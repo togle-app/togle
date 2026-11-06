@@ -1,0 +1,221 @@
+{
+  "format": "togle-hub/1",
+  "agents": [
+    {
+      "slug": "customer-support",
+      "name": "Customer Support",
+      "description": "Troubleshooting calls with customers",
+      "author": "Togle",
+      "tags": [
+        "Business"
+      ],
+      "skills": 3,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/escalating/SKILL.md",
+        "skills/pinning-down-the-problem/SKILL.md",
+        "skills/walking-through-a-fix/SKILL.md"
+      ]
+    },
+    {
+      "slug": "dental-front-desk",
+      "name": "Dental Front Desk",
+      "description": "Patient calls to the clinic",
+      "author": "Togle",
+      "tags": [
+        "Health"
+      ],
+      "skills": 3,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/booking-a-visit/SKILL.md",
+        "skills/cancelling-a-visit/SKILL.md",
+        "skills/insurance-question/SKILL.md"
+      ]
+    },
+    {
+      "slug": "doctors-visit",
+      "name": "Doctor's Visit",
+      "description": "Video visits with your doctor, as the patient",
+      "author": "Togle",
+      "tags": [
+        "Health"
+      ],
+      "skills": 2,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/describing-symptoms/SKILL.md",
+        "skills/understanding-the-plan/SKILL.md"
+      ]
+    },
+    {
+      "slug": "engineering-1-1-coach",
+      "name": "Engineering 1:1 Coach",
+      "description": "One-on-ones with engineers",
+      "author": "Togle",
+      "tags": [
+        "Work"
+      ],
+      "skills": 3,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/agreeing-on-support/SKILL.md",
+        "skills/discussing-feedback/SKILL.md",
+        "skills/drawing-out-concerns/SKILL.md"
+      ]
+    },
+    {
+      "slug": "founder-podcast-host",
+      "name": "Founder Podcast Host",
+      "description": "Podcast interviews with startup founders",
+      "author": "Togle",
+      "tags": [
+        "Media"
+      ],
+      "skills": 3,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/difficult-or-vague-answers/SKILL.md",
+        "skills/founder-story/SKILL.md",
+        "skills/product-and-problem/SKILL.md"
+      ]
+    },
+    {
+      "slug": "hiring-interviewer",
+      "name": "Hiring Interviewer",
+      "description": "When you're the one interviewing a candidate",
+      "author": "Togle",
+      "tags": [
+        "Work"
+      ],
+      "skills": 3,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/checking-a-requirement/SKILL.md",
+        "skills/closing-the-interview/SKILL.md",
+        "skills/probing-a-vague-answer/SKILL.md"
+      ]
+    },
+    {
+      "slug": "interview-practice",
+      "name": "Interview Practice",
+      "description": "Mock interviews to prepare for the real one",
+      "author": "Togle",
+      "tags": [
+        "Career"
+      ],
+      "skills": 2,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/behavioral-questions/SKILL.md",
+        "skills/feedback-on-an-answer/SKILL.md"
+      ]
+    },
+    {
+      "slug": "investor-pitch",
+      "name": "Investor Pitch",
+      "description": "Fundraising calls with investors",
+      "author": "Togle",
+      "tags": [
+        "Business"
+      ],
+      "skills": 2,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/asking-them-back/SKILL.md",
+        "skills/hard-questions/SKILL.md"
+      ]
+    },
+    {
+      "slug": "math-tutor",
+      "name": "Math Tutor",
+      "description": "Online math lessons for school students",
+      "author": "Togle",
+      "tags": [
+        "Teaching"
+      ],
+      "skills": 2,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/checking-understanding/SKILL.md",
+        "skills/stuck-on-a-problem/SKILL.md"
+      ]
+    },
+    {
+      "slug": "nekretnine-zagreb",
+      "name": "Agent za nekretnine",
+      "description": "Pozivi s klijentima agencije u Zagrebu",
+      "author": "Togle",
+      "tags": [
+        "Business"
+      ],
+      "skills": 2,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/prodaja-ili-najam/SKILL.md",
+        "skills/razjasniti-potrebe/SKILL.md"
+      ]
+    },
+    {
+      "slug": "sales-call",
+      "name": "Sales Call",
+      "description": "Discovery calls, demos and next steps",
+      "author": "Togle",
+      "tags": [
+        "Business"
+      ],
+      "skills": 3,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/agreeing-on-a-next-step/SKILL.md",
+        "skills/discovery-questions/SKILL.md",
+        "skills/handling-pushback/SKILL.md"
+      ]
+    },
+    {
+      "slug": "spanish-tutor",
+      "name": "Spanish Tutor",
+      "description": "Beginner adult Spanish lessons on Zoom",
+      "author": "Togle",
+      "tags": [
+        "Teaching"
+      ],
+      "skills": 3,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/beginner-explanations/SKILL.md",
+        "skills/gentle-correction/SKILL.md",
+        "skills/speaking-practice/SKILL.md"
+      ]
+    },
+    {
+      "slug": "team-meeting",
+      "name": "Team Meeting",
+      "description": "Work meetings with company knowledge",
+      "author": "Togle",
+      "tags": [
+        "Work"
+      ],
+      "skills": 3,
+      "answers": 0,
+      "files": [
+        "AGENT.md",
+        "skills/giving-a-status-update/SKILL.md",
+        "skills/raising-a-risk/SKILL.md",
+        "skills/wrapping-up/SKILL.md"
+      ]
+    }
+  ]
+}

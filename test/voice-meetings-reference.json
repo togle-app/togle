@@ -1,0 +1,22 @@
+{
+  "source": "https://groups.inf.ed.ac.uk/ami/download/",
+  "license": "CC-BY-4.0",
+  "description": "Before the neural segmentation change. Same enrollment and annotated clips; 12x uniform meeting gain. This is speaker identity testing on oracle-bounded clips, not end-to-end diarization error rate.",
+  "sha256": {
+    "ami_public_manual_1.6.2.zip": "b56e5babb2496b8795deeeda7e71178d7fbc9963f94276cf2a3f4b56ebbc9f9d",
+    "ES2002a.wav": "9c76866990fcc8b84006dc32d273ad99df439090b748ebe72103bb78c3216ee7",
+    "ES2003a.wav": "41cf861afafc20e70061c6cc82b2cb1c620d630be6d13361da928f04fc00beea"
+  },
+  "meetings": {
+    "ES2002a": {
+      "enrollment": ["ES2002a-3", "ES2002a-35", "ES2002a-45", "ES2002a-0", "ES2002a-6", "ES2002a-7", "ES2002a-33", "ES2002a-34", "ES2002a-130", "ES2002a-4", "ES2002a-20", "ES2002a-28"],
+      "turns": 197, "single": { "correct": 49, "wrong": 0, "unknown": 17 }, "short": { "correct": 12, "wrong": 0, "unknown": 14 }, "mixed": { "labeled": 71, "rejected": 24 }, "profiles": 4,
+      "latency": { "medianMs": 51, "p95Ms": 100 }
+    },
+    "ES2003a": {
+      "enrollment": ["ES2003a-59", "ES2003a-60", "ES2003a-61", "ES2003a-0", "ES2003a-1", "ES2003a-3", "ES2003a-2", "ES2003a-6", "ES2003a-28", "ES2003a-9", "ES2003a-52", "ES2003a-53"],
+      "turns": 139, "single": { "correct": 78, "wrong": 0, "unknown": 11 }, "short": { "correct": 12, "wrong": 0, "unknown": 10 }, "mixed": { "labeled": 23, "rejected": 5 }, "profiles": 4,
+      "latency": { "medianMs": 67, "p95Ms": 95 }
+    }
+  }
+}

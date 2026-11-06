@@ -1,0 +1,80 @@
+# Togle, built with electron-builder on the system it's for: `npm run pack` makes the app in dist/ to try it
+# (dist/win-unpacked on Windows), and `npm run dist` makes what installs it: an installer on Windows, a .dmg and .zip on
+# macOS, an AppImage and a .deb on Linux. Speech recognition isn't in it: Togle downloads whisper.cpp and the models for
+# the PC it's on when someone picks it in Settings → Calls. No audio driver either: Togle hears calls through the
+# system's own capture, and Togle Microphone (a separate app) brings its own.
+appId: io.togle.app
+productName: Togle
+directories:
+  output: dist
+# Stops the build when the market's index isn't there to go in with it.
+beforePack: scripts/before-pack.cjs
+afterPack: scripts/after-pack.cjs
+# What electron-vite built. electron-builder adds package.json and the dependencies (never the devDependencies).
+files:
+  - out/**
+# The Agent SDK executes its official native Claude Code binary beside the app archive.
+asarUnpack:
+  - node_modules/@anthropic-ai/claude-agent-sdk-*/**
+  - node_modules/@koromix/koffi-*/**
+  - node_modules/sherpa-onnx-*/**
+# Read from beside the app (process.resourcesPath) once it's packaged: the agents of the market (agents/hub.ts).
+extraResources:
+  - from: resources/licenses
+    to: licenses
+  - from: resources/dictation-windows.ps1
+    to: dictation-windows.ps1
+  - from: build/icon.png
+    to: icon.png
+  - from: build/icon.ico
+    to: icon.ico
+  - from: hub-template
+    to: hub-template
+    filter:
+      - index.json
+      - agents/**
+win:
+  icon: build/icon.ico
+  target: nsis
+# Installs for the user who runs it, without asking for administrator rights.
+nsis:
+  oneClick: true
+  perMachine: false
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+mac:
+  # electron-builder converts the 1024px PNG to an .icns. SVG is not a native icon input.
+  icon: build/icon.png
+  # Default to the build Mac's architecture, matching Electron and the installed native dependencies.
+  # Build on each architecture separately; --arm64 / --x64 explicitly select the target.
+  target:
+    - dmg
+    - zip
+  minimumSystemVersion: '14.2.0'
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # What macOS asks the user before Togle hears the call: the microphone, and what the Mac plays (macOS 14.2 and later).
+  extendInfo:
+    NSMicrophoneUsageDescription: Togle hears your side of the call through the microphone.
+    NSAudioCaptureUsageDescription: Togle hears the other side of the call in what your Mac plays.
+linux:
+  icon: build/icon.png
+  target:
+    - AppImage
+    - deb
+  category: Office
+  # A .deb names who packages it.
+  maintainer: Luka Dutina
+deb:
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0

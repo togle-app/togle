@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Togle">
+  <title>Togle</title>
+  <defs>
+    <linearGradient id="tile" x1="180" y1="80" x2="850" y2="980" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6878FF"/>
+      <stop offset="1" stop-color="#414DD0"/>
+    </linearGradient>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="220" fill="url(#tile)"/>
+  <rect x="434" y="352" width="156" height="414" rx="78" fill="#F8FAFF"/>
+  <rect x="232" y="250" width="560" height="156" rx="78" fill="#F8FAFF"/>
+  <circle cx="724" cy="328" r="94" fill="#91EED0"/>
+</svg>

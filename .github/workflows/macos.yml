@@ -1,0 +1,55 @@
+name: macOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Install the matching Electron runtime
+        run: node node_modules/electron/install.js
+      - name: Test and build the Mac app
+        run: npm run test:macos
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Togle-macOS-${{ runner.arch }}-verification
+          retention-days: 14
+          path: |
+            dist/build-info.json
+            test/.work/macos/*.log
+            test/.work/macos/report.json
+            test/.work/dictation-ui/failure.json
+            test/.work/dictation-ui/failure.png
+            test/.work/ui/failure.json
+            test/.work/ui/failure.png
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: Togle-macOS-${{ runner.arch }}
+          retention-days: 14
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error

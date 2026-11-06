@@ -1,0 +1,20 @@
+node_modules/
+out/
+dist/
+dist-*/
+*.log
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Whisper binaries and models are downloaded by `npm run setup:whisper`
+resources/whisper/
+
+# Built and written by `npm test`, `npm run eval` and `npm run e2e`
+test/.build/
+test/.work/
+eval/.build/
+eval/results/
+eval/audio/

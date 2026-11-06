@@ -1,0 +1,33 @@
+const code = 'const ticket = "https://example.com/browse/SOH-123";\nconsole.log("<ready>", ticket);'
+const reply = [
+  '## Release review',
+  '',
+  '**Ready for review**, with *one remaining check* and ~~old wording~~ removed. Café · 你好 · 한국어.',
+  '',
+  '[SOH-123: OAuth callback](https://example.com/browse/SOH-123?view=detail&from=meeting) · https://github.com/example/project/pull/9.',
+  '',
+  '> Confirm the owner before announcing the release.',
+  '',
+  '3. Review the callback',
+  '   - [x] Tests passed',
+  '   - [ ] Verify the work account',
+  '4. Share the update',
+  '',
+  '| Item | Owner | Evidence |',
+  '| :--- | :--- | ---: |',
+  '| Callback | **Denis** | [Pull request](https://github.com/example/project/pull/9) |',
+  '| Verification | Luka | Pending |',
+  '',
+  '```typescript', code, '```',
+  '',
+  'Questions: team@example.com. Read [release notes][notes].',
+  '',
+  '![Release diagram](https://never-fetch.example.invalid/diagram.png)',
+  '',
+  '<img src="https://never-fetch.example.invalid/pixel.png" onerror="window.__richTextAttack=true">',
+  '',
+  '[Unsafe script](javascript:alert(1)) · [Local file](file:///C:/private.txt) · `items[0]` and [99].',
+  '',
+  '[notes]: https://example.com/releases/2026-11-03'
+].join('\n')
+module.exports = { reply, code }

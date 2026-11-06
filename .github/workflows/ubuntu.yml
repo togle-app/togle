@@ -1,0 +1,86 @@
+name: Ubuntu
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        audio: [pulseaudio, pipewire]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      XDG_CURRENT_DESKTOP: GNOME
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install desktop and audio test dependencies
+        run: |
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y --no-install-recommends xvfb pulseaudio pulseaudio-utils pipewire pipewire-pulse wireplumber gnome-keyring libgtk-3-0 libsecret-1-0 libasound2t64 libgbm1 libfuse2t64
+      - run: npm ci
+      - name: Install the matching Electron runtime
+        run: node node_modules/electron/install.js
+      - name: Configure Chromium's Linux sandbox helper
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+      - name: Test and package with ${{ matrix.audio }}
+        env:
+          TOGLE_AUDIO_SERVER: ${{ matrix.audio }}
+        run: |
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/togle-audio"
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          xvfb-run -a dbus-run-session -- bash -euc '
+            printf "%s" "togle-disposable-ci" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            if [ "$TOGLE_AUDIO_SERVER" = pipewire ]; then
+              pipewire > "$XDG_RUNTIME_DIR/pipewire.log" 2>&1 &
+              core_pid=$!
+              for i in {1..150}; do
+                [ -S "$XDG_RUNTIME_DIR/pipewire-0" ] && break
+                kill -0 "$core_pid" 2>/dev/null || { cat "$XDG_RUNTIME_DIR/pipewire.log"; exit 1; }
+                sleep 0.1
+              done
+              [ -S "$XDG_RUNTIME_DIR/pipewire-0" ] || { cat "$XDG_RUNTIME_DIR/pipewire.log"; exit 1; }
+              pipewire-pulse > "$XDG_RUNTIME_DIR/pipewire-pulse.log" 2>&1 &
+              wireplumber > "$XDG_RUNTIME_DIR/wireplumber.log" 2>&1 &
+            else
+              pulseaudio --start --exit-idle-time=-1
+            fi
+            for i in {1..30}; do pactl info >/dev/null 2>&1 && break; sleep 1; done
+            pactl info || { cat "$XDG_RUNTIME_DIR/"*.log; exit 1; }
+            npm run test:linux
+          '
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Togle-Ubuntu-${{ matrix.audio }}-${{ runner.arch }}-verification
+          retention-days: 14
+          path: |
+            dist/build-info.json
+            test/.work/linux/*.log
+            test/.work/linux/report.json
+            test/.work/dictation-ui/failure.*
+            test/.work/ui/failure.*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: Togle-Ubuntu-${{ matrix.audio }}-${{ runner.arch }}
+          retention-days: 14
+          path: |
+            dist/*.deb
+            dist/*.AppImage
+          if-no-files-found: error
