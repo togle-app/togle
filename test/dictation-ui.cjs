@@ -198,6 +198,8 @@ app.whenReady().then(async () => {
   await compact()
   assert.equal(await js("getComputedStyle(document.querySelector('.dictation-wave')).animationName"), 'none', 'Recording animates only from real audio levels')
   await wait('window.__testStreams.length === 1')
+  // The window draws levels as audio arrives; its chunks reach main over IPC a moment later (on a slow machine, later still).
+  for (let n = 0; n < 60 && !chunks.some(chunk => chunk.id === 'one'); n++) await sleep(50)
   assert.ok(chunks.some(chunk => chunk.id === 'one'), 'Streaming audio is sent before recording stops')
   assert.equal(await js("[...document.querySelectorAll('button')].some(button=>/^(Done|Use original)$/.test(button.textContent))"), false)
   assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'), true)
