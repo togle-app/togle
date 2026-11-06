@@ -65,6 +65,8 @@ export interface MicrophoneLinkState {
   bufferMs?: number
   /** Whether the audio driver is installed: `restart` means the computer must restart first. */
   setup?: 'ready' | 'missing' | 'restart'
+  /** Togle Microphone runs only for someone signed in to it: `signed-out` means it waits for that, in its own window. */
+  account?: 'signed-in' | 'signed-out'
   version: string
 }
 
@@ -126,6 +128,7 @@ export function readLinkFile(value: unknown): MicrophoneLinkFile | undefined {
 const PHASES: readonly MicrophoneLinkPhase[] = ['off', 'starting', 'on', 'error']
 const ENGINES = ['deepfilter', 'rnnoise', 'bypass'] as const
 const SETUPS = ['ready', 'missing', 'restart'] as const
+const ACCOUNTS = ['signed-in', 'signed-out'] as const
 
 /** A state received over the link, with anything unexpected dropped. */
 export function readLinkState(value: unknown): MicrophoneLinkState | undefined {
@@ -143,6 +146,7 @@ export function readLinkState(value: unknown): MicrophoneLinkState | undefined {
     personalized: state.personalized === true,
     ...(typeof state.bufferMs === 'number' && Number.isFinite(state.bufferMs) && state.bufferMs >= 0 && state.bufferMs < 5000 ? { bufferMs: state.bufferMs } : {}),
     ...(SETUPS.includes(state.setup as typeof SETUPS[number]) ? { setup: state.setup } : {}),
+    ...(ACCOUNTS.includes(state.account as typeof ACCOUNTS[number]) ? { account: state.account } : {}),
     version: state.version!
   }
 }

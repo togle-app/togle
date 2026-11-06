@@ -7,7 +7,7 @@ import {
   encodeLinkMessage, LinkLineReader, MICROPHONE_LINK_FILE, MICROPHONE_PROTOCOL, readLinkFile, readLinkState,
   type MicrophoneLaunch, type MicrophoneLinkFile, type MicrophoneLinkMethod, type MicrophoneLinkPage, type MicrophoneLinkState
 } from '@shared/microphone-link'
-import type { MicrophoneSettings, TogleMicrophoneStatus } from '@shared/microphone'
+import { MICROPHONE_SIGN_IN, type MicrophoneSettings, type TogleMicrophoneStatus } from '@shared/microphone'
 
 const REQUEST_TIMEOUT_MS = 5_000
 /** How often Togle looks for Togle Microphone when it isn't connected (a file read and a failed connect: cheap). */
@@ -94,7 +94,8 @@ export class MicrophoneLink extends EventEmitter {
     const status = await this.refresh()
     if (!settings.autoStart || !status.installed || this.forCall) return status
     const phase = status.state?.phase
-    if (phase === 'on' || phase === 'starting' || status.state?.setup === 'missing' || status.state?.setup === 'restart') return status
+    // Signed out of Togle Microphone: it can't start, and a call is no moment to open its sign-in. Togle shows that instead.
+    if (phase === 'on' || phase === 'starting' || status.state?.setup === 'missing' || status.state?.setup === 'restart' || status.state?.account === 'signed-out') return status
     try {
       await this.turnOn('call', CALL_WAIT_MS)
       this.forCall = true
@@ -121,6 +122,11 @@ export class MicrophoneLink extends EventEmitter {
       await this.launch(['--start'])
       await this.waitFor(status => status.running, wait)
       if (!this.connected) throw new Error("Togle Microphone didn't start.")
+    }
+    if (this.state?.account === 'signed-out') {
+      // Asked by the user: its window opens at the sign-in.
+      if (reason === 'user') await this.request('show', { page: 'settings' }).catch(() => undefined)
+      throw new Error(MICROPHONE_SIGN_IN)
     }
     if (this.state?.phase !== 'on' && this.state?.phase !== 'starting') this.accept(await this.request('start', { reason }))
     await this.waitFor(status => status.state?.phase === 'on' || status.state?.phase === 'error', Math.min(wait, CALL_WAIT_MS))

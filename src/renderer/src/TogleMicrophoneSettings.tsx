@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SettingsPatch } from '@shared/api'
 import type { Settings } from '@shared/types'
-import { describeNoise, isMicrophoneOn, type TogleMicrophoneStatus } from '@shared/microphone'
+import { describeNoise, isMicrophoneOn, microphoneNeedsSignIn, type TogleMicrophoneStatus } from '@shared/microphone'
 import { checkMicrophone } from './audio/capture'
 import { PlaySample, type NoiseFinding } from './MicrophoneSuggestion'
 import { Row, Section, Toggle } from './Rows'
@@ -13,6 +13,7 @@ export function microphoneSummary(status: TogleMicrophoneStatus | undefined): st
   if (!status?.installed) return 'Not installed'
   if (!status.running || !status.state) return 'Installed · not running'
   const state = status.state
+  if (state.account === 'signed-out') return 'Signed out · sign in to use it'
   if (state.setup === 'restart') return 'Restart your computer to finish installing it'
   if (state.setup === 'missing') return 'Its audio driver is missing: open it to repair'
   if (state.phase === 'on') return `On${state.input ? ` · cleaning ${state.input}` : ''}${status.forCall ? ' · for this call' : ''}`
@@ -61,6 +62,7 @@ export function TogleMicrophoneSettings({ settings, save }: { settings: Settings
     )
   }
   const on = isMicrophoneOn(status)
+  const signIn = microphoneNeedsSignIn(status)
   const microphone = settings.microphone
   return (
     <Section id="settings-microphone" title="Togle Microphone"
@@ -70,8 +72,10 @@ export function TogleMicrophoneSettings({ settings, save }: { settings: Settings
         {!status?.installed && <button className="primary small" onClick={() => void api.openMicrophonePage('settings')}>Get Togle Microphone</button>}
         {status?.running && status.state && (on
           ? <button className="ghost small" disabled={busy} onClick={() => act(() => api.turnOffMicrophone())}>Turn off</button>
-          : <button className="ghost small" disabled={busy || status.state.setup === 'missing' || status.state.setup === 'restart'} onClick={() => act(() => api.turnOnMicrophone())}>Turn on</button>)}
-        {status?.installed && <button className="link" disabled={busy} onClick={() => act(() => api.showMicrophone())}>Open</button>}
+          : signIn
+            ? <button className="primary small" disabled={busy} onClick={() => act(() => api.showMicrophone())}>Sign in</button>
+            : <button className="ghost small" disabled={busy || status.state.setup === 'missing' || status.state.setup === 'restart'} onClick={() => act(() => api.turnOnMicrophone())}>Turn on</button>)}
+        {status?.installed && !signIn && <button className="link" disabled={busy} onClick={() => act(() => api.showMicrophone())}>Open</button>}
       </Row>
       {error && <p className="error" role="alert">{error}</p>}
       <Toggle name="Turn on during calls" note="When a call starts, Togle turns Togle Microphone on, and off again when the call ends." checked={microphone.autoStart} disabled={!status?.installed} onChange={autoStart => void save({ microphone: { autoStart } })} />
@@ -88,7 +92,9 @@ export function TogleMicrophoneSettings({ settings, save }: { settings: Settings
           <div className="row">
             <PlaySample finding={check.finding} />
             {!on && (check.finding.report.verdict === 'noisy' || check.finding.report.verdict === 'some') && (status?.installed
-              ? <button className="primary small" onClick={() => act(() => api.turnOnMicrophone())}>Turn on Togle Microphone</button>
+              ? signIn
+                ? <button className="primary small" onClick={() => act(() => api.showMicrophone())}>Sign in to Togle Microphone</button>
+                : <button className="primary small" onClick={() => act(() => api.turnOnMicrophone())}>Turn on Togle Microphone</button>
               : <button className="primary small" onClick={() => void api.openMicrophonePage('microphone-check')}>Get Togle Microphone</button>)}
           </div>
         </div>

@@ -73,6 +73,14 @@ function CleanMicrophone({ status }: { status?: TogleMicrophoneStatus }) {
   if (state?.phase === 'on' || state?.phase === 'starting') {
     return <span className="clean-mic-chip on" title={`Togle Microphone is cleaning ${state.input ?? 'your microphone'} for every call app`}><span className="dot" />{state.phase === 'on' ? 'Clean mic' : 'Clean mic…'}</span>
   }
+  if (state?.account === 'signed-out') {
+    return (
+      <button className="link clean-mic-chip" disabled={busy} title="You’re signed out of Togle Microphone: your microphone goes to the call as it is"
+        onClick={() => { setBusy(true); void api.showMicrophone().catch(() => undefined).finally(() => setBusy(false)) }}>
+        Clean mic · Sign in
+      </button>
+    )
+  }
   const problem = state?.phase === 'error' ? state.error || 'Togle Microphone stopped.' : undefined
   return (
     <button className="link clean-mic-chip" disabled={busy} title={problem ?? 'Togle Microphone is off: your microphone goes to the call as it is'}

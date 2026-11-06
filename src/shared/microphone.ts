@@ -35,6 +35,13 @@ export function isMicrophoneOn(status: TogleMicrophoneStatus | undefined): boole
   return !!status?.running && (status.state?.phase === 'on' || status.state?.phase === 'starting')
 }
 
+/** Togle Microphone is used signed in to it: running, but signed out, it waits for that in its own window. */
+export function microphoneNeedsSignIn(status: TogleMicrophoneStatus | undefined): boolean {
+  return !!status?.running && status.state?.account === 'signed-out'
+}
+
+export const MICROPHONE_SIGN_IN = 'Sign in to Togle Microphone to use it.'
+
 /** `unknown`: not enough of the call was measured to say. */
 export type NoiseVerdict = 'quiet' | 'some' | 'noisy' | 'unknown'
 

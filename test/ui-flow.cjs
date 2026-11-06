@@ -154,6 +154,32 @@ async function checkTogleMicrophone(T, agent) {
     flow.window.destroy()
   }
 
+  // Signed out of Togle Microphone: Settings and the call strip ask to sign in to it (in its own window), and a call
+  // leaves it alone.
+  for (const width of [400, 1100]) {
+    const flow = await open(T, agent, 'togle-microphone-signed-out', width)
+    await flow.click('.sidebar-settings', 'Settings')
+    await flow.wait(status + "==='Signed out · sign in to use it'")
+    assert.equal(await flow.evaluate("[...document.querySelectorAll('" + section + " button')].some(b=>['Turn on','Open'].includes(b.textContent.trim()))"), false, 'nothing to turn on, and one way to open it')
+    await flow.evaluate("document.querySelector('" + section + "').scrollIntoView({block:'start'})")
+    await fitsWidth(flow, section)
+    await flow.capture('togle-microphone-signed-out-' + width)
+    await flow.click(section + ' button', 'Sign in')
+    assert.deepEqual(await calledWith(flow, 'showMicrophone'), [[null]], 'its window opens, where the sign-in is')
+    await flow.evaluate("document.querySelector('.settings .page-head button.icon')?.click()")
+    await flow.paint()
+    await flow.click('button.listen', 'Start call')
+    await flow.wait("document.querySelector('button.listen')?.textContent.includes('End call')")
+    await flow.wait("document.querySelector('.clean-mic-chip')?.textContent.trim()==='Clean mic · Sign in'")
+    await flow.capture('togle-microphone-signed-out-call-' + width)
+    await flow.click('.clean-mic-chip', 'Clean mic · Sign in')
+    assert.equal((await calledWith(flow, 'showMicrophone')).length, 2, 'the chip opens it too')
+    assert.deepEqual(await calledWith(flow, 'turnOnMicrophone'), [], 'never asked to turn on while signed out')
+    await flow.click('button.listen', 'End call')
+    assert.deepEqual(flow.errors, [])
+    flow.window.destroy()
+  }
+
   // A noisy call: after it, what the microphone picked up, a way to hear it, the page, and both ways to stop it.
   for (const [width, choice] of [[400, 'Get Togle Microphone'], [1100, 'Don’t show this again']]) {
     const flow = await open(T, agent, 'noisy-call', width)
@@ -176,7 +202,7 @@ async function checkTogleMicrophone(T, agent) {
     assert.deepEqual(flow.errors, [])
     flow.window.destroy()
   }
-  console.log('Togle Microphone: not installed, installed, on and off, turned on for a call, and the after-call noise suggestion passed at compact and wide sizes.')
+  console.log('Togle Microphone: not installed, installed, on and off, turned on for a call, signed out of it, and the after-call noise suggestion passed at compact and wide sizes.')
 }
 
 async function checkHistoryAndNotes(T, agent) {

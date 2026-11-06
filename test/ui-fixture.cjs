@@ -50,16 +50,18 @@ module.exports = function install(fixture) {
   api.updateApiConnection = async (id, input) => { record('updateApiConnection', [id, input]); const connection = apiConnections.find(connection => connection.id === id); Object.assign(connection, { kind: input.kind, label: input.label, baseUrl: input.baseUrl, model: input.model, hasKey: input.key === undefined ? connection.hasKey : !!input.key, revision: connection.revision + 1 }); emit('onApiConnectionsChanged'); return clone(connection) }
   api.removeApiConnection = async id => { record('removeApiConnection', [id]); apiConnections.splice(apiConnections.findIndex(connection => connection.id === id), 1); emit('onApiConnectionsChanged') }
   api.dictationStatus = async () => ({ phase: 'idle' })
-  // Togle Microphone, the separate app: not installed, unless the scenario has it (installed, running, off).
-  let microphone = fixture.scenario === 'togle-microphone'
-    ? { installed: true, running: true, state: { phase: 'off', device: 'Togle Microphone', input: 'USB Headset', systemDefault: false, personalized: true, engine: 'deepfilter', bufferMs: 128, setup: 'ready', version: '0.1.0' } }
+  // Togle Microphone, the separate app: not installed, unless the scenario has it (installed, running, off; or signed
+  // out of it, waiting in its own window for that).
+  const signedOut = fixture.scenario === 'togle-microphone-signed-out'
+  let microphone = fixture.scenario === 'togle-microphone' || signedOut
+    ? { installed: true, running: true, state: { phase: 'off', device: 'Togle Microphone', input: 'USB Headset', systemDefault: false, personalized: true, engine: 'deepfilter', bufferMs: 128, setup: 'ready', ...(signedOut ? { account: 'signed-out' } : {}), version: '0.1.0' } }
     : { installed: false, running: false }
   const microphoneChanged = () => emit('onMicrophone', clone(microphone))
   const microphoneOn = on => ({ ...microphone, state: { ...microphone.state, phase: on ? 'on' : 'off', systemDefault: on } })
   api.microphoneStatus = async () => clone(microphone)
   api.prepareCallMicrophone = async () => {
     record('prepareCallMicrophone', [])
-    if (microphone.running && microphone.state.phase === 'off' && fixture.settings.microphone?.autoStart !== false) { microphone = { ...microphoneOn(true), forCall: true }; microphoneChanged() }
+    if (microphone.running && microphone.state.phase === 'off' && microphone.state.account !== 'signed-out' && fixture.settings.microphone?.autoStart !== false) { microphone = { ...microphoneOn(true), forCall: true }; microphoneChanged() }
     return clone(microphone)
   }
   api.turnOnMicrophone = async () => { record('turnOnMicrophone', []); if (!microphone.installed) throw new Error("Togle Microphone isn't installed."); microphone = microphoneOn(true); microphoneChanged(); return clone(microphone) }

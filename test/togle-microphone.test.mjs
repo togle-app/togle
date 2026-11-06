@@ -11,7 +11,7 @@ import { workDir, wait } from './helpers.mjs'
 const work = workDir('togle-microphone')
 const {
   MicrophoneLink, encodeLinkMessage, LinkLineReader, readLinkFile, readLinkState, isTogleMicrophoneLabel, microphonePage, TOGLE_SITE,
-  describeNoise, isMicrophoneOn, noiseVerdict, readNoiseReport, shouldSuggest, MICROPHONE_DEFAULTS, NoiseCheck, noisyThreshold,
+  describeNoise, isMicrophoneOn, microphoneNeedsSignIn, noiseVerdict, readNoiseReport, shouldSuggest, MICROPHONE_DEFAULTS, MICROPHONE_SIGN_IN, NoiseCheck, noisyThreshold,
   getSettings, loadSettings, updateSettings
 } = await import('./.build/togle.mjs')
 
@@ -131,6 +131,31 @@ test('turns it on before a call and off after it, and leaves it alone when it wa
   const off = await microphone.prepareCall({ ...MICROPHONE_DEFAULTS, autoStart: false })
   assert.equal(off.state.phase, 'off')
   assert.ok(!fake.requests.slice(count).some(r => r.method === 'start'))
+})
+
+test('signed out of Togle Microphone: a call leaves it alone, and asking for it opens its sign-in', async t => {
+  const dir = folder(), fake = fakeMicrophone(dir, { state: { ...offState, account: 'signed-out' } })
+  await fake.listen(); fake.writeFile()
+  const microphone = link(dir)
+  t.after(async () => { microphone.stop(); await fake.close() })
+  const before = await microphone.prepareCall(MICROPHONE_DEFAULTS)
+  assert.equal(before.state.account, 'signed-out')
+  assert.equal(microphoneNeedsSignIn(before), true)
+  assert.equal(before.forCall, undefined)
+  assert.ok(!fake.methods().includes('start') && !fake.methods().includes('show'), 'a call neither starts it nor opens its window')
+  await assert.rejects(microphone.turnOn('call'), { message: MICROPHONE_SIGN_IN })
+  assert.ok(!fake.methods().includes('show'))
+  await assert.rejects(microphone.turnOn('user'), { message: MICROPHONE_SIGN_IN })
+  assert.deepEqual(fake.requests.filter(r => r.method === 'show').map(r => r.params), [{ page: 'settings' }], 'asked by the user, its sign-in opens')
+  assert.ok(!fake.methods().includes('start'))
+  // Signed in there: the next call turns it on, and off after.
+  fake.set({ account: 'signed-in' })
+  await until(() => microphone.status().state?.account === 'signed-in')
+  assert.equal(microphoneNeedsSignIn(microphone.status()), false)
+  assert.equal((await microphone.prepareCall(MICROPHONE_DEFAULTS)).state.phase, 'on')
+  await microphone.endCall()
+  await until(() => microphone.status().state?.phase === 'off')
+  assert.equal(microphoneNeedsSignIn({ installed: true, running: false }), false, 'not running: nothing known about its account')
 })
 
 test('starts an installed Togle Microphone that is not running, only through its own program', async t => {
