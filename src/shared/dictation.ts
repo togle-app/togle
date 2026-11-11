@@ -5,6 +5,34 @@ export function dictationSource(settings: Settings, choice = settings.dictation.
   return settings.provider === 'chatgpt' ? 'chatgpt' : settings.provider === 'claude' && settings.claude.auth === 'subscription' ? 'claude' : undefined
 }
 
+/** A subscription account, as voice typing chooses among them. */
+export interface VoiceAccountOption { id: string; provider: 'chatgpt' | 'claude'; signedIn?: boolean }
+
+/**
+ * The subscription account voice typing uses when it's left automatic (dictation.accountId ''): the AI's own account
+ * when the AI runs on a subscription (the first job's that does, with a profile of jobs); otherwise one that's signed
+ * in, else ChatGPT's. It cleans up the words and keeps the word list and history; this computer hears the speech.
+ */
+export function automaticVoiceAccount(settings: Settings, accounts: VoiceAccountOption[]): string {
+  const known = (id?: string): VoiceAccountOption | undefined => (id ? accounts.find(account => account.id === id) : undefined)
+  const source = dictationSource(settings)
+  if (source) {
+    if (settings.ai) {
+      for (const lane of ['deep', 'background', 'vision', 'quick'] as const) {
+        const account = known(settings.ai.tasks[lane].sourceId)
+        if (account?.provider === source) return account.id
+      }
+    }
+    const chosen = known(settings.subscriptionAccountId)
+    return chosen?.provider === source ? chosen.id : `${source}-default`
+  }
+  return accounts.find(account => account.signedIn)?.id ?? 'chatgpt-default'
+}
+
+/** The account voice typing uses: the one picked for it, or the automatic one. */
+export const voiceAccountId = (settings: Settings, accounts: VoiceAccountOption[]): string =>
+  settings.dictation.accountId || automaticVoiceAccount(settings, accounts)
+
 export type DictationPhase = 'idle' | 'starting' | 'recording' | 'finishing' | 'polishing' | 'inserting' | 'done' | 'ready' | 'error'
 export interface DictationState {
   phase: DictationPhase

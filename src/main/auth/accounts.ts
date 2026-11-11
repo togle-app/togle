@@ -82,6 +82,8 @@ export class SubscriptionAccounts {
     return entry
   }
   identity(id: string): SubscriptionAccount { return this.snapshot(this.get(id)) }
+  /** Every account as it's known now, without reading Claude's sign-in again (list() does). */
+  known(): SubscriptionAccount[] { return [...this.entries.values()].map(entry => this.snapshot(entry)) }
   async list(refresh = false): Promise<SubscriptionAccount[]> {
     await Promise.all([...this.entries.values()].filter(entry => entry.kind === 'claude').map(entry => (entry.auth as ClaudeCodeAuth).status(refresh)))
     return [...this.entries.values()].map(entry => this.snapshot(entry))
@@ -114,11 +116,15 @@ export class SubscriptionAccounts {
 
   /** Pin identity for a request/call as well as its profile. Reauthentication cannot silently reroute a call. */
   pinned(id: string, includeName = true): LLMProvider {
-    const entry = this.get(id), initial = this.snapshot(entry)
+    const entry = this.get(id)
     const provider: LLMProvider = entry.provider
-    const identity = entry.auth.identity()
+    const take = (): { initial: SubscriptionAccount; identity?: string } => ({ initial: this.snapshot(entry), identity: entry.auth.identity() })
+    // A Claude sign-in Togle hasn't read yet (it reads it in the background as it starts) is pinned as it's first read.
+    let pin = entry.kind === 'claude' && !entry.auth.read ? undefined : take()
     const check = async (): Promise<void> => {
       const status = entry.kind === 'claude' ? await entry.auth.status() : entry.auth.status()
+      pin ??= take()
+      const { initial, identity } = pin
       if (!initial.signedIn || !status.signedIn) throw new Error(`Sign in to ${entry.metadata.label} in Settings.`)
       if (status.email !== initial.email || entry.auth.identity() !== identity) throw new Error('The subscription identity changed. Start a new call or request with the intended account.')
     }
@@ -134,7 +140,8 @@ export class SubscriptionAccounts {
       } } : {}),
       stream: async (input, options) => {
         await check(); options.signal.throwIfAborted()
-        const name = includeName && typeof initial.name === 'string' ? initial.name.trim() : ''
+        const signedName = pin?.initial.name
+        const name = includeName && typeof signedName === 'string' ? signedName.trim() : ''
         await provider.stream(name ? { ...input, system: `${input.system}\n\nThe signed-in user's display name is ${JSON.stringify(name)}. Prefer any explicit name or identity the user provides.` } : input, options)
       }
     }

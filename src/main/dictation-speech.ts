@@ -1,7 +1,6 @@
 import type { Settings } from '@shared/types'
 import { dictationSource } from '@shared/dictation'
 import type { CompletionInput, LLMProvider, PreparedText } from './providers/types'
-import type { ClaudeSpeechStream } from './stt/claude-speech'
 import type { DictationVocabulary } from '@shared/dictation'
 import { prepareDictationText } from './dictation-vocabulary'
 
@@ -25,9 +24,8 @@ interface Options {
   claude: LLMProvider
   chatgptAccount(): Account
   claudeAccount(): Promise<Account>
+  /** This PC's speech recognition: it hears every account's dictation (no sign-in includes transcription). */
   remote(pcm: Float32Array, language: string, signal: AbortSignal): Promise<string>
-  claudeSpeech(language: string, email: string, signal: AbortSignal): Promise<(pcm: Float32Array, signal: AbortSignal) => Promise<string>>
-  claudeStream?(language: string, email: string, signal: AbortSignal): Promise<ClaudeSpeechStream>
 }
 
 const cleanupInput = (source: 'chatgpt' | 'claude', text = '', words: string[] = []): CompletionInput => ({ lane: 'quick', model: source === 'claude' ? 'haiku' : undefined, effort: 'low', webSearch: false, tools: [],
@@ -48,16 +46,12 @@ export function abortable<T>(task: Promise<T>, signal: AbortSignal): Promise<T> 
 /** Frozen per recording: changing a call's agent/settings cannot reroute its audio or text. */
 export class DictationSpeech implements DictationEngine {
   private generation = 0
-  readonly streaming: boolean
   readonly polishes: boolean
-  private live?: ClaudeSpeechStream
   private vocabulary: DictationVocabulary = { words: [], snippets: [] }
   private warm?: Promise<{ prepared: PreparedText; output: string; final?: string } | undefined>
-  private run?: { source: 'chatgpt' | 'claude'; language: string; polish: boolean; provider?: LLMProvider; account?: string; speechAccount?: string; recognizeClaude?: (pcm: Float32Array, signal: AbortSignal) => Promise<string> }
+  private run?: { source: 'chatgpt' | 'claude'; language: string; polish: boolean; provider?: LLMProvider; account?: string }
   constructor(private options: Options) {
-    const settings = options.settings()
-    this.streaming = !!options.claudeStream && dictationSource(settings) === 'claude'
-    this.polishes = settings.dictation.polish
+    this.polishes = options.settings().dictation.polish
   }
   async ready(signal: AbortSignal = AbortSignal.timeout(15_000)): Promise<void> {
     this.dispose()
@@ -70,14 +64,10 @@ export class DictationSpeech implements DictationEngine {
     this.vocabulary = structuredClone(vocabulary)
     const source = dictationSource(s)
     if (!source) throw new Error('Choose a Claude or ChatGPT subscription account for dictation in Settings.')
-    const plan = source
-    const claudeAccount = source === 'claude' || (s.dictation.polish && plan === 'claude') ? await abortable(o.claudeAccount(), signal) : undefined
-    const speechAccount = source === 'claude' ? claudeAccount! : o.chatgptAccount()
-    if (source === 'chatgpt' && !speechAccount.signedIn) throw new Error('Sign in with ChatGPT in Settings to use subscription dictation.')
-    if (source === 'claude' && (!speechAccount.signedIn || !speechAccount.email)) throw new Error('Sign in with Claude in Settings to use Claude dictation.')
-    const account = !s.dictation.polish ? undefined : plan === 'claude' ? claudeAccount : plan === 'chatgpt' ? o.chatgptAccount() : undefined
-    if (s.dictation.polish && plan && !account?.signedIn) throw new Error(`Sign in with ${plan === 'claude' ? 'Claude' : 'ChatGPT'} in Settings, or turn off dictation cleanup.`)
-    const provider = plan === 'claude' ? o.claude : o.chatgpt
+    // This PC hears the words; the account they belong to (its word list, its history) cleans them up, when that's on.
+    const account = source === 'claude' ? await abortable(o.claudeAccount(), signal) : o.chatgptAccount()
+    if (!account.signedIn) throw new Error(source === 'claude' ? 'Sign in with Claude in Settings to use Claude dictation.' : 'Sign in with ChatGPT in Settings to use subscription dictation.')
+    const provider = source === 'claude' ? o.claude : o.chatgpt
     // Initialize the official text runtime while the microphone is active. No
     // dictated text or inference request is sent until the transcript is final.
     if (s.dictation.polish && provider.prepareText) {
@@ -86,25 +76,12 @@ export class DictationSpeech implements DictationEngine {
         .then(prepared => { if (signal.aborted || generation !== this.generation) { prepared.close(); return undefined }; return Object.assign(warm, { prepared }) })
         .catch(() => undefined)
     }
-    const opening = this.streaming ? o.claudeStream!(language, speechAccount.email!, signal).then(live => {
-      // Release even a backend that resolves after cancellation or another recording.
-      if (signal.aborted || generation !== this.generation) live.cancel()
-      return live
-    }) : undefined
-    const live = opening ? await abortable(opening, signal) : undefined
-    const recognizeClaude = source === 'claude' && !this.streaming ? await abortable(o.claudeSpeech(language, speechAccount.email!, signal), signal) : undefined
     signal.throwIfAborted()
-    if (generation !== this.generation) { live?.cancel(); return }
-    this.live = live
-    this.run = { source, language, polish: s.dictation.polish && !!plan, provider, account: account?.email, speechAccount: speechAccount.email, recognizeClaude }
-  }
-  push(pcm: Float32Array): void { if (!this.live) throw new Error('Start dictation again.'); this.live.push(pcm) }
-  async finish(signal: AbortSignal): Promise<string> {
-    if (!this.live) throw new Error('Start dictation again.')
-    return abortable(this.live.finish(), AbortSignal.any([signal, AbortSignal.timeout(25_000)]))
+    if (generation !== this.generation) return
+    this.run = { source, language, polish: s.dictation.polish, provider, account: account.email }
   }
   dispose(): void {
-    this.generation++; this.live?.cancel(); this.live = undefined
+    this.generation++
     void this.warm?.then(value => value?.prepared.close())
     this.warm = undefined; this.run = undefined
   }
@@ -114,10 +91,10 @@ export class DictationSpeech implements DictationEngine {
     if (!r) throw new Error('Start dictation again.')
     if (r.source === 'chatgpt') {
       const account = this.options.chatgptAccount()
-      if (!account.signedIn || account.email !== r.speechAccount) throw new Error('The ChatGPT account changed. Start dictation again.')
+      if (!account.signedIn || account.email !== r.account) throw new Error('The ChatGPT account changed. Start dictation again.')
     }
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(25_000)])
-    return abortable(r.source === 'claude' ? r.recognizeClaude!(pcm, bounded) : this.options.remote(pcm, r.language, bounded), bounded)
+    return abortable(this.options.remote(pcm, r.language, bounded), bounded)
   }
   async polish(text: string, signal: AbortSignal): Promise<string> {
     const r = this.run

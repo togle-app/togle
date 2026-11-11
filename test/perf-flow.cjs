@@ -110,7 +110,7 @@ app.whenReady().then(async () => {
     await evaluate("document.querySelector('.history-more').click()")
     await wait("document.querySelectorAll('.history-transcript-line').length===200")
     assert.match(T.exportCall(record), /Needle: final decision/)
-    await evaluate("document.querySelector('[role=tab][aria-label=Replies]').click()")
+    await evaluate("document.querySelector('[role=tab][aria-label=Suggestions]').click()")
     await wait("document.querySelectorAll('.history-suggestion').length===25")
     await evaluate("document.querySelector('.history-more').click()")
     await wait("document.querySelectorAll('.history-suggestion').length===50")

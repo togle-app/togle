@@ -71,13 +71,15 @@ export function CallPeople({ transcript, group, onGroup, auto, onAuto, remember 
   }, [])
   const people = useMemo(() => [...new Map(transcript.filter(line => line.voiceId).map(line => [line.voiceId!, line])).values()], [transcript])
   const unassigned = transcript.filter(line => line.speaker === 'them' && !line.voiceId).length
-  const likelyGroup = people.filter(line => line.speaker === 'them').length > 1 || groupCue(transcript)
+  const voices = people.filter(line => line.speaker === 'them').length
+  const likelyGroup = voices > 1 || groupCue(transcript)
   return <div className="call-awareness">
-    {!group && likelyGroup && !dismissed && <div className="call-offer" role="status"><span>This may be a group call.</span><button className="link" onClick={() => onGroup(true)}>Turn on group mode</button><button className="link" onClick={() => setDismissed(true)}>Not now</button></div>}
+    {/* Two voices on the other side: several people, or one heard as two (a headset switched, a room mic). Both are fixable. */}
+    {!group && likelyGroup && !dismissed && <div className="call-offer" role="status"><span>{voices > 1 ? `Togle hears ${voices} other voices: a group call, or one person heard as ${voices}?` : 'This may be a group call.'}</span><button className="link" onClick={() => onGroup(true)}>Turn on group mode</button>{voices > 1 && <button className="link" onClick={() => { setExpanded(true); setDismissed(true) }}>Same person</button>}<button className="link" onClick={() => setDismissed(true)}>Not now</button></div>}
     {!auto && transcript.length >= 2 && !autoDismissed && <div className="call-offer"><span>Automatic suggestions are off.</span><button className="link" onClick={onAuto}>Turn on suggestions</button><button className="link" onClick={() => setAutoDismissed(true)}>Not now</button></div>}
     <section className="call-people" aria-label="People in this call">
       <button className="people-toggle" aria-expanded={expanded} aria-controls="call-people-list" onClick={() => setExpanded(value => !value)}>
-        <span>People{people.length > 0 ? ` · ${people.length}` : ''}</span><span>{unassigned > 0 ? 'Some labels pending · ' : ''}{expanded ? 'Hide' : 'Show'}</span>
+        <span>People{people.length > 0 ? ` · ${people.length}` : ''}</span><span>{unassigned > 0 ? 'Some lines without a name · ' : ''}{expanded ? 'Hide' : 'Show'}</span>
       </button>
       {expanded && <div id="call-people-list" className="people-list">
       {status.state === 'loading' && <p className="hint" role="status">Preparing local speaker recognition… Transcription continues.</p>}

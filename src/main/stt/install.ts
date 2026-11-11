@@ -6,7 +6,7 @@ import { createReadStream, existsSync, promises as fs, readFileSync, statSync } 
 import os from 'node:os'
 import path from 'node:path'
 import type { LocalModelId, LocalSpeechState } from '@shared/types'
-import { engineById, engineFor, MODELS, RELEASE, whisperFor, type Download, type EngineBuild, type ModelFile } from './catalog'
+import { engineById, engineFor, MODEL_NAMES, MODELS, RELEASE, whisperFor, type Download, type EngineBuild, type ModelFile } from './catalog'
 
 // Hosts like GitHub and Hugging Face throttle a long-lived connection (one model took over five minutes for its first
 // 50 MB), so a file comes as many short range requests over parallel connections. Where each part is, is saved beside
@@ -17,7 +17,9 @@ const STALL_MS = 30_000
 const MAX_CHUNK_ATTEMPTS = 30
 // The window hears of an install's progress this often at most.
 const PROGRESS_MS = 250
-const LABELS: Record<LocalModelId, string> = { parakeet: 'Parakeet', 'whisper-turbo': 'Whisper large-v3-turbo', 'whisper-base': 'Whisper base' }
+const LABELS: Record<LocalModelId, string> = MODEL_NAMES
+// The Whisper run when more than one is installed: the most accurate.
+const WHISPERS: LocalModelId[] = ['whisper-turbo', 'whisper-small', 'whisper-base']
 
 /** What Togle runs to hear on this PC: whisper.cpp's programs and libraries, and the models. */
 export interface LocalSpeech {
@@ -324,7 +326,7 @@ export class SpeechInstaller extends EventEmitter {
     if (!found) return this.dev()
     const { record, engine } = found
     const binDir = path.join(this.home, record.dir, engine.dir)
-    const whisper = record.models.includes('whisper-turbo') ? 'whisper-turbo' : record.models.includes('whisper-base') ? 'whisper-base' : null
+    const whisper = WHISPERS.find((m) => record.models.includes(m)) ?? null
     return {
       binDir,
       server: engine.server ? path.join(binDir, engine.server) : null,

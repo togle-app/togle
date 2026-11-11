@@ -39,7 +39,7 @@ import { Conversation } from './Conversation'
 import { useHotkey, withKeys } from './hotkeys'
 import { Icon } from './Icon'
 import { Menu, type MenuItem } from './Menu'
-import { MonitorPicker } from './MonitorPicker'
+import { lastScreenName, MonitorPicker } from './MonitorPicker'
 import { MeetingNotice } from './Meetings'
 import { onOpenSettings, openSettings, type SettingsPart } from './open-settings'
 import { PlanMeter, PlanNotice } from './Plan'
@@ -135,7 +135,9 @@ export default function App() {
   const [chatAgentId, setChatAgentId] = useState<string>()
   const [agentTab, setAgentTab] = useState<'chat' | 'live' | 'calls' | 'settings' | 'knowledge' | 'skills' | 'learning'>('chat')
   const [selectedCallId, setSelectedCallId] = useState<string>()
-  const showHistory = (id?: string): void => { setSelectedCallId(id); setAgentTab('calls'); setView('agent') }
+  // The part of a saved call it opens at: its lessons (from Learning), or its notes (from the call just ended).
+  const [selectedCallTab, setSelectedCallTab] = useState<'overview' | 'learning'>()
+  const showHistory = (id?: string, tab: 'overview' | 'learning' = 'learning'): void => { setSelectedCallId(id); setSelectedCallTab(tab); setAgentTab('calls'); setView('agent') }
   // What the agents page shows as it opens: an agent's page, or the list of them.
   const [agentsRequest, setAgentsRequest] = useState<AgentsRequest>({ seq: 0 })
   const [agentsSection, setAgentsSection] = useState<'agents' | 'new' | 'share'>('agents')
@@ -250,7 +252,7 @@ export default function App() {
     }
   }
   const capture = useRef<CallCapture | null>(null)
-  // Togle Microphone, when it's on this computer; and what the microphone picked up in a noisy call, to show after it.
+  // Togle Studio, when it's on this computer; and what the microphone picked up in a noisy call, to show after it.
   const [microphone, setMicrophone] = useState<TogleMicrophoneStatus>()
   const [noiseFinding, setNoiseFinding] = useState<NoiseFinding | null>(null)
   useEffect(() => {
@@ -394,7 +396,11 @@ export default function App() {
   useEffect(() => {
     void api.getSettings().then(setSettings)
     void api.listAgents().then(setAgents)
-    warmUpAudio().catch((err) => console.warn('[capture] warm-up failed:', (err as Error).message))
+    // Opening the audio engine once makes the first call start sooner, but it takes ~50 ms of this window's time: once
+    // the window is drawn and idle, not before its first paint. A call started before then opens the engine itself.
+    const warm = requestIdleCallback(() => {
+      if (!capture.current) warmUpAudio().catch((err) => console.warn('[capture] warm-up failed:', (err as Error).message))
+    }, { timeout: 3000 })
     void api.authStatus().then(setAuth)
     void api.sttStatus().then(setStt)
     // The call so far: after a reload, or the one that was open when Togle last closed.
@@ -487,7 +493,7 @@ export default function App() {
       // New frames, and frames whose description arrived later.
       api.onFrame((frame) => setFrames((prev) => (prev.some((f) => f.id === frame.id) ? prev.map((f) => (f.id === frame.id ? frame : f)) : [...prev, frame])))
     ]
-    return () => subs.forEach((unsub) => unsub())
+    return () => { cancelIdleCallback(warm); subs.forEach((unsub) => unsub()) }
   }, [])
 
   // The conversation of the agent I talk to, as it was kept (once).
@@ -548,7 +554,7 @@ export default function App() {
     }
   }, [])
 
-  const toggleListening = useCallback(async (source?: CaptureSource | null, draft?: CallDraft | null) => {
+  const toggleListening = useCallback(async (source?: CaptureSource | null, draft?: CallDraft | null, resume = false) => {
     // Ignore clicks and hotkeys while capture is still opening devices.
     if (busy.current || resetting.current || choosingAgentNow.current) return
     closeSidebar()
@@ -560,7 +566,9 @@ export default function App() {
     if (!capture.current && source === undefined) {
       const agentId = shownAgent?.id
       if (!agentId) return
-      const fresh = view !== 'main'
+      // Starting is a new call from anywhere (the ended call's own view, the shortcut): the call before goes on only
+      // when asked to (Resume call), so the next meeting is never added to the last one's transcript and notes.
+      const fresh = !(resume && view === 'main')
       setCallDraft(previous => previous?.agentId === agentId && previous.fresh === fresh ? previous : { agentId, fresh, brief: fresh ? '' : brief, group: fresh ? false : group })
       await chooseMonitor('start')
       return
@@ -614,7 +622,7 @@ export default function App() {
       setNoiseFinding(null)
       try {
         for (const speaker of ['me', 'them'] as const) await api.pauseCallInput(speaker, pausedInputs.current[speaker])
-        // Togle Microphone first, when it's installed and Settings say so: the call then hears the clean microphone.
+        // Togle Studio first, when it's installed and Settings say so: the call then hears the clean microphone.
         const cleanMic = await api.prepareCallMicrophone().catch(() => undefined)
         const measureNoise = settingsNow.current?.microphone?.suggestions !== false && !isMicrophoneOn(cleanMic)
         await session.start((speaker, pcm, startedAt, segmentId, kind) => api.pushAudio(speaker, pcm, startedAt, segmentId, kind), (['me', 'them'] as const).filter(speaker => pausedInputs.current[speaker]), { measureNoise })
@@ -693,11 +701,24 @@ export default function App() {
   const closeSessionPick = useCallback(() => setSessionPick(false), [])
   useEffect(() => { setSessionPick(false); setScreenPick(null) }, [view, chatAgentId, agentTab])
 
+  /**
+   * The call shortcut with Togle out of sight: the picker would open where it can't be seen, and the call wouldn't
+   * start. It starts as the last one did (that window or screen, or audio only); one going on ends.
+   */
+  const startUnseen = useCallback(async () => {
+    const agentId = shownAgent?.id
+    if (capture.current || callSetup || !agentId) return toggleListening()
+    const name = lastScreenName()
+    const source = name ? (await api.listCaptureSources(false).catch(() => [])).find(item => item.name === name) ?? null : null
+    await toggleListening(source, { agentId, fresh: true, brief: '', group: false })
+  }, [shownAgent?.id, callSetup, toggleListening])
+
   useEffect(
     () =>
       api.onHotkey((action) => {
         if (action === 'dictation-settings') openSettings('dictation')
         if (action === 'toggle-listening') void toggleListening()
+        if (action === 'start-call-unseen') void startUnseen()
         if (action === 'toggle-recording') void toggleRecording()
         if (action === 'snapshot') void snapshot()
         // Togle came up (the shortcut brought it): the box to write in, ready to type, in the conversation.
@@ -712,7 +733,7 @@ export default function App() {
           if (newest) api.copyText(toSay(newest))
         }
       }),
-    [toggleListening, toggleRecording, snapshot, closeSidebar]
+    [toggleListening, startUnseen, toggleRecording, snapshot, closeSidebar]
   )
 
   // Settings opened from anywhere (a card's error, the setup card, the call strip), at the part that fixes it; opened
@@ -774,7 +795,7 @@ export default function App() {
     try {
       await changeSettings({ assist: { auto: !settings.assist.auto } })
     } catch (err) {
-      setWarnings([`Could not change automatic replies: ${errorText(err)}`])
+      setWarnings([`Could not change automatic suggestions: ${errorText(err)}`])
     } finally {
       autoBusy.current = false
       setChangingAuto(false)
@@ -1140,10 +1161,8 @@ export default function App() {
     else api.assist({ kind: 'ask', question: text })
   }
 
-  // The call heard with the ChatGPT plan (as it is unless another is picked), not signed in yet: it hears once signed in.
-  const hearsOnSignIn = !!settings && (settings.transcription.me === 'chatgpt' || settings.transcription.them === 'chatgpt') && !auth.signedIn
-  // ChatGPT answering and hearing alike: signing in is all a first call needs.
-  const signInOnly = !routedProfile && !shownAgent?.subscriptionAccountId && !!settings && settings.provider === 'chatgpt' && needsAI && (!noSpeech || hearsOnSignIn)
+  // Speech is ready and ChatGPT answers: signing in is all a first call needs. (No sign-in hears calls: this computer does.)
+  const signInOnly = !routedProfile && !shownAgent?.subscriptionAccountId && !!settings && settings.provider === 'chatgpt' && needsAI && !noSpeech
   const useLocalSpeech = async () => {
     try {
       await changeSettings({ transcription: { me: 'local', them: 'local' } })
@@ -1154,10 +1173,11 @@ export default function App() {
   }
   const useClaude = async (): Promise<void> => {
     try {
-      const speech = subscriptionAccounts.accounts.find(account => account.id === settings?.transcription.accountId)
-      const connectSpeech = !speech?.signedIn && ['chatgpt', 'claude'].includes(settings?.transcription.me || '')
-      const claudeId = subscriptionAccounts.accounts.find(account => account.id === settings?.subscriptionAccountId && account.provider === 'claude')?.id || 'claude-default'
-      await changeSettings({ provider: 'claude', claude: { auth: 'subscription' }, ...(connectSpeech ? { transcription: { accountId: claudeId, me: 'claude' as const, them: 'claude' as const } } : {}) })
+      const voice = subscriptionAccounts.accounts.find(account => account.id === settings?.dictation.accountId)
+      // Voice typing's account (its cleanup and word list) follows to Claude when the one picked for it isn't signed in:
+      // left automatic, it's the AI's. Speech stays on this computer either way: no sign-in includes transcription.
+      const followAI = !!settings?.dictation.accountId && !voice?.signedIn
+      await changeSettings({ provider: 'claude', claude: { auth: 'subscription' }, ...(followAI ? { dictation: { accountId: '' } } : {}) })
       openSettings('ai')
     } catch (err) { setWarnings([errorText(err)]) }
   }
@@ -1165,7 +1185,7 @@ export default function App() {
     <>
       <div className="row">
         <button className={primary ? 'primary' : 'ghost'} disabled={signingIn} onClick={() => void signIn()}>
-          {signingIn ? 'Waiting for browser…' : 'Sign in with ChatGPT'}
+          {signingIn ? 'Waiting for browser…' : 'Continue with ChatGPT'}
         </button>
         {signingIn ? (
           <button className="ghost" onClick={() => void api.cancelSignIn()}>
@@ -1173,8 +1193,8 @@ export default function App() {
           </button>
         ) : (
           primary && (
-            <button className="ghost" onClick={() => void useClaude()}>
-              Use Claude
+            <button className="ghost" title="Claude sign-in in other apps isn’t approved by Anthropic yet, so it may change or stop working." onClick={() => void useClaude()}>
+              Use Claude (experimental)
             </button>
           )
         )}
@@ -1192,7 +1212,7 @@ export default function App() {
     (signInOnly ? (
       <article className="assist connect setup">
         <p className="setup-title">Connect your AI plan</p>
-        <p className="hint">Use a plan you already have. Transcription can also run on this PC.</p>
+        <p className="hint">Use the plan you already have, at no extra cost.</p>
         {signInRow(true)}
       </article>
     ) : (
@@ -1201,7 +1221,7 @@ export default function App() {
         <div className={`setup-step ${needsAI ? '' : 'done'}`}>
           <span className="step-mark">{needsAI ? '1' : <Icon name="check" size={12} />}</span>
           <div className="step-body">
-            <p>AI for answers</p>
+            <p>AI for suggestions</p>
             {!needsAI ? (
               <p className="hint">Using {readiness.answers}</p>
             ) : shownAgent?.subscriptionAccountId || shownAgent?.preferences?.ai ? (
@@ -1226,26 +1246,20 @@ export default function App() {
           <span className="step-mark">{noSpeech ? '2' : <Icon name="check" size={12} />}</span>
           <div className="step-body">
             <p>Speech to text</p>
-            {noSpeech && hearsOnSignIn ? (
+            {noSpeech && stt.needs ? (
               <>
-                <p className="hint">Transcribe on this PC, or use a ChatGPT plan.</p>
+                <p className="hint">The speech service you picked needs {stt.needs}.</p>
                 <div className="row">
-                  <button className="primary" onClick={() => void useLocalSpeech()}>
-                    Set up on this PC
-                  </button>
-                  <button className="ghost" disabled={signingIn} onClick={() => void signIn()}>
-                    {signingIn ? 'Waiting for browser…' : 'Use ChatGPT'}
-                  </button>
+                  <button className={needsAI ? 'ghost' : 'primary'} onClick={() => openSettings('speech')}>Add it in Settings</button>
+                  <button className="link" onClick={() => void useLocalSpeech()}>Use this computer instead</button>
                 </div>
-                {signingIn && <button className="link" onClick={() => void api.cancelSignIn()}>Cancel sign-in</button>}
-                {auth.error && <p className="error">{auth.error}</p>}
               </>
             ) : noSpeech ? (
               <>
-                {stt.needs && <p className="hint">With {stt.needs} in Settings, or installed on this PC.</p>}
+                <p className="hint">Runs on this computer: private, and nothing to pay. A one-time download.</p>
                 <div className="row">
-                  <button className={needsAI ? 'ghost' : 'primary'} onClick={() => openSettings('speech')}>
-                    {stt.needs ? 'Set it up…' : 'Install…'}
+                  <button className={needsAI ? 'ghost' : 'primary'} onClick={() => void useLocalSpeech()}>
+                    Set up speech
                   </button>
                 </div>
               </>
@@ -1267,6 +1281,12 @@ export default function App() {
   const learn = useCallback(() => void teachRef.current(), [])
   const summarize = useCallback(() => api.assist({ kind: 'summary' }), [])
   const showTranscript = useCallback(() => setTimelineOpen(true), [])
+  // The call just ended, saved: its meeting notes, in its agent's Call history.
+  const openCallNotes = useCallback(() => {
+    const owner = activeNow.current
+    if (owner) setChatAgentId(owner.id)
+    setSelectedCallId(callNow.current); setSelectedCallTab('overview'); setAgentTab('calls'); setView('agent')
+  }, [])
 
   const screenItems: MenuItem[] = [
     { label: 'Suggest from the screen', onSelect: () => void chooseScreen('suggest') },
@@ -1277,24 +1297,24 @@ export default function App() {
   const stripTools = (listening || recording) && (
     <>
       <div className="strip-row tools">
-        <button className="suggest-reply" title={withKeys('Suggest a reply', keys.suggest)} onClick={() => api.assist({ kind: 'suggest' })}>
-          Suggest reply
+        <button className="suggest-reply" aria-label="Suggest reply" title={withKeys('Suggest a reply', keys.suggest)} onClick={() => api.assist({ kind: 'suggest' })}>
+          Suggest reply{keys.suggest && <kbd className="wide-only">{keys.suggest}</kbd>}
         </button>
         <CallToggle
-          label="Auto" accessibleLabel="Automatic replies" checked={!!settings?.assist.auto}
+          label="Auto-suggest" short="Auto" accessibleLabel="Automatic suggestions" checked={!!settings?.assist.auto}
           disabled={changingAuto}
-          title={settings?.assist.auto ? 'Pause automatic replies. Suggest reply stays available.' : 'Suggest replies automatically when you need to answer.'}
+          title={settings?.assist.auto ? 'Pause automatic suggestions. Suggest reply stays available.' : 'Show a suggestion automatically when you need to answer.'}
           onToggle={() => void toggleAuto()}
         />
-        <CallToggle label="Group" accessibleLabel="Group call" checked={group}
+        <CallToggle label="Group call" short="Group" accessibleLabel="Group call" checked={group}
           title={group ? 'Group mode is on. Focus on questions addressed to you.' : 'Turn on group mode for calls with several people.'}
           onToggle={() => { setGroup(!group); api.setGroupCall(!group) }} />
         <Menu
-          className="call-tools"
-          title="Summary and screen options"
+          className="call-tools icon"
+          title="More: a summary, the screen"
           ariaLabel="Call tools"
           direction="up"
-          label={<>Tools <Icon name="chevron" size={12} /></>}
+          label={<Icon name="more" size={14} />}
           items={[
             { label: 'Summarize call', disabled: !hasCall, onSelect: summarize },
             'divider',
@@ -1319,15 +1339,16 @@ export default function App() {
         {planShown && <PlanMeter plan={planShown} listening={listening} onOpen={() => setView('settings')} />}
       </div>
       <CallPeople key={callKey} transcript={transcript} group={group} onGroup={value => { setGroup(value); api.setGroupCall(value) }} auto={!!settings?.assist.auto} onAuto={() => void toggleAuto()} remember={settings?.assist.rememberVoices !== false} />
-      {listening && <div className={`screen-context-status ${recording ? 'on' : ''}`} aria-label="Screen context">
-        <span className="screen-context-label"><Icon name="monitor" /><strong>{monitorStatus.state === 'reading' ? 'Reading screen…' : recording ? `Watching ${recordName}` : monitorStatus.state === 'watching' ? 'Connecting screen…' : monitorStatus.state === 'paused' ? 'Screen paused' : 'Audio only'}</strong></span>
-        <span className="spacer" />
-        {recording || monitorStatus.id ? <button className="link" title={withKeys('Pause screen context', keys.record)} onClick={() => void toggleRecording()}>Pause screen</button> : monitorStatus.source ? <button className="link" onClick={() => void startMonitoring(monitorStatus.source!)}>Resume screen</button> : null}
-        <button className="link" onClick={() => void chooseMonitor('change')}>{monitorStatus.source ? 'Change' : 'Add screen'}</button>
-        {monitorStatus.error && <span className="screen-context-detail" role="status">{monitorStatus.error}</span>}
-        <ScreenTiming status={monitorStatus} />
-      </div>}
     </>
+  )
+  // What the AI sees during the call, on the strip's status line: the screen, or audio only.
+  const screenStatus = listening && (
+    <div className={`screen-context-status ${recording ? 'on' : ''}`} aria-label="Screen context">
+      <span className="screen-context-label"><Icon name="monitor" /><strong>{monitorStatus.state === 'reading' ? 'Reading screen…' : recording ? `Watching ${recordName}` : monitorStatus.state === 'watching' ? 'Connecting screen…' : monitorStatus.state === 'paused' ? 'Screen paused' : 'Audio only'}</strong></span>
+      {recording || monitorStatus.id ? <button className="link" title={withKeys('Pause screen context', keys.record)} onClick={() => void toggleRecording()}>Pause screen</button> : monitorStatus.source ? <button className="link" onClick={() => void startMonitoring(monitorStatus.source!)}>Resume screen</button> : null}
+      <button className="link" onClick={() => void chooseMonitor('change')}>{monitorStatus.source ? 'Change' : 'Add screen'}</button>
+      {monitorStatus.error && <span className="screen-context-detail" role="status">{monitorStatus.error}</span>}
+    </div>
   )
 
   const callStrip = (listening || recording || timelineOpen) && (
@@ -1344,13 +1365,13 @@ export default function App() {
       open={timelineOpen}
       onOpen={setTimelineOpen}
       tools={stripTools || undefined}
+      status={screenStatus || undefined}
+      timing={listening ? <ScreenTiming status={monitorStatus} /> : undefined}
       deaf={
         noSpeech
-          ? hearsOnSignIn
-            ? "Can't hear the call: sign in with ChatGPT first."
-            : stt.needs
-              ? `Can't hear the call: add ${stt.needs} in Settings first.`
-              : "Can't hear the call: speech recognition isn't installed."
+          ? stt.needs
+            ? `Can't hear the call: add ${stt.needs} in Settings first.`
+            : "Can't hear the call: speech recognition isn't set up on this computer yet."
           : stt.state === 'error'
             ? "Can't hear the call: speech recognition stopped."
             : undefined
@@ -1402,18 +1423,28 @@ export default function App() {
     setView(tab === 'live' && hasCall && shownAgent?.id === activeAgent?.id ? 'main' : 'agent')
   }
 
+  // The call's own view once it's over: the next call is a new one, and this one can go on (Resume call).
+  const callEnded = !listening && !callSetup && view === 'main' && hasCall
+  const callBusy = starting || clearing || choosingAgent || !settings
   const callButton = view === 'agent' && listening ? undefined : (
     // Beside the box to write in, in its form: a click starts or stops the call, it doesn't send what's written.
-    <button
-      type="button"
-      className={`primary listen ${listening && view !== 'agent' ? 'stop' : ''}`}
-      disabled={starting || clearing || choosingAgent || !settings}
-      title={withKeys(listening ? 'End the call' : callSetup ? 'Connect AI and transcription before starting' : `Start a call with ${shownAgent?.name}`, keys.listen)}
-      onClick={() => void toggleListening()}
-    >
-      <Icon name={listening && view !== 'agent' ? 'stop' : callSetup ? 'settings' : 'phone'} size={13} />
-      {starting ? 'Starting…' : listening ? view === 'agent' ? 'Return to call' : 'End call' : callSetup ? 'Set up call' : view === 'main' && hasCall ? 'Resume call' : 'Start call'}
-    </button>
+    <>
+      {callEnded && (
+        <button type="button" className="ghost resume-call" disabled={callBusy} title="Continue this call: the same transcript, suggestions and notes" onClick={() => void toggleListening(undefined, undefined, true)}>
+          Resume call
+        </button>
+      )}
+      <button
+        type="button"
+        className={`primary listen ${listening && view !== 'agent' ? 'stop' : ''}`}
+        disabled={callBusy}
+        title={withKeys(listening ? 'End the call' : callSetup ? 'Connect AI and transcription before starting' : `${callEnded ? 'Start a new call' : 'Start a call'} with ${shownAgent?.name}`, keys.listen)}
+        onClick={() => void toggleListening()}
+      >
+        <Icon name={listening && view !== 'agent' ? 'stop' : callSetup ? 'settings' : 'phone'} size={13} />
+        {starting ? 'Starting…' : listening ? view === 'agent' ? 'Return to call' : 'End call' : callSetup ? 'Set up call' : callEnded ? 'New call' : 'Start call'}
+      </button>
+    </>
   )
 
   return (
@@ -1422,7 +1453,7 @@ export default function App() {
         <div className="title">
           <button className="icon sidebar-toggle" aria-label="Toggle agents" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(previous => !previous)}><Icon name="sidebar" size={17} /></button>
           <span className="brand"><img src={togleIcon} width={20} height={20} alt="" /><span className="brand-name">Togle</span></span>
-          {listening && (view === 'main' ? <span className="live" role="timer" aria-label="Call duration"><span className="dot live" /><Elapsed since={listeningSince} />{hidden && <Icon name="eyeOff" size={12} />}</span> : (
+          {listening && (view === 'main' ? <span className="live" role="timer" aria-label={hidden ? 'Call duration. Togle is hidden from screen sharing' : 'Call duration'}><span className="dot live" /><Elapsed since={listeningSince} />{hidden && <span className="hidden-mark" title="Hidden from screen sharing: only you can see Togle. Screen shares and recordings show what's behind it."><Icon name="eyeOff" size={12} /></span>}</span> : (
             <button className="live live-call-link" aria-label={`Return to call with ${activeAgent?.name}`} onClick={openCurrentCall} title={hidden ? "Listening. Only you can see Togle: screen shares and recordings show what's behind it." : 'Return to the running call'}>
               <span className="dot live" />
               <span>Return to live call</span><Elapsed since={listeningSince} />
@@ -1454,7 +1485,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {monitorPick && <MonitorPicker sources={sources} loading={loadingSources} error={sourceError} startingCall={monitorPick === 'start'} onClose={closeMonitorPick}
+      {monitorPick && <MonitorPicker sources={sources} loading={loadingSources} error={sourceError} startingCall={monitorPick === 'start'} resuming={monitorPick === 'start' && callDraft?.fresh === false && hasCall} onClose={closeMonitorPick}
         agentName={agents.find(agent => agent.id === callDraft?.agentId)?.name} brief={callDraft?.brief ?? ''} group={callDraft?.group ?? false}
         onPrepare={(brief, group) => setCallDraft(previous => previous ? { ...previous, brief, group } : previous)}
         onPick={source => { const intent = monitorPick; closeMonitorPick(); if (intent === 'start') void toggleListening(source, callDraft); else void startMonitoring(source) }}
@@ -1508,7 +1539,7 @@ export default function App() {
           <div className="notice info">
             <span>
               In a group call Togle suggests when you're asked: by name, or right after you spoke. To know your name,{' '}
-              <button className="link" onClick={() => setView('settings')}>
+              <button className="link" onClick={() => openSettings('name')}>
                 add it in Settings
               </button>
               .
@@ -1525,7 +1556,7 @@ export default function App() {
             <span>{stt.state === 'starting' ? 'Getting speech recognition ready: what they say shows in a moment.' : (stt.detail ?? 'Speech recognition is off.')}</span>
           </div>
         )}
-        {/* The speech API picked for a side can't hear it, or missed a line: this PC hears it meanwhile, if it can. */}
+        {/* The speech API picked for a side can't hear it, or missed a line: this computer hears it meanwhile, if it can. */}
         {stt.problem && listening && (
           <div className="notice">
             <span>{stt.problem}</span>
@@ -1557,7 +1588,7 @@ export default function App() {
           <div className="workspace-head">
             {configuring && <button className="icon" aria-label="Back to chat" title="Back to chat" onClick={() => selectAgentTab('chat')}><Icon name="back" /></button>}
             <Avatar agent={shownAgent} size={32} />
-            <div><h2 title={shownAgent.description}>{shownAgent.name}</h2><p className="connection-status" title={view === 'main' && brief ? brief : undefined}>{configuring ? 'Agent settings' : view === 'main' ? `${listening ? 'Live call' : 'Call ended'}${brief ? ` · ${brief.split('\n')[0]}` : ''}` : shownAgent.description || answerConnection}</p></div>
+            <div><h2 title={shownAgent.description}>{shownAgent.name}</h2><p className="connection-status">{configuring ? 'Agent settings' : view === 'main' ? listening ? 'Live call' : 'Call ended' : shownAgent.description || answerConnection}</p></div>
             {view === 'agent' && !configuring && <button className="ghost small agent-settings-button" onClick={() => selectAgentTab('settings')}><Icon name="settings" size={14} />Agent settings</button>}
             {configuring && <button className="ghost small" onClick={() => openAgents({ share: shownAgent.id })}>Share agent</button>}
           </div>
@@ -1570,7 +1601,7 @@ export default function App() {
             selectAgentTab(workspaceTabs[next])
             event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
           }}>
-            {workspaceTabs.map(tab => <button key={tab} role="tab" id={`agent-tab-${tab}`} aria-controls="agent-panel" aria-selected={selectedAgentTab === tab} tabIndex={selectedAgentTab === tab ? 0 : -1} onClick={() => selectAgentTab(tab)}>{tab === 'live' ? <>{listening && shownAgent.id === activeAgent?.id && <span className="workspace-live-dot" aria-hidden="true" />}Live Call</> : tab === 'calls' ? 'Call History' : tab[0].toUpperCase() + tab.slice(1)}</button>)}
+            {workspaceTabs.map(tab => <button key={tab} role="tab" id={`agent-tab-${tab}`} aria-controls="agent-panel" aria-selected={selectedAgentTab === tab} tabIndex={selectedAgentTab === tab ? 0 : -1} onClick={() => selectAgentTab(tab)}>{tab === 'live' ? <>{listening && shownAgent.id === activeAgent?.id && <span className="workspace-live-dot" aria-hidden="true" />}Live call</> : tab === 'calls' ? 'Call history' : tab[0].toUpperCase() + tab.slice(1)}</button>)}
           </div>
           </div>
           <div className="workspace-body" id="agent-panel" role="tabpanel" aria-labelledby={`agent-tab-${selectedAgentTab}`}>
@@ -1600,6 +1631,7 @@ export default function App() {
             canLearn={canLearn}
             onLearn={learn}
             onSummary={summarize}
+            onNotes={view === 'main' && settings?.assist.rememberCalls !== false ? openCallNotes : undefined}
             onTranscript={showTranscript}
             onDropFiles={(paths) => void attach(shownAgent, 'files', paths)}
             onTry={(question) => tryQuestion(shownAgent, question)}
@@ -1623,7 +1655,7 @@ export default function App() {
             <h3>{listening ? `Call in progress with ${activeAgent?.name}` : 'No live call'}</h3>
             <p>{listening ? 'Your call keeps running while you browse other agents.' : `Start a call with ${shownAgent.name} for live suggestions, transcript and screen context.`}</p>
             {listening ? <button className="primary" onClick={openCurrentCall}>Return to live call</button> : callButton}
-          </div> : agentTab === 'calls' ? <CallHistory key={shownAgent.id} ownerId={shownAgent.id} selectedId={selectedCallId} onSelect={setSelectedCallId} agents={agents} enabled={settings?.assist.rememberCalls !== false} currentCallId={hasCall && shownAgent.id === activeAgent?.id ? callKey : undefined} currentCallTitle={brief.split('\n')[0] || 'Current call'} onOpenCurrent={openCurrentCall} onAgent={replaceAgent} onDone={() => selectAgentTab('chat')} asking={!!chats.of(shownAgent.id).turn} onAsk={(call, question) => {
+          </div> : agentTab === 'calls' ? <CallHistory key={shownAgent.id} ownerId={shownAgent.id} selectedId={selectedCallId} openTab={selectedCallTab} onSelect={setSelectedCallId} agents={agents} enabled={settings?.assist.rememberCalls !== false} currentCallId={hasCall && shownAgent.id === activeAgent?.id ? callKey : undefined} currentCallTitle={brief.split('\n')[0] || 'Current call'} onOpenCurrent={openCurrentCall} onAgent={replaceAgent} onDone={() => selectAgentTab('chat')} asking={!!chats.of(shownAgent.id).turn} onAsk={(call, question) => {
             if (call.agentId !== shownAgent.id || chats.of(shownAgent.id).turn) return
             selectAgentTab('chat')
             chats.teach(shownAgent, question, { id: call.id, title: call.title || 'Saved call' })

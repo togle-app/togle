@@ -305,7 +305,7 @@ export const AnswerCard = memo(function AnswerCard({ item, older, asked = true, 
       {docs.length > 0 && <p className="sources">From: {docs.join(' · ')}</p>}
       {item.context && <details className="answer-evidence context-trace">
         <summary>Context for this answer</summary>
-        <p className="hint">Material supplied to the model. Inclusion alone does not show which items it relied on.</p>
+        <p className="hint">What the AI was given for this suggestion. It may not have used all of it.</p>
         {!!item.context.skills.length && <><h4>Assistance skills</h4><ul>{item.context.skills.map(skill => <li key={skill.id}>{skill.name} · version {skill.revision}</li>)}</ul></>}
         {!!item.context.references.length && <><h4>Reference knowledge</h4><ul>{item.context.references.map(reference => <li key={reference.id}>{reference.name}</li>)}</ul></>}
         <details><summary>Remembered context ({item.context.facts.length})</summary>{item.context.facts.map(fact => <p key={fact.text}><InlineMarkdown text={fact.text} /><small className="hint"> · {sourceLabel(fact.source)}</small></p>)}</details>

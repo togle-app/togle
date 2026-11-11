@@ -62,15 +62,15 @@ export type Unsubscribe = () => void
 
 /** Bridge exposed to the renderer as `window.togle`. */
 export interface TogleApi {
-  /** Togle Microphone, the separate app that cleans the microphone for every call app: found again, then its status. */
+  /** Togle Studio, the separate app that cleans the microphone for every call app: found again, then its status. */
   microphoneStatus(): Promise<TogleMicrophoneStatus>
   onMicrophone(cb: (status: TogleMicrophoneStatus) => void): Unsubscribe
-  /** Before a call starts: turns Togle Microphone on for it when it's installed and Settings say so. */
+  /** Before a call starts: turns Togle Studio on for it when it's installed and Settings say so. */
   prepareCallMicrophone(): Promise<TogleMicrophoneStatus>
   turnOnMicrophone(): Promise<TogleMicrophoneStatus>
   turnOffMicrophone(): Promise<TogleMicrophoneStatus>
   showMicrophone(page?: MicrophoneLinkPage): Promise<void>
-  /** Togle Microphone's web page, tagged with where in Togle it was opened from. */
+  /** Togle Studio's web page, tagged with where in Togle it was opened from. */
   openMicrophonePage(from: 'after-call' | 'settings' | 'call-strip' | 'microphone-check'): Promise<void>
   /** A call's noise measurement (no audio): whether to show the suggestion, which then counts as shown. */
   noiseMeasured(report: NoiseReport): Promise<boolean>
@@ -98,6 +98,8 @@ export interface TogleApi {
   onDictation(cb: (state: DictationState) => void): Unsubscribe
   onDictationExpanded(cb: (expanded: boolean) => void): Unsubscribe
   expandDictation(expanded: boolean, explicit?: boolean): void
+  /** The resting voice bar's size as drawn (bigger while listening or with words in it), so clicks on it aren't passed through. */
+  setDictationPill(width: number, height: number): void
   dragDictation(action: 'start' | 'move' | 'end', x: number, y: number): void
   toggleDictation(): Promise<void>
   cancelDictation(): Promise<void>
@@ -172,6 +174,8 @@ export interface TogleApi {
   reviewCallSession(id: string): Promise<CallLearningResult>
   approveCallLearning(id: string, reviewId: string, selected: string[]): Promise<CallLearningResult>
   dismissCallLearning(id: string, reviewId: string): Promise<CallSession>
+  /** Lessons not to keep (by their ids), leaving the rest waiting. */
+  dropCallLearning(id: string, reviewId: string, selected: string[]): Promise<CallSession>
   onCallSessions(cb: (change: { id?: string }) => void): Unsubscribe
   /** The call so far: the one going on, or the one picked up from disk as Togle started. */
   currentCall(): Promise<CurrentCall>

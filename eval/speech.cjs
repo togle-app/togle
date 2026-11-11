@@ -30,6 +30,9 @@ const SET = typeof OPTS.set === 'string' ? JSON.parse(fs.readFileSync(path.join(
 const LEVELS = typeof OPTS.levels === 'string' ? OPTS.levels.split(',').map((l) => (l === 'clean' ? null : Number(l))) : [null, 20, 10, 5]
 // The agent's words to spell right, as the call's agent would give them (none for recordings of anything else).
 const VOCABULARY = SET ? '' : 'Acme Analytics, Growth, Nordlink, SAP, SSO'
+// `--language de`: the call's language, as Settings sets it, for a set of recordings in another language (Parakeet
+// hears 25 of them, Whisper the rest); English unless given.
+const LANGUAGE = typeof OPTS.language === 'string' ? OPTS.language : 'en'
 
 useCopyOfTogleData()
 app.getAppPath = () => ROOT
@@ -74,7 +77,8 @@ const words = (text) =>
     .replace(/\bdr\b\.?/g, 'doctor')
     .replace(/sign-on/g, 'sign on')
     .replace(/[-–—]/g, ' ')
-    .replace(/[^a-z0-9' ]+/g, ' ')
+    // Letters of any alphabet: accented ones, and Cyrillic, Greek, for a set in another language (--language).
+    .replace(/[^\p{L}\p{N}' ]+/gu, ' ')
     .replace(/(^|\s)'+|'+(?=\s|$)/g, ' ')
     .split(/\s+/)
     .filter(Boolean)
@@ -144,7 +148,7 @@ run(async () => {
   const onSegment = T.hearing({
     parakeet: () => parakeet,
     whisper: counted,
-    language: () => 'en',
+    language: () => LANGUAGE,
     vocabulary: async () => VOCABULARY,
     copilot: { anticipate: () => {}, dropAnticipated: () => {}, talkedOn: () => {}, add: (_speaker, text) => (heard = text) },
     caption: () => {}
@@ -169,11 +173,11 @@ run(async () => {
       row.togle = { wer: wer(clip.text, heard ?? ''), ms: performance.now() - t, heard: heard ?? '', byWhisper }
       // For comparison: Whisper alone, with the agent's words, on every utterance.
       t = performance.now()
-      const alone = await within(60_000, `Whisper on ${clip.name}`, whisper.transcribe(pcm, { language: 'en', prompt: VOCABULARY, partial: false, stream: 'them' }))
+      const alone = await within(60_000, `Whisper on ${clip.name}`, whisper.transcribe(pcm, { language: LANGUAGE, prompt: VOCABULARY, partial: false, stream: 'them' }))
       row.whisper = { wer: wer(clip.text, alone.text), ms: performance.now() - t, heard: alone.text.trim() }
       if (speechApi) {
         t = performance.now()
-        const byApi = await within(60_000, `${speechApi.label()} on ${clip.name}`, speechApi.transcribe(pcm, { language: 'en', vocabulary: VOCABULARY }))
+        const byApi = await within(60_000, `${speechApi.label()} on ${clip.name}`, speechApi.transcribe(pcm, { language: LANGUAGE, vocabulary: VOCABULARY }))
         row.api = { wer: wer(clip.text, byApi), ms: performance.now() - t, heard: byApi }
       }
       level.push(row)

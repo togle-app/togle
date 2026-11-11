@@ -66,7 +66,7 @@ function speech(library, polish = true, stream) {
   const provider = { stream: async (input, handlers) => { requests.push(input); if (stream) return stream(input, handlers); handlers.onFinal(JSON.parse(input.user).dictated_text) } }
   const account = { signedIn: true, email: 'work@example.test' }
   const engine = new DictationSpeech({ settings: () => settings, vocabulary: Promise.resolve(library), claude: provider, chatgpt: provider,
-    claudeAccount: async () => account, chatgptAccount: () => account, claudeSpeech: async () => async () => 'toggle my signature', remote: async () => '' })
+    claudeAccount: async () => account, chatgptAccount: () => account, remote: async () => 'toggle my signature' })
   return { engine, requests }
 }
 

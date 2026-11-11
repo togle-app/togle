@@ -45,14 +45,16 @@ export function validatePreferences(value: unknown): AgentPreferences {
     const group = input[section]
     if (!group) continue
     if (typeof group !== 'object' || Array.isArray(group)) throw new Error('Speech and voice typing preferences must be settings objects.')
-    const fields = section === 'dictation' ? ['speech', 'accountId', 'mode', 'polish', 'showBar', 'microphoneId'] : ['accountId', 'language', 'me', 'them', 'openaiModel', 'serverUrl', 'serverModel']
+    // Voice typing's account is voice typing's alone (calls are heard by this computer or a speech API, never an account).
+    const fields = section === 'dictation' ? ['speech', 'accountId', 'mode', 'polish', 'showBar', 'microphoneId'] : ['language', 'me', 'them', 'openaiModel', 'serverUrl', 'serverModel']
     const clean: Record<string, unknown> = {}
     for (const key of fields) {
       const value = (group as Record<string, unknown>)[key]
       if (value === undefined) continue
       const valid = ['polish', 'showBar'].includes(key) ? typeof value === 'boolean' : typeof value === 'string' && value.length <= (key === 'serverUrl' || key === 'microphoneId' ? 2000 : 200)
       if (!valid || key === 'mode' && !['hold', 'toggle'].includes(value as string) || key === 'speech' && !['auto', 'claude', 'chatgpt'].includes(value as string) || ['me', 'them'].includes(key) && !['local', 'openai', 'server', 'chatgpt', 'claude'].includes(value as string)) throw new Error(`Invalid ${section} preference: ${key}.`)
-      clean[key] = value
+      // Claude speech was removed (it isn't open to other apps): a side it heard is heard by this PC now.
+      clean[key] = ['me', 'them'].includes(key) && value === 'claude' ? 'local' : value
     }
     result[section] = clean as never
   }

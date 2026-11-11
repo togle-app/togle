@@ -1,14 +1,14 @@
 import type { MicrophoneLinkState } from './microphone-link'
 
 /**
- * Togle's side of Togle Microphone, the separate app that removes background noise from the user's voice in every
+ * Togle's side of Togle Studio, the separate app that removes background noise from the user's voice in every
  * call app. Togle measures what the microphone picks up during calls, and when it's noisy it can show the user, with
- * a link to Togle Microphone. Both are optional and off with one setting.
+ * a link to Togle Studio. Both are optional and off with one setting.
  */
 
-/** What Togle knows about Togle Microphone on this computer. */
+/** What Togle knows about Togle Studio on this computer. */
 export interface TogleMicrophoneStatus {
-  /** Togle Microphone has run on this computer: it left its link file. */
+  /** Togle Studio has run on this computer: it left its link file. */
   installed: boolean
   /** It's running and Togle is connected to it. */
   running: boolean
@@ -19,13 +19,13 @@ export interface TogleMicrophoneStatus {
 }
 
 export interface MicrophoneSettings {
-  /** After a call, show what the microphone picked up when it was noisy, with a link to Togle Microphone. */
+  /** After a call, show what the microphone picked up when it was noisy, with a link to Togle Studio. */
   suggestions: boolean
-  /** Turn Togle Microphone on when a call starts, when it's installed, and off again after the call. */
+  /** Turn Togle Studio on when a call starts, when it's installed, and off again after the call. */
   autoStart: boolean
   /** When a suggestion was last shown. */
   suggestedAt?: number
-  /** Suggestions closed with "Not now" since the user last opened Togle Microphone's page. */
+  /** Suggestions closed with "Not now" since the user last opened Togle Studio's page. */
   dismissals?: number
 }
 
@@ -35,12 +35,12 @@ export function isMicrophoneOn(status: TogleMicrophoneStatus | undefined): boole
   return !!status?.running && (status.state?.phase === 'on' || status.state?.phase === 'starting')
 }
 
-/** Togle Microphone is used signed in to it: running, but signed out, it waits for that in its own window. */
+/** Togle Studio is used signed in to it: running, but signed out, it waits for that in its own window. */
 export function microphoneNeedsSignIn(status: TogleMicrophoneStatus | undefined): boolean {
   return !!status?.running && status.state?.account === 'signed-out'
 }
 
-export const MICROPHONE_SIGN_IN = 'Sign in to Togle Microphone to use it.'
+export const MICROPHONE_SIGN_IN = 'Sign in to Togle Studio to use it.'
 
 /** `unknown`: not enough of the call was measured to say. */
 export type NoiseVerdict = 'quiet' | 'some' | 'noisy' | 'unknown'
@@ -104,7 +104,7 @@ const SUGGEST_EVERY_MS = 3 * 24 * 60 * 60_000
 /** After this many "Not now", suggestions stay in Settings only. */
 const MAX_DISMISSALS = 3
 
-/** Whether to show the microphone suggestion after a call. Never during one, never once Togle Microphone is on. */
+/** Whether to show the microphone suggestion after a call. Never during one, never once Togle Studio is on. */
 export function shouldSuggest(settings: MicrophoneSettings, status: TogleMicrophoneStatus | undefined, report: NoiseReport, now = Date.now()): boolean {
   if (!settings.suggestions || report.verdict !== 'noisy' || isMicrophoneOn(status)) return false
   if ((settings.dismissals ?? 0) >= MAX_DISMISSALS) return false
@@ -119,6 +119,23 @@ const minutes = (ms: number): string => {
 }
 
 /** The measurement in words, for the suggestion and the microphone check. */
+/**
+ * What the measurement means, in one plain sentence for someone who doesn't think in decibels: how much of the time
+ * they weren't talking the call could hear their background, and the typing. The numbers stay in describeNoise.
+ */
+export function plainNoise(report: NoiseReport): string {
+  const share = report.quietMs > 0 ? report.noisyMs / report.quietMs : 0
+  const parts: string[] = []
+  if (report.noisyMs >= 1000 && share > 0) {
+    const howMuch = share >= 0.75 ? 'most of the time' : share >= 0.4 ? 'about half the time' : share >= 0.15 ? 'some of the time' : 'a little of the time'
+    parts.push(`People on your call could hear your background ${howMuch} you weren't talking (${minutes(report.noisyMs)} in all)`)
+  }
+  if (report.bursts >= 3) parts.push(parts.length ? `plus ${report.bursts} short sounds like typing or clicks` : `People on your call could hear ${report.bursts} short sounds like typing or clicks`)
+  if (!parts.length) return report.verdict === 'unknown' ? 'There was too little quiet time to tell.' : 'Your background was quiet.'
+  const sentence = `${parts.join(', ')}.`
+  return report.snrDb !== undefined && report.snrDb < 28 ? `${sentence} Your voice didn't stand out much from it.` : sentence
+}
+
 export function describeNoise(report: NoiseReport): string {
   const parts: string[] = []
   if (report.quietMs > 0 && report.noisyMs >= 1000) {

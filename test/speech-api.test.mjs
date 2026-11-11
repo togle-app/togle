@@ -205,10 +205,10 @@ test("the window is told what hears each side, and why the API picked for one ca
   // Nothing picked: this PC's state as it is.
   assert.deepEqual(hearingStatus(pc, { me: null, them: null }), pc)
   // Picked, but no key yet: this PC hears that side meanwhile, and its state counts.
-  assert.equal(hearingStatus(pc, { me: null, them: openai }).problem, 'Add an OpenAI API key in Settings: until then this PC hears other people.')
+  assert.equal(hearingStatus(pc, { me: null, them: openai }).problem, 'Add an OpenAI API key in Settings: until then this computer hears other people.')
   assert.equal(
     hearingStatus(pc, { me: openai, them: openai }).problem,
-    'Add an OpenAI API key in Settings: until then this PC hears your voice and other people.'
+    'Add an OpenAI API key in Settings: until then this computer hears your voice and other people.'
   )
   // Nor installed on this PC: nothing went wrong, and nothing hears it meanwhile; what it needs is for the window to ask.
   assert.deepEqual(hearingStatus({ state: 'missing', detail: 'Local Whisper is not installed.' }, { me: null, them: openai }), {
@@ -219,7 +219,7 @@ test("the window is told what hears each side, and why the API picked for one ca
   await openai.setKey('sk-test')
   assert.deepEqual(hearingStatus(pc, { me: null, them: openai }), {
     state: 'ready',
-    detail: 'Your voice: this PC (Parakeet, with Whisper for unclear speech). Other people: OpenAI gpt-transcribe'
+    detail: 'Your voice: this computer (Parakeet, with Whisper for unclear speech). Other people: OpenAI gpt-transcribe'
   })
   // Both sides heard by it: nothing waits on this PC's models, which only caption.
   assert.deepEqual(hearingStatus({ state: 'starting' }, { me: openai, them: openai }), {
@@ -233,7 +233,7 @@ test("the window is told what hears each side, and why the API picked for one ca
   await assert.rejects(openai.transcribe(second, { language: 'en', vocabulary: '' }))
   assert.equal(
     hearingStatus(pc, { me: null, them: openai }).problem,
-    "OpenAI didn't hear a line: it answered 500: The server had an error. This PC heard it instead."
+    "OpenAI didn't hear a line: it answered 500: The server had an error. This computer heard it instead."
   )
   assert.equal(hearingStatus({ state: 'missing' }, { me: null, them: openai }).problem, "OpenAI didn't hear a line: it answered 500: The server had an error.")
   // The key turned down: this PC hears that side until there's another.
@@ -241,8 +241,8 @@ test("the window is told what hears each side, and why the API picked for one ca
   await assert.rejects(openai.transcribe(second, { language: 'en', vocabulary: '' }))
   assert.deepEqual(hearingStatus(pc, { me: null, them: openai }), {
     state: 'ready',
-    detail: 'Your voice: this PC (Parakeet, with Whisper for unclear speech). Other people: this PC (Parakeet, with Whisper for unclear speech)',
-    problem: "OpenAI turned down the API key: until there's another in Settings, this PC hears other people."
+    detail: 'Your voice: this computer (Parakeet, with Whisper for unclear speech). Other people: this computer (Parakeet, with Whisper for unclear speech)',
+    problem: "OpenAI turned down the API key: until there's another in Settings, this computer hears other people."
   })
   assert.equal(
     hearingStatus({ state: 'missing' }, { me: openai, them: openai }).problem,
@@ -251,54 +251,10 @@ test("the window is told what hears each side, and why the API picked for one ca
   await assert.rejects(local.transcribe(second, { language: 'en', vocabulary: '' }))
   assert.equal(
     hearingStatus(pc, { me: local, them: null }).problem,
-    "The speech server needs an API key: until there's one in Settings, this PC hears your voice."
+    "The speech server needs an API key: until there's one in Settings, this computer hears your voice."
   )
   openai.reset()
   assert.equal(hearingStatus(pc, { me: null, them: openai }).problem, undefined)
-})
-
-test("the ChatGPT plan's dictation is sent the clip alone, as Codex sends it, with the sign-in", async () => {
-  const forms = []
-  let signedIn = false
-  const plan = new SpeechApi('chatgpt', '', () => ({ baseUrl: 'https://chatgpt.com/backend-api', model: '' }), {
-    signedIn: () => signedIn,
-    post: async (form) => {
-      forms.push(form)
-      return Response.json({ text: 'Can we try it before we buy?' })
-    }
-  })
-  assert.equal(plan.missing(), 'a ChatGPT sign-in')
-  signedIn = true
-  // Half a second, quiet: padded to a second, and raised to Codex's level.
-  const quiet = Float32Array.from({ length: 8000 }, (_, i) => 0.1 * Math.sin(i / 5))
-  assert.equal(await plan.transcribe(quiet, { language: 'en', vocabulary: 'Nordlink, SAP' }), 'Can we try it before we buy?')
-  const fields = [...forms[0].entries()]
-  assert.deepEqual(
-    fields.map(([name, value]) => [name, value.name, value.type, value.size]),
-    [['file', 'audio.wav', 'audio/wav', 44 + 16000 * 2]],
-    'no model, language or words to spell'
-  )
-  const wav = Buffer.from(await fields[0][1].arrayBuffer())
-  let peak = 0
-  for (let i = 44; i < wav.length; i += 2) peak = Math.max(peak, Math.abs(wav.readInt16LE(i)))
-  assert.ok(Math.abs(peak / 32767 - 0.9) < 0.01, `its peak is at 0.9 (${(peak / 32767).toFixed(3)})`)
-  assert.equal(plan.label(), "the ChatGPT plan's dictation")
-})
-
-test('turned down by ChatGPT (403), the plan gets no more lines until it is picked again', async () => {
-  const plan = new SpeechApi('chatgpt', '', () => ({ baseUrl: 'https://chatgpt.com/backend-api', model: '' }), {
-    signedIn: () => true,
-    post: async () => new Response('<html>Just a moment...</html>', { status: 403, headers: { 'Content-Type': 'text/html' } })
-  })
-  await assert.rejects(plan.transcribe(second, { language: 'en', vocabulary: '' }), /chatgpt\.com turned the request down/)
-  assert.equal(plan.canHear(), false)
-  const pc = { state: 'ready', detail: 'Parakeet' }
-  assert.equal(
-    hearingStatus(pc, { me: null, them: plan }).problem,
-    "ChatGPT's dictation turned Togle down (chatgpt.com turned the request down): until you sign in again or pick it again in Settings, this PC hears other people."
-  )
-  plan.reset()
-  assert.equal(plan.canHear(), true)
 })
 
 test('"too many requests" rests an API for as long as it says, and this PC hears that side meanwhile', async () => {
@@ -310,8 +266,8 @@ test('"too many requests" rests an API for as long as it says, and this PC hears
   assert.equal(api.canHear(), false)
   assert.ok(api.restingUntil() > Date.now())
   const status = hearingStatus({ state: 'ready', detail: 'Parakeet' }, { me: api, them: null })
-  assert.match(status.problem, /^The speech server is turning requests away for now: this PC hears your voice until \d/)
-  assert.equal(status.detail, 'Your voice: this PC (Parakeet). Other people: this PC (Parakeet)')
+  assert.match(status.problem, /^The speech server is turning requests away for now: this computer hears your voice until \d/)
+  assert.equal(status.detail, 'Your voice: this computer (Parakeet). Other people: this computer (Parakeet)')
   await wait(1200)
   assert.equal(api.canHear(), true, 'it is asked again once the wait is over')
   assert.equal(changes, 2, 'and the window hears when that is')

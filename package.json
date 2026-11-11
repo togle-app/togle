@@ -36,8 +36,6 @@
     "test:dictation:ui": "electron-vite build && rolldown -c eval/rolldown.config.mjs && node test/dictation-ui-launch.cjs",
     "test:dictation:hover": "electron-vite build && rolldown -c eval/rolldown.config.mjs && node test/dictation-hover-native-launch.cjs",
     "test:tray": "electron-vite build && node test/tray-launch.cjs",
-    "test:dictation:live": "electron-vite build && rolldown -c eval/rolldown.config.mjs && node test/dictation-live-launch.cjs",
-    "test:speech:live": "rolldown -c eval/rolldown.config.mjs && node test/shared-speech-live-launch.cjs",
     "test:presets:live": "rolldown -c eval/rolldown.config.mjs && node test/preset-live-launch.cjs",
     "test:work-updates:live": "rolldown -c eval/rolldown.config.mjs && node test/work-updates-live-launch.cjs",
     "test:dictation:latency": "electron-vite build && rolldown -c eval/rolldown.config.mjs && node test/dictation-latency-launch.cjs",

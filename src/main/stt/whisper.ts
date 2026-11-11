@@ -156,13 +156,13 @@ export class LocalWhisper extends EventEmitter {
     if (!local || !model) {
       this.set({
         state: 'missing',
-        detail: "Speech recognition isn't on this PC yet: install it in Settings, or pick OpenAI or a speech server there."
+        detail: "Speech recognition isn't set up on this computer yet: set it up in Settings → Speech."
       })
       return
     }
     const exe = local.server
     if (!existsSync(model) || !existsSync(exe ?? local.library)) {
-      this.set({ state: 'missing', detail: 'Some of speech recognition is missing from this PC: install it again in Settings.' })
+      this.set({ state: 'missing', detail: 'Part of speech recognition is missing from this computer: set it up again in Settings → Speech.' })
       return
     }
 

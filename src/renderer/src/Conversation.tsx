@@ -172,11 +172,13 @@ interface Props {
   onLearn: () => void
   /** After the call: what it covered, as a suggestion of its own. */
   onSummary: () => void
+  /** After a saved call: its meeting notes, in Call history (where they're written once it ends). */
+  onNotes?: () => void
   /** After the call: what was said and shown. */
   onTranscript: () => void
   /** Shown after an entry: the call's questions asked again, after its review. */
   after?: (entry: Entry) => ReactNode
-  /** Files or folders dropped into the conversation, by where they are on this PC. */
+  /** Files or folders dropped into the conversation, by where they are on this computer. */
   onDropFiles: (paths: string[]) => void
   /** A review that can show how it answers now (it learned something): its link. */
   canAskAgain: (review: ReviewEntry) => boolean
@@ -338,6 +340,7 @@ export function Conversation(props: Props) {
   const keepNotes = useStable((review: ReviewEntry) => void chats.keepNotes(agent.id, review))
   const learn = useStable(props.onLearn)
   const summary = useStable(props.onSummary)
+  const notes = useStable(() => props.onNotes?.())
   const transcript = useStable(props.onTranscript)
   const deeper = useStable(props.onDeeper)
   const againCard = useStable(props.onAgain)
@@ -417,7 +420,7 @@ export function Conversation(props: Props) {
             if (el.scrollTop < MORE_AT_PX) showEarlier()
           }}
         >
-          {!entries.length && !banner && !callWorkspace && <Welcome agent={agent} onPick={(example) => composer.current?.fill(example)} />}
+          {!entries.length && !banner && !callWorkspace && <Welcome agent={agent} canCall={!!props.callButton} onPick={(example) => composer.current?.fill(example)} />}
           {entries.slice(start).map((entry, j) => {
             const open = entry.role === 'call' && entry.call === call
             const latest = open && entry.id === latestStretch
@@ -446,6 +449,7 @@ export function Conversation(props: Props) {
                     autoReplies={props.autoReplies}
                     onLearn={learn}
                     onSummary={summary}
+                    onNotes={props.onNotes ? notes : undefined}
                     onTranscript={transcript}
                     onDeeper={deeper}
                     onAgain={againCard}
@@ -500,22 +504,35 @@ export function Conversation(props: Props) {
   )
 }
 
-/** First-use prompts complement the header and composer without repeating profile controls. */
-function Welcome({ agent, onPick }: { agent: Agent; onPick: (example: string) => void }) {
+/**
+ * First-use prompts complement the header and composer without repeating profile controls. What Start call (beside
+ * the box) does is said once here: it's what Togle is for, and nothing else in an empty chat says it.
+ */
+function Welcome({ agent, canCall, onPick }: { agent: Agent; canCall: boolean; onPick: (example: string) => void }) {
   // Started blank: nothing says yet what it's for, so that's what it asks first.
   const blank = !agent.description.trim() && !agent.instructions.trim() && !agent.skills.length
+  // The shortcuts that work from any app, where they're found first: nothing else in the window says voice typing exists.
+  const dictateKeys = useHotkey('dictate'), suggestKeys = useHotkey('suggest')
   return (
     <div className="welcome">
       <h3>{blank ? 'What should I help with?' : 'How can I help?'}</h3>
       <p className="hint">
         {blank
           ? 'Describe the kinds of calls you want help with.'
-          : 'Ask a question or prepare for your next call.'}
+          : canCall
+            ? 'When your meeting begins, press Start call: I’ll listen to both sides and suggest what to say when you’re asked something. Until then, ask me anything or prepare for it here.'
+            : 'Ask a question or prepare for your next call.'}
       </p>
       <div className="welcome-actions">
         <button className="quick" onClick={() => onPick(blank ? 'Help me set up an agent for ' : 'Help me prepare for a call about ')}><Icon name="phone" size={13} />{blank ? 'Set my role' : 'Prepare for a call'}</button>
         {!blank && <button className="quick" onClick={() => onPick('Review these talking points for my call: ')}><Icon name="check" size={13} />Review talking points</button>}
       </div>
+      {(dictateKeys || (canCall && suggestKeys)) && (
+        <ul className="welcome-keys" aria-label="Shortcuts that work in any app">
+          {dictateKeys && <li><kbd>{dictateKeys}</kbd> Voice typing in any app</li>}
+          {canCall && suggestKeys && <li><kbd>{suggestKeys}</kbd> A suggestion during a call</li>}
+        </ul>
+      )}
     </div>
   )
 }
@@ -856,6 +873,8 @@ interface StretchProps {
   autoReplies: boolean
   onLearn: () => void
   onSummary: () => void
+  /** Once it's over, a saved call's meeting notes (in Call history); none for a call that isn't saved. */
+  onNotes?: () => void
   onTranscript: () => void
   onDeeper: (item: AnswerItem) => void
   onAgain: (item: AnswerItem) => void
@@ -875,6 +894,7 @@ const CallStretch = memo(function CallStretch({
   autoReplies,
   onLearn,
   onSummary,
+  onNotes,
   onTranscript,
   onDeeper,
   onAgain,
@@ -930,19 +950,25 @@ const CallStretch = memo(function CallStretch({
         ))}
       {open && !block.endedAt && !cards.length && (
         <p className="call-hint">
-          <strong>Replies appear here</strong>
+          <strong>Suggestions appear here</strong>
           <span>
           {deaf
             ? 'Nothing is heard until speech recognition is set up.'
             : !autoReplies
-              ? 'Automatic replies are paused. Click Suggest reply whenever you need help.'
-              : `Suggestions show here when you're asked something.${suggestKeys ? ` ${suggestKeys} asks for one, from any app.` : ''}`}
+              ? 'Automatic suggestions are off. Click Suggest reply whenever you need help.'
+              : `When someone asks you something, what to say shows here.${suggestKeys ? ` ${suggestKeys} asks for one, from any app.` : ''}`}
           </span>
         </p>
       )}
       {over && (
         <div className="call-links">
-          {heard && (
+          {/* A saved call has its meeting notes (written by themselves once it ends); a private one, a summary asked for. */}
+          {heard && onNotes && (
+            <button className="link" title="This call's meeting notes, transcript and lessons, in Call history" onClick={onNotes}>
+              Meeting notes
+            </button>
+          )}
+          {heard && !onNotes && (
             <button className="link" title="What the call covered, and what was agreed" onClick={onSummary}>
               Summary
             </button>
@@ -1069,6 +1095,8 @@ const ReviewMessage = memo(function ReviewMessage({
     <div className="msg agent review">
       <Avatar agent={agent} size={20} />
       <div className="bubble">
+        {/* The chat doesn't show the call itself: which call this is about, by when it looked back at it. */}
+        <p className="review-head"><Icon name="phone" size={11} />After your call · {clock(entry.at)}</p>
         {review.state === 'loading' && <p className="thinking">Looking back at the call…</p>}
         {review.state === 'error' && (
           <>

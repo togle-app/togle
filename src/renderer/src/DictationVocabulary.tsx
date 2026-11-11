@@ -7,7 +7,7 @@ type Draft = { kind: 'word' | 'snippet'; id?: string; phrase: string; value: str
 export function DictationVocabulary({ accountId, accountName }: { accountId: string; accountName: string }) {
   const [expanded, setExpanded] = useState(false)
   return <details className="dictation-vocabulary" onToggle={event => setExpanded(event.currentTarget.open)}>
-    <summary>Words &amp; shortcuts</summary>
+    <summary>Words &amp; snippets</summary>
     {expanded && <VocabularyEditor key={accountId} accountId={accountId} accountName={accountName} />}
   </details>
 }
@@ -38,7 +38,7 @@ function VocabularyEditor({ accountId, accountName }: { accountId: string; accou
   }
   const edit = (value: Draft): void => { setDraft(value); setError(''); setStatus('') }
   return <div className="vocabulary-editor">
-    <p className="hint">For {accountName} only. Saved on this device. Other accounts keep their own words and shortcuts.</p>
+    <p className="hint">Kept with {accountName}, on this computer. Another account has its own words and snippets.</p>
     {!vocabulary && !error && <p className="hint" role="status">Loading words…</p>}
     {vocabulary && <>
       <div className="vocabulary-heading"><h4>Words</h4><button className="ghost" disabled={busy || !!draft} onClick={() => edit({ kind: 'word', phrase: '', value: '' })}>Add word</button></div>
@@ -48,13 +48,13 @@ function VocabularyEditor({ accountId, accountName }: { accountId: string; accou
         <button className="ghost" disabled={busy || !!draft} aria-label={`Edit word ${word.word}`} onClick={() => edit({ kind: 'word', id: word.id, phrase: word.word, value: word.heardAs })}>Edit</button>
         <button className="ghost" disabled={busy || !!draft} aria-label={`Remove word ${word.word}`} onClick={() => void save({ kind: 'remove', id: word.id })}>Remove</button>
       </li>)}</ul> : <p className="hint">No words saved yet.</p>}
-      <div className="vocabulary-heading"><h4>Spoken shortcuts</h4><button className="ghost" disabled={busy || !!draft} onClick={() => edit({ kind: 'snippet', phrase: '', value: '' })}>Add shortcut</button></div>
+      <div className="vocabulary-heading"><h4>Snippets</h4><button className="ghost" disabled={busy || !!draft} onClick={() => edit({ kind: 'snippet', phrase: '', value: '' })}>Add snippet</button></div>
       <p className="hint">Say a distinctive phrase, such as “my work email”, to insert your saved text exactly.</p>
       {vocabulary.snippets.length ? <ul className="vocabulary-list">{vocabulary.snippets.map(snippet => <li key={snippet.id}>
         <span><strong>{snippet.phrase}</strong><small className="snippet-preview">{snippet.text}</small></span>
-        <button className="ghost" disabled={busy || !!draft} aria-label={`Edit shortcut ${snippet.phrase}`} onClick={() => edit({ kind: 'snippet', id: snippet.id, phrase: snippet.phrase, value: snippet.text })}>Edit</button>
-        <button className="ghost" disabled={busy || !!draft} aria-label={`Remove shortcut ${snippet.phrase}`} onClick={() => void save({ kind: 'remove', id: snippet.id })}>Remove</button>
-      </li>)}</ul> : <p className="hint">No shortcuts saved yet.</p>}
+        <button className="ghost" disabled={busy || !!draft} aria-label={`Edit snippet ${snippet.phrase}`} onClick={() => edit({ kind: 'snippet', id: snippet.id, phrase: snippet.phrase, value: snippet.text })}>Edit</button>
+        <button className="ghost" disabled={busy || !!draft} aria-label={`Remove snippet ${snippet.phrase}`} onClick={() => void save({ kind: 'remove', id: snippet.id })}>Remove</button>
+      </li>)}</ul> : <p className="hint">No snippets yet: say a short phrase, and Togle types the text you saved for it.</p>}
     </>}
     {draft && <form className="vocabulary-form" onSubmit={event => {
       event.preventDefault()

@@ -21,7 +21,7 @@ export function AgentPreferences({ agent, onAgent }: { agent: Agent; onAgent: (a
     refresh(); const off = api.onSttStatus(refresh)
     return () => { active = false; off() }
   }, [agent.id, agent.preferences?.transcription, general?.transcription])
-  if (!general) return <p className="hint">Loading general settings…</p>
+  if (!general) return <p className="hint">Loading settings…</p>
   const settings = effectiveSettings(general, agent)
   const preferences = agent.preferences || {}
   const hasAI = !!preferences.ai || !!agent.subscriptionAccountId || !!agent.model
@@ -46,12 +46,12 @@ export function AgentPreferences({ agent, onAgent }: { agent: Agent; onAgent: (a
   }
   const saveVoice = async (patch: SettingsPatch): Promise<void> => { if (patch.dictation) await change({ ...preferences, dictation: { ...settings.dictation, ...patch.dictation } }).catch(error => setError(message(error))) }
   return <div className="settings settings-embedded agent-preferences" aria-label="Agent preferences">
-    <div className="preference-scope"><Toggle name="Use general AI settings" checked={!hasAI} disabled={busy} onChange={inherit => setSection('ai', !inherit)} /></div>
-    {hasAI ? <ModelSettings settings={{ ...settings, ai: profile } as Settings} save={saveAI} agent /> : <p className="inherit-note">Models and accounts follow General settings.</p>}
-    <div className="preference-scope"><Toggle name="Use general speech settings" checked={!preferences.transcription} disabled={busy} onChange={inherit => setSection('transcription', !inherit)} /></div>
-    {preferences.transcription ? <SpeechSettings settings={settings} save={saveSpeech} stt={stt} agent /> : <p className="inherit-note">Speech account and language follow General settings.</p>}
-    <div className="preference-scope"><Toggle name="Use general voice typing settings" checked={!preferences.dictation} disabled={busy} onChange={inherit => setSection('dictation', !inherit)} /></div>
-    {preferences.dictation ? <DictationSettings settings={settings} save={saveVoice} agent /> : <p className="inherit-note">F9 uses General preferences for this agent.</p>}
+    <div className="preference-scope"><Toggle name="Use App settings for AI" checked={!hasAI} disabled={busy} onChange={inherit => setSection('ai', !inherit)} /></div>
+    {hasAI ? <ModelSettings settings={{ ...settings, ai: profile } as Settings} save={saveAI} agent /> : <p className="inherit-note">Models and accounts follow App settings.</p>}
+    <div className="preference-scope"><Toggle name="Use App settings for speech" checked={!preferences.transcription} disabled={busy} onChange={inherit => setSection('transcription', !inherit)} /></div>
+    {preferences.transcription ? <SpeechSettings settings={settings} save={saveSpeech} stt={stt} agent /> : <p className="inherit-note">Speech language and call transcription follow App settings.</p>}
+    <div className="preference-scope"><Toggle name="Use App settings for voice typing" checked={!preferences.dictation} disabled={busy} onChange={inherit => setSection('dictation', !inherit)} /></div>
+    {preferences.dictation ? <DictationSettings settings={settings} save={saveVoice} agent /> : <p className="inherit-note">Voice typing follows App settings.</p>}
     <CalendarSettings agent={agent} onAgent={onAgent} />
     {error && <p className="error" role="alert">{error}</p>}
   </div>

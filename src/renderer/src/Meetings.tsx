@@ -27,7 +27,7 @@ export function MeetingNotice({ listening, onStart }: { listening: boolean; onSt
   if (listening || !event || status.state === 'off' || status.state === 'needs-connection') return null
   return <div className="meeting-notice" role="status">
     <span><strong>{event.title}</strong><span className="hint">{event.agentName && `${event.agentName} · `}{event.start > now ? `Starts in ${Math.max(1, Math.ceil((event.start - now) / 60_000))} min` : 'Scheduled now'}</span></span>
-    <button className="primary small" onClick={() => onStart(event)}>Start assistance</button>
+    <button className="primary small" onClick={() => onStart(event)}>Start call</button>
     <button className="link" onClick={() => { setDismissed(previous => new Set([...previous, event.id])); void api.dismissMeeting(event.id) }}>Dismiss</button>
   </div>
 }
@@ -55,8 +55,8 @@ export function CalendarSettings({ agent, onAgent }: { agent: Agent; onAgent: (a
     catch { setError('Could not refresh the calendar. Try again.') }
     finally { setRefreshing(false) }
   }
-  return <Section id="agent-calendar" title="Meeting reminders">
-    <Toggle name="Remind me before meetings" note={`Offer ${agent.name} five minutes before a meeting. You choose when assistance starts.`} checked={enabled} disabled={saving} onChange={value => { if (!value) setSettingUp(false); void save(value) }} />
+  return <Section id="agent-calendar" title="Meeting reminders" state={<span className="provider-tag">Needs Claude</span>}>
+    <Toggle name="Remind me before meetings" note={`Five minutes before a meeting, Togle offers to start a call with ${agent.name}. Reads your calendar through a Claude account.`} checked={enabled} disabled={saving} onChange={value => { if (!value) setSettingUp(false); void save(value) }} />
     {(enabled || settingUp) && <>
       <Row stacked name="Calendar account" note="This agent reads the calendar connected to this Claude account."><select aria-label="Agent calendar account" value={accountId} disabled={saving} onChange={event => void save(true, event.target.value)}>
         <option value="" disabled>Choose a Claude account to enable reminders</option>

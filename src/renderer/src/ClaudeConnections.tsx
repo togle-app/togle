@@ -35,7 +35,7 @@ export function ClaudeConnections({ agent, onAgent }: { agent: Agent; onAgent: (
   const apps = [...(catalog?.apps ?? []), ...chosen.filter(name => !catalog?.apps.some(app => app.name === name)).map(name => ({ name, label: name.replace(/^claude\.ai\s+/, ''), status: 'failed' as const, readTools: 0 }))]
     .filter(app => (app.status === 'connected' && app.readTools > 0) || chosen.includes(app.name))
   return <section className="connected-apps" aria-label="Connected apps">
-    <div className="inspector-section-head"><h3>Connected apps</h3>{!editing && <button className="ghost small" onClick={() => setEditing(true)}>{selection?.servers.length ? 'Manage apps' : 'Choose apps'}</button>}</div>
+    <div className="inspector-section-head"><h3>Connected apps <span className="provider-tag">Needs Claude</span></h3>{!editing && <button className="ghost small" onClick={() => setEditing(true)}>{selection?.servers.length ? 'Manage apps' : 'Choose apps'}</button>}</div>
     <p className="hint">{selection?.servers.length ? `${selection.servers.map(name => name.replace(/^claude\.ai\s+/, '')).join(', ')} · ${selection.account}` : 'Let this agent search your Claude apps in chat and during calls.'}</p>
     {editing && <>
       <p className="hint">Works when this agent uses a Claude subscription. Selected apps can be searched and read; messages and tickets are not changed.</p>

@@ -183,7 +183,7 @@ while ($null -ne ($line = [Console]::ReadLine())) {
       if ([TogleTextInput]::ModifiersDown()) { throw 'Release the shortcut keys. Your text is ready to copy.' }
       $current = Read-FocusedText
       if (!(Test-SameTarget $target $current)) {
-        $result = @{ inserted=$false; message='The text box or cursor changed. Copy your text where you need it.' }
+        $result = @{ inserted=$false; message='Togle couldn''t type it because the cursor moved. Copy it, then paste with Ctrl+V.' }
       } elseif ($target.terminal) {
         if ([TogleTextInput]::GetForegroundWindow().ToInt64().ToString() -ne $target.front) { throw 'The focused app changed. Your text is ready to copy.' }
         $count = [TogleTextInput]::Write($text)
@@ -203,7 +203,7 @@ while ($null -ne ($line = [Console]::ReadLine())) {
           if ($null -ne $clipboard) { $clipboard.Publish($text) }
           # Clipboard ownership/setup must not permit a late focus or cursor change.
           $beforePaste = Read-FocusedText
-          if (!(Test-SameTarget $target $beforePaste)) { throw 'The text box or cursor changed.' }
+          if (!(Test-SameTarget $target $beforePaste)) { throw 'Togle couldn''t type it because the cursor moved. Copy it, then paste with Ctrl+V.' }
           if ([TogleTextInput]::ModifiersDown()) { throw 'Release the shortcut keys.' }
           $delivered = if ($null -ne $clipboard) { [TogleTextInput]::Paste() -eq 4 } else { [TogleTextInput]::Write($text) -eq $text.Length*2 }
           $inserted = $false

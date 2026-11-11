@@ -7,7 +7,13 @@ export function microphoneProblem(error: unknown): string {
   const name = (error as Error)?.name
   if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'That microphone is disconnected or unavailable. Choose another microphone in Dictation settings.'
   if (name === 'NotReadableError') return 'The microphone is busy or unavailable. Check the device, then try again.'
-  if (name === 'NotAllowedError' || name === 'SecurityError') return 'Microphone access is blocked. Allow Togle to use the microphone in your system settings.'
+  // Outside the window (a test), no platform to name.
+  const platform = typeof window === 'undefined' ? undefined : window.togle?.platform
+  if (name === 'NotAllowedError' || name === 'SecurityError') return platform === 'win32'
+    ? 'Windows is blocking the microphone: turn on Settings → Privacy & security → Microphone → “Let desktop apps access your microphone”.'
+    : platform === 'darwin'
+      ? "Microphone access is blocked: allow Togle in System Settings → Privacy & Security → Microphone, then quit and reopen Togle."
+      : 'Microphone access is blocked. Allow Togle to use the microphone in your system settings.'
   return 'Could not open your microphone. Check the device and microphone access, then try again.'
 }
 

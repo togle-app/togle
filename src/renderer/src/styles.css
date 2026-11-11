@@ -105,7 +105,8 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.45 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  /* Korean, Japanese and Chinese have their system fonts after Segoe UI, which lacks them (Korean showed as boxes). */
+  font: 13px/1.45 'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Malgun Gothic', 'Yu Gothic UI', 'Microsoft YaHei UI', 'Apple SD Gothic Neo', 'Hiragino Sans', 'PingFang SC', 'Noto Sans CJK KR', 'Noto Sans KR', sans-serif;
   overflow: hidden;
 }
 
@@ -1797,6 +1798,9 @@ button.jump.fresh {
 .welcome .hint {
   max-width: 340px;
 }
+/* The shortcuts that work from any app, under the first prompts: quiet, one line each. */
+.welcome-keys { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; margin: 6px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 12px; }
+.welcome-keys li { display: inline-flex; align-items: center; gap: 6px; }
 .welcome-actions {
   display: flex;
   flex-direction: row;
@@ -2447,6 +2451,13 @@ sup.cite {
   margin: 0;
   padding: 8px 12px;
 }
+/* A line of explanation inside a card lines up with the rows' text, instead of touching the card's edge. */
+.settings .card > .hint {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
 /* A setting: what it is (and a line on it) on the left, its control on the right; stacked, its field under its name. */
 .settings .setting {
   display: grid;
@@ -2814,7 +2825,7 @@ details.more > summary:hover {
 .replace-notes, .history-clear-confirm { padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
 .personal-call-notes { margin: 14px 0; padding-top: 12px; border-top: 1px solid var(--border); }
 
-/* After a noisy call: what the microphone picked up, and Togle Microphone. Calm, not an error. */
+/* After a noisy call: what the microphone picked up, and Togle Studio. Calm, not an error. */
 .notice.microphone-suggestion {
   background: var(--panel);
   border-color: #2f3a55;
@@ -2845,6 +2856,37 @@ details.more > summary:hover {
 .microphone-suggestion-body p.hint {
   color: var(--faint);
 }
+/* The verdict and what Togle Studio does are what the card is for: normal text, not the dim grey. */
+.microphone-suggestion-body p.microphone-suggestion-verdict,
+.microphone-suggestion-body p.microphone-suggestion-pitch {
+  color: var(--text);
+}
+.microphone-suggestion-details > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.microphone-suggestion-details > p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+/* Settings → Togle Studio: the status and its buttons wrap under the name instead of squeezing word by word. */
+.settings .setting.microphone-row > .control {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+@media (max-width: 640px) {
+  .settings .setting.microphone-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 6px;
+  }
+  .settings .setting.microphone-row > .control {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+  }
+}
 .microphone-suggestion-body .row,
 .microphone-check .row {
   display: flex;
@@ -2863,7 +2905,7 @@ details.more > summary:hover {
   gap: 6px;
 }
 
-/* Settings → Togle Microphone. */
+/* Settings → Togle Studio. */
 .microphone-status {
   font-size: 12px;
   color: var(--muted);
@@ -2884,7 +2926,7 @@ details.more > summary:hover {
   color: var(--text);
 }
 
-/* The call strip: Togle Microphone, when it's installed. */
+/* The call strip: Togle Studio, when it's installed. */
 .clean-mic-chip {
   flex: none;
   display: inline-flex;
@@ -2927,3 +2969,91 @@ details.more > summary:hover {
 .plan-label .link {
   font-size: 11px;
 }
+
+/* The live call in a small window: the suggestion keeps at least two fifths of it, the call's controls go on as few
+   lines as fit, and in a short window the agent's name and the tabs step aside (the sidebar and title bar say them). */
+.app.in-call .call-workspace .stream-wrap { min-height: clamp(120px, 40vh, 420px); }
+.call-workspace .call-block.live .assist:not(.older) .md { font-size: 15px; line-height: 1.5; }
+.strip-row.audio-row { flex-wrap: wrap; row-gap: 4px; }
+.strip-row.audio-row .screen-context-status { padding: 0; flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; }
+.strip-row.audio-row .screen-context-status .screen-context-label { max-width: 190px; }
+.strip-row.audio-row .screen-context-detail { white-space: normal; }
+.strip-row.tools button.call-tools.icon { padding: 3px 8px; }
+.suggest-reply kbd { margin-left: 7px; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px; font: 10px var(--mono, monospace); color: var(--muted); }
+.auto-replies .toggle-short { display: none; }
+.timeline-panel > .screen-timing { padding: 8px 10px 0; }
+@media (max-width: 560px) {
+  .suggest-reply kbd.wide-only { display: none; }
+  .auto-replies .toggle-long { display: none; }
+  .auto-replies .toggle-short { display: inline; }
+}
+@media (max-height: 640px) {
+  .app.in-call .main:has(.call-workspace) .workspace-head { display: none; }
+  .app.in-call .main:has(.call-workspace) .agent-detail-tabs button { padding-block: 4px; }
+  .app.in-call .main:has(.call-workspace) .call-strip { gap: 4px; padding-top: 4px; }
+}
+
+/* The start-call picker: Group call in sight, and the last choice marked (its words aren't part of the button's name). */
+.call-group-start { margin: 10px 0 0; flex-wrap: wrap; }
+.call-group-start .hint { flex-basis: 100%; margin: 0 0 0 22px; font-size: 11px; white-space: normal; }
+.monitor-source.last, .monitor-audio-only.last { border-color: var(--accent); }
+.monitor-source.last strong::after, .monitor-audio-only.last::after { content: ' · Last used'; color: var(--accent); font-weight: 400; font-size: 11px; }
+
+/* Noise is coming through: said in amber on the status line. */
+.clean-mic-chip.off { color: var(--them); }
+
+/* Settings: one line per speech job, the provider beside an account's name, Claude marked experimental. */
+.speech-summary { list-style: none; margin: 0; padding: 8px 12px; display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.speech-summary strong { display: inline-block; min-width: 96px; color: var(--text); font-weight: 600; }
+.provider-tag { margin-left: 6px; padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 10px; font-weight: 500; color: var(--muted); vertical-align: 1px; }
+.provider-tag.experimental { border-color: color-mix(in srgb, var(--them) 50%, transparent); color: var(--them); }
+.model-options .task-models { display: grid; gap: 8px; margin-top: 10px; }
+
+/* Lessons waiting for an OK: each with its own Keep and Don't keep. */
+ul.pending-lessons { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+ul.pending-lessons > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+ul.pending-lessons > li > span:first-child { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.history-suggestion .copy-suggestion { margin-top: 4px; font-size: 12px; }
+
+/* Creating an agent: what one is, the chosen template unmistakable, and Create in reach at 400px. */
+.agent-definition { margin: 0 0 8px; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--panel); border-radius: 6px; color: var(--text); font-size: 13px; line-height: 1.5; }
+.template-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); box-shadow: 0 0 0 1px var(--accent) inset; }
+.template-card.selected strong::after { content: ' ✓'; color: var(--accent); }
+.new-agent > button.primary { position: sticky; bottom: 0; z-index: 2; box-shadow: 0 -8px 16px var(--bg, #0f1115); }
+
+/* The workspace keeps room for its box to write in and its call button: a tall notice above it (after a noisy call, in
+   a small window) scrolls instead of pushing them out of the window. */
+.main > .workspace-body { min-height: 150px; }
+.main > .notice.microphone-suggestion { min-height: 72px; overflow-y: auto; }
+
+/* The transcript open during a call in a small window gives up its height: Suggest reply, Hide transcript and the
+   levels stay in sight instead of scrolling away under it. */
+.call-strip > .timeline-panel { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 72px; overflow-y: auto; }
+.call-strip > .timeline-panel .lines { min-height: 0; }
+.call-strip > :not(.timeline-panel) { flex-shrink: 0; }
+/* Reading the transcript, the suggestion keeps a little less of the window (over a quarter), so both fit. */
+.app.in-call .call-workspace:has(.call-strip > .timeline-panel) .stream-wrap { min-height: clamp(96px, 28vh, 320px); }
+@media (max-height: 640px) { .call-strip > .timeline-panel { min-height: 56px; } }
+
+/* After a call: New call, and beside it the call that ended going on. */
+.composer button.resume-call { flex-shrink: 0; height: 30px; padding: 0 11px; border-radius: 7px; white-space: nowrap; }
+.live-call-empty button.listen { display: inline-flex; align-items: center; gap: 6px; }
+.titlebar .hidden-mark { display: inline-flex; }
+
+/* A preset that can't be used says why on it, readable: its name dimmed, the reason in the warning colour. */
+.preset-choices .preset-choice:disabled { opacity: 1; color: var(--faint); }
+.model-presets button span.preset-problem { color: var(--them); }
+
+/* A review in the chat, which doesn't show the call: which call it's about. */
+.review-head { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: 11px; color: var(--faint); }
+.review-head svg { flex-shrink: 0; }
+
+/* A speech job's line that wraps keeps to the right of its name. */
+.speech-summary li { display: grid; grid-template-columns: 96px minmax(0, 1fr); column-gap: 8px; }
+
+/* Settings' parts, a click away from the top of a long page. */
+.settings-jump { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: -8px 0 14px; font-size: 12px; }
+.settings-jump button.link { font-size: 12px; }
+
+/* Voice typing's account isn't signed in: said beside the account, with a way to sign in, before F9 fails. */
+.settings .setting.voice-account-signin > .note { color: var(--them); }

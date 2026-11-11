@@ -1,8 +1,9 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Frame, PartialTranscript, TranscriptEntry } from '@shared/types'
 import { sameSpeechTurn } from '@shared/speakers'
+import { inTimeOrder } from '@shared/timeline'
 
-const LABEL = { me: 'Me', them: 'Them' } as const
+const LABEL = { me: 'You', them: 'Them' } as const
 
 function clock(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -89,10 +90,7 @@ export const Timeline = memo(function Timeline({ transcript, partials, frames, e
   const restoredTop = useRef<number | null>(null)
   // Captions change several times per utterance. Only merge and sort the visible tail;
   // reading older speech is explicit and never removes it from the call or its export.
-  const settled = useMemo(() => [
-    ...transcript.map(line => ({ at: line.at, line })),
-    ...frames.map(frame => ({ at: frame.at, frame }))
-  ].sort((a, b) => a.at - b.at), [transcript, frames])
+  const settled = useMemo(() => inTimeOrder(transcript, frames), [transcript, frames])
   const keyOf = (item: typeof settled[number]): string => 'line' in item ? item.line.id : item.frame.id
   const pinnedIndex = useMemo(() => pinned === null ? -1 : settled.findIndex(item => keyOf(item) === pinned), [settled, pinned])
   const start = pinnedIndex >= 0 ? pinnedIndex : Math.max(0, settled.length - visible)

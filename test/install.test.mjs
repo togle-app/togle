@@ -109,9 +109,10 @@ function engineArchive() {
 test('installing sets up the engine and the models, says how far it got, and is found again until removed', async () => {
   const archive = engineArchive()
   const base = randomBytes(3000)
+  const small = randomBytes(4000)
   const parakeet = randomBytes(5000)
   const turbo = randomBytes(7000)
-  host({ 'engine.tar.gz': archive, 'base.bin': base, 'parakeet.bin': parakeet, 'turbo.bin': turbo })
+  host({ 'engine.tar.gz': archive, 'base.bin': base, 'small.bin': small, 'parakeet.bin': parakeet, 'turbo.bin': turbo })
   const engine = {
     id: 'test',
     ...item('engine.tar.gz', archive),
@@ -124,6 +125,7 @@ test('installing sets up the engine and the models, says how far it got, and is 
   const models = {
     parakeet: { file: 'parakeet.bin', ...item('parakeet.bin', parakeet) },
     'whisper-turbo': { file: 'turbo.bin', ...item('turbo.bin', turbo) },
+    'whisper-small': { file: 'small.bin', ...item('small.bin', small) },
     'whisper-base': { file: 'base.bin', ...item('base.bin', base) }
   }
   const home = path.join(work, 'speech')
@@ -133,8 +135,8 @@ test('installing sets up the engine and the models, says how far it got, and is 
   assert.equal(before.offer.engine, archive.length, 'the engine is to download')
   assert.deepEqual(
     before.offer.models.filter((m) => m.recommended).map((m) => m.id),
-    ['parakeet', 'whisper-base'],
-    'on a CPU: Parakeet and Whisper base'
+    ['parakeet', 'whisper-small'],
+    "on a CPU: Parakeet, and Whisper small (for the languages Parakeet doesn't hear)"
   )
   assert.equal(installer.local(), null)
   const seen = []
@@ -156,12 +158,14 @@ test('installing sets up the engine and the models, says how far it got, and is 
   const after = await installer.state()
   assert.deepEqual(after.installed, ['whisper-base', 'parakeet'])
   assert.equal(after.offer.engine, 0, 'nothing more to download for the engine')
-  // Another model later: added beside the others, and the bigger Whisper is the one run.
-  const asked = host({ 'turbo.bin': turbo })
+  // Another model later: added beside the others, and the more accurate Whisper is the one run.
+  const asked = host({ 'small.bin': small, 'turbo.bin': turbo })
+  await installer.install(['whisper-small'])
+  assert.equal(installer.local().whisperModel, path.join(home, 'models', 'small.bin'), 'Whisper small over base')
   await installer.install(['whisper-turbo'])
-  assert.deepEqual(asked.map((a) => a.split(' ')[0]), ['turbo.bin'], 'only the new model is fetched')
+  assert.deepEqual(asked.map((a) => a.split(' ')[0]), ['small.bin', 'turbo.bin'], 'only the new models are fetched')
   assert.equal(installer.local().whisperModel, path.join(home, 'models', 'turbo.bin'))
-  assert.deepEqual((await installer.state()).installed, ['whisper-base', 'parakeet', 'whisper-turbo'])
+  assert.deepEqual((await installer.state()).installed, ['whisper-base', 'parakeet', 'whisper-small', 'whisper-turbo'])
   // A model gone from disk isn't counted installed.
   await installer.remove()
   assert.equal(installer.local(), null)
@@ -192,32 +196,32 @@ test('a development copy (npm run setup:whisper) is run while nothing is install
 test('what this PC has already is taken from there, checked, not downloaded; at start, all of it is taken by itself', async () => {
   const archive = engineArchive()
   const parakeet = randomBytes(5000)
-  const base = randomBytes(3000)
+  const small = randomBytes(4000)
   const turbo = randomBytes(7000)
   const engine = { id: 'test', ...item('engine.tar.gz', archive), dir: 'Release', server: 'whisper-server.exe', library: 'parakeet.dll', ggml: 'ggml.dll', gpu: false }
   const models = {
     parakeet: { file: 'parakeet.bin', ...item('parakeet.bin', parakeet) },
     'whisper-turbo': { file: 'turbo.bin', ...item('turbo.bin', turbo) },
-    'whisper-base': { file: 'base.bin', ...item('base.bin', base) }
+    'whisper-small': { file: 'small.bin', ...item('small.bin', small) }
   }
   // A development copy with the same files, under other names, a level down; and a file the size of turbo that isn't it.
   const seed = path.join(work, 'seed')
   mkdirSync(path.join(seed, 'models'), { recursive: true })
   writeFileSync(path.join(seed, 'whisper-bin-test.tar.gz'), archive)
   writeFileSync(path.join(seed, 'models', 'ggml-parakeet.bin'), parakeet)
-  writeFileSync(path.join(seed, 'models', 'ggml-base.bin'), base)
+  writeFileSync(path.join(seed, 'models', 'ggml-small-q5_1.bin'), small)
   writeFileSync(path.join(seed, 'models', 'turbo-look-alike.bin'), randomBytes(7000))
   const asked = host({ 'turbo.bin': turbo })
   const home = path.join(work, 'speech-seeded')
   const installer = new SpeechInstaller(home, null, { engine, models }, [seed])
   const offer = (await installer.state()).offer
   assert.equal(offer.engine, 0, 'the engine is here: nothing to download')
-  assert.deepEqual(offer.models.filter((m) => m.here).map((m) => m.id).sort(), ['parakeet', 'whisper-base', 'whisper-turbo'], 'by size, before the check')
-  // At start: what suits this PC (on a CPU, Parakeet and Whisper base) is all here, so it's taken.
+  assert.deepEqual(offer.models.filter((m) => m.here).map((m) => m.id).sort(), ['parakeet', 'whisper-small', 'whisper-turbo'], 'by size, before the check')
+  // At start: what suits this PC (on a CPU, Parakeet and Whisper small) is all here, so it's taken.
   assert.equal(await installer.adopt(), true)
   assert.deepEqual(asked, [], 'nothing was downloaded')
-  assert.deepEqual((await installer.state()).installed.sort(), ['parakeet', 'whisper-base'])
-  assert.ok(readFileSync(installer.local().whisperModel).equals(base))
+  assert.deepEqual((await installer.state()).installed.sort(), ['parakeet', 'whisper-small'])
+  assert.ok(readFileSync(installer.local().whisperModel).equals(small))
   assert.ok(existsSync(path.join(seed, 'whisper-bin-test.tar.gz')), 'what it was taken from stays')
   assert.equal(await installer.adopt(), false, 'installed: nothing more to take')
   // The look-alike fails the check: turbo is downloaded, as any other file.

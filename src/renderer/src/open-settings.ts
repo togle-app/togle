@@ -1,7 +1,8 @@
 // Settings opened from anywhere in the window (a card's error, the call strip, the setup card), at the part that fixes
 // what's wrong: App listens for it and opens Settings scrolled there.
 
-export type SettingsPart = 'ai' | 'speech' | 'dictation'
+/** A part of Settings; `name` is the field for your name, in During calls (a group call's note asks for it). */
+export type SettingsPart = 'ai' | 'speech' | 'dictation' | 'name'
 
 const EVENT = 'togle:open-settings'
 

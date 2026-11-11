@@ -1,7 +1,7 @@
 /**
- * How Togle and Togle Microphone find and talk to each other on one computer. This file is the same in both apps.
+ * How Togle and Togle Studio find and talk to each other on one computer. This file is the same in both apps.
  *
- * Togle Microphone writes `link.json` into its own user-data folder each time it starts: where its local socket is
+ * Togle Studio writes `link.json` into its own user-data folder each time it starts: where its local socket is
  * (a named pipe on Windows, a Unix socket elsewhere), a token that changes on every start, and how to start the app
  * again. Togle reads the file, connects, sends the token in `hello`, and can then read the microphone's state, watch
  * it change, or ask the microphone to start, stop or show its window. Only the state travels over the link, never
@@ -12,12 +12,12 @@
 
 export const MICROPHONE_LINK_API = 1
 /** The app's product name. Electron names its user-data folder after it. */
-export const MICROPHONE_PRODUCT = 'Togle Microphone'
-/** The input that call apps list once Togle Microphone is installed. */
+export const MICROPHONE_PRODUCT = 'Togle Studio'
+/** The input that call apps list once Togle Studio is installed. */
 export const MICROPHONE_DEVICE = 'Togle Microphone'
 export const MICROPHONE_LINK_FILE = 'link.json'
-/** `togle-microphone://open`, `togle-microphone://start`, `togle-microphone://stop`. */
-export const MICROPHONE_PROTOCOL = 'togle-microphone'
+/** `togle-studio://open`, `togle-studio://start`, `togle-studio://stop`. */
+export const MICROPHONE_PROTOCOL = 'togle-studio'
 export const MICROPHONE_LINK_MAX_LINE = 64 * 1024
 
 /** Labels of the Togle Microphone input as Chromium lists them on Windows, macOS and Linux. */
@@ -40,7 +40,7 @@ export interface MicrophoneLinkFile {
   socket: string
   /** 64 hex characters, new on every start. */
   token: string
-  /** Starts Togle Microphone when it isn't running. */
+  /** Starts Togle Studio when it isn't running. */
   launch?: MicrophoneLaunch
   startedAt: number
 }
@@ -65,7 +65,7 @@ export interface MicrophoneLinkState {
   bufferMs?: number
   /** Whether the audio driver is installed: `restart` means the computer must restart first. */
   setup?: 'ready' | 'missing' | 'restart'
-  /** Togle Microphone runs only for someone signed in to it: `signed-out` means it waits for that, in its own window. */
+  /** Togle Studio runs only for someone signed in to it: `signed-out` means it waits for that, in its own window. */
   account?: 'signed-in' | 'signed-out'
   version: string
 }
@@ -152,14 +152,15 @@ export function readLinkState(value: unknown): MicrophoneLinkState | undefined {
 }
 
 /**
- * The website. A placeholder until Togle has a domain: change it here, in both apps, before a release.
- * Pages: `/` (Togle), `/microphone/` (Togle Microphone).
+ * The websites: togle.app for Togle and studio.togle.app for Togle Studio. togle.app must be registered before a
+ * release (it wasn't on 2026-11-09). Change them here, in both apps.
  */
-export const TOGLE_SITE = 'https://example.com'
+export const TOGLE_SITE = 'https://togle.app'
+export const STUDIO_SITE = 'https://studio.togle.app'
 
-/** Togle Microphone's page, tagged with where in the app the visit came from. */
+/** Togle Studio's site, tagged with where in the app the visit came from. */
 export function microphonePage(from: 'after-call' | 'settings' | 'call-strip' | 'microphone-check'): string {
-  const url = new URL('/microphone/', TOGLE_SITE)
-  url.search = new URLSearchParams({ utm_source: 'togle', utm_medium: 'app', utm_campaign: 'microphone', utm_content: from }).toString()
+  const url = new URL('/', STUDIO_SITE)
+  url.search = new URLSearchParams({ utm_source: 'togle', utm_medium: 'app', utm_campaign: 'studio', utm_content: from }).toString()
   return url.toString()
 }

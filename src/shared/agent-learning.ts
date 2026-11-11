@@ -7,6 +7,6 @@ export const skillPurpose = (skill: Partial<Pick<Skill, 'purpose' | 'origin'>>):
   skill.purpose === 'reference' || !skill.purpose && skill.origin === 'call' ? 'reference' : 'assistance'
 
 export function sourceLabel(source?: LearningSource): string {
-  if (!source || !Number.isFinite(source.at)) return 'Earlier context; source not recorded'
+  if (!source || !Number.isFinite(source.at)) return 'Kept before Togle noted where lessons came from'
   return `${source.kind === 'call' ? 'Reported in a call' : 'Provided by you'} · ${new Date(source.at).toLocaleDateString()}`
 }

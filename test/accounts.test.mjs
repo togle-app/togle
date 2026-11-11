@@ -79,6 +79,28 @@ test('pinned calls keep their account and fail closed after reauthentication; us
   await assert.rejects(pinned.stream(input, options), /Sign in to Work/)
 })
 
+test('a Claude account pinned before its sign-in is read (Togle reads it in the background as it starts) is pinned as it is read', async () => {
+  const accounts = fixture(), account = await accounts.add('claude', 'Startup'), entry = accounts.get(account.id)
+  let email = 'work@test.example', runs = 0
+  // The official runtime's status, without starting it.
+  entry.auth.run = async () => { runs++; await new Promise(resolve => setTimeout(resolve, 20)); return { code: 0, output: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', email, configDirectory: entry.auth.environment().CLAUDE_CONFIG_DIR }) } }
+  const requests = []; entry.provider.stream = async input => { requests.push(input) }
+  const input = { lane: 'quick', user: 'First call after start', system: 'Help.' }, options = { signal: new AbortController().signal, onDelta: () => {} }
+  assert.equal(entry.auth.read, false)
+  const pinned = accounts.pinned(account.id)
+  await pinned.stream(input, options)
+  assert.equal(requests.length, 1, 'a sign-in not read yet is not taken for a signed-out one')
+  assert.equal(entry.auth.read, true); assert.equal(runs, 1)
+  email = 'someone-else@test.example'
+  await entry.auth.status(true)
+  await assert.rejects(pinned.stream(input, options), /identity changed/, 'pinned to the sign-in it read first')
+  assert.equal(requests.length, 1)
+  // Read before pinning, it's pinned at once, as before.
+  const now = accounts.pinned(account.id)
+  await now.stream(input, options)
+  assert.equal(requests.length, 2)
+})
+
 test('agent account overrides survive restart and are excluded from shared packages; study uses the owner', async () => {
   const requests = [], store = new AgentStore(async (...args) => { requests.push(args); return 'Useful document summary.' }); await store.load()
   const agent = await store.create('blank', { subscriptionAccountId: 'work-account-id' })

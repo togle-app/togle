@@ -13,10 +13,6 @@ const REQUEST_TIMEOUT_MS = 20_000
 // characters) stays well under this.
 const MAX_KEYWORDS = 60
 const MAX_KEYWORD_CHARS = 60
-// The ChatGPT plan's dictation takes clips of a second or more (as Codex sends them): a shorter one is padded with
-// silence. Codex also sends them at this peak level.
-const PLAN_MIN_SAMPLES = SAMPLE_RATE
-const PLAN_PEAK = 0.9
 // Turned away for now (429) without a time to wait: this long before a line goes to it again.
 const REST_MS = 60_000
 
@@ -35,14 +31,6 @@ export interface HearOptions {
   language: string
   /** Names and jargon to spell right, comma-separated, as Whisper takes them. */
   vocabulary: string
-}
-
-/** The dictation of the ChatGPT plan Togle is signed in to: whether it is, and a clip's form sent with the sign-in. */
-export interface PlanDictation {
-  signedIn: () => boolean
-  post?: (form: FormData, signal: AbortSignal) => Promise<Response>
-  recognize?: (pcm: Float32Array, options: HearOptions) => Promise<string>
-  missing?: () => string | null
 }
 
 /** gpt-transcribe (and what follows it) takes lists of languages and keywords; Whisper's API, and the servers that copy it, one language and a prompt. */
@@ -83,18 +71,6 @@ export function transcriptionForm(wav: Buffer, model: string, { language, vocabu
   return form
 }
 
-/** A clip as the ChatGPT plan's dictation takes it, the way Codex sends its own: the file alone, a second at least, at Codex's level. */
-export function planForm(pcm: Float32Array): FormData {
-  let peak = 0
-  for (const x of pcm) peak = Math.max(peak, Math.abs(x))
-  const gain = peak > 0 ? PLAN_PEAK / peak : 1
-  const clip = new Float32Array(Math.max(pcm.length, PLAN_MIN_SAMPLES))
-  for (let i = 0; i < pcm.length; i++) clip[i] = pcm[i] * gain
-  const form = new FormData()
-  form.append('file', new Blob([new Uint8Array(encodeWav(clip, SAMPLE_RATE))], { type: 'audio/wav' }), 'audio.wav')
-  return form
-}
-
 const hostOf = (url: string): string => {
   try {
     return new URL(url.trim()).host
@@ -106,8 +82,8 @@ const hostOf = (url: string): string => {
 /**
  * Hears a side of the call in place of this PC's models: through OpenAI's speech API (/audio/transcriptions), OpenAI's
  * own models or any server that speaks the same API (a model run on this PC with speaches, LocalAI or vLLM, or a
- * service's); or through the dictation of the ChatGPT plan Togle is signed in to. Each finished utterance goes as it
- * ends, in a request of its own.
+ * service's). Each finished utterance goes as it ends, in a request of its own. No subscription sign-in hears speech:
+ * neither ChatGPT's nor Claude's includes transcription.
  */
 export class SpeechApi {
   private key: string | null = null
@@ -116,8 +92,8 @@ export class SpeechApi {
   /** Why it didn't hear the last line it was given; null once it hears one. */
   problem: string | null = null
   /**
-   * It turned down what it was asked with (401: the key, or the sign-in; 403 from the ChatGPT plan, which shuts out a
-   * client it won't serve): that won't change by itself, so no lines go to it until the key or what it's sent to does.
+   * It turned down the key it was asked with (401): that won't change by itself, so no lines go to it until the key or
+   * what it's sent to does.
    */
   refused = false
   /** Turned away for now ("too many requests"): no lines go to it before then (epoch ms). */
@@ -129,27 +105,23 @@ export class SpeechApi {
   constructor(
     readonly id: SpeechApiId,
     private keyFile: string,
-    private target: () => SpeechTarget,
-    /** Subscription speech uses its account's sign-in rather than an API key. */
-    private plan?: PlanDictation
+    private target: () => SpeechTarget
   ) {}
 
   async load(): Promise<void> {
-    if (!this.plan) this.key = await readSecret<string>(this.keyFile)
+    this.key = await readSecret<string>(this.keyFile)
   }
 
   hasKey(): boolean {
     return !!this.key
   }
   pinned(target: SpeechTarget): SpeechApi {
-    const snapshot = structuredClone(target), api = new SpeechApi(this.id, this.keyFile, () => snapshot, this.plan)
+    const snapshot = structuredClone(target), api = new SpeechApi(this.id, this.keyFile, () => snapshot)
     api.key = this.key
     return api
   }
 
   async setKey(key: string): Promise<void> {
-    // The ChatGPT plan's goes with the sign-in: there's no key of its own to keep.
-    if (this.plan) return
     this.key = key.trim() || null
     await writeSecret(this.keyFile, this.key)
     // What it needs may be there now, and the last line may have been turned down for the old key: the window hears
@@ -162,10 +134,9 @@ export class SpeechApi {
 
   /**
    * What it needs before it can hear anything, in words ("an OpenAI API key"); null when it has it. OpenAI's needs a
-   * key, a server only its address, the ChatGPT plan a sign-in.
+   * key, a server only its address.
    */
   missing(): string | null {
-    if (this.plan) return !this.plan.signedIn() ? `a ${this.id === 'claude' ? 'Claude' : 'ChatGPT'} sign-in` : this.plan.missing?.() ?? null
     if (this.id === 'openai') return this.key ? null : 'an OpenAI API key'
     return /^https?:\/\/[^\s/]/i.test(this.target().baseUrl.trim()) ? null : "the speech server's address"
   }
@@ -183,13 +154,12 @@ export class SpeechApi {
   /** What hears, as the window says it: "OpenAI gpt-transcribe", "whisper-large-v3 at localhost:8000". */
   label(): string {
     const { baseUrl, model } = this.target()
-    if (this.plan) return this.id === 'claude' ? 'Claude speech' : "the ChatGPT plan's dictation"
     return this.id === 'openai' ? `OpenAI ${model}` : `${model.trim() || 'the speech server'} at ${hostOf(baseUrl)}`
   }
 
   /** Who it is, to begin a sentence with: "OpenAI". */
   who(): string {
-    return this.plan ? this.id === 'claude' ? 'Claude' : 'ChatGPT' : this.id === 'openai' ? 'OpenAI' : 'The speech server'
+    return this.id === 'openai' ? 'OpenAI' : 'The speech server'
   }
 
   /** Forgets why the last line wasn't heard, now that what it's sent to has changed. */
@@ -208,9 +178,7 @@ export class SpeechApi {
 
   /** Why a request failed, in words: "it turned down the API key". */
   private reason(err: unknown, status?: number, text = ''): string {
-    if (status === 401) return this.plan ? 'it turned down the sign-in' : 'it turned down the API key'
-    // What chatgpt.com sends a client it won't serve is a web page, not a message.
-    if (status === 403 && this.plan) return this.id === 'claude' ? 'Claude speech refused this account or workspace' : 'chatgpt.com turned the request down'
+    if (status === 401) return 'it turned down the API key'
     if (status === 429) return /quota|billing|credit/i.test(text) ? 'the account has no credit left' : 'too many requests just now'
     if (status) return `it answered ${status}${text ? `: ${text.slice(0, 160)}` : ''}`
     const message = (err as Error).message ?? String(err)
@@ -231,7 +199,6 @@ export class SpeechApi {
     const send = (hints: boolean): Promise<Response> => {
       const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
       const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout
-      if (this.plan?.post) return this.plan.post(planForm(pcm), signal)
       return net.fetch(`${baseUrl.trim().replace(/\/+$/, '')}/audio/transcriptions`, {
         method: 'POST',
         headers: this.key ? { Authorization: `Bearer ${this.key}` } : {},
@@ -241,17 +208,7 @@ export class SpeechApi {
     }
     let said: unknown
     try {
-      if (this.plan?.recognize) {
-        const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]) : AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-        said = await this.plan.recognize(pcm, { ...options, signal })
-        signal.throwIfAborted()
-        if (!this.plan.signedIn()) throw new Error('The speech account changed. Start a new call or dictation with the intended account.')
-        this.refused = false; this.restUntil = 0; clearTimeout(this.restTimer)
-        this.setProblem(null)
-        return cleanTranscript(typeof said === 'string' ? said : '', pcm.length / SAMPLE_RATE, options.language, options.dictation)
-      }
-      // The plan's dictation takes the audio alone: no language, no words to spell.
-      const hints = !this.plan && !this.hintsRefusedBy.has(where)
+      const hints = !this.hintsRefusedBy.has(where)
       let res = await send(hints)
       if (hints && (res.status === 400 || res.status === 422)) {
         const text = await errorText(res)
@@ -263,7 +220,6 @@ export class SpeechApi {
       if (!res.ok) throw this.failed(undefined, res.status, await errorText(res), res.headers.get('retry-after'))
       said = (res.headers.get('content-type') ?? '').includes('json') ? ((await res.json()) as { text?: unknown }).text : await res.text()
       options.signal?.throwIfAborted()
-      if (this.plan && !this.plan.signedIn()) throw new Error('The speech account changed. Start a new call or dictation with the intended account.')
     } catch (err) {
       if (options.signal?.aborted) throw options.signal.reason
       throw err instanceof HeardNothing ? err : this.failed(err, typeof (err as { status?: unknown })?.status === 'number' ? (err as { status: number }).status : undefined)
@@ -279,7 +235,7 @@ export class SpeechApi {
   /** The error a line it couldn't hear rejects with; the window says why. */
   private failed(err: unknown, status?: number, text?: string, retryAfter?: string | null): HeardNothing {
     const reason = this.reason(err, status, text)
-    if (status === 401 || (status === 403 && this.plan)) this.refused = true
+    if (status === 401) this.refused = true
     if (status === 429) this.rest(Number(retryAfter) > 0 ? Number(retryAfter) * 1000 : REST_MS)
     this.setProblem(reason)
     return new HeardNothing(reason)
@@ -325,7 +281,7 @@ export function hearingStatus(local: SttStatus, picked: Record<Speaker, SpeechAp
   const state = SIDES.every((s) => hearer(s.speaker)) ? 'ready' : local.state
   const detail =
     state === 'ready'
-      ? SIDES.map((s) => `${capital(s.name)}: ${hearer(s.speaker)?.label() ?? `this PC${local.detail ? ` (${local.detail})` : ''}`}`).join('. ')
+      ? SIDES.map((s) => `${capital(s.name)}: ${hearer(s.speaker)?.label() ?? `this computer${local.detail ? ` (${local.detail})` : ''}`}`).join('. ')
       : local.detail
   const sides = (api: SpeechApi): string =>
     SIDES.filter((s) => picked[s.speaker] === api)
@@ -334,7 +290,7 @@ export function hearingStatus(local: SttStatus, picked: Record<Speaker, SpeechAp
   // Who hears an API's sides while it can't: this PC, when its models are there; else no one.
   const standIn = local.state === 'ready' || local.state === 'starting'
   const meanwhile = (api: SpeechApi): string =>
-    standIn ? `this PC hears ${sides(api)}` : `Togle can't hear ${SIDES.every((s) => picked[s.speaker] === api) ? 'the call' : sides(api)}`
+    standIn ? `this computer hears ${sides(api)}` : `Togle can't hear ${SIDES.every((s) => picked[s.speaker] === api) ? 'the call' : sides(api)}`
   let problem: string | undefined
   let needs: string | undefined
   const lacking = apis.find((api) => api.missing())
@@ -345,16 +301,13 @@ export function hearingStatus(local: SttStatus, picked: Record<Speaker, SpeechAp
     if (standIn) problem = `Add ${lacking.missing()} in Settings: until then ${meanwhile(lacking)}.`
     else needs = lacking.missing() ?? undefined
   } else if (refused) {
-    problem =
-      refused.id === 'chatgpt' || refused.id === 'claude'
-        ? `${refused.who()}'s dictation turned Togle down (${refused.problem}): until you sign in again or pick it again in Settings, ${meanwhile(refused)}.`
-        : refused.hasKey()
-          ? `${refused.who()} turned down the API key: until there's another in Settings, ${meanwhile(refused)}.`
-          : `${refused.who()} needs an API key: until there's one in Settings, ${meanwhile(refused)}.`
+    problem = refused.hasKey()
+      ? `${refused.who()} turned down the API key: until there's another in Settings, ${meanwhile(refused)}.`
+      : `${refused.who()} needs an API key: until there's one in Settings, ${meanwhile(refused)}.`
   } else if (resting) problem = `${resting.who()} is turning requests away for now: ${meanwhile(resting)} until ${clock(resting.restingUntil())}.`
   else if (failing) {
     problem = `${failing.who()} didn't hear a line: ${failing.problem}.`
-    if (local.state === 'ready') problem += ' This PC heard it instead.'
+    if (local.state === 'ready') problem += ' This computer heard it instead.'
   }
   return { state, ...(detail ? { detail } : {}), ...(problem ? { problem } : {}), ...(needs ? { needs } : {}) }
 }

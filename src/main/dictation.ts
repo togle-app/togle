@@ -156,7 +156,7 @@ export class Dictation {
   }
   copied(id: string | undefined, text: string): void {
     if (this.current.id === id && this.current.text === text && ['ready', 'error'].includes(this.current.phase)) {
-      this.set({ phase: 'done', outcome: 'copied', message: 'Copied to clipboard' })
+      this.set({ phase: 'done', outcome: 'copied', message: `Copied. Press ${process.platform === 'darwin' ? '⌘V' : 'Ctrl+V'} to paste.` })
     }
   }
   copyFailed(id: string | undefined, text: string): void {

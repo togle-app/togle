@@ -13,7 +13,19 @@ const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 type Tab = 'overview' | 'transcript' | 'suggestions' | 'learning'
 const TABS: Tab[] = ['overview', 'transcript', 'suggestions', 'learning']
-const TAB_LABELS: Record<Tab, string> = { overview: 'Overview', transcript: 'Transcript', suggestions: 'Replies', learning: 'Learning' }
+const TAB_LABELS: Record<Tab, string> = { overview: 'Overview', transcript: 'Transcript', suggestions: 'Suggestions', learning: 'Learning' }
+/** Time into the call ("3:07", "75:20"), exactly as the meeting notes cite it, so a citation can be checked here. */
+export function intoCall(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+/** How long a call ran, in words ("23 min", "1 h 5 min", "under a minute"). */
+function callLength(ms: number): string {
+  const minutes = Math.round(ms / 60000)
+  if (minutes < 1) return 'under a minute'
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ''}`
+}
+const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`
 const CALLS_PER_PAGE = 100
 const LINES_PER_PAGE = 100
 const REPLIES_PER_PAGE = 25
@@ -23,6 +35,8 @@ interface Props {
   enabled: boolean
   onDone: () => void
   selectedId?: string
+  /** The part a call given as `selectedId` opens at: its lessons unless said otherwise (its notes, after the call). */
+  openTab?: 'overview' | 'learning'
   onSelect: (id: string | undefined) => void
   /** Omitted only for the retained records of removed agents, reached through Settings. */
   ownerId?: string
@@ -34,12 +48,12 @@ interface Props {
   asking?: boolean
 }
 
-export function CallHistory({ agents, enabled, onDone, selectedId, onSelect, ownerId, currentCallId, currentCallTitle = 'Current call', onOpenCurrent, onAgent, onAsk, asking }: Props) {
+export function CallHistory({ agents, enabled, onDone, selectedId, openTab, onSelect, ownerId, currentCallId, currentCallTitle = 'Current call', onOpenCurrent, onAgent, onAsk, asking }: Props) {
   const [calls, setCalls] = useState<CallSessionSummary[] | null>(null)
   const selected = selectedId ?? null
   const setSelected = (id: string | null): void => onSelect(id ?? undefined)
   const [record, setRecord] = useState<CallSession | null>(null)
-  const [tab, setTab] = useState<Tab>(selectedId ? 'learning' : 'overview')
+  const [tab, setTab] = useState<Tab>(selectedId ? openTab ?? 'learning' : 'overview')
   const [query, setQuery] = useState('')
   const [shown, setShown] = useState(CALLS_PER_PAGE)
   const [error, setError] = useState('')
@@ -107,12 +121,12 @@ export function CallHistory({ agents, enabled, onDone, selectedId, onSelect, own
   return <div className="call-history agent-calls">
     {!ownerId && !selected && <><div className="page-head"><button className="icon" aria-label="Back to Settings" onClick={onDone}><Icon name="back" /></button><h2>Calls from removed agents</h2></div><p className="hint">These records remain available after their agent is deleted.</p></>}
     {selected && <div className="page-head call-breadcrumb">
-      <button className="ghost" aria-label={ownerId ? `Back to ${ownerName} calls` : 'Back to archived calls'} onClick={() => { setSelected(null); setRecord(null); setError('') }}><Icon name="back" size={14} />{ownerId ? `${ownerName} / Calls` : 'Calls from removed agents'}</button>
+      <button className="ghost" aria-label={ownerId ? `Back to ${ownerName} calls` : 'Back to archived calls'} onClick={() => { setSelected(null); setRecord(null); setError('') }}><Icon name="back" size={14} />{ownerId ? `${ownerName} / Call history` : 'Calls from removed agents'}</button>
     </div>}
     {selected ? record ? <>
       <div className="call-detail-head">
         <h2>{callTitle(record)}</h2>
-        <p className="hint">{new Date(record.startedAt).toLocaleString()} · {!ownerId && `${record.agentName} · `}{record.status === 'live' ? 'Live' : record.status === 'interrupted' ? 'Interrupted' : 'Ended'}</p>
+        <p className="hint">{new Date(record.startedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}{record.status !== 'live' && ` · ${callLength((record.endedAt ?? record.transcript.at(-1)?.at ?? record.startedAt) - record.startedAt)}`} · {!ownerId && `${record.agentName} · `}{record.status === 'live' ? 'Live' : record.status === 'interrupted' ? 'Interrupted' : 'Ended'}</p>
         <div className="call-record-actions">
           {record.id === currentCallId && onOpenCurrent && <button className="primary" disabled={busy} onClick={onOpenCurrent}>{record.status === 'live' ? 'Return to live call' : 'Ask about call'}</button>}
           <Menu className="ghost" ariaLabel="Call options" title="Call options" label={<>More <Icon name="chevron" size={12} /></>} items={[
@@ -145,8 +159,9 @@ export function CallHistory({ agents, enabled, onDone, selectedId, onSelect, own
           {record.brief && record.brief.trim() !== record.title.trim() && <><h4>Call context</h4><Markdown text={record.brief} /></>}
           <CallNotes key={`notes-${record.id}`} record={record} onRecord={setRecord} canGenerate={!!agent} />
           {onAsk && agent && record.status !== 'live' && (record.transcript.length > 0 || !!record.summary) && <CallQuestions key={`questions-${record.id}`} record={record} onAsk={onAsk} busy={!!asking} />}
-          <p className="hint">{record.transcript.length} transcript lines · {record.suggestions.length} replies · {record.learning.changes.length} improvements</p>
-          {record.status !== 'live' && !!record.transcript.length && record.learning.state !== 'reviewed' && <button className="primary" disabled={busy || record.learning.state === 'reviewing' || !agent} onClick={() => setTab('learning')}>Review and learn</button>}
+          <p className="hint">{plural(record.transcript.length, 'transcript line', 'transcript lines')} · {plural(record.suggestions.length, 'suggestion', 'suggestions')} · {plural(record.learning.changes.length, 'lesson kept', 'lessons kept')}</p>
+          {/* One click: the review starts here, and its lessons show under Learning. */}
+          {record.status !== 'live' && !!record.transcript.length && record.learning.state !== 'reviewed' && <button className="primary" disabled={busy || record.learning.state === 'reviewing' || !agent} onClick={() => { setTab('learning'); void run(async () => { const result = await api.reviewCallSession(record.id); setRecord(result.session); onAgent(result.agent) }) }}>Review and learn</button>}
         </>}
         {tab === 'transcript' && <HistoryTranscript key={record.id} record={record} onRecord={setRecord} />}
         {tab === 'suggestions' && <HistorySuggestions key={record.id} suggestions={record.suggestions} />}
@@ -157,9 +172,9 @@ export function CallHistory({ agents, enabled, onDone, selectedId, onSelect, own
       {hasOwnedCalls && <div className="history-filters"><input className="history-search" aria-label="Search calls" placeholder={ownerId ? 'Search this agent’s calls…' : 'Search retained calls or agent names…'} value={query} onChange={event => { setQuery(event.target.value); setShown(CALLS_PER_PAGE) }} /></div>}
       {calls === null ? <p className="hint" role="status">Loading calls…</p> : <div className="call-history-list">
         {matchingRuntime && <button className="past-call-row current-call-row" aria-label="Open current call" onClick={onOpenCurrent}><strong>{currentCallTitle}</strong><span>Available in this workspace</span><span className="past-call-preview">{enabled ? 'Not yet in history.' : 'Not saved to history.'}</span></button>}
-        {matching.slice(0, shown).map(call => <button key={call.id} className={`past-call-row ${call.status === 'live' ? 'live-record' : ''}`} aria-label={`Open call: ${callTitle(call)}`} onClick={() => call.id === currentCallId && call.status === 'live' && onOpenCurrent ? onOpenCurrent() : open(call.id)}><strong>{callTitle(call)}</strong>{!ownerId && <span>{call.agentName}</span>}{(named(call) || call.status !== 'ended') && <span>{named(call) ? new Date(call.startedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}{named(call) && call.status !== 'ended' ? ' · ' : ''}{call.status === 'live' ? 'In progress — return to call' : call.status === 'interrupted' ? 'Interrupted' : ''}</span>}<span className="past-call-preview">{call.summary.replace(/^# [^\r\n]+\r?\n/u, '').trim() || (call.lines || call.replies ? `${call.lines} transcript lines · ${call.replies} replies` : call.status === 'live' ? 'Listening for the conversation…' : 'No speech was captured.')}</span>{call.pendingLessons > 0 && <span className="pending-badge">{call.pendingLessons} lessons to approve</span>}</button>)}
+        {matching.slice(0, shown).map(call => <button key={call.id} className={`past-call-row ${call.status === 'live' ? 'live-record' : ''}`} aria-label={`Open call: ${callTitle(call)}`} onClick={() => call.id === currentCallId && call.status === 'live' && onOpenCurrent ? onOpenCurrent() : open(call.id)}><strong>{callTitle(call)}</strong>{!ownerId && <span>{call.agentName}</span>}{(named(call) || call.status !== 'ended') && <span>{named(call) ? new Date(call.startedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}{named(call) && call.status !== 'ended' ? ' · ' : ''}{call.status === 'live' ? 'In progress — return to call' : call.status === 'interrupted' ? 'Interrupted' : ''}</span>}<span className="past-call-preview">{call.summary.replace(/^# [^\r\n]+\r?\n/u, '').trim() || (call.lines || call.replies ? `${plural(call.lines, 'transcript line', 'transcript lines')} · ${plural(call.replies, 'suggestion', 'suggestions')}` : call.status === 'live' ? 'Listening for the conversation…' : 'Nothing was said.')}</span>{call.pendingLessons > 0 && <span className="pending-badge">{plural(call.pendingLessons, 'lesson', 'lessons')} waiting for your OK</span>}</button>)}
         {matching.length > shown && <button className="history-more" onClick={() => setShown(previous => previous + CALLS_PER_PAGE)}>Show more calls</button>}
-        {!hasOwnedCalls && <div className="history-empty"><h3>{ownerId ? 'No calls yet' : 'No retained calls'}</h3><p>{!ownerId ? 'There are no saved calls from removed agents. Existing agents keep their history in Calls.' : enabled ? 'Start a call above. Its transcript, replies, and notes will appear here.' : 'Turn on Remember calls in Settings to save future calls.'}</p></div>}
+        {!hasOwnedCalls && <div className="history-empty"><h3>{ownerId ? 'No calls yet' : 'No retained calls'}</h3><p>{!ownerId ? 'There are no saved calls from removed agents. Each agent keeps its own calls under Call history.' : enabled ? 'Start a call from Live call. Its transcript, suggestions and meeting notes will appear here.' : 'Turn on Remember calls in Settings to save future calls.'}</p></div>}
         {hasOwnedCalls && !matching.length && !matchingRuntime && <p className="hint">No calls match this search.</p>}
       </div>}
     </>}
@@ -198,7 +213,7 @@ const HistoryTranscript = memo(function HistoryTranscript({ record, onRecord }: 
     {people.length > 0 && <details className="call-people"><summary>People · Correct speakers</summary><p className="hint">Confirm names or combine duplicate speakers with “Same person as…”.</p>{people.map(line => <SpeakerName key={`${line.voiceId}:${line.voiceName}:${line.voiceNamedBy}`} line={line} people={people} save={async name => onRecord(await api.renameCallSpeaker(record.id, line.voiceId!, name))} merge={async into => onRecord(await api.mergeCallSpeakers(record.id, line.voiceId!, into))} />)}</details>}
     <div className="transcript-tools"><input aria-label="Search transcript" placeholder="Find something said…" value={query} onChange={event => { setQuery(event.target.value); setShown(LINES_PER_PAGE) }} /><button disabled={!lines.length} onClick={() => void navigator.clipboard.writeText(lines.map(line => `${speakerLabel(line)}: ${line.text}`).join('\n')).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }, error => setError(errorText(error)))}>{copied ? 'Copied' : 'Copy transcript'}</button></div>
     {!lines.length ? <p className="hint">No transcript was saved for this call.</p> : <p className="hint" role="status">{matching.length ? `Showing ${Math.min(shown, matching.length)} of ${matching.length} lines${search ? ' matching your search' : ''}.` : 'No transcript lines match this search.'}</p>}
-    {matching.slice(0, shown).map(line => <div className="history-transcript-line" key={line.id}><span className="who">{speakerLabel(line)} <time>{clock.format(line.at)}</time></span><p>{line.text}</p></div>)}
+    {matching.slice(0, shown).map(line => <div className="history-transcript-line" key={line.id}><span className="who">{speakerLabel(line)} <time title={clock.format(line.at)}>{intoCall(line.at - record.startedAt)}</time></span><p>{line.text}</p></div>)}
     {matching.length > shown && <button className="history-more" onClick={() => setShown(previous => previous + LINES_PER_PAGE)}>Show {LINES_PER_PAGE} more lines</button>}
     {error && <p className="error" role="status">{error}</p>}
   </>
@@ -209,16 +224,14 @@ const HistorySuggestions = memo(function HistorySuggestions({ suggestions }: { s
   const sorted = useMemo(() => [...suggestions].sort((a, b) => a.at - b.at), [suggestions])
   return <>
     {!suggestions.length && <p className="hint">No suggestions were saved for this call.</p>}
-    {sorted.slice(0, shown).map(card => <article className="history-suggestion" key={card.id}><h4>{card.question || (card.kind === 'summary' ? 'Summary' : 'Suggested reply')}</h4><Markdown text={card.text} />{card.deep && <details><summary>Deeper answer</summary><Markdown text={card.deep} /></details>}</article>)}
+    {sorted.slice(0, shown).map(card => <article className="history-suggestion" key={card.id}><h4>{card.question || (card.kind === 'summary' ? 'Summary' : 'Suggestion')}</h4><Markdown text={card.text} /><CopyText text={card.text} />{card.deep && <details><summary>Deeper answer</summary><Markdown text={card.deep} /></details>}</article>)}
     {sorted.length > shown && <button className="history-more" onClick={() => setShown(previous => previous + REPLIES_PER_PAGE)}>Show more suggestions</button>}
   </>
 })
 
 function CallLearningPanel({ record, agent, onRecord, onAgent }: { record: CallSession; agent?: Agent; onRecord: (record: CallSession) => void; onAgent: (agent: Agent) => void }) {
-  const [selected, setSelected] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  useEffect(() => setSelected([]), [record.learning.reviewId])
   const run = async (work: () => Promise<void>): Promise<void> => {
     if (busy) return
     setBusy(true); setError('')
@@ -234,10 +247,19 @@ function CallLearningPanel({ record, agent, onRecord, onAgent }: { record: CallS
         const entry = agent?.history.find(entry => entry.id === change.id)
         return <div className={`learning-change ${entry?.undone ? 'undone' : ''}`} key={change.id}><p>{change.text}</p>{entry && <button className="link" disabled={busy || entry.undone} onClick={() => void run(async () => onAgent(await api.undoChange(record.agentId, change.id)))}>{entry.undone ? 'Undone' : 'Undo'}</button>}</div>
       })}</>}
-      {items.length > 0 && <><h4>Needs your approval</h4><p className="hint">Choose only the lessons you want this agent to reuse on future calls.</p><div className="pending-lessons">{items.map(item => <label key={item.id}><input type="checkbox" checked={selected.includes(item.id)} disabled={busy || !agent} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.id] : previous.filter(id => id !== item.id))} /><span>{item.label}</span></label>)}</div><div className="row"><button className="primary" disabled={busy || !agent || !selected.length} onClick={() => void run(async () => { const result = await api.approveCallLearning(record.id, record.learning.reviewId!, selected); onRecord(result.session); onAgent(result.agent) })}>Keep selected{selected.length ? ` (${selected.length})` : ''}</button><button disabled={busy} onClick={() => void run(async () => onRecord(await api.dismissCallLearning(record.id, record.learning.reviewId!)))}>Dismiss remaining</button></div></>}
+      {items.length > 0 && <><h4>Waiting for your OK</h4><p className="hint">Keep only what you want this agent to use on future calls.</p><ul className="pending-lessons">{items.map(item => <li key={item.id}><span>{item.label}</span><span className="row">
+        <button className="primary small" disabled={busy || !agent} onClick={() => void run(async () => { const result = await api.approveCallLearning(record.id, record.learning.reviewId!, [item.id]); onRecord(result.session); onAgent(result.agent) })}>Keep</button>
+        <button className="ghost small" disabled={busy} onClick={() => void run(async () => onRecord(await api.dropCallLearning(record.id, record.learning.reviewId!, [item.id])))}>Don’t keep</button>
+      </span></li>)}</ul></>}
       {record.learning.state === 'reviewed' && !items.length && !record.learning.changes.length && <p className="hint">The review found no new reusable knowledge to keep.</p>}
     </>}
     {record.learning.error && <p className="error">{record.learning.error}</p>}
     {error && <p className="error" role="status">{error}</p>}
   </div>
+}
+
+/** Copy under a saved suggestion: its words, ready to paste into an email or chat. */
+function CopyText({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return <button className="link copy-suggestion" onClick={() => void navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }, () => undefined)}>{copied ? 'Copied' : 'Copy'}</button>
 }

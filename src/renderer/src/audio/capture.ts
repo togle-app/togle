@@ -363,13 +363,22 @@ async function openLoopback(ctx: AudioContext): Promise<MediaStream> {
 
 const SOURCE_NAME: Record<Speaker, string> = { me: 'Microphone', them: 'System audio' }
 
+/** Why a source didn't open, as the person can fix it: the setting that blocks it, or what holds the device. */
 function captureProblem(error: unknown, speaker: Speaker): string {
   const { name, message } = error as Error
-  if (window.togle?.platform !== 'darwin') return message
+  const platform = typeof window === 'undefined' ? undefined : window.togle?.platform
   if (name === 'NotAllowedError' || name === 'SecurityError' || (speaker === 'them' && message === 'no loopback audio track')) {
-    const permission = speaker === 'me' ? 'Microphone' : 'Screen & System Audio Recording'
-    return `Check Togle's access in System Settings → Privacy & Security → ${permission}, then quit and reopen Togle.`
+    if (platform === 'darwin') {
+      const permission = speaker === 'me' ? 'Microphone' : 'Screen & System Audio Recording'
+      return `Check Togle's access in System Settings → Privacy & Security → ${permission}, then quit and reopen Togle.`
+    }
+    if (speaker === 'me') return platform === 'win32'
+      ? 'Windows is blocking it: turn on Settings → Privacy & security → Microphone → “Let desktop apps access your microphone”.'
+      : 'Microphone access is blocked: allow it in your system settings.'
+    return message
   }
+  if (speaker === 'me' && (name === 'NotFoundError' || name === 'OverconstrainedError')) return 'No microphone was found: plug one in, or choose another in your sound settings.'
+  if (speaker === 'me' && name === 'NotReadableError') return 'Another app may be holding the microphone, or the device stopped: check it, then reconnect.'
   return message
 }
 

@@ -51,7 +51,7 @@ export function SharePanel({ agent }: { agent: Agent }) {
       setBusy(false)
     }
   }
-  const save = () => run(async () => ((await api.exportAgent(agent.id, choice())) ? 'Saved. Anyone with Togle can install it from Explore agents → Import file.' : null))
+  const save = () => run(async () => ((await api.exportAgent(agent.id, choice())) ? 'Saved as a file. Send it to someone: they install it with Explore agents → Import file.' : null))
   const publish = () =>
     run(async () => {
       await api.publishAgent(agent.id, choice(), hub)
@@ -69,7 +69,7 @@ export function SharePanel({ agent }: { agent: Agent }) {
   ].filter(Boolean)
   return (
     <section className="share">
-      <p className="hint">Anyone with Togle can install a copy of it. It takes {listed(carries)}.</p>
+      <p className="hint">Saves a file you can send to someone with Togle, who can install their own copy. Nothing is published. The file has {listed(carries)}.</p>
       {agent.memory.length > 0 && (
         <Section title="Facts it remembers, to include">
           {agent.memory.map((fact) => (
@@ -291,7 +291,7 @@ export function Market({ agents, onPreview, onFile }: { agents: Agent[]; onPrevi
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
 
-  // Togle's own agents (on this PC) at once, and each added hub's as it answers: a slow hub holds up only itself.
+  // Togle's own agents (on this computer) at once, and each added hub's as it answers: a slow hub holds up only itself.
   const load = async (): Promise<void> => {
     const shown = (came: HubListing[], order: string[]): void =>
       setListings((prev) => {
@@ -388,7 +388,7 @@ export function Market({ agents, onPreview, onFile }: { agents: Agent[]; onPrevi
                 </span>
               </button>
             ))}
-            {!shown.length && <p className="hint">{words.length || category ? `No agent matches${query.trim() ? ` “${query.trim()}”` : ''}.` : 'No agents here yet.'}</p>}
+            {!shown.length && <p className="hint">{words.length || category ? `No agent matches${query.trim() ? ` “${query.trim()}”` : ''}.` : 'No agents from this hub yet. Create your own from the + in the sidebar, or try another category.'}</p>}
           </div>
           {(listings ?? [])
             .filter((l) => l.error)

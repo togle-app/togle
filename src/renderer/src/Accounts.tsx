@@ -45,21 +45,23 @@ export function AccountSettings({ settings, connections, addApi }: { settings: S
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const signingIn = list.accounts.some(account => account.signingIn || account.pending)
+  // ChatGPT first: it's what Togle is built around. Claude after it, marked experimental.
+  const ordered = [...list.accounts].sort((a, b) => Number(a.provider !== 'chatgpt') - Number(b.provider !== 'chatgpt'))
   const run = async (id: string, action: () => Promise<unknown>): Promise<void> => {
     setBusy(id); setError('')
     try { await action() } catch (error) { setError(message(error)) } finally { setBusy('') }
   }
   return <div className="subscription-accounts">
     <div className="account-list">
-      {list.accounts.map(account => <div className="account-row" key={account.id}>
-        <div className="account-info"><strong>{accountTitle(account)}</strong>
+      {ordered.map(account => <div className="account-row" key={account.id}>
+        <div className="account-info"><strong>{accountTitle(account)}{accountTitle(account) !== providerLabel(account.provider) && <span className="provider-tag">{providerLabel(account.provider)}</span>}{account.provider === 'claude' && <span className="provider-tag experimental" title="Anthropic hasn’t approved Claude sign-in for other apps yet, so it may change or stop working.">Experimental</span>}</strong>
           <span>{account.email || (account.shared ? 'Not connected yet' : providerLabel(account.provider))}</span>
           <span className="account-status">{account.signingIn || account.pending ? 'Waiting for sign-in…' : account.signedIn ? 'Connected' : 'Sign in needed'}{modelSourceId(settings) === account.id && ' · Default AI account'}</span>
         </div>
         {account.signingIn || account.pending ? <button className="ghost small" onClick={() => void run(account.id, () => api.cancelAccountSignIn(account.id))}>Cancel sign-in</button>
           : account.signedIn ? <Menu className="ghost small" label="Manage" ariaLabel={`Manage ${accountTitle(account)}`} align="right" items={[
             { label: 'Reconnect account', disabled: !!busy || signingIn, onSelect: () => void run(account.id, () => api.signInAccount(account.id)) },
-            { label: 'Sign out', disabled: !!busy, note: account.shared && account.provider === 'claude' ? 'Also signs out Claude Code on this device.' : 'This account stays available to reconnect.', onSelect: () => void run(account.id, () => api.signOutAccount(account.id)) }
+            { label: 'Sign out', disabled: !!busy, note: account.shared && account.provider === 'claude' ? 'Claude Code on this computer shares this sign-in, so it signs out too.' : 'This account stays available to reconnect.', onSelect: () => void run(account.id, () => api.signOutAccount(account.id)) }
           ]} /> : <button className={account.provider === 'chatgpt' ? 'primary small continue-chatgpt' : 'ghost small'} disabled={!!busy || signingIn} onClick={() => void run(account.id, () => api.signInAccount(account.id))}>{connectLabel(account)}</button>}
         {account.signingIn && account.url && <div className="account-pending"><button className="link" onClick={() => void api.openExternal(account.url!)}>Open sign-in page</button></div>}
         {account.error && <p className="error account-pending" role="status">{account.error}</p>}
@@ -69,8 +71,8 @@ export function AccountSettings({ settings, connections, addApi }: { settings: S
     </div>
     {!adding ? <Menu className="ghost account-add-button" label="Add connection" ariaLabel="Add account or connection" items={[
       { label: 'ChatGPT account', note: 'Use your ChatGPT plan', disabled: !!busy || signingIn, onSelect: () => { setProvider('chatgpt'); setAdding(true) } },
-      { label: 'Claude subscription', disabled: !!busy || signingIn, onSelect: () => { setProvider('claude'); setAdding(true) } },
-      ...(addApi ? [{ label: 'API key', onSelect: () => addApi('compatible') }, { label: 'Anthropic API', onSelect: () => addApi('anthropic') }, { label: 'Local model server', onSelect: () => addApi('local') }] : [])
+      { label: 'Claude subscription', note: 'Experimental', disabled: !!busy || signingIn, onSelect: () => { setProvider('claude'); setAdding(true) } },
+      ...(addApi ? [{ label: 'API key', note: 'Billed by your provider, not your plan', onSelect: () => addApi('compatible') }, { label: 'Anthropic API', note: 'Billed by Anthropic, not your plan', onSelect: () => addApi('anthropic') }, { label: 'Local model server', note: 'A model you run yourself', onSelect: () => addApi('local') }] : [])
     ]} /> : <form className="account-add" onSubmit={event => {
       event.preventDefault()
       void run('new', async () => {

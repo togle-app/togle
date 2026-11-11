@@ -92,6 +92,15 @@ export class CallLearning {
     })
   }
 
+  /** Lessons the person chose not to keep, one at a time; the others stay waiting. */
+  drop(id: string, reviewId: string, selected: string[]): Promise<CallSession> {
+    return this.serial(id, async () => {
+      const record = await this.proposal(id, reviewId)
+      const { rest } = selectLessons(record.learning.pending, selected)
+      return this.sessions.update(id, latest => ({ ...latest, learning: { ...latest.learning, pending: rest, reviewId: randomUUID() } }))
+    })
+  }
+
   dismiss(id: string, reviewId: string): Promise<CallSession> {
     return this.serial(id, async () => {
       await this.proposal(id, reviewId)

@@ -37,7 +37,7 @@ const placeKey = (dir: string): string => dir.replace(/[\\/]+$/, '').toLowerCase
 const folderName = (cwd?: string): string => (cwd ? (cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? cwd) : '')
 
 /**
- * A work session with Claude Code or Codex on this PC, or a chat of theirs on claude.ai or ChatGPT (from the export of
+ * A work session with Claude Code or Codex on this computer, or a chat of theirs on claude.ai or ChatGPT (from the export of
  * them they downloaded), to give the agent: the latest first, or found by what it was about (its title, its folder,
  * what was asked in it). Picked, it goes into the agent's documents. Arrows and Enter pick from the search box; a click
  * elsewhere, Escape or switching apps closes it. With two accounts of a tool (one for work, say), they
@@ -159,7 +159,7 @@ export function SessionPicker({
     <div className="session-picker" ref={box}>
       {picksOwn && (
         <div className="session-homes" role="group" aria-label="Where it looks: this agent's own Claude Code, Codex and chats">
-          <span className="hint">{gone ? 'Its own aren’t on this PC any more. Look in:' : 'Look in:'}</span>
+          <span className="hint">{gone ? 'Its own aren’t on this computer any more. Look in:' : 'Look in:'}</span>
           <button type="button" className={`home-choice all ${own.size ? '' : 'on'}`} aria-pressed={!own.size} onClick={() => void everywhere()}>
             All
           </button>

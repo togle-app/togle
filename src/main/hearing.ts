@@ -1,3 +1,4 @@
+import { parakeetHears, speechLanguageCode } from '@shared/speech'
 import type { SegmentKind, Speaker } from '@shared/types'
 import type { Copilot } from './copilot'
 import type { HeardTiming } from './perf'
@@ -10,8 +11,22 @@ import { SAMPLE_RATE, type LocalWhisper } from './stt/whisper'
 // pronounced English this beat either recognizer alone.
 const LOW_CONFIDENCE = 0.8
 const SHORT_SOUND_S = 1.5
-// Parakeet also knows other European languages: in English, accented letters mean it switched language.
+// Parakeet knows 25 European languages and tells which by itself: in English, accented letters mean it switched.
 const NOT_ENGLISH = /[^\x00-\x7f‘’“”–—…]/
+const CYRILLIC = new Set(['ru', 'uk', 'bg'])
+
+/**
+ * Whether Parakeet's text is in another language than the call's: in English, any accented letter; in another of its
+ * languages, mostly letters of another alphabet (a Croatian call heard as Cyrillic). With automatic detection, never.
+ */
+export function switchedLanguage(text: string, language: string): boolean {
+  const code = speechLanguageCode(language)
+  if (code === 'auto') return false
+  if (code === 'en') return NOT_ENGLISH.test(text)
+  const letters = text.match(/\p{L}/gu) ?? []
+  const alphabet = CYRILLIC.has(code) ? /\p{Script=Cyrillic}/u : code === 'el' ? /\p{Script=Greek}/u : /\p{Script=Latin}/u
+  return letters.filter((letter) => !alphabet.test(letter)).length > letters.length / 2
+}
 
 // Below this (see signalToNoise) Parakeet starts dropping words while still sounding sure of itself, and Whisper
 // with the agent's words holds up better: in npm run speech, with chatter 5 dB below the caller, 8.5% of the
@@ -44,6 +59,17 @@ export interface Ears {
   /** Null while it isn't installed or running; Whisper then hears everything. */
   parakeet: () => Pick<LocalParakeet, 'available' | 'transcribe'> | null
   whisper: Pick<LocalWhisper, 'transcribe'>
+  /**
+   * Whether Whisper is installed and running (default yes). On a CPU it's only installed for languages Parakeet doesn't
+   * hear: without it, Parakeet's text is kept, noisy line or unsure, rather than lost.
+   */
+  whisperReady?: () => boolean
+  /**
+   * Whether Whisper re-checks what Parakeet hears in its own languages, unsure or noisy (default yes): on a GPU, where
+   * large-v3-turbo does it in a moment. Not on a CPU, where Whisper small takes seconds a sentence and heard those
+   * languages worse than Parakeet; with automatic detection it still takes what Parakeet is unsure of.
+   */
+  whisperChecks?: () => boolean
   /**
    * The API picked to hear a side (OpenAI's, or another server's), once it has what it needs: it writes that side's
    * transcript in place of this PC's models. Live captions and answers started at a pause stay on this PC, where
@@ -80,12 +106,15 @@ interface Heard {
 export function hearing(ears: Ears): Hearing {
   /**
    * Text for a clip: a finished utterance from the API picked for its side, when there is one; otherwise Parakeet first,
-   * Whisper when Parakeet is unsure, missing, the call isn't in English, or (except for live captions) the line is
-   * noisy. Null means a newer live caption replaced this one.
+   * Whisper when Parakeet is unsure, missing, doesn't hear the call's language, or (except for live captions) the line
+   * is noisy, as long as Whisper is installed. Null means a newer live caption replaced this one.
    */
   async function recognize(speaker: Speaker, pcm: Float32Array, partial: boolean): Promise<Heard | null> {
     const language = ears.language()
     const noisy = !partial && signalToNoise(pcm) < NOISY_DB
+    const whisperReady = ears.whisperReady?.() ?? true
+    const checks = whisperReady && (ears.whisperChecks?.() ?? true)
+    const recheck = checks || (whisperReady && speechLanguageCode(language) === 'auto')
     const api = partial ? null : ears.api?.(speaker)
     if (api) {
       try {
@@ -101,7 +130,10 @@ export function hearing(ears: Ears): Hearing {
       noisy
     })
     const parakeet = ears.parakeet()
-    if (!parakeet?.available || language !== 'en' || noisy) return byWhisper()
+    // Without Whisper, Parakeet tries even a language it doesn't list (a Serbian call may come out in Croatian
+    // spelling): better than losing the line.
+    const parakeetFirst = !!parakeet?.available && (parakeetHears(language) || !whisperReady) && !(noisy && checks)
+    if (!parakeet || !parakeetFirst) return byWhisper()
     let heard: ParakeetResult | null
     try {
       heard = await parakeet.transcribe(pcm, { partial, stream: speaker })
@@ -111,9 +143,11 @@ export function hearing(ears: Ears): Hearing {
     }
     if (!heard) return null
     const byParakeet: Heard = { text: heard.text, by: 'parakeet', noisy }
-    if (partial || (heard.text && heard.confidence >= LOW_CONFIDENCE && !NOT_ENGLISH.test(heard.text))) return byParakeet
+    if (partial || (heard.text && heard.confidence >= LOW_CONFIDENCE && !switchedLanguage(heard.text, language))) return byParakeet
     // Parakeet hearing nothing in a short sound means there was no speech; Whisper would only guess.
     if (!heard.text && pcm.length < SHORT_SOUND_S * SAMPLE_RATE) return byParakeet
+    // No Whisper to re-check with (none on this PC, or a CPU's, for other languages): Parakeet's text is the best there is.
+    if (!recheck) return byParakeet
     const second = await byWhisper().catch((err: Error) => {
       console.warn('[stt] Whisper:', err.message)
       return null
@@ -128,16 +162,17 @@ export function hearing(ears: Ears): Hearing {
    */
   async function heardAtPause(speaker: Speaker, pcm: Float32Array): Promise<string | null> {
     const parakeet = ears.parakeet()
-    if (!parakeet?.available || ears.language() !== 'en') return null
+    const language = ears.language()
+    if (!parakeet?.available || !parakeetHears(language)) return null
     // On a noisy line, what Whisper hears the way it will hear the final transcript, so the two agree.
-    if (signalToNoise(pcm) < NOISY_DB) {
+    if (signalToNoise(pcm) < NOISY_DB && (ears.whisperReady?.() ?? true) && (ears.whisperChecks?.() ?? true)) {
       const heard = await ears.whisper
-        .transcribe(pcm, { language: 'en', prompt: await ears.vocabulary(), partial: false, stream: speaker })
+        .transcribe(pcm, { language, prompt: await ears.vocabulary(), partial: false, stream: speaker })
         .catch(() => null)
       return heard?.text.trim() || null
     }
     const heard = await parakeet.transcribe(pcm, { partial: true, stream: speaker }).catch(() => null)
-    return heard?.text && heard.confidence >= LOW_CONFIDENCE && !NOT_ENGLISH.test(heard.text) ? heard.text : null
+    return heard?.text && heard.confidence >= LOW_CONFIDENCE && !switchedLanguage(heard.text, language) ? heard.text : null
   }
 
   // The newest piece of audio of each utterance still in progress: a pause transcribed after they went on

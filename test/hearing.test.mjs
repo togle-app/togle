@@ -79,11 +79,13 @@ test('a partial finishing after its final transcript cannot replace it or cancel
 })
 
 /** The hearing handler with recognizers and a copilot that record what they were asked (`api`: the speech API picked for a side). */
-function ears({ parakeet = [], whisper = [], language = 'en', api, normalize } = {}) {
+function ears({ parakeet = [], whisper = [], language = 'en', api, normalize, whisperReady, whisperChecks } = {}) {
   const calls = []
   const handler = hearing({
     normalize,
     api,
+    whisperReady,
+    whisperChecks,
     parakeet: () =>
       parakeet && {
         available: true,
@@ -157,8 +159,8 @@ test('an empty final drops an answer started at the pause and clears the caption
   ])
 })
 
-test('without Parakeet, or in another language, Whisper hears everything and pauses start nothing', async () => {
-  for (const setup of [{ parakeet: null }, { language: 'hr' }]) {
+test("without Parakeet, or in a language Parakeet doesn't hear, Whisper hears everything and pauses start nothing", async () => {
+  for (const setup of [{ parakeet: null }, { language: 'sr' }]) {
     const { handler, calls } = ears({ ...setup, whisper: ['Koliko košta?'] })
     await handler('them', second, 1000, 'seg-5', 'pause')
     await handler('them', second, 1000, 'seg-5', 'final')
@@ -167,6 +169,51 @@ test('without Parakeet, or in another language, Whisper hears everything and pau
       ['add', 'them', 'Koliko košta?', 1000, 2000, 'seg-5']
     ])
   }
+})
+
+test("Parakeet hears its other languages too: a Croatian call's pause and final line stay with it", async () => {
+  const { handler, calls } = ears({ language: 'hr', parakeet: [{ text: 'Koliko košta?', confidence: 0.95 }, { text: 'Koliko košta?', confidence: 0.95 }] })
+  await handler('them', second, 1000, 'hr-1', 'pause')
+  await handler('them', second, 1000, 'hr-1', 'final')
+  assert.ok(!calls.some(([what]) => what === 'whisper'), 'no Whisper for a language Parakeet hears, accented letters and all')
+  assert.ok(calls.some(([what, text]) => what === 'anticipate' && text === 'Koliko košta?'))
+  assert.ok(calls.some(([what, , text]) => what === 'add' && text === 'Koliko košta?'))
+})
+
+test('a Croatian line Parakeet heard in Cyrillic, or an English one with accented letters, goes to Whisper', async () => {
+  for (const [language, heard, said] of [['hr', 'Сколько стоит?', 'Koliko košta?'], ['en', 'Où est la gare?', 'Where is the station?']]) {
+    const { handler, calls } = ears({ language, parakeet: [{ text: heard, confidence: 0.95 }], whisper: [said] })
+    await handler('them', second, 1000, 'switched', 'final')
+    assert.deepEqual(calls.filter(([what]) => what === 'whisper' || what === 'add').map(([what, , text]) => (what === 'add' ? text : what)), ['whisper', said])
+  }
+})
+
+test("without Whisper (a CPU's, for Parakeet's languages), Parakeet's text is kept, noisy line or unsure", async () => {
+  const unsure = ears({ language: 'de', whisperReady: () => false, parakeet: [{ text: 'Wie viel kostet das', confidence: 0.5 }] })
+  await unsure.handler('them', second, 1000, 'de-1', 'final')
+  assert.deepEqual(unsure.calls, [['parakeet', false], ['add', 'them', 'Wie viel kostet das', 1000, 2000, 'de-1']])
+  const noisy = ears({ language: 'de', whisperReady: () => false, parakeet: [{ text: 'Wie viel kostet das?', confidence: 0.9 }, { text: 'Wie viel kostet das?', confidence: 0.9 }] })
+  await noisy.handler('them', speech(0.02), 1000, 'de-2', 'pause')
+  await noisy.handler('them', speech(0.02), 1000, 'de-2', 'final')
+  assert.ok(!noisy.calls.some(([what]) => what === 'whisper'))
+  assert.ok(noisy.calls.some(([what, text]) => what === 'anticipate' && text === 'Wie viel kostet das?'))
+  assert.ok(noisy.calls.some(([what, , text]) => what === 'add' && text === 'Wie viel kostet das?'))
+})
+
+test("on a CPU, Whisper small doesn't re-check Parakeet's languages, but takes what Parakeet is unsure of when the language is detected", async () => {
+  const croatian = ears({ language: 'hr', whisperChecks: () => false, parakeet: [{ text: 'koliko kosta', confidence: 0.5 }], whisper: ['Koliko košta?'] })
+  await croatian.handler('them', speech(0.02), 1000, 'cpu-1', 'final')
+  assert.ok(!croatian.calls.some(([what]) => what === 'whisper'), 'neither the noisy line nor the unsure words go to Whisper small')
+  assert.deepEqual(croatian.calls.at(-1), ['add', 'them', 'koliko kosta', 1000, 2000, 'cpu-1'])
+  const detected = ears({ language: 'auto', whisperChecks: () => false, parakeet: [{ text: 'konnichiwa', confidence: 0.3 }], whisper: ['こんにちは'] })
+  await detected.handler('them', second, 1000, 'cpu-2', 'final')
+  assert.deepEqual(detected.calls.at(-1), ['add', 'them', 'こんにちは', 1000, 2000, 'cpu-2'])
+})
+
+test("without Whisper, a language Parakeet doesn't list is still tried by Parakeet rather than lost", async () => {
+  const { handler, calls } = ears({ language: 'sr', whisperReady: () => false, parakeet: [{ text: 'Koliko košta?', confidence: 0.9 }] })
+  await handler('them', second, 1000, 'sr-1', 'final')
+  assert.deepEqual(calls.at(-1), ['add', 'them', 'Koliko košta?', 1000, 2000, 'sr-1'])
 })
 
 /** A second of "speech" with gaps between the words where the given noise is left. */

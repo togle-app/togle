@@ -112,6 +112,13 @@ export const MODELS = {
     bytes: 574041195,
     sha256: '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2'
   },
+  'whisper-small': {
+    file: 'ggml-small-q5_1.bin',
+    url: `${HF}/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin`,
+    bytes: 190085487,
+    sha256: 'ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb'
+  },
+  // What a CPU got before Whisper small: still run where it's installed, no longer offered first.
   'whisper-base': {
     file: 'ggml-base.bin',
     url: `${HF}/ggerganov/whisper.cpp/resolve/main/ggml-base.bin`,
@@ -121,6 +128,21 @@ export const MODELS = {
 } satisfies Record<string, ModelFile>
 
 export type ModelId = keyof typeof MODELS
+
+/** What Settings and the status call each model. */
+export const MODEL_NAMES: Record<ModelId, string> = {
+  parakeet: 'Parakeet',
+  'whisper-turbo': 'Whisper large-v3-turbo',
+  'whisper-small': 'Whisper small',
+  'whisper-base': 'Whisper base'
+}
+
+/** A model's name by its file (a development copy's too): its file name when it isn't one of these. */
+export function modelNameOf(file: string): string {
+  const name = file.split(/[\\/]/).pop() ?? file
+  const id = (Object.keys(MODELS) as ModelId[]).find((m) => MODELS[m].file === name)
+  return id ? MODEL_NAMES[id] : name
+}
 
 /** A build by its id, as installed.json names it. */
 export const engineById = (id: string): EngineBuild | null => (Object.hasOwn(ENGINES, id) ? ENGINES[id] : null)
@@ -137,7 +159,8 @@ export function engineFor(platform: NodeJS.Platform, arch: string, gpu: boolean)
 }
 
 /**
- * The Whisper model for a build: large-v3-turbo on a GPU, base on a CPU, where turbo's every utterance takes seconds.
- * Parakeet is in both.
+ * The Whisper model for a build: large-v3-turbo on a GPU; small on a CPU, where turbo takes 15-35 s a sentence and base
+ * got 40% of Russian and Spanish wrong (small: 8-20%, at half the speech's length). Parakeet is in both, and on a CPU it
+ * hears its 25 languages alone: Whisper small is only for the others (shared/speech.ts, localModelsFor).
  */
-export const whisperFor = (engine: EngineBuild): ModelId => (engine.gpu ? 'whisper-turbo' : 'whisper-base')
+export const whisperFor = (engine: EngineBuild): ModelId => (engine.gpu ? 'whisper-turbo' : 'whisper-small')

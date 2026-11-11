@@ -1,5 +1,5 @@
-// Togle's side of Togle Microphone: finding it over its local link, turning it on around calls, and the noise check that
-// shows a noisy microphone after a call. A fake Togle Microphone serves the link; nothing real is started or heard.
+// Togle's side of Togle Studio: finding it over its local link, turning it on around calls, and the noise check that
+// shows a noisy microphone after a call. A fake Togle Studio serves the link; nothing real is started or heard.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import crypto from 'node:crypto'
@@ -10,18 +10,18 @@ import { workDir, wait } from './helpers.mjs'
 
 const work = workDir('togle-microphone')
 const {
-  MicrophoneLink, encodeLinkMessage, LinkLineReader, readLinkFile, readLinkState, isTogleMicrophoneLabel, microphonePage, TOGLE_SITE,
-  describeNoise, isMicrophoneOn, microphoneNeedsSignIn, noiseVerdict, readNoiseReport, shouldSuggest, MICROPHONE_DEFAULTS, MICROPHONE_SIGN_IN, NoiseCheck, noisyThreshold,
+  MicrophoneLink, launchEnvironment, encodeLinkMessage, LinkLineReader, readLinkFile, readLinkState, isTogleMicrophoneLabel, microphonePage, STUDIO_SITE, TOGLE_SITE,
+  describeNoise, plainNoise, isMicrophoneOn, microphoneNeedsSignIn, noiseVerdict, readNoiseReport, shouldSuggest, MICROPHONE_DEFAULTS, MICROPHONE_SIGN_IN, NoiseCheck, noisyThreshold,
   getSettings, loadSettings, updateSettings
 } = await import('./.build/togle.mjs')
 
 let folders = 0
-const folder = () => { const dir = path.join(work, 'Togle Microphone ' + ++folders); fs.mkdirSync(dir, { recursive: true }); return dir }
+const folder = () => { const dir = path.join(work, 'Togle Studio ' + ++folders); fs.mkdirSync(dir, { recursive: true }); return dir }
 const offState = { phase: 'off', device: 'Togle Microphone', input: 'USB Headset', systemDefault: false, personalized: true, engine: 'deepfilter', bufferMs: 128, setup: 'ready', version: '0.1.0' }
 
-/** A Togle Microphone that serves the link the way the real one does. */
+/** A Togle Studio that serves the link the way the real one does. */
 function fakeMicrophone(dir, { token = crypto.randomBytes(32).toString('hex'), expect = token, state = offState, launch } = {}) {
-  const socket = process.platform === 'win32' ? `\\\\.\\pipe\\togle-microphone-${crypto.randomBytes(8).toString('hex')}` : path.join(dir, 'link.sock')
+  const socket = process.platform === 'win32' ? `\\\\.\\pipe\\togle-studio-${crypto.randomBytes(8).toString('hex')}` : path.join(dir, 'link.sock')
   const watchers = new Set(), connections = new Set(), requests = []
   const set = patch => { state = { ...state, ...patch }; for (const c of watchers) c.write(encodeLinkMessage({ event: 'state', data: state })) }
   const server = net.createServer(connection => {
@@ -38,7 +38,7 @@ function fakeMicrophone(dir, { token = crypto.randomBytes(32).toString('hex'), e
         if (!hello) {
           if (message.method !== 'hello' || message.params?.token !== expect) { reply({ error: 'Not allowed' }); connection.destroy(); return }
           hello = true
-          reply({ result: { product: 'Togle Microphone', version: '0.1.0', api: 1 } })
+          reply({ result: { product: 'Togle Studio', version: '0.1.0', api: 1 } })
         } else if (message.method === 'state') reply({ result: state })
         else if (message.method === 'watch') { watchers.add(connection); reply({ result: true }); connection.write(encodeLinkMessage({ event: 'state', data: state })) }
         else if (message.method === 'start') { set({ phase: 'on', systemDefault: true }); reply({ result: state }) }
@@ -51,7 +51,7 @@ function fakeMicrophone(dir, { token = crypto.randomBytes(32).toString('hex'), e
   return {
     socket, token, requests, set,
     methods: () => requests.map(r => r.method),
-    writeFile: (extra = {}) => fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Microphone', version: '0.1.0', pid: process.pid, socket, token, launch, startedAt: Date.now(), ...extra })),
+    writeFile: (extra = {}) => fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Studio', version: '0.1.0', pid: process.pid, socket, token, launch, startedAt: Date.now(), ...extra })),
     listen: () => new Promise((resolve, reject) => { if (process.platform !== 'win32') fs.rmSync(socket, { force: true }); server.once('error', reject); server.listen(socket, resolve) }),
     close: () => new Promise(resolve => { for (const c of connections) c.destroy(); server.close(() => resolve()) })
   }
@@ -60,7 +60,7 @@ function fakeMicrophone(dir, { token = crypto.randomBytes(32).toString('hex'), e
 const link = (dir, options = {}) => new MicrophoneLink({ folder: dir, client: { name: 'togle', version: '0.0.0-test' }, ...options })
 const until = async (check, ms = 3000) => { const end = Date.now() + ms; while (Date.now() < end) { if (check()) return; await wait(20) } assert.fail('timed out') }
 
-test('Togle works the same without Togle Microphone', async () => {
+test('Togle works the same without Togle Studio', async () => {
   const microphone = link(path.join(work, 'never installed'))
   assert.deepEqual(await microphone.refresh(), { installed: false, running: false })
   assert.deepEqual(await microphone.prepareCall(MICROPHONE_DEFAULTS), { installed: false, running: false })
@@ -69,7 +69,7 @@ test('Togle works the same without Togle Microphone', async () => {
   microphone.stop()
 })
 
-test('finds a running Togle Microphone, proves the token and follows its state', async t => {
+test('finds a running Togle Studio, proves the token and follows its state', async t => {
   const dir = folder(), fake = fakeMicrophone(dir)
   await fake.listen(); fake.writeFile()
   const microphone = link(dir)
@@ -95,7 +95,7 @@ test('a link that does not prove the token, or points somewhere else, shows noth
   t.after(async () => { refused.stop(); await fake.close() })
   assert.deepEqual(await refused.refresh(), { installed: true, running: false })
   const elsewhere = folder()
-  fs.writeFileSync(path.join(elsewhere, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Microphone', version: '0.1.0', pid: 1, socket: process.platform === 'win32' ? '\\\\.\\pipe\\someone-else' : '/tmp/someone-else.sock', token: 'a'.repeat(64), startedAt: 1 }))
+  fs.writeFileSync(path.join(elsewhere, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Studio', version: '0.1.0', pid: 1, socket: process.platform === 'win32' ? '\\\\.\\pipe\\someone-else' : '/tmp/someone-else.sock', token: 'a'.repeat(64), startedAt: 1 }))
   const other = link(elsewhere)
   assert.deepEqual(await other.refresh(), { installed: true, running: false })
   other.stop()
@@ -133,7 +133,7 @@ test('turns it on before a call and off after it, and leaves it alone when it wa
   assert.ok(!fake.requests.slice(count).some(r => r.method === 'start'))
 })
 
-test('signed out of Togle Microphone: a call leaves it alone, and asking for it opens its sign-in', async t => {
+test('signed out of Togle Studio: a call leaves it alone, and asking for it opens its sign-in', async t => {
   const dir = folder(), fake = fakeMicrophone(dir, { state: { ...offState, account: 'signed-out' } })
   await fake.listen(); fake.writeFile()
   const microphone = link(dir)
@@ -158,11 +158,11 @@ test('signed out of Togle Microphone: a call leaves it alone, and asking for it 
   assert.equal(microphoneNeedsSignIn({ installed: true, running: false }), false, 'not running: nothing known about its account')
 })
 
-test('starts an installed Togle Microphone that is not running, only through its own program', async t => {
+test('starts an installed Togle Studio that is not running, only through its own program', async t => {
   const dir = folder(), fake = fakeMicrophone(dir, { state: { ...offState, phase: 'on', systemDefault: true } })
-  const program = process.platform === 'win32' ? path.join(dir, 'Togle Microphone.exe') : process.platform === 'darwin' ? '/usr/bin/open' : path.join(dir, 'togle-microphone')
+  const program = process.platform === 'win32' ? path.join(dir, 'Togle Studio.exe') : process.platform === 'darwin' ? '/usr/bin/open' : path.join(dir, 'togle-microphone')
   if (process.platform !== 'darwin') fs.writeFileSync(program, '')
-  const args = process.platform === 'darwin' ? ['-b', 'io.togle.microphone', '--args', '--hidden'] : ['--hidden']
+  const args = process.platform === 'darwin' ? ['-b', 'io.togle.studio', '--args', '--hidden'] : ['--hidden']
   const runs = [], opened = []
   fake.writeFile({ launch: { command: program, args } })
   const microphone = link(dir, { run: launch => { runs.push(launch); void fake.listen().then(() => fake.writeFile({ launch: { command: program, args } })) }, open: async url => { opened.push(url) } })
@@ -184,18 +184,69 @@ test('starts an installed Togle Microphone that is not running, only through its
   shown.stop()
 })
 
-test('a launch that is not Togle Microphone is never run: its address asks the system instead', async () => {
+test('a launch that is not Togle Studio is never run: its address asks the system instead', async () => {
   const dir = folder(), runs = [], opened = []
-  fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Microphone', version: '0.1.0', pid: 1, socket: process.platform === 'win32' ? '\\\\.\\pipe\\togle-microphone-00000000' : path.join(dir, 'link.sock'), token: 'b'.repeat(64), startedAt: 1,
+  fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Studio', version: '0.1.0', pid: 1, socket: process.platform === 'win32' ? '\\\\.\\pipe\\togle-studio-00000000' : path.join(dir, 'link.sock'), token: 'b'.repeat(64), startedAt: 1,
     launch: { command: process.platform === 'win32' ? 'C:\\Windows\\System32\\cmd.exe' : '/bin/sh', args: ['-c', 'echo'] } }))
   const microphone = link(dir, { run: launch => runs.push(launch), open: async url => { opened.push(url) } })
   await assert.rejects(microphone.turnOn('user', 300), /didn't start/)
   assert.deepEqual(runs, [])
-  assert.deepEqual(opened, ['togle-microphone://start'])
+  assert.deepEqual(opened, ['togle-studio://start'])
   microphone.stop()
 })
 
-test('follows Togle Microphone when it starts again with a new token', async t => {
+test("Togle run from source can start Togle Studio's development build, and a packaged Togle can't", async () => {
+  const dir = folder(), runs = [], opened = []
+  const electron = path.join(dir, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron')
+  const app = path.join(dir, 'app')
+  fs.mkdirSync(path.dirname(electron), { recursive: true }); fs.writeFileSync(electron, '')
+  fs.mkdirSync(app, { recursive: true }); fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify({ productName: 'Togle Studio' }))
+  fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Studio', version: '0.1.0', pid: 1, socket: process.platform === 'win32' ? '\\\\.\\pipe\\togle-studio-00000000' : path.join(dir, 'link.sock'), token: 'c'.repeat(64), startedAt: Date.now(),
+    launch: { command: electron, args: [app, '--hidden'] } }))
+  const packaged = link(dir, { run: launch => runs.push(launch), open: async url => { opened.push(url) } })
+  await packaged.show()
+  assert.deepEqual(runs, [], 'a packaged Togle never runs Electron from a link file')
+  assert.deepEqual(opened, ['togle-studio://open'])
+  packaged.stop()
+  const source = link(dir, { development: true, run: launch => runs.push(launch), open: async url => { opened.push(url) } })
+  await source.show()
+  assert.deepEqual(runs, [{ command: electron, args: [app] }], 'shown, without --hidden')
+  source.stop()
+  // Not the microphone app's folder: nothing runs.
+  fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify({ productName: 'Something else' }))
+  const other = link(dir, { development: true, run: launch => runs.push(launch), open: async () => { throw new Error('No app for this address') } })
+  await assert.rejects(other.show(), /couldn't start Togle Studio/)
+  assert.equal(runs.length, 1)
+  other.stop()
+})
+
+test('the old Togle Microphone link file can still start the renamed app from source, and nothing else', async () => {
+  const dir = folder(), previous = folder(), runs = []
+  const electron = path.join(previous, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron')
+  const app = path.join(previous, 'app')
+  fs.mkdirSync(path.dirname(electron), { recursive: true }); fs.writeFileSync(electron, '')
+  fs.mkdirSync(app, { recursive: true }); fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify({ productName: 'Togle Studio' }))
+  const old = { api: 1, product: 'Togle Microphone', version: '0.1.0', pid: 1, socket: process.platform === 'win32' ? '\\.\pipe\togle-microphone-00000000' : path.join(previous, 'link.sock'), token: 'd'.repeat(64), startedAt: Date.now(), launch: { command: electron, args: [app, '--hidden'] } }
+  fs.writeFileSync(path.join(previous, 'link.json'), JSON.stringify(old))
+  const microphone = link(dir, { development: true, previousFolder: previous, run: launch => runs.push(launch), open: async () => { throw new Error('No app for this address') } })
+  assert.deepEqual(await microphone.refresh(), { installed: true, running: false }, 'found through its old link file, but not talked to')
+  await microphone.show()
+  assert.deepEqual(runs, [{ command: electron, args: [app] }])
+  microphone.stop()
+  // Another app's file in the old folder is ignored.
+  fs.writeFileSync(path.join(previous, 'link.json'), JSON.stringify({ ...old, product: 'Something else' }))
+  const other = link(dir, { development: true, previousFolder: previous, run: launch => runs.push(launch) })
+  assert.deepEqual(await other.refresh(), { installed: false, running: false })
+  other.stop()
+})
+
+test('Togle Studio starts without Togle’s development variables (its page would load instead of Studio’s)', () => {
+  const env = launchEnvironment({ PATH: 'C:/bin', APPDATA: 'C:/Users/a/AppData/Roaming', ELECTRON_RENDERER_URL: 'http://localhost:5173/', electron_run_as_node: '1',
+    NODE_ENV: 'development', TOGLE_HEADLESS: '1', TOGLE_DEBUG_PORT: '9222', VITE_DEV_SERVER_URL: 'http://localhost:5173/', USERNAME: 'a' })
+  assert.deepEqual(env, { PATH: 'C:/bin', APPDATA: 'C:/Users/a/AppData/Roaming', USERNAME: 'a' })
+})
+
+test('follows Togle Studio when it starts again with a new token', async t => {
   const dir = folder(), first = fakeMicrophone(dir)
   await first.listen(); first.writeFile()
   const microphone = link(dir)
@@ -218,7 +269,7 @@ test('link messages and files: only what the protocol allows', () => {
   assert.deepEqual(reader.push('ate","data":{}}\n'), [{ event: 'state', data: {} }])
   assert.throws(() => new LinkLineReader().push('[1]\n'), /not an object/)
   assert.throws(() => new LinkLineReader().push('x'.repeat(70 * 1024)), /too long/)
-  assert.equal(readLinkFile({ api: 1, product: 'Togle Microphone', version: '1', pid: 1, socket: 's', token: 'short', startedAt: 1 }), undefined)
+  assert.equal(readLinkFile({ api: 1, product: 'Togle Studio', version: '1', pid: 1, socket: 's', token: 'short', startedAt: 1 }), undefined)
   assert.equal(readLinkState({ ...offState, phase: 'sideways' }), undefined)
   const { bufferMs, engine, ...rest } = offState
   assert.deepEqual(readLinkState({ ...offState, bufferMs: -5, engine: 'magic', extra: 1 }), rest)
@@ -226,8 +277,10 @@ test('link messages and files: only what the protocol allows', () => {
   assert.equal(isTogleMicrophoneLabel('Togle Microphone Feed (VB-Audio Virtual Cable)'), false)
   assert.equal(isTogleMicrophoneLabel('Microphone (USB Headset)'), false)
   const page = new URL(microphonePage('after-call'))
-  assert.equal(page.origin, new URL(TOGLE_SITE).origin)
-  assert.equal(page.pathname, '/microphone/')
+  assert.equal(page.origin, new URL(STUDIO_SITE).origin)
+  assert.equal(page.origin, 'https://studio.togle.app')
+  assert.equal(page.pathname, '/')
+  assert.equal(new URL(TOGLE_SITE).origin, 'https://togle.app')
   assert.equal(page.searchParams.get('utm_content'), 'after-call')
   assert.equal(page.searchParams.get('utm_source'), 'togle')
 })
@@ -322,7 +375,7 @@ test('the microphone check judges on a few seconds', () => {
 
 const noisy = { analyzedMs: 600_000, speechMs: 180_000, quietMs: 360_000, noisyMs: 162_000, bursts: 41, floorDb: -47, peakDb: -38, speechDb: -24, snrDb: 23 }
 
-test('suggestions: only after noisy calls, never with Togle Microphone on, every few days, and never after "Don’t show"', () => {
+test('suggestions: only after noisy calls, never with Togle Studio on, every few days, and never after "Don’t show"', () => {
   const report = { ...noisy, verdict: noiseVerdict(noisy) }
   assert.equal(report.verdict, 'noisy')
   const none = { installed: false, running: false }
@@ -351,7 +404,17 @@ test('a report from the window is checked, and its verdict worked out again', ()
   assert.match(text, /only 23 dB above the background/)
 })
 
-test('settings: Togle Microphone’s choices are checked, and the clean microphone’s old settings stay in the file for it', async () => {
+test('the plain verdict says what the call heard without decibels, and the numbers stay in the details', () => {
+  const plain = plainNoise({ ...noisy, verdict: 'noisy' })
+  assert.match(plain, /^People on your call could hear your background about half the time you weren't talking \(2 min 42 s in all\), plus 41 short sounds like typing or clicks\./)
+  assert.match(plain, /Your voice didn't stand out much from it\./)
+  assert.doesNotMatch(plain, /dB|%/)
+  assert.equal(plainNoise({ ...noisy, noisyMs: 0, bursts: 0, snrDb: 40, verdict: 'quiet' }), 'Your background was quiet.')
+  assert.match(plainNoise({ ...noisy, noisyMs: 0, bursts: 5, snrDb: 40, verdict: 'some' }), /^People on your call could hear 5 short sounds like typing or clicks\.$/)
+  assert.match(plainNoise({ ...noisy, noisyMs: noisy.quietMs, verdict: 'noisy' }), /most of the time/)
+})
+
+test('settings: Togle Studio’s choices are checked, and the clean microphone’s old settings stay in the file for it', async () => {
   const file = path.join(work, 'settings.json')
   fs.writeFileSync(file, JSON.stringify({ cleanMic: { enabled: true, inputId: 'usb', airGate: true }, microphone: { suggestions: false, dismissals: 2 } }))
   await loadSettings()
@@ -360,6 +423,6 @@ test('settings: Togle Microphone’s choices are checked, and the clean micropho
   await updateSettings({ microphone: { autoStart: false, suggestedAt: 'now', dismissals: -1 } })
   assert.deepEqual(getSettings().microphone, { suggestions: false, autoStart: false, dismissals: 2 })
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'))
-  assert.deepEqual(saved.cleanMic, { enabled: true, inputId: 'usb', airGate: true }, 'Togle Microphone imports these the first time it runs')
+  assert.deepEqual(saved.cleanMic, { enabled: true, inputId: 'usb', airGate: true }, 'Togle Studio imports these the first time it runs')
   assert.equal(saved.microphone.autoStart, false)
 })

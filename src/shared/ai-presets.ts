@@ -4,9 +4,9 @@ import { AI_TASKS } from './preferences'
 
 export const PRESET_VERSION = '2026-11-03-v1'
 export const PRESETS: { id: AIPreset; label: string; note: string }[] = [
-  { id: 'claude', label: 'Claude', note: 'Claude for every task' },
   { id: 'codex', label: 'ChatGPT', note: 'ChatGPT for every task' },
-  { id: 'mixed', label: 'Mixed', note: 'Claude reasoning + ChatGPT speed' }
+  { id: 'claude', label: 'Claude', note: 'Claude for every task (experimental)' },
+  { id: 'mixed', label: 'Mixed', note: 'Needs both plans: ChatGPT for quick suggestions, Claude for detailed answers' }
 ]
 export interface PresetCatalog { source: ModelSource; models: ModelOption[] }
 const concrete = (id: string): boolean => /^claude-(?:opus|sonnet|haiku|fable)-\d/i.test(id)

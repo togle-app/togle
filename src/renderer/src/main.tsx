@@ -1,11 +1,8 @@
-import { Component, lazy, StrictMode, Suspense, type ReactNode } from 'react'
+import { Component, StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Icon } from './Icon'
 import { DictationBar } from './DictationBar'
 import './styles.css'
-
-// The always-visible voice bar should not load agents, call history, or the settings UI.
-const App = lazy(() => import('./App'))
 
 /**
  * A render error would leave the frameless window blank, with no button to close it: show what happened, and a way
@@ -62,12 +59,21 @@ class Failed extends Component<{ children: ReactNode }, { error?: Error }> {
   }
 }
 
+/** A window whose script didn't load says so, in the Failed boundary, rather than staying blank. */
+function Unloaded({ error }: { error: Error }): ReactNode {
+  throw error
+}
+
 const dictationSurface = new URLSearchParams(location.search).get('surface') === 'dictation'
 if (dictationSurface) document.body.classList.add('dictation-surface')
-createRoot(document.getElementById('root')!).render(dictationSurface ? <DictationBar /> : (
-  <StrictMode>
-    <Failed>
-      <Suspense fallback={null}><App /></Suspense>
-    </Failed>
-  </StrictMode>
-))
+const root = createRoot(document.getElementById('root')!)
+if (dictationSurface) root.render(<DictationBar />)
+else {
+  // The always-visible voice bar doesn't load agents, call history, or the settings UI: the main window loads them
+  // here, before its first render. Not with React.lazy: React 19 holds back what a Suspense boundary reveals for up to
+  // 300 ms after its fallback, and the window would stay empty that long as Togle starts.
+  void import('./App').then(
+    ({ default: App }) => root.render(<StrictMode><Failed><App /></Failed></StrictMode>),
+    (error: Error) => root.render(<Failed><Unloaded error={error} /></Failed>)
+  )
+}

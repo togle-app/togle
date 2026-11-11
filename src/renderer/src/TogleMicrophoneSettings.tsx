@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SettingsPatch } from '@shared/api'
 import type { Settings } from '@shared/types'
-import { describeNoise, isMicrophoneOn, microphoneNeedsSignIn, type TogleMicrophoneStatus } from '@shared/microphone'
+import { describeNoise, isMicrophoneOn, microphoneNeedsSignIn, plainNoise, type TogleMicrophoneStatus } from '@shared/microphone'
 import { checkMicrophone } from './audio/capture'
 import { PlaySample, type NoiseFinding } from './MicrophoneSuggestion'
 import { Row, Section, Toggle } from './Rows'
 
 const api = window.togle
 
-/** How Togle Microphone is doing, in a few words. */
+/** How Togle Studio is doing, in a few words. */
 export function microphoneSummary(status: TogleMicrophoneStatus | undefined): string {
   if (!status?.installed) return 'Not installed'
   if (!status.running || !status.state) return 'Installed · not running'
@@ -32,7 +32,7 @@ const VERDICT: Record<string, string> = {
 }
 
 /**
- * Settings → Togle Microphone: the separate app that cleans the microphone for every call app. Its status when it's on
+ * Settings → Togle Studio: the separate app that cleans the microphone for every call app. Its status when it's on
  * this computer, turning it on for calls, the suggestions after noisy calls, and a microphone check that measures (and
  * plays back) what the microphone picks up.
  */
@@ -65,21 +65,22 @@ export function TogleMicrophoneSettings({ settings, save }: { settings: Settings
   const signIn = microphoneNeedsSignIn(status)
   const microphone = settings.microphone
   return (
-    <Section id="settings-microphone" title="Togle Microphone"
-      note={<>A separate app that removes background noise from your voice in every call app, on your computer. Togle finds it by itself. <button className="link" onClick={() => void api.openMicrophonePage('settings')}>Learn more</button></>}>
-      <Row name="Status" note={status?.running && status.state?.phase === 'on' ? 'Calls on your default microphone get the clean sound. An app set to a specific microphone needs “Togle Microphone” chosen in it.' : undefined} label={false}>
+    <Section id="settings-microphone" title="Togle Studio">
+      <p className="hint card-intro">A separate paid app that removes background noise from your voice in every call app, on this computer: 60 free minutes a month, Pro $12 a month. Togle finds it by itself. <button className="link" onClick={() => void api.openMicrophonePage('settings')}>Learn more</button></p>
+      <Row className="microphone-row" name="Status" note={status?.running && status.state?.phase === 'on' ? 'Calls on your default microphone get the clean sound. An app set to a specific microphone needs “Togle Microphone” chosen in it.' : undefined} label={false}>
         <span className="microphone-status" data-on={on || undefined}>{microphoneSummary(status)}</span>
-        {!status?.installed && <button className="primary small" onClick={() => void api.openMicrophonePage('settings')}>Get Togle Microphone</button>}
+        {!status?.installed && <button className="ghost small" onClick={() => void api.openMicrophonePage('settings')}>See Togle Studio</button>}
         {status?.running && status.state && (on
           ? <button className="ghost small" disabled={busy} onClick={() => act(() => api.turnOffMicrophone())}>Turn off</button>
           : signIn
             ? <button className="primary small" disabled={busy} onClick={() => act(() => api.showMicrophone())}>Sign in</button>
             : <button className="ghost small" disabled={busy || status.state.setup === 'missing' || status.state.setup === 'restart'} onClick={() => act(() => api.turnOnMicrophone())}>Turn on</button>)}
-        {status?.installed && !signIn && <button className="link" disabled={busy} onClick={() => act(() => api.showMicrophone())}>Open</button>}
+        {status?.installed && !signIn && <button className="ghost small" disabled={busy} onClick={() => act(() => api.showMicrophone())}>Open app</button>}
       </Row>
       {error && <p className="error" role="alert">{error}</p>}
-      <Toggle name="Turn on during calls" note="When a call starts, Togle turns Togle Microphone on, and off again when the call ends." checked={microphone.autoStart} disabled={!status?.installed} onChange={autoStart => void save({ microphone: { autoStart } })} />
-      <Toggle name="Show what my microphone picks up" note="After a noisy call, Togle shows what your microphone picked up while nobody spoke, and a link to Togle Microphone. It measures levels only; nothing is saved or sent." checked={microphone.suggestions} onChange={suggestions => void save({ microphone: { suggestions, ...(suggestions ? { dismissals: 0 } : {}) } })} />
+      {/* Only once it's installed: before that, a switch that's on but greyed out only confuses. */}
+      {status?.installed && <Toggle name="Turn on during calls" note={signIn ? 'Starts once you sign in to Togle Studio.' : 'When a call starts, Togle turns Togle Studio on, and off again when the call ends.'} checked={microphone.autoStart} onChange={autoStart => void save({ microphone: { autoStart } })} />}
+      <Toggle name="Suggest Togle Studio after noisy calls" note="After a noisy call, Togle shows what your microphone picked up while you weren’t talking, with a link to Togle Studio. It keeps the last few seconds in memory so you can play them back; nothing is saved to disk or sent." checked={microphone.suggestions} onChange={suggestions => void save({ microphone: { suggestions, ...(suggestions ? { dismissals: 0 } : {}) } })} />
       <Row name="Check my microphone" note={check?.phase === 'quiet' ? 'Stay quiet for a few seconds…' : check?.phase === 'speak' ? 'Now say a sentence, as you would in a call…' : 'Measures your background, then your voice. About ten seconds.'} label={false}>
         {check?.phase === 'quiet' || check?.phase === 'speak'
           ? <button className="ghost small" onClick={() => { stopCheck.current?.abort(); setCheck(undefined) }}>Cancel</button>
@@ -88,14 +89,15 @@ export function TogleMicrophoneSettings({ settings, save }: { settings: Settings
       {check?.phase === 'failed' && <p className="error" role="alert">{check.error}</p>}
       {check?.phase === 'done' && (
         <div className="microphone-check" role="status">
-          <p><strong>{VERDICT[check.finding.report.verdict]}</strong> {check.finding.report.verdict !== 'unknown' && describeNoise(check.finding.report)}</p>
+          <p><strong>{VERDICT[check.finding.report.verdict]}</strong> {check.finding.report.verdict !== 'unknown' && plainNoise(check.finding.report)}</p>
+          {check.finding.report.verdict !== 'unknown' && <details className="microphone-suggestion-details"><summary>Details</summary><p>{describeNoise(check.finding.report)}</p></details>}
           <div className="row">
             <PlaySample finding={check.finding} />
             {!on && (check.finding.report.verdict === 'noisy' || check.finding.report.verdict === 'some') && (status?.installed
               ? signIn
-                ? <button className="primary small" onClick={() => act(() => api.showMicrophone())}>Sign in to Togle Microphone</button>
-                : <button className="primary small" onClick={() => act(() => api.turnOnMicrophone())}>Turn on Togle Microphone</button>
-              : <button className="primary small" onClick={() => void api.openMicrophonePage('microphone-check')}>Get Togle Microphone</button>)}
+                ? <button className="primary small" onClick={() => act(() => api.showMicrophone())}>Sign in to Togle Studio</button>
+                : <button className="primary small" onClick={() => act(() => api.turnOnMicrophone())}>Turn on Togle Studio</button>
+              : <button className="primary small" onClick={() => void api.openMicrophonePage('microphone-check')}>See Togle Studio</button>)}
           </div>
         </div>
       )}

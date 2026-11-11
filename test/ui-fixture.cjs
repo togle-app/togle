@@ -50,7 +50,7 @@ module.exports = function install(fixture) {
   api.updateApiConnection = async (id, input) => { record('updateApiConnection', [id, input]); const connection = apiConnections.find(connection => connection.id === id); Object.assign(connection, { kind: input.kind, label: input.label, baseUrl: input.baseUrl, model: input.model, hasKey: input.key === undefined ? connection.hasKey : !!input.key, revision: connection.revision + 1 }); emit('onApiConnectionsChanged'); return clone(connection) }
   api.removeApiConnection = async id => { record('removeApiConnection', [id]); apiConnections.splice(apiConnections.findIndex(connection => connection.id === id), 1); emit('onApiConnectionsChanged') }
   api.dictationStatus = async () => ({ phase: 'idle' })
-  // Togle Microphone, the separate app: not installed, unless the scenario has it (installed, running, off; or signed
+  // Togle Studio, the separate app: not installed, unless the scenario has it (installed, running, off; or signed
   // out of it, waiting in its own window for that).
   const signedOut = fixture.scenario === 'togle-microphone-signed-out'
   let microphone = fixture.scenario === 'togle-microphone' || signedOut
@@ -64,7 +64,7 @@ module.exports = function install(fixture) {
     if (microphone.running && microphone.state.phase === 'off' && microphone.state.account !== 'signed-out' && fixture.settings.microphone?.autoStart !== false) { microphone = { ...microphoneOn(true), forCall: true }; microphoneChanged() }
     return clone(microphone)
   }
-  api.turnOnMicrophone = async () => { record('turnOnMicrophone', []); if (!microphone.installed) throw new Error("Togle Microphone isn't installed."); microphone = microphoneOn(true); microphoneChanged(); return clone(microphone) }
+  api.turnOnMicrophone = async () => { record('turnOnMicrophone', []); if (!microphone.installed) throw new Error("Togle Studio isn't installed."); microphone = microphoneOn(true); microphoneChanged(); return clone(microphone) }
   api.turnOffMicrophone = async () => { record('turnOffMicrophone', []); microphone = microphoneOn(false); delete microphone.forCall; microphoneChanged(); return clone(microphone) }
   api.showMicrophone = async page => { record('showMicrophone', [page]) }
   api.openMicrophonePage = async from => { record('openMicrophonePage', [from]) }
@@ -129,7 +129,7 @@ module.exports = function install(fixture) {
     record('mergeVoices', [from, into]); combine(transcript, from, into)
     emit('onTranscriptUpdated', clone(transcript.filter(line => line.voiceId === into)))
   }
-  let local = { dev: false, installed: fixture.readyAudio ? ['whisper-base'] : [], offer: { gpu: false, engine: 1000000, models: [{ id: 'whisper-base', label: 'Whisper base', bytes: 148000000, recommended: true }] } }
+  let local = { dev: false, installed: fixture.readyAudio ? ['parakeet'] : [], offer: { gpu: false, engine: 1000000, models: [{ id: 'parakeet', label: 'Parakeet', bytes: 669000000, recommended: true }, { id: 'whisper-turbo', label: 'Whisper large-v3-turbo', bytes: 574000000, recommended: false }, { id: 'whisper-small', label: 'Whisper small', bytes: 190000000, recommended: true }, { id: 'whisper-base', label: 'Whisper base', bytes: 148000000, recommended: false }] } }
   let sessions = fixture.sessions || fixture.agents.map(agent => ({
     version: 1, id: 'history-' + agent.id, agentId: agent.id, agentName: agent.name, startedAt: Date.UTC(2026, 9, 28, 10), endedAt: Date.UTC(2026, 9, 28, 10, 30), status: 'ended', updatedAt: 1000,
     title: agent.name === 'Support' ? 'Webhook support call' : 'Acme renewal', brief: agent.name === 'Support' ? 'Webhook support call' : 'Acme renewal', group: false, frameSession: 'frames-' + agent.id,
@@ -219,13 +219,11 @@ module.exports = function install(fixture) {
     emit('onAgentChanged', clone(agent)); return clone(agent)
   }
   api.sttStatus = async () => {
+    // No sign-in hears speech: calls are heard by this PC's models (or a speech API, which these flows don't pick).
     const t = fixture.settings.transcription
-    const chosen = t.accountId || fixture.agents.find(agent => agent.id === fixture.settings.activeAgentId)?.subscriptionAccountId || fixture.settings.subscriptionAccountId
-    const speechAccount = subscriptions.find(account => account.id === chosen) || subscriptions.find(account => account.id === 'chatgpt-default')
-    const subscription = ['chatgpt', 'claude'].includes(t.me)
-    const remoteReady = subscription && speechAccount.signedIn && (speechAccount.provider !== 'claude' || fixture.claudeSpeechLanguages.includes(t.language))
-    const ready = remoteReady || local.installed.length > 0
-    return { state: ready ? 'ready' : 'missing', needs: ready ? undefined : 'a ChatGPT sign-in', transcriptionLanguage: t.language, transcriptionAccount: subscription ? clone(speechAccount) : undefined }
+    const ready = local.installed.length > 0
+    // As the app says it: speech recognition missing from this computer isn't a service that "needs" a key.
+    return { state: ready ? 'ready' : 'missing', transcriptionLanguage: t.language }
   }
   api.localSpeech = async () => clone(local)
   api.listModels = async sourceId => {
@@ -297,6 +295,12 @@ module.exports = function install(fixture) {
     facts.forEach((fact, index) => { if (selected.includes('facts:' + index)) { addFact(agent, fact, false); session.learning.changes.push({ id: agent.history.at(-1).id, text: agent.history.at(-1).text }) } })
     session.learning.pending.facts = facts.filter((_, index) => !selected.includes('facts:' + index)); session.learning.reviewId = 'review-' + ++sequence
     emit('onCallSessions', { id }); return clone({ session, agent })
+  }
+  api.dropCallLearning = async (id, reviewId, selected) => {
+    record('dropCallLearning', [id, reviewId, selected]); const session = needSession(id)
+    if (session.learning.reviewId !== reviewId) throw new Error('These lessons changed.')
+    session.learning.pending.facts = session.learning.pending.facts.filter((_, index) => !selected.includes('facts:' + index)); session.learning.reviewId = 'review-' + ++sequence
+    emit('onCallSessions', { id }); return clone(session)
   }
   api.dismissCallLearning = async (id, reviewId) => { record('dismissCallLearning', [id, reviewId]); const session = needSession(id); session.learning.pending = empty(); session.learning.reviewId = 'review-' + ++sequence; emit('onCallSessions', { id }); return clone(session) }
   api.learnFromCall = async () => { capture(); const result = await api.reviewCallSession(currentKey); return { ...empty(), agentId: result.agent.id, ...result } }

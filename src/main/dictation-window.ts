@@ -21,6 +21,8 @@ export class DictationWindow {
   private resting = false
   private stopped = false
   private unavailable = false
+  // The resting pill's size as the bar draws it: wider while listening, taller with a warning or label in it.
+  private pill = { width: 64, height: 28 }
   private failures: number[] = []
   private displayId?: number
   private placement?: { version: 1; displayId: number; x: number; y: number }
@@ -83,8 +85,10 @@ export class DictationWindow {
     const b = win.getContentBounds(), point = this.cursor()
     const phase = this.resting ? 'idle' : this.state.phase
     const recovery = phase === 'ready' || phase === 'error', status = phase !== 'idle' && phase !== 'recording'
-    const width = Math.min(b.width, this.expanded ? recovery ? 352 : 280 : status ? 156 : 64)
-    const height = Math.min(b.height, this.expanded ? recovery ? 264 : phase === 'recording' && this.state.inCall ? 100 : 76 : status ? 44 : 28)
+    const width = Math.min(b.width, this.expanded ? recovery ? 352 : 280 : status ? 156 : this.pill.width)
+    // Listening, the open panel may have a line under its title (the call hears you, the microphone is muted): as tall
+    // as it is then, so the pointer on its title's buttons is inside it.
+    const height = Math.min(b.height, this.expanded ? recovery ? 264 : phase === 'recording' ? 100 : 76 : status ? 44 : this.pill.height)
     return point.x >= b.x+(b.width-width)/2 && point.x < b.x+(b.width+width)/2 && point.y >= b.y+b.height-height && point.y < b.y+b.height
   }
   private watchPointer(): void {
@@ -122,6 +126,14 @@ export class DictationWindow {
     if (this.passthrough === ignore) return
     this.passthrough = ignore
     if (this.forwardMouse) this.window?.setIgnoreMouseEvents(ignore, { forward: true })
+  }
+  setPill(width: number, height: number): void {
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return
+    const next = { width: Math.max(48, Math.min(200, Math.round(width))), height: Math.max(28, Math.min(44, Math.round(height))) }
+    if (next.width === this.pill.width && next.height === this.pill.height) return
+    this.pill = next
+    // Linux sizes the window to the pill, so a bigger pill needs a bigger window; elsewhere the canvas is fixed.
+    if (!this.forwardMouse) this.render()
   }
   setIndicator(visible: boolean): void {
     if(visible && !this.showBar){this.phaseCursor=this.cursor();clearTimeout(this.expandTimer);this.expandTimer=undefined}
@@ -188,8 +200,8 @@ export class DictationWindow {
     const recovery = state.phase === 'ready' || state.phase === 'error'
     const status = state.phase !== 'idle' && state.phase !== 'recording'
     const current = win.getBounds()
-    const width = this.forwardMouse ? current.width : Math.min(this.expanded ? recovery ? 352 : 280 : status ? 156 : 64, area.width - 16)
-    const height = this.forwardMouse ? current.height : Math.min(this.expanded ? recovery ? 264 : state.phase === 'recording' && state.inCall ? 100 : 76 : status ? 44 : 40, area.height - 16)
+    const width = this.forwardMouse ? current.width : Math.min(this.expanded ? recovery ? 352 : 280 : status ? 156 : this.pill.width, area.width - 16)
+    const height = this.forwardMouse ? current.height : Math.min(this.expanded ? recovery ? 264 : state.phase === 'recording' ? 100 : 76 : status ? 44 : Math.max(40, this.pill.height), area.height - 16)
     const bounds = { width, height, x: this.placement ? Math.round(area.x + area.width * this.placement.x - width / 2) : area.x + Math.round((area.width - width) / 2), y: this.placement ? Math.round(area.y + area.height * this.placement.y - height) : area.y + area.height - height - 12 }
     const layout = this.displayLayout(display)
     if (!this.forwardMouse || this.layout !== layout) {
@@ -260,7 +272,7 @@ export class DictationWindow {
       screen.removeListener('display-metrics-changed', this.displayChanged)
       this.recover()
     })
-    if (process.env.ELECTRON_RENDERER_URL) {
+    if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
       const url = new URL(process.env.ELECTRON_RENDERER_URL); url.searchParams.set('surface', 'dictation')
       void win.loadURL(url.toString())
     } else void win.loadFile(path.join(this.builtMain, '../renderer/index.html'), { query: { surface: 'dictation' } })

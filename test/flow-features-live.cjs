@@ -13,7 +13,7 @@ app.whenReady().then(async () => {
   assert.ok((await auth.status()).signedIn, 'A Claude subscription sign-in is required for this opt-in check')
   const vocabulary = { words: [{ id: 'word', word: 'Togle', heardAs: 'toggle' }], snippets: [{ id: 'email', phrase: 'my demo email', text: 'luka@example.test' }] }
   const speech = new T.DictationSpeech({ settings: T.getSettings, vocabulary: Promise.resolve(vocabulary), claude: provider, chatgpt: provider,
-    claudeAccount: () => auth.status(), chatgptAccount: () => ({ signedIn: false }), claudeSpeech: async () => async () => '', remote: async () => '' })
+    claudeAccount: () => auth.status(), chatgptAccount: () => ({ signedIn: false }), remote: async () => '' })
   const controller = new AbortController()
   let dictation
   try {

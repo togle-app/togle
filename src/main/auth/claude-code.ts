@@ -4,7 +4,6 @@ import { existsSync, promises as fs } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { homedir } from 'node:os'
-import { claudeKeychainService } from './claude-speech'
 import type { ClaudeAuthStatus } from '@shared/types'
 
 const STATUS_MS = 15_000
@@ -32,17 +31,20 @@ export function claudeSubscriptionEnv(): NodeJS.ProcessEnv {
 type Launch = (file: string, args: string[], env: NodeJS.ProcessEnv, cwd: string) => ChildProcess
 const launch: Launch = (file, args, env, cwd) => spawn(file, args, { env, cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 
-export interface ClaudeSpeechProfile { directory: string; email: string; organization?: string; keychainService?: string }
+/** Which Claude account and workspace the official runtime is signed in to, from its own status output. */
+interface ClaudeProfile { directory: string; email: string; organization?: string }
 
-/** Sign-in, sign-out and token refresh belong to the official runtime. Speech reads its access token only in the main process. */
+/** Sign-in, sign-out and token refresh belong to the official runtime. Togle never reads its credentials or tokens. */
 export class ClaudeCodeAuth {
   private current: ClaudeAuthStatus = { available: true, signedIn: false }
   private checkedAt = 0
+  /** Its status was read at least once: until then, cachedStatus() is a guess (signed out). */
+  private everRead = false
   private checking: Promise<ClaudeAuthStatus> | null = null
   private login: Promise<ClaudeAuthStatus> | null = null
   private controller: AbortController | null = null
   private generation = 0
-  private profile?: ClaudeSpeechProfile
+  private profile?: ClaudeProfile
   onChange: (status: ClaudeAuthStatus) => void = () => {}
 
   constructor(private binary = claudeCodeExecutable, private start: Launch = launch, private configDirectory?: string) {}
@@ -57,15 +59,11 @@ export class ClaudeCodeAuth {
   }
 
   cachedStatus(): ClaudeAuthStatus { return { ...this.current } }
+  /** Whether cachedStatus() comes from the runtime yet: Togle reads it in the background as it starts. */
+  get read(): boolean { return this.everRead }
   identity(): string | undefined { return this.current.signedIn ? JSON.stringify([this.current.email, this.profile?.organization, this.profile?.directory]) : undefined }
 
   executable(): string { return this.binary() }
-
-  async speechProfile(): Promise<ClaudeSpeechProfile> {
-    const status = await this.status(true)
-    if (!status.signedIn || status.signingIn || !this.profile || this.profile.email !== status.email) throw new Error('Sign in with Claude in Settings to use Claude dictation.')
-    return { ...this.profile, keychainService: claudeKeychainService(this.environment()) }
-  }
 
   async directory(): Promise<string> {
     const dir = this.configDirectory ? path.join(this.configDirectory, 'runtime') : path.join(app.getPath('userData'), 'claude-runtime')
@@ -89,6 +87,10 @@ export class ClaudeCodeAuth {
   }
 
   private async readStatus(): Promise<ClaudeAuthStatus> {
+    try { return await this.readStatusOnce() } finally { this.everRead = true }
+  }
+
+  private async readStatusOnce(): Promise<ClaudeAuthStatus> {
     try {
       const { code, output } = await this.run(['auth', 'status'], AbortSignal.timeout(STATUS_MS))
       const status = JSON.parse(output) as { loggedIn?: boolean; authMethod?: string; apiProvider?: string; email?: string; subscriptionType?: string; configDirectory?: string; orgId?: string }

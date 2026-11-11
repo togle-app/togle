@@ -17,7 +17,7 @@ import { MICROPHONE_PRODUCT, microphonePage } from '@shared/microphone-link'
 import { readNoiseReport, shouldSuggest } from '@shared/microphone'
 import { TogleTray } from './tray'
 import { HotkeyPress } from './hotkey-press'
-import { dictationSource } from '@shared/dictation'
+import { voiceAccountId } from '@shared/dictation'
 import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import koffi from 'koffi'
@@ -68,8 +68,6 @@ import { train, type TrainCall } from './agents/train'
 import { ChatGPTAuth } from './auth/chatgpt'
 import { ClaudeCodeAuth } from './auth/claude-code'
 import { SubscriptionAccounts, accountChoice, defaultAccountId } from './auth/accounts'
-import { ClaudeSpeechAccess } from './auth/claude-speech'
-import { ClaudeSpeech } from './stt/claude-speech'
 import { CallFile } from './call-file'
 import { CallSessions, exportCall, legacySession, sessionSummary } from './call-sessions'
 import { CallLearning } from './call-learning'
@@ -84,7 +82,7 @@ import { CodeBase } from './code'
 import { Copilot } from './copilot'
 import type { CallCard } from './prompts'
 import { FrameStore, registerFrameScheme, serveFrames } from './frames'
-import { hearing } from './hearing'
+import { hearing, switchedLanguage } from './hearing'
 import { PerfLog } from './perf'
 import type { UsageStatus } from './plan'
 import { ChatGPTProvider } from './providers/chatgpt'
@@ -96,9 +94,9 @@ import { captureFrame, listCaptureSources, listScreens, resolveCaptureSource } f
 import { ScreenMonitor } from './screen-monitor'
 import { VoiceTracker, VOICE_MODEL } from './stt/voices'
 import { VoiceMemory } from './stt/voice-memory'
-import { getSettings, loadSettings, needsSpeechAccountMigration, savedBeforeSpeechChoice, updateSettings } from './settings'
-import { migrateSpeechAccounts, speechLanguageCode } from '@shared/speech'
-import { subscriptionRecognizer } from './stt/subscription'
+import { getSettings, loadSettings, savedBeforeSpeechChoice, updateSettings, voiceAccountsMigrated, voiceAccountsToMigrate } from './settings'
+import { migrateVoicePreferences, parakeetHears, speechLanguageCode, speechLanguageName } from '@shared/speech'
+import { modelNameOf } from './stt/catalog'
 import { LocalParakeet } from './stt/parakeet'
 import { SpeechInstaller, speechHome } from './stt/install'
 import { hearingStatus, OPENAI_MODEL, OPENAI_URL, SpeechApi } from './stt/speech-api'
@@ -187,21 +185,7 @@ const speechApis: Record<'openai' | 'server', SpeechApi> = {
 }
 /** A speech API by the id the window names it with (anything else: none). */
 const speechApi = (id: unknown): SpeechApi | undefined => (id === 'openai' || id === 'server' ? speechApis[id] : undefined)
-const accountSpeech = new Map<string, SpeechApi>()
 const remoteSpeech = new Map<string, SpeechApi>()
-const claudeSpeechServices = new Map<string, ClaudeSpeech>()
-function claudeSpeechService(id: string): ClaudeSpeech {
-  const entry = accounts.get(id)
-  if (entry.kind !== 'claude') throw new Error('Choose a Claude speech account.')
-  let service = claudeSpeechServices.get(id)
-  if (!service) { service = new ClaudeSpeech(new ClaudeSpeechAccess(entry.auth, () => entry.provider.listModels())); claudeSpeechServices.set(id, service) }
-  return service
-}
-function speechAccount(agentId?: string) {
-  const pinned = (!agentId || agentId === currentSession?.agentId) ? currentSession?.speechAccountId : undefined
-  const settings = speechSettings(agentId), id = pinned || settings.accountId
-  return id ? accounts.get(id) : settings.me === 'claude' ? selectedClaude(agentId) : callChatGPT(agentId)
-}
 function speechSettings(agentId?: string) {
   const current = (!agentId || agentId === currentSession?.agentId) ? currentSession : undefined
   if (current?.speechSettings) return current.speechSettings
@@ -211,25 +195,10 @@ function speechSettings(agentId?: string) {
 function callLanguage(agentId?: string): string {
   return (!agentId || agentId === currentSession?.agentId) && currentSession?.speechLanguage || speechSettings(agentId).language
 }
-function subscriptionSpeechFor(agentId?: string): SpeechApi {
-  const entry = speechAccount(agentId), id = entry.metadata.id
-  const inCall = currentSession?.speechAccountId === id && (!agentId || agentId === currentSession.agentId)
-  const identity = inCall && callSpeechIdentity !== undefined ? callSpeechIdentity : entry.auth.identity()
-  const language = callLanguage(agentId)
-  const key = JSON.stringify([id, identity, language])
-  let api = accountSpeech.get(key)
-  if (!api) {
-    api = subscriptionRecognizer(entry, () => claudeSpeechService(id), identity, () => language)
-    api.onChange = () => send('stt:status', sttStatus())
-    accountSpeech.set(key, api)
-  }
-  return api
-}
 /** The API picked to hear a side; null when this PC's models hear it. */
 const speechApiFor = (speaker: Speaker, agentId?: string): SpeechApi | null => {
   const settings = speechSettings(agentId), source = settings[speaker]
-  if (source === 'claude') return subscriptionSpeechFor(agentId)
-  // Sign in with ChatGPT doesn't include transcription: a ChatGPT account's calls are heard by this PC.
+  // Neither Sign in with ChatGPT nor a Claude sign-in includes transcription: a subscription's calls are heard by this PC.
   if (source === 'local' || source === 'chatgpt') return null
   const target = source === 'openai' ? { baseUrl: OPENAI_URL, model: settings.openaiModel || OPENAI_MODEL } : { baseUrl: settings.serverUrl, model: settings.serverModel }
   const call = !agentId || agentId === currentSession?.agentId ? currentSession?.id : undefined
@@ -239,20 +208,25 @@ const speechApiFor = (speaker: Speaker, agentId?: string): SpeechApi | null => {
   return api
 }
 
-/** This PC's speech recognition: Parakeet when it's running, with Whisper behind it. */
+/**
+ * This PC's speech recognition, by the models' names and where they run: Parakeet when it's running, with Whisper
+ * behind it where that's installed (on a CPU, only for languages Parakeet doesn't hear).
+ */
 function localSttStatus(): SttStatus {
   const status = whisper.status()
-  if (!parakeet?.available) return status.state === 'ready' ? { ...status, detail: `Whisper ${status.detail}` } : status
-  return { state: 'ready', detail: `Parakeet, with Whisper for unclear speech${status.state === 'ready' ? '' : ' (Whisper not ready)'}` }
+  const local = speech.local()
+  const where = local?.gpu ? 'graphics' : 'processor'
+  const whisperName = local?.whisperModel ? modelNameOf(local.whisperModel) : null
+  if (!parakeet?.available) return status.state === 'ready' ? { ...status, detail: `${whisperName ?? 'Whisper'} · ${where}` } : status
+  const behind = !whisperName ? '' : status.state === 'ready'
+    ? `, with ${whisperName} for ${local?.gpu ? 'unclear speech and other languages' : 'other languages'}`
+    : ` (${whisperName} not ready)`
+  return { state: 'ready', detail: `Parakeet${behind} · ${where}` }
 }
 
 /** Transcription status for the window: this PC's, and the API picked for a side, if one is. */
 function sttStatus(agentId?: string): SttStatus {
-  const status = { ...hearingStatus(localSttStatus(), { me: speechApiFor('me', agentId), them: speechApiFor('them', agentId) }), transcriptionLanguage: callLanguage(agentId), callId: !agentId || agentId === currentSession?.agentId ? currentSession?.id : undefined }
-  const t = speechSettings(agentId)
-  if (![t.me, t.them].some(source => source === 'claude')) return status
-  const { id, provider, label, shared, email, signedIn } = accounts.identity(speechAccount(agentId).metadata.id)
-  return { ...status, transcriptionAccount: { id, provider, label, shared, email, signedIn } }
+  return { ...hearingStatus(localSttStatus(), { me: speechApiFor('me', agentId), them: speechApiFor('them', agentId) }), transcriptionLanguage: callLanguage(agentId), callId: !agentId || agentId === currentSession?.agentId ? currentSession?.id : undefined }
 }
 
 const frameStore = new FrameStore()
@@ -317,13 +291,6 @@ function selectedChatGPT() {
   const entry = selectedAccount('chatgpt')
   if (entry.kind !== 'chatgpt') throw new Error('Choose a ChatGPT subscription account.')
   return entry
-}
-function callChatGPT(agentId?: string) {
-  const agent = agents.list().find(agent => agent.id === (agentId || getSettings().activeAgentId))
-  const pinnedCall = callAccountId && (!agentId || currentSession?.agentId === agentId) ? callAccountId : undefined
-  const id = pinnedCall || accountChoice(getSettings(), agent?.subscriptionAccountId)
-  const entry = id ? accounts.get(id) : undefined
-  return entry?.kind === 'chatgpt' ? entry : selectedChatGPT()
 }
 
 /** Plain completion with the active model, for background work like studying documents. */
@@ -452,7 +419,6 @@ function codeBaseFor(folders: string[]): CodeBase | undefined {
 let callProvider: LLMProvider | undefined
 let callAI: AIProfile | undefined
 let callAccountId: string | undefined
-let callSpeechIdentity: string | undefined
 let callUserName: string | undefined
 const liveProvider = (): LLMProvider => callProvider ?? activeProvider(getSettings().activeAgentId)
 const screenMonitor = new ScreenMonitor(liveProvider, () => copilot.timelineNow())
@@ -531,29 +497,40 @@ const dictationTarget = new DictationTargetBridge(path.join(app.isPackaged ? pro
 const dictationVocabulary = new DictationVocabularyStore()
 const dictationHistory = new DictationHistoryStore(accountId => send('dictation:history-changed', { accountId }))
 const dictationHistoryRuns = new WeakMap<DictationEngine, Promise<DictationHistoryTicket | undefined>>()
-/** Dictation heard by this PC's speech recognition: Parakeet for English when it's sure, Whisper otherwise. */
+/**
+ * Dictation heard by this PC's speech recognition: Parakeet for its 25 languages when it's sure, Whisper otherwise.
+ * Whisper re-checks Parakeet only where it's quick (a GPU's large-v3-turbo) or the language is detected; on a CPU,
+ * where Whisper small is only for other languages, and without Whisper, Parakeet's text is kept.
+ */
 async function localDictation(pcm: Float32Array, language: string, signal: AbortSignal): Promise<string> {
   signal.throwIfAborted()
-  if (localSttStatus().state !== 'ready') throw new Error("Dictation with a ChatGPT account is heard by this PC's speech recognition. Set it up in Settings → Speech to text.")
-  if (parakeet?.available && speechLanguageCode(language) === 'en') {
-    const heard = await parakeet.transcribe(pcm, { partial: false, stream: 'dictation' }).catch(() => null)
-    if (heard?.text && heard.confidence >= 0.6) return heard.text
+  if (localSttStatus().state !== 'ready') throw new Error("Voice typing is heard by this computer's speech recognition. Set it up in Settings → Speech.")
+  const whisperReady = whisper.status().state === 'ready'
+  const recheck = whisperReady && (!!speech.local()?.gpu || speechLanguageCode(language) === 'auto')
+  let heard: { text: string; confidence: number } | null = null
+  if (parakeet?.available && (parakeetHears(language) || !whisperReady)) {
+    heard = await parakeet.transcribe(pcm, { partial: false, stream: 'dictation' }).catch(() => null)
+    if (heard?.text && heard.confidence >= 0.6 && !switchedLanguage(heard.text, language)) return heard.text
+    if (heard?.text && !recheck) return heard.text
+  }
+  if (!whisperReady) {
+    if (heard?.text) return heard.text
+    const what = speechLanguageCode(language) === 'auto' ? 'Detecting the language' : speechLanguageName(language)
+    throw new Error(`${what} needs one more download on this computer: add it in Settings → Speech.`)
   }
   return (await whisper.transcribe(pcm, { language, partial: false, stream: 'dictation', dictation: true })).text
 }
 function createDictationSpeech(): DictationSpeech {
   meetingNotes.pauseAutomatic()
   callTitles.pause()
-  const settings = structuredClone(voiceSettings()), source = dictationSource(settings)
-  const speechId = settings.dictation.accountId || settings.transcription.accountId
-  const entry = speechId ? accounts.get(speechId) : source ? selectedAccount(source) : undefined
-  if (!entry) throw new Error('Choose a Claude or ChatGPT subscription account for dictation in Settings.')
+  const settings = structuredClone(voiceSettings())
+  // Voice typing's own account, or (automatic) the AI's: one setting, in Settings → Voice typing.
+  let entry: ReturnType<typeof accounts.get>
+  try { entry = accounts.get(voiceAccountId(settings, accounts.known())) }
+  catch { throw new Error('Your voice typing account is unavailable. Choose another in Settings → Voice typing.') }
   settings.provider = entry.kind; settings.claude.auth = 'subscription'; settings.dictation.speech = entry.kind
   const openai = entry.kind === 'chatgpt' ? entry : undefined, anthropic = entry.kind === 'claude' ? entry : undefined
   const provider = accounts.pinned(entry.metadata.id, false)
-  const identity = entry.auth.identity()
-  const api = subscriptionRecognizer(entry, () => claudeSpeechService(entry.metadata.id), identity, () => settings.transcription.language)
-  if (anthropic) claudeSpeechService(entry.metadata.id)
   const scopedSpeechWords = speechWords(agents.get(copilot.isListening ? currentSession?.agentId || getSettings().activeAgentId : dictationAgentId || getSettings().activeAgentId).vocabulary)
   const speech = new DictationSpeech({
     vocabulary: dictationVocabulary.get(entry.metadata.id).then(vocabulary => {
@@ -564,22 +541,24 @@ function createDictationSpeech(): DictationSpeech {
     settings: () => settings, chatgpt: provider, claude: provider,
     chatgptAccount: () => openai?.auth.status() ?? { signedIn: false },
     claudeAccount: () => anthropic?.auth.status() ?? Promise.resolve({ signedIn: false }),
-    // A ChatGPT account's dictation is heard by this PC (Sign in with ChatGPT doesn't include transcription); ChatGPT
-    // still cleans it up, when that's on.
-    remote: (pcm, language, signal) => openai ? localDictation(pcm, language, signal) : api.transcribe(pcm, { language, vocabulary: '', signal, dictation: true }),
-    claudeSpeech: (language, email, signal) => claudeSpeechServices.get(entry.metadata.id)!.prepare(language, email, signal),
-    claudeStream: entry.kind === 'claude' ? (language, email, signal) => claudeSpeechServices.get(entry.metadata.id)!.open(language, email, signal) : undefined
+    // Every account's dictation is heard by this PC: neither sign-in includes transcription. The account cleans it up,
+    // when that's on.
+    remote: (pcm, language, signal) => localDictation(pcm, language, signal)
   })
   dictationHistoryRuns.set(speech, dictationHistory.begin(entry.metadata.id).catch(error => { console.warn('[dictation history]', (error as Error).message); return undefined }))
   return speech
 }
 const dictationWindow = new DictationWindow(() => dictation.cancel())
-// Togle Microphone, the separate app that cleans the microphone for every call app, when it's on this computer.
+// Togle Studio, the separate app that cleans the microphone for every call app, when it's on this computer.
 // Test runs look in a folder of their own, never at the real one.
 const microphoneLink = new MicrophoneLink({
   folder: !app.isPackaged && process.env.TOGLE_MICROPHONE_FOLDER ? process.env.TOGLE_MICROPHONE_FOLDER : path.join(app.getPath('appData'), MICROPHONE_PRODUCT),
   client: { name: 'togle', version: app.getVersion() },
-  open: url => shell.openExternal(url)
+  open: url => shell.openExternal(url),
+  // From source, Togle can start the microphone app's development build too (its link file names Electron and its folder).
+  development: !app.isPackaged,
+  // Before release Togle Studio was called Togle Microphone: its old link file can still start it, once.
+  previousFolder: !app.isPackaged && process.env.TOGLE_MICROPHONE_FOLDER ? undefined : path.join(app.getPath('appData'), 'Togle Microphone')
 })
 const microphoneLinkOn = (): boolean => app.isPackaged || process.env.TOGLE_HEADLESS !== '1' || !!process.env.TOGLE_MICROPHONE_FOLDER
 let microphoneNoticeShown = false
@@ -588,7 +567,7 @@ microphoneLink.on('changed', status => {
   // Togle turned it on for this call and it stopped: the call may be silent.
   if (status.forCall && status.state?.phase === 'error' && !microphoneNoticeShown && !quitting && !win?.isVisible() && Notification.isSupported()) {
     microphoneNoticeShown = true
-    const notice = new Notification({ title: 'Togle Microphone stopped', body: 'Your call may be silent. Open Togle Microphone to reconnect, or choose your microphone in the call app.' })
+    const notice = new Notification({ title: 'Togle Studio stopped', body: 'Your call may be silent. Open Togle Studio to reconnect, or choose your microphone in the call app.' })
     notice.on('click', () => void microphoneLink.show().catch(() => openWindow()))
     notice.show()
   }
@@ -641,7 +620,7 @@ async function requestQuit(confirmed = false): Promise<void> {
   }
   quitting = true; closeConfirmed = true
   dictation.dispose(); voices.stop()
-  // What Togle turned on for the call goes off with it; Togle Microphone itself keeps running.
+  // What Togle turned on for the call goes off with it; Togle Studio itself keeps running.
   await Promise.race([microphoneLink.endCall(), new Promise(resolve => setTimeout(resolve, 1500))])
   microphoneLink.stop()
   try { await Promise.all([meetingNotes.stop(), callTitles.stop()]); await voices.flush(); await callFile.flush(); await dictationHistory.flush() }
@@ -923,7 +902,8 @@ function createWindow(): void {
   if (process.env.TOGLE_AUTOSTART) {
     win.webContents.once('did-finish-load', () => setTimeout(() => send('hotkey', 'toggle-listening'), 1500))
   }
-  if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
+  // Only a development run loads its page from the dev server; a packaged Togle ignores the variable.
+  if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else void win.loadFile(path.join(__dirname, '../renderer/index.html'))
 }
 
@@ -976,7 +956,8 @@ const HOTKEYS: { id: HotkeyId; keys: string; label: string; run: () => void }[] 
   { id: 'suggest', keys: 'Ctrl+Alt+Space', label: 'Suggest', run: () => void copilot.assist({ kind: 'suggest' }) },
   { id: 'suggest-screen', keys: 'Ctrl+Alt+Enter', label: 'Suggest from the screen', run: () => void copilot.assist({ kind: 'suggest', withScreen: true }) },
   { id: 'deeper', keys: 'Ctrl+Alt+Shift+D', label: 'Think deeper', run: () => copilot.deeper() },
-  { id: 'listen', keys: 'Ctrl+Alt+Shift+L', label: 'Start or end a call', run: () => send('hotkey', 'toggle-listening') },
+  // Out of sight (hidden, minimized), the window couldn't show the start-call picker: the call starts as last time.
+  { id: 'listen', keys: 'Ctrl+Alt+Shift+L', label: 'Start or end a call', run: () => send('hotkey', win?.isVisible() && !win.isMinimized() ? 'toggle-listening' : 'start-call-unseen') },
   { id: 'snapshot', keys: 'Ctrl+Alt+Shift+S', label: 'Save a picture of the screen for the call', run: () => send('hotkey', 'snapshot') },
   { id: 'record', keys: 'Ctrl+Alt+Shift+R', label: 'Watch the screen, or stop', run: () => send('hotkey', 'toggle-recording') },
   // Minimized counts as hidden: the hotkey brings it back.
@@ -1100,6 +1081,7 @@ function registerIpc(): void {
     if (dictationWindow.owns(event.sender) && typeof expanded === 'boolean') dictationWindow.setExpanded(expanded, explicit === true)
   })
   ipcMain.on('dictation:drag', (event, action: string, x: number, y: number) => { if (dictationWindow.owns(event.sender)) dictationWindow.drag(action, x, y) })
+  ipcMain.on('dictation:pill', (event, width: number, height: number) => { if (dictationWindow.owns(event.sender) && typeof width === 'number' && typeof height === 'number') dictationWindow.setPill(width, height) })
   ipcMain.handle('dictation:toggle', () => dictation.toggle())
   ipcMain.handle('dictation:cancel', () => dictation.cancel())
   ipcMain.handle('dictation:original', (_event, id: string) => { if (typeof id === 'string') dictation.useOriginal(id) })
@@ -1119,7 +1101,6 @@ function registerIpc(): void {
     if (patch.ai) validateProfile(patch.ai as AIProfile)
     if ((patch.provider || patch.subscriptionAccountId !== undefined) && patch.ai === undefined) patch = { ...patch, ai: null }
     if (patch.dictation?.accountId) accounts.get(patch.dictation.accountId)
-    if (patch.transcription?.accountId) accounts.get(patch.transcription.accountId)
     if (patch.subscriptionAccountId) {
       const entry = accounts.get(patch.subscriptionAccountId)
       patch = { ...patch, provider: entry.kind, ...(entry.kind === 'claude' ? { claude: { ...patch.claude, auth: 'subscription' } } : {}) }
@@ -1143,7 +1124,7 @@ function registerIpc(): void {
     selectedChatGPT().provider.plan.update()
     // What hears each side may be another now: why the one before didn't hear a line isn't this one's problem.
     if (patch?.transcription) {
-      for (const api of [...Object.values(speechApis), ...accountSpeech.values()]) api.reset()
+      for (const api of Object.values(speechApis)) api.reset()
       send('stt:status', sttStatus())
     }
     return saved
@@ -1202,7 +1183,6 @@ function registerIpc(): void {
     if (quitting) return
     send('accounts:changed', undefined)
     if (status.provider === 'claude') { const identity = accounts.get(status.id).auth.identity(); if (calendarIdentities.get(status.id) !== identity) calendar.clear(status.id); calendarIdentities.set(status.id, identity) }
-    for (const [key, speech] of accountSpeech) if ((JSON.parse(key) as string[])[0] === status.id) speech.reset()
     if (status.signedIn) studyAgain()
     if (status.id !== selectedAccount(status.provider).metadata.id) return
     if (status.provider === 'chatgpt') {
@@ -1253,6 +1233,8 @@ function registerIpc(): void {
     normalize: text => speechLesson(text) ? text : correctSpeech(text, speechWords(agents.get(currentSession?.agentId || getSettings().activeAgentId).vocabulary)),
     parakeet: () => parakeet,
     whisper,
+    whisperReady: () => whisper.status().state === 'ready',
+    whisperChecks: () => !!speech.local()?.gpu,
     api: (speaker) => {
       const api = speechApiFor(speaker)
       return api?.canHear() ? api : null
@@ -1333,10 +1315,8 @@ function registerIpc(): void {
         callUserName = callAccountId ? accounts.identity(callAccountId).name : undefined
         callAI = profile
       }
-      const speechAccountId = currentSession?.speechAccountId || speechAccount(agent.id).metadata.id
-      if (!currentSession || callSpeechIdentity === undefined) callSpeechIdentity = accounts.get(speechAccountId).auth.identity()
       const meeting = currentSession?.meeting ?? (!currentSession ? meetingForCall(calendar.status(agent.id), agent.id, Date.now(), meetingId) : undefined)
-      currentSession = { ...currentSession, id: currentCallKey, agentId: agent.id, agentName: agent.name, accountId: callAccountId, ai: currentSession?.ai || callAI, speechAccountId, speechSettings: currentSession?.speechSettings || structuredClone(speechSettings(agent.id)), speechLanguage: currentSession?.speechLanguage || speechSettings(agent.id).language, meeting: meeting && { id: meeting.id, title: meeting.title, start: meeting.start, end: meeting.end }, startedAt: currentSession?.startedAt ?? Date.now(), endedAt: undefined, status: 'live' }
+      currentSession = { ...currentSession, id: currentCallKey, agentId: agent.id, agentName: agent.name, accountId: callAccountId, ai: currentSession?.ai || callAI, speechSettings: currentSession?.speechSettings || structuredClone(speechSettings(agent.id)), speechLanguage: currentSession?.speechLanguage || speechSettings(agent.id).language, meeting: meeting && { id: meeting.id, title: meeting.title, start: meeting.start, end: meeting.end }, startedAt: currentSession?.startedAt ?? Date.now(), endedAt: undefined, status: 'live' }
     } else if (currentSession) currentSession = { ...currentSession, status: 'ended', endedAt: Date.now() }
     if (!value) void microphoneLink.endCall()
     copilot.setListening(value)
@@ -1365,7 +1345,7 @@ function registerIpc(): void {
     // A call the user cleared mustn't come back: deleting a long call's pictures takes a while (and can fail on a
     // busy file), and the saved call is deleted meanwhile.
     await callFile.clear(() => copilot.clear())
-    callProvider = undefined; callAI = undefined; callAccountId = undefined; callSpeechIdentity = undefined; callUserName = undefined
+    callProvider = undefined; callAI = undefined; callAccountId = undefined; callUserName = undefined
     remoteSpeech.clear()
     currentCallKey = frameStore.sessionId
     // A new call while listening: its share of the plan counts from here, as when listening starts.
@@ -1465,6 +1445,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('calls:review', async (_e, id: string) => { await storedCallSession(id); return callLearning.review(id) })
   ipcMain.handle('calls:approve', (_e, id: string, reviewId: string, selected: string[]) => callLearning.approve(id, reviewId, Array.isArray(selected) ? selected : []))
+  ipcMain.handle('calls:drop', (_e, id: string, reviewId: string, selected: string[]) => callLearning.drop(id, reviewId, Array.isArray(selected) ? selected.filter(item => typeof item === 'string') : []))
   ipcMain.handle('calls:dismiss', (_e, id: string, reviewId: string) => callLearning.dismiss(id, reviewId))
 
   ipcMain.handle('record:sources', (_e, previews?: boolean) => listCaptureSources(previews === true))
@@ -1525,7 +1506,6 @@ function registerIpc(): void {
     if (patch.preferences) {
       const preferences = validatePreferences(patch.preferences)
       if (preferences.ai) validateProfile(preferences.ai)
-      if (preferences.transcription?.accountId) accounts.get(preferences.transcription.accountId)
       if (preferences.dictation?.accountId) accounts.get(preferences.dictation.accountId)
       patch = { ...patch, preferences }
     }
@@ -1909,13 +1889,15 @@ if (!app.requestSingleInstanceLock()) {
     await Promise.all([loadSettings(), auth.load(), claude.load(), compat.load(), ...Object.values(speechApis).map((api) => api.load())])
     await accounts.load()
     await apiConnections.load()
-    await accounts.list()
+    // Claude's sign-in is read by starting its runtime (claude auth status): a quarter of a second here, seconds on a
+    // slow disk. The window doesn't wait for it; what needs it waits (accounts.list(), pinned requests).
+    const accountsRead = accounts.list().catch(error => { console.warn('[accounts]', (error as Error).message); return [] })
     // Before the speech model was a choice, this PC heard every call: a Togle from then that has its speech recognition
     // keeps it (quicker, and the audio stays here); one without starts on the ChatGPT plan, as a new one does.
     if (savedBeforeSpeechChoice() && speech.local()) await updateSettings({ transcription: { me: 'local', them: 'local' } })
     started.settings = Date.now()
     // Apply text retention on startup, including accounts whose history screen is not opened.
-    void accounts.list().then(list => Promise.all(list.map(account => dictationHistory.get(account.id)))).catch(error => console.warn('[dictation history] retention:', (error as Error).message))
+    void accountsRead.then(list => Promise.all(list.map(account => dictationHistory.get(account.id)))).catch(error => console.warn('[dictation history] retention:', (error as Error).message))
     await agents.load(getSettings().assist.context)
     started.agents = Date.now()
     if (!agents.list().some((a) => a.id === getSettings().activeAgentId)) {
@@ -1924,15 +1906,17 @@ if (!app.requestSingleInstanceLock()) {
     warmWorkApps(agents.get(getSettings().activeAgentId))
     if (getSettings().assist.calendarReminders) {
       const owner = agents.list().find(agent => agent.id === getSettings().assist.calendarAgentId) || agents.get(getSettings().activeAgentId)
-      if (!owner.calendar) { const id = selectedClaude().metadata.id; await agents.update(owner.id, { calendar: { enabled: true, accountId: id, accountEmail: accounts.identity(id).email } }) }
+      if (!owner.calendar) { await accountsRead; const id = selectedClaude().metadata.id; await agents.update(owner.id, { calendar: { enabled: true, accountId: id, accountEmail: accounts.identity(id).email } }) }
       await updateSettings({ assist: { calendarReminders: false, calendarAgentId: '' } })
     }
-    if (needsSpeechAccountMigration()) {
-      const settings = getSettings(), source = dictationSource(settings)
-      const voice = settings.dictation.accountId || (source ? selectedAccount(source).metadata.id : undefined)
-      const sides = [settings.transcription.me, settings.transcription.them]
-      const call = sides.includes('chatgpt') ? callChatGPT().metadata.id : sides.includes('claude') ? selectedClaude().metadata.id : undefined
-      await updateSettings(migrateSpeechAccounts(settings, call, voice))
+    // Voice typing's account became one setting (loadSettings): the agents' own choices carry over the same way.
+    const oldVoiceAccounts = voiceAccountsToMigrate()
+    if (oldVoiceAccounts) {
+      for (const agent of agents.list()) {
+        const preferences = migrateVoicePreferences(agent.preferences, oldVoiceAccounts)
+        if (preferences) await agents.update(agent.id, { preferences }).catch(error => console.warn('[voice typing account]', agent.id, (error as Error).message))
+      }
+      await voiceAccountsMigrated()
     }
     studyAgain()
     serveFrames()
@@ -1959,7 +1943,8 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc()
     started.window = Date.now()
     createWindow()
-    calendar.start()
+    // Reminders check the Claude account they belong to: once its sign-in is read.
+    void accountsRead.then(() => { if (!quitting) calendar.start() })
     registerHotkeys()
     if (app.isPackaged || process.env.TOGLE_HEADLESS !== '1' || process.env.TOGLE_TEST_TRAY === '1') {
       try {

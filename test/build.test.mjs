@@ -12,7 +12,7 @@ const asar = require('@electron/asar')
 test('installers carry no audio driver and need no administrator', () => {
   const config = require('js-yaml').load(fs.readFileSync(new URL('../electron-builder.yml', import.meta.url), 'utf8'))
   const targets = config.mac.target.map(target => typeof target === 'string' ? target : target.target)
-  assert.deepEqual(targets, ['dmg', 'zip'], 'macOS ships the app alone: Togle Microphone brings its own driver')
+  assert.deepEqual(targets, ['dmg', 'zip'], 'macOS ships the app alone: Togle Studio brings its own driver')
   assert.equal(config.pkg, undefined)
   assert.equal(config.nsis.include, undefined, 'the Windows installer runs no driver setup')
   assert.equal(config.nsis.perMachine, false, 'Windows installs for the user, without administrator rights')

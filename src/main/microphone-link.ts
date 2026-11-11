@@ -1,16 +1,16 @@
 import { EventEmitter } from 'node:events'
 import net from 'node:net'
 import path from 'node:path'
-import { existsSync, promises as fs, watch, type FSWatcher } from 'node:fs'
+import { existsSync, readFileSync, promises as fs, watch, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
 import {
-  encodeLinkMessage, LinkLineReader, MICROPHONE_LINK_FILE, MICROPHONE_PROTOCOL, readLinkFile, readLinkState,
+  encodeLinkMessage, LinkLineReader, MICROPHONE_LINK_FILE, MICROPHONE_PRODUCT, MICROPHONE_PROTOCOL, readLinkFile, readLinkState,
   type MicrophoneLaunch, type MicrophoneLinkFile, type MicrophoneLinkMethod, type MicrophoneLinkPage, type MicrophoneLinkState
 } from '@shared/microphone-link'
 import { MICROPHONE_SIGN_IN, type MicrophoneSettings, type TogleMicrophoneStatus } from '@shared/microphone'
 
 const REQUEST_TIMEOUT_MS = 5_000
-/** How often Togle looks for Togle Microphone when it isn't connected (a file read and a failed connect: cheap). */
+/** How often Togle looks for Togle Studio when it isn't connected (a file read and a failed connect: cheap). */
 const POLL_MS = 15_000
 /** After a launch, how long to wait for it to come up. */
 const LAUNCH_WAIT_MS = 15_000
@@ -20,18 +20,28 @@ const CALL_WAIT_MS = 4_000
 interface Pending { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }
 
 export interface MicrophoneLinkOptions {
-  /** Togle Microphone's user-data folder, where it writes link.json. */
+  /** Togle Studio's user-data folder, where it writes link.json. */
   folder: string
   client: { name: string; version: string }
   platform?: NodeJS.Platform
   /** Starts a program, detached (tests replace it). */
   run?: (launch: MicrophoneLaunch) => void
-  /** Opens a togle-microphone:// address (tests replace it). */
+  /** Opens a togle-studio:// address (tests replace it). */
   open?: (url: string) => Promise<void>
+  /**
+   * Togle runs from source: a development build of Togle Studio (Electron from a node_modules folder, given the
+   * microphone app's own folder) may be started too. A packaged Togle only starts the installed app's program.
+   */
+  development?: boolean
+  /**
+   * Where the app wrote its link file while it was still called Togle Microphone (before release). Read only, never
+   * watched (that would keep the renamed app from moving the folder), and only to start the renamed app.
+   */
+  previousFolder?: string
 }
 
 /**
- * Finds Togle Microphone on this computer and talks to it over its local link (see @shared/microphone-link): its
+ * Finds Togle Studio on this computer and talks to it over its local link (see @shared/microphone-link): its
  * state, watched as it changes, and turning it on and off around calls. Togle works the same without it.
  */
 export class MicrophoneLink extends EventEmitter {
@@ -77,7 +87,7 @@ export class MicrophoneLink extends EventEmitter {
     this.disconnect()
   }
 
-  /** Reads the link file again and connects if Togle Microphone is running. */
+  /** Reads the link file again and connects if Togle Studio is running. */
   async refresh(): Promise<TogleMicrophoneStatus> {
     const file = await this.readFile()
     const moved = !!this.file && !!file && (file.token !== this.file.token || file.socket !== this.file.socket)
@@ -89,12 +99,12 @@ export class MicrophoneLink extends EventEmitter {
     return this.status()
   }
 
-  /** Before a call: turns Togle Microphone on when it's installed and the setting asks for it. */
+  /** Before a call: turns Togle Studio on when it's installed and the setting asks for it. */
   async prepareCall(settings: MicrophoneSettings): Promise<TogleMicrophoneStatus> {
     const status = await this.refresh()
     if (!settings.autoStart || !status.installed || this.forCall) return status
     const phase = status.state?.phase
-    // Signed out of Togle Microphone: it can't start, and a call is no moment to open its sign-in. Togle shows that instead.
+    // Signed out of Togle Studio: it can't start, and a call is no moment to open its sign-in. Togle shows that instead.
     if (phase === 'on' || phase === 'starting' || status.state?.setup === 'missing' || status.state?.setup === 'restart' || status.state?.account === 'signed-out') return status
     try {
       await this.turnOn('call', CALL_WAIT_MS)
@@ -118,10 +128,10 @@ export class MicrophoneLink extends EventEmitter {
   async turnOn(reason: 'call' | 'user' = 'user', wait = LAUNCH_WAIT_MS): Promise<TogleMicrophoneStatus> {
     if (!this.connected) await this.refresh()
     if (!this.connected) {
-      if (!this.file) throw new Error("Togle Microphone isn't installed.")
+      if (!this.file) throw new Error("Togle Studio isn't installed.")
       await this.launch(['--start'])
       await this.waitFor(status => status.running, wait)
-      if (!this.connected) throw new Error("Togle Microphone didn't start.")
+      if (!this.connected) throw new Error("Togle Studio didn't start.")
     }
     if (this.state?.account === 'signed-out') {
       // Asked by the user: its window opens at the sign-in.
@@ -130,7 +140,7 @@ export class MicrophoneLink extends EventEmitter {
     }
     if (this.state?.phase !== 'on' && this.state?.phase !== 'starting') this.accept(await this.request('start', { reason }))
     await this.waitFor(status => status.state?.phase === 'on' || status.state?.phase === 'error', Math.min(wait, CALL_WAIT_MS))
-    if (this.state?.phase === 'error') throw new Error(this.state.error || 'Togle Microphone could not start.')
+    if (this.state?.phase === 'error') throw new Error(this.state.error || 'Togle Studio could not start.')
     return this.status()
   }
 
@@ -142,11 +152,11 @@ export class MicrophoneLink extends EventEmitter {
     return this.status()
   }
 
-  /** Opens Togle Microphone's window, starting the app first when it isn't running. */
+  /** Opens Togle Studio's window, starting the app first when it isn't running. */
   async show(page: MicrophoneLinkPage = 'settings'): Promise<void> {
     if (!this.connected) await this.refresh()
     if (this.connected) { await this.request('show', { page }); return }
-    if (!this.file) throw new Error("Togle Microphone isn't installed.")
+    if (!this.file) throw new Error("Togle Studio isn't installed.")
     await this.launch([], true)
   }
 
@@ -157,8 +167,17 @@ export class MicrophoneLink extends EventEmitter {
   }
 
   private async readFile(): Promise<MicrophoneLinkFile | undefined> {
+    const read = async (folder: string): Promise<unknown> => JSON.parse(await fs.readFile(path.join(folder, MICROPHONE_LINK_FILE), 'utf8'))
     try {
-      return readLinkFile(JSON.parse(await fs.readFile(path.join(this.options.folder, MICROPHONE_LINK_FILE), 'utf8')))
+      return readLinkFile(await read(this.options.folder))
+    } catch {
+      if (!this.options.previousFolder) return undefined
+    }
+    // The app's link from before it was renamed: good for starting it (it moves its folder and writes a new link), not for talking to it.
+    try {
+      const old = await read(this.options.previousFolder) as { product?: unknown; socket?: unknown } | null
+      if (old?.product !== 'Togle Microphone') return undefined
+      return readLinkFile({ ...old, product: MICROPHONE_PRODUCT })
     } catch {
       return undefined
     }
@@ -178,9 +197,9 @@ export class MicrophoneLink extends EventEmitter {
     }
   }
 
-  /** Only Togle Microphone's own pipe or socket. */
+  /** Only Togle Studio's own pipe or socket. */
   private validSocket(socket: string): boolean {
-    if (this.platform === 'win32') return /^\\\\\.\\pipe\\togle-microphone-[0-9a-f]{8,64}$/i.test(socket)
+    if (this.platform === 'win32') return /^\\\\\.\\pipe\\togle-studio-[0-9a-f]{8,64}$/i.test(socket)
     if (!path.isAbsolute(socket) || !socket.endsWith('.sock')) return false
     const inside = (folder?: string): boolean => !!folder && path.dirname(socket) === path.resolve(folder)
     return inside(this.options.folder) || inside(process.env.XDG_RUNTIME_DIR)
@@ -205,7 +224,7 @@ export class MicrophoneLink extends EventEmitter {
         if (this.socket === socket) {
           this.socket = undefined
           this.connected = false
-          this.rejectAll(new Error('Togle Microphone closed the link.'))
+          this.rejectAll(new Error('Togle Studio closed the link.'))
           this.publish()
         }
         done(false)
@@ -216,7 +235,7 @@ export class MicrophoneLink extends EventEmitter {
           try {
             await this.request('hello', { token: file.token, client: this.options.client.name, version: this.options.client.version })
             const state = readLinkState(await this.request('state'))
-            if (!state) throw new Error('Togle Microphone sent a state Togle does not understand.')
+            if (!state) throw new Error('Togle Studio sent a state Togle does not understand.')
             this.state = state
             this.connected = true
             await this.request('watch')
@@ -235,7 +254,7 @@ export class MicrophoneLink extends EventEmitter {
     const socket = this.socket
     this.socket = undefined
     this.connected = false
-    this.rejectAll(new Error('Togle Microphone is not connected.'))
+    this.rejectAll(new Error('Togle Studio is not connected.'))
     socket?.destroy()
   }
 
@@ -258,12 +277,12 @@ export class MicrophoneLink extends EventEmitter {
 
   private request(method: MicrophoneLinkMethod, params?: object): Promise<unknown> {
     const socket = this.socket
-    if (!socket || socket.destroyed) return Promise.reject(new Error('Togle Microphone is not connected.'))
+    if (!socket || socket.destroyed) return Promise.reject(new Error('Togle Studio is not connected.'))
     const id = this.nextId++
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error('Togle Microphone did not answer.'))
+        reject(new Error('Togle Studio did not answer.'))
       }, REQUEST_TIMEOUT_MS)
       this.pending.set(id, { resolve, reject, timer })
       socket.write(encodeLinkMessage({ id, method, ...(params ? { params } : {}) } as never))
@@ -294,18 +313,30 @@ export class MicrophoneLink extends EventEmitter {
     })
   }
 
-  /** What link.json says starts Togle Microphone, if it's really Togle Microphone. */
+  /** What link.json says starts Togle Studio, if it's really Togle Studio. */
   private launchCommand(extra: string[], visible: boolean): MicrophoneLaunch | undefined {
     const launch = this.file?.launch
     if (!launch) return
     const args = visible ? launch.args.filter(arg => arg !== '--hidden') : launch.args
+    if (this.options.development && this.developmentBuild(launch)) return { command: launch.command, args: [...args, ...extra] }
     if (this.platform === 'win32') {
-      if (!path.isAbsolute(launch.command) || !/\\Togle Microphone\.exe$/i.test(launch.command) || !existsSync(launch.command)) return
+      if (!path.isAbsolute(launch.command) || !/\\Togle Studio\.exe$/i.test(launch.command) || !existsSync(launch.command)) return
     } else if (this.platform === 'darwin') {
-      if (launch.command !== '/usr/bin/open' || launch.args[0] !== '-b' || launch.args[1] !== 'io.togle.microphone') return
+      if (launch.command !== '/usr/bin/open' || launch.args[0] !== '-b' || launch.args[1] !== 'io.togle.studio') return
       if (extra.length && !args.includes('--args')) return { command: launch.command, args: [...args, '--args', ...extra] }
-    } else if (!path.isAbsolute(launch.command) || !/togle[- ]?microphone/i.test(path.basename(launch.command)) || !existsSync(launch.command)) return
+    } else if (!path.isAbsolute(launch.command) || !/togle[- ]?studio/i.test(path.basename(launch.command)) || !existsSync(launch.command)) return
     return { command: launch.command, args: [...args, ...extra] }
+  }
+
+  /** A development build of Togle Studio: Electron from a node_modules folder, run on the microphone app's folder. */
+  private developmentBuild(launch: MicrophoneLaunch): boolean {
+    const electron = this.platform === 'win32'
+      ? /[\\/]node_modules[\\/]electron[\\/]dist[\\/]electron\.exe$/i
+      : /[\\/]node_modules[\\/]electron[\\/]dist[\\/](?:electron|Electron\.app[\\/]Contents[\\/]MacOS[\\/]Electron)$/
+    const folder = launch.args[0]
+    if (!path.isAbsolute(launch.command) || !electron.test(launch.command) || !existsSync(launch.command) || !folder || !path.isAbsolute(folder)) return false
+    try { return (JSON.parse(readFileSync(path.join(folder, 'package.json'), 'utf8')) as { productName?: unknown }).productName === MICROPHONE_PRODUCT }
+    catch { return false }
   }
 
   private async launch(extra: string[], visible = false): Promise<void> {
@@ -316,13 +347,24 @@ export class MicrophoneLink extends EventEmitter {
     }
     // Not a launch Togle can check: the app's own address starts it instead (it registers it when it runs).
     const action = extra.includes('--start') ? 'start' : 'open'
-    if (!this.options.open) throw new Error("Togle Microphone can't be started from Togle. Open it from your apps.")
-    await this.options.open(`${MICROPHONE_PROTOCOL}://${action}`)
+    const cannot = "Togle couldn't start Togle Studio. Open it from your apps, then try again."
+    if (!this.options.open) throw new Error(cannot)
+    try { await this.options.open(`${MICROPHONE_PROTOCOL}://${action}`) }
+    catch { throw new Error(cannot) }
   }
 }
 
+/**
+ * The environment Togle Studio starts with: Togle's, minus what was meant for Togle alone. Above all its development
+ * server's address (ELECTRON_RENDERER_URL), which made Togle Studio load Togle's page and show a blank window.
+ */
+export function launchEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([key]) =>
+    !/^(?:ELECTRON_RENDERER_URL|ELECTRON_RUN_AS_NODE|ELECTRON_ENABLE_LOGGING|ELECTRON_ENABLE_STACK_DUMPING|ELECTRON_NO_ATTACH_CONSOLE|NODE_ENV|NODE_OPTIONS|VITE_.*|TOGLE_.*)$/i.test(key)))
+}
+
 function runDetached(launch: MicrophoneLaunch): void {
-  const child = spawn(launch.command, launch.args, { detached: true, stdio: 'ignore', windowsHide: false })
-  child.on('error', error => console.warn('[microphone] could not start Togle Microphone:', error.message))
+  const child = spawn(launch.command, launch.args, { detached: true, stdio: 'ignore', windowsHide: false, env: launchEnvironment() })
+  child.on('error', error => console.warn('[microphone] could not start Togle Studio:', error.message))
   child.unref()
 }

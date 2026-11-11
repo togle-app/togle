@@ -3,6 +3,7 @@ import type { Settings } from '@shared/types'
 import { readJson, writeJson } from './storage'
 import { validateAIProfile } from '@shared/preferences'
 import { MICROPHONE_DEFAULTS } from '@shared/microphone'
+import { mergedVoiceAccount, type OldVoiceAccounts } from '@shared/speech'
 
 const FILE = 'settings.json'
 
@@ -41,12 +42,12 @@ export const DEFAULT_SETTINGS: Settings = {
   compat: { baseUrl: 'https://api.openai.com/v1', model: '' },
   assist: { auto: true, rememberVoices: true, autoNotes: true },
   activeAgentId: '',
-  // One shared subscription for calls and voice typing. A ChatGPT account's speech is heard by this PC (Sign in with
-  // ChatGPT doesn't include transcription), which detects the spoken language; Claude requires an explicit supported
-  // language. Existing account/language choices survive upgrades.
-  transcription: { accountId: 'chatgpt-default', language: 'auto', me: 'local', them: 'local', openaiModel: 'gpt-transcribe', serverUrl: '', serverModel: '' },
+  // Calls are heard by this PC (no sign-in includes transcription), which detects the spoken language, unless a speech
+  // API is picked for them.
+  transcription: { language: 'auto', me: 'local', them: 'local', openaiModel: 'gpt-transcribe', serverUrl: '', serverModel: '' },
   window: { alwaysOnTop: true, opacity: 1, hideFromCapture: true },
   microphone: { ...MICROPHONE_DEFAULTS },
+  // Voice typing is heard by this PC too; its account ('' : the AI's own, automatically) cleans up the words.
   dictation: { speech: 'auto', accountId: '', mode: process.platform === 'win32' ? 'hold' : 'toggle', polish: true, showBar: true, microphoneId: '' },
   // Hubs of agents added by hand (Togle's own comes first anyway). Here so that loading keeps them.
   hubs: [],
@@ -58,14 +59,16 @@ let current: Settings = DEFAULT_SETTINGS
 let lastWrite: Promise<void> = Promise.resolve()
 /**
  * Settings of earlier versions that another app reads from this file, kept in it as they were: the clean microphone's,
- * from before it became Togle Microphone, which imports them the first time it runs.
+ * from before it became Togle Studio, which imports them the first time it runs.
  */
 const KEPT_FOR_OTHERS = ['cleanMic'] as const
 let kept: Record<string, unknown> = {}
 // Saved by a Togle from before the speech model was a choice, when this PC heard every call.
 let fromBeforeSpeechChoice = false
-let legacySpeechAccounts = false
-export const needsSpeechAccountMigration = (): boolean => legacySpeechAccounts
+// Saved when voice typing's account was two settings (a shared speech account, and voice typing's own over it): what
+// they were, for the agents' own choices to carry over too (migrateVoicePreferences). Undefined once carried over.
+let oldVoiceAccounts: OldVoiceAccounts | undefined
+export const voiceAccountsToMigrate = (): OldVoiceAccounts | undefined => oldVoiceAccounts
 
 /** Whether a value can take a setting's place: of the same kind as its default (any kind, for one it doesn't have). */
 const fits = (value: unknown, by: unknown): boolean =>
@@ -101,6 +104,17 @@ function merge(base: Settings, patch: SettingsPatch): Settings {
       next[key] = { ...prev, ...Object.fromEntries(Object.entries(value).filter(([k, v]) => v !== undefined && fits(v, group[k]))) }
     } else next[key] = value
   }
+  // What hears a side of a call is this PC or a speech API. Neither sign-in includes transcription (the ChatGPT plan's
+  // isn't part of Sign in with ChatGPT; Claude's speech isn't open to other apps), so a side saved or sent as either,
+  // or as anything else, is heard by this PC.
+  const t = next.transcription as Settings['transcription']
+  const heard = (source: string): Settings['transcription']['me'] => source === 'openai' || source === 'server' ? source : 'local'
+  if (heard(t.me) !== t.me || heard(t.them) !== t.them) next.transcription = { ...t, me: heard(t.me), them: heard(t.them) }
+  // No account hears calls: the speech account they shared with voice typing is voice typing's own now (loadSettings).
+  if ('accountId' in (next.transcription as object)) {
+    const { accountId: _moved, ...rest } = next.transcription as Settings['transcription'] & { accountId?: unknown }
+    next.transcription = rest
+  }
   return next as unknown as Settings
 }
 
@@ -110,11 +124,16 @@ export async function loadSettings(): Promise<Settings> {
   kept = Object.fromEntries(KEPT_FOR_OTHERS.filter(key => raw[key] !== undefined).map(key => [key, raw[key]]))
   if (stored.ai) try { stored.ai = validateAIProfile(stored.ai) } catch { stored.ai = null }
   current = merge(DEFAULT_SETTINGS, stored)
-  legacySpeechAccounts = Object.keys(stored).length > 0 && stored.transcription?.accountId === undefined
-  if (legacySpeechAccounts) current.transcription = { ...current.transcription, accountId: '' }
+  // Voice typing's account was two settings: a speech account it shared with calls (which never used it), and its own
+  // over it. One now, voice typing's: the account it used.
+  const speechAccount = (stored.transcription as { accountId?: unknown } | undefined)?.accountId
+  oldVoiceAccounts = undefined
+  if (typeof speechAccount === 'string') {
+    const voice = typeof stored.dictation?.accountId === 'string' ? stored.dictation.accountId : ''
+    oldVoiceAccounts = { voice, speech: speechAccount }
+    current.dictation = { ...current.dictation, accountId: mergedVoiceAccount(voice, speechAccount) }
+  }
   if (current.dictation.speech === 'local') current.dictation = { ...current.dictation, speech: 'auto' }
-  // The ChatGPT plan's transcription isn't part of Sign in with ChatGPT: those calls are heard by this PC now.
-  if (current.transcription.me === 'chatgpt' || current.transcription.them === 'chatgpt') current.transcription = { ...current.transcription, me: current.transcription.me === 'chatgpt' ? 'local' : current.transcription.me, them: current.transcription.them === 'chatgpt' ? 'local' : current.transcription.them }
   fromBeforeSpeechChoice = Object.keys(stored).length > 0 && stored.transcription?.me === undefined && stored.transcription?.them === undefined
   // Lanes merge one by one, so a lane added in a newer version keeps its default; settings from before
   // lanes existed (one model for everything) start from the lane defaults.
@@ -129,6 +148,12 @@ export async function loadSettings(): Promise<Settings> {
 
 export function getSettings(): Settings {
   return current
+}
+
+/** The agents' own voice typing choices are carried over too: saved now, the old two settings are gone from the file. */
+export function voiceAccountsMigrated(): Promise<Settings> {
+  oldVoiceAccounts = undefined
+  return updateSettings({})
 }
 
 /** Whether the settings loaded were saved before the speech model was a choice: this PC heard every call then. */

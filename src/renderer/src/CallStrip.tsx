@@ -63,7 +63,7 @@ function Meters({ capture, listening, inputs, onPause }: { capture: RefObject<Ca
 }
 
 /**
- * Togle Microphone during the call, when it's on this computer: on, or off with a way to turn it on. Nothing when it
+ * Togle Studio during the call, when it's on this computer: on, or off with a way to turn it on. Nothing when it
  * isn't installed: the call isn't the place to suggest it.
  */
 function CleanMicrophone({ status }: { status?: TogleMicrophoneStatus }) {
@@ -71,27 +71,27 @@ function CleanMicrophone({ status }: { status?: TogleMicrophoneStatus }) {
   if (!status?.installed) return null
   const state = status.running ? status.state : undefined
   if (state?.phase === 'on' || state?.phase === 'starting') {
-    return <span className="clean-mic-chip on" title={`Togle Microphone is cleaning ${state.input ?? 'your microphone'} for every call app`}><span className="dot" />{state.phase === 'on' ? 'Clean mic' : 'Clean mic…'}</span>
+    return <span className="clean-mic-chip on" title={`Togle Studio is cleaning ${state.input ?? 'your microphone'} for every call app`}><span className="dot" />{state.phase === 'on' ? 'Noise removal on' : 'Noise removal starting…'}</span>
   }
   if (state?.account === 'signed-out') {
     return (
-      <button className="link clean-mic-chip" disabled={busy} title="You’re signed out of Togle Microphone: your microphone goes to the call as it is"
+      <button className="link clean-mic-chip off" disabled={busy} title="You’re signed out of Togle Studio: your call hears your background until you sign in"
         onClick={() => { setBusy(true); void api.showMicrophone().catch(() => undefined).finally(() => setBusy(false)) }}>
-        Clean mic · Sign in
+        Noise removal off · Sign in
       </button>
     )
   }
-  const problem = state?.phase === 'error' ? state.error || 'Togle Microphone stopped.' : undefined
+  const problem = state?.phase === 'error' ? state.error || 'Togle Studio stopped.' : undefined
   return (
-    <button className="link clean-mic-chip" disabled={busy} title={problem ?? 'Togle Microphone is off: your microphone goes to the call as it is'}
+    <button className="link clean-mic-chip off" disabled={busy} title={problem ?? 'Togle Studio is off: your call hears your background'}
       onClick={() => { setBusy(true); void api.turnOnMicrophone().catch(() => api.showMicrophone()).catch(() => undefined).finally(() => setBusy(false)) }}>
-      {problem ? 'Clean mic stopped · Fix' : 'Clean mic off · Turn on'}
+      {problem ? 'Noise removal stopped · Fix' : 'Noise removal off · Turn on'}
     </button>
   )
 }
 
 interface Props {
-  /** Togle Microphone, when it's on this computer. */
+  /** Togle Studio, when it's on this computer. */
   microphone?: TogleMicrophoneStatus
   listening: boolean
   capture: RefObject<CallCapture | null>
@@ -103,8 +103,12 @@ interface Props {
   /** What was said and shown, unfolded above it. */
   open: boolean
   onOpen: (open: boolean) => void
-  /** During the call: what to ask for, the screen, recording, the plan. After it, the strip only shows what was said. */
+  /** During the call: what to ask for, recording, the plan. After it, the strip only shows what was said. */
   tools?: ReactNode
+  /** During the call: what the AI sees (the screen, or audio only), on the status line with the levels. */
+  status?: ReactNode
+  /** Which screen moments the last answer looked at: in the transcript drawer, not on the live view. */
+  timing?: ReactNode
   /** Why nothing of the call can be heard (no speech recognition): said, with a way to set it up, instead of Listening. */
   deaf?: string
 }
@@ -113,7 +117,7 @@ interface Props {
  * The call as it goes, under the conversation: the levels, its latest words (what was said and shown, unfolded on a
  * click), and what to ask for. Live captions are its own: as they come in, only the strip is drawn again.
  */
-export function CallStrip({ microphone, listening, capture, inputs, onRetryAudio, onPauseInput, transcript, frames, open, onOpen, tools, deaf }: Props) {
+export function CallStrip({ microphone, listening, capture, inputs, onRetryAudio, onPauseInput, transcript, frames, open, onOpen, tools, status, timing, deaf }: Props) {
   const [partials, setPartials] = useState<PartialTranscript[]>([])
   const finished = useRef(new Set<string>())
   useEffect(() => {
@@ -130,6 +134,8 @@ export function CallStrip({ microphone, listening, capture, inputs, onRetryAudio
       api.onTranscript((entry) => {
         if (entry.segmentId) {
           finished.current.add(entry.segmentId)
+          // A late caption comes within moments of its line: the latest few hundred are plenty, all call long.
+          if (finished.current.size > 400) finished.current.delete(finished.current.values().next().value!)
           setPartials((prev) => prev.filter((p) => p.segmentId !== entry.segmentId))
         }
       })
@@ -141,15 +147,16 @@ export function CallStrip({ microphone, listening, capture, inputs, onRetryAudio
   const final = transcript.at(-1)
   const latest = partial && (!final || partial.at >= final.at) ? partial : final
   const caption = latest?.text
-  // What was said, copied as lines ("Them: …"), for notes or an email after the call.
+  // What was said, copied as lines ("You: …", "Them: …"), for notes or an email after the call.
   const [copied, setCopied] = useState(false)
   const copyAll = (): void =>
-    void navigator.clipboard.writeText(transcript.map((e) => `${e.speaker === 'me' ? 'Me' : 'Them'}: ${e.text}`).join('\n')).then(() => {
+    void navigator.clipboard.writeText(transcript.map((e) => `${e.speaker === 'me' ? 'You' : 'Them'}: ${e.text}`).join('\n')).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), COPIED_MS)
     }, () => undefined)
   const timeline = open && (
     <div className="timeline-panel">
+      {timing}
       <Timeline transcript={transcript} partials={partials} frames={frames} empty={listening ? 'Listening…' : 'Nothing was said.'} />
     </div>
   )
@@ -175,8 +182,9 @@ export function CallStrip({ microphone, listening, capture, inputs, onRetryAudio
   return (
     <section className="call-strip">
       {timeline}
+      {/* One status line: what the AI sees, then the levels and the clean microphone. */}
       <div className="strip-row audio-row">
-          <span className="strip-title">Transcript</span>
+          {status ?? <span className="strip-title">Transcript</span>}
           <span className="spacer" />
           {listening && <CleanMicrophone status={microphone} />}
           {listening && <Meters capture={capture} listening={listening} inputs={inputs} onPause={onPauseInput} />}
@@ -187,8 +195,10 @@ export function CallStrip({ microphone, listening, capture, inputs, onRetryAudio
           ) : null}
         </div>
       {listening && (inputs.me.state === 'unavailable' || inputs.them.state === 'unavailable') && (
-        <p className="audio-help" role="status" title={inputs.them.detail ?? inputs.me.detail}>
+        <p className="audio-help" role="status">
           {inputs.them.state === 'unavailable' ? "Call audio is disconnected. Togle can't hear the other side." : "Your microphone is disconnected. Togle can still hear the call."}
+          {/* Why, as it can be fixed: the setting that blocks it, or what holds the device. */}
+          {(inputs.them.state === 'unavailable' ? inputs.them.detail : inputs.me.detail) && <> {inputs.them.state === 'unavailable' ? inputs.them.detail : inputs.me.detail}</>}
         </p>
       )}
       <div className="strip-row">

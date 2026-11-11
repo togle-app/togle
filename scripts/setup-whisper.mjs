@@ -1,8 +1,8 @@
 // Downloads whisper.cpp and a Whisper model into resources/whisper for local transcription.
 //
-//   npm run setup:whisper                 CUDA build + large-v3-turbo if an NVIDIA GPU is found, else CPU + base
+//   npm run setup:whisper                 CUDA build + large-v3-turbo if an NVIDIA GPU is found, else CPU + small
 //   npm run setup:whisper -- --cpu        force the CPU build
-//   npm run setup:whisper -- --model ggml-small.bin
+//   npm run setup:whisper -- --model ggml-medium-q5_0.bin
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { open } from 'node:fs/promises'
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 // Pinned whisper.cpp build; bump deliberately after checking the release assets.
 const RELEASE = 'b5454'
 const ASSETS = { cuda: 'whisper-bin-win-cuda-12.4.0-x64.zip', cpu: 'whisper-bin-x64.zip' }
-const DEFAULT_MODELS = { cuda: 'ggml-large-v3-turbo-q5_0.bin', cpu: 'ggml-base.bin' }
+const DEFAULT_MODELS = { cuda: 'ggml-large-v3-turbo-q5_0.bin', cpu: 'ggml-small-q5_1.bin' }
 const MODEL_BASE_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main'
 // Parakeet TDT v3 for whisper.cpp's parakeet.dll: Togle's main recognizer (Whisper handles unclear speech).
 const PARAKEET_URL = 'https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main/ggml-parakeet-tdt-0.6b-v3-q8_0.bin'

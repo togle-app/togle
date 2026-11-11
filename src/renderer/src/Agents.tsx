@@ -181,7 +181,8 @@ function NewAgent({ onDraft, onBlank, onMarket, onTemplate }: { onDraft: (said: 
   }
   return (
     <div className="new-agent">
-      <p className="hint">Start from a template, then make it your own. Templates are included on this PC and use no AI requests.</p>
+      <p className="agent-definition">An agent is your helper for one kind of call. It follows your instructions, uses your documents, and learns from each call, keeping only what you approve.</p>
+      <p className="hint">Start from a template, then make it your own. Templates come with Togle and use no AI requests.</p>
       <div className="template-grid" aria-label="Agent templates">
         {templates.filter(template => template.id !== 'blank').map(template => (
           <button key={template.id} className={`template-card ${selected === template.id ? 'selected' : ''}`} aria-label={`Use ${template.name} template`} aria-pressed={selected === template.id} disabled={busy} onClick={() => setSelected(template.id)}>

@@ -35,7 +35,7 @@ export function AgentKnowledge({ agent, onAgent, onChat }: Props) {
       {vocabularyTerms(agent.vocabulary).length > 0 && <p className="hint">{vocabularyTerms(agent.vocabulary).join(', ')}</p>}
     </details>
     <div className="inspector-section-head"><h4>Remembered facts <span className="count">{agent.memory.length}</span></h4><button className="ghost small" disabled={busy || !!fact} onClick={() => { setError(''); setFact({ text: '' }) }}>Add fact</button></div>
-    <p className="hint">Facts stay saved here. Live answers use up to {MEMORY_LIMIT.toLocaleString()} characters of relevant facts to stay fast.</p>
+    <p className="hint">Facts stay saved here. During a call, suggestions use the facts that fit what was just said.</p>
     {fact && <form className="training-form" aria-label={fact.before === undefined ? 'Add fact' : 'Edit fact'} onSubmit={event => {
       event.preventDefault()
       void change(() => api.saveAgentFact(agent.id, fact.text, fact.before)).then(saved => { if (saved) setFact(undefined) })

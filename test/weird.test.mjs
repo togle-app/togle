@@ -193,6 +193,12 @@ test("a new Togle hears calls on this PC (ChatGPT's sign-in has no transcription
   writeFileSync(file, JSON.stringify({ transcription: { me: 'chatgpt', them: 'chatgpt', accountId: 'chatgpt-default' } }))
   const moved = await loadSettings()
   assert.deepEqual([moved.transcription.me, moved.transcription.them], ['local', 'local'])
+  // Saved with Claude speech, which was removed: this PC hears those calls too, and a change can't bring it back.
+  writeFileSync(file, JSON.stringify({ transcription: { me: 'claude', them: 'openai', accountId: 'claude-default' } }))
+  const fromClaude = await loadSettings()
+  assert.deepEqual([fromClaude.transcription.me, fromClaude.transcription.them], ['local', 'openai'])
+  await updateSettings({ transcription: { me: 'claude', them: 'claude' } })
+  assert.deepEqual([getSettings().transcription.me, getSettings().transcription.them], ['local', 'local'])
   rmSync(file, { force: true })
   await loadSettings()
   assert.equal(savedBeforeSpeechChoice(), false, 'nothing saved yet: a new Togle')

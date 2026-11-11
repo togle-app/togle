@@ -4,9 +4,9 @@
 .dictation-hit { position: relative; flex: 0 0 auto; width: 64px; height: 28px; max-width: 100%; max-height: 100%; pointer-events: auto; touch-action: none; transition: width 180ms cubic-bezier(.2,.8,.2,1), height 180ms cubic-bezier(.2,.8,.2,1); }
 .dictation-hit.is-expanded { width: 280px; height: 76px; }
 .dictation-hit.has-status:not(.is-expanded) { width: 156px; height: 44px; }
-.dictation-hit.is-expanded.is-in-call { height: 100px; }
+.dictation-hit.is-expanded.is-in-call, .dictation-hit.is-expanded.has-note { height: 100px; }
 .dictation-hit.is-expanded.is-recovery { width: 352px; height: 264px; }
-.dictation-bar { position: absolute; inset: 8px; background: #171a208c; border: 1px solid #ffffff18; border-radius: 9px; box-shadow: 0 1px 4px #0003; overflow: hidden; transition: border-radius 180ms ease; }
+.dictation-bar { position: absolute; inset: 8px; background: #171a20e6; border: 1px solid #ffffff18; border-radius: 9px; box-shadow: 0 1px 4px #0003; overflow: hidden; transition: border-radius 180ms ease; }
 .dictation-bar.is-expanded { border-radius: 18px; background: #171a20ed; }
 .dictation-announcement { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .dictation-details { position: absolute; inset: 0 0 16px; padding: 7px 11px 0; display: flex; flex-direction: column; gap: 8px; opacity: 0; visibility: hidden; transform: translateY(4px); transition: opacity 120ms ease, transform 160ms ease; }
@@ -23,7 +23,7 @@
 .dictation-bar .dictation-handle { position: absolute; bottom: -1px; left: 50%; transform: translateX(-50%); width: 48px; height: 12px; padding: 0; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 12px; background: transparent; opacity: 1; cursor: grab; touch-action: none; }
 .dictation-bar .dictation-handle:active { cursor: grabbing; }
 .dictation-bar .dictation-handle.has-status { width: 100%; height: 100%; gap: 7px; font-size: 11px; color: #d2dbed; }
-.dictation-bar.is-expanded .dictation-handle.has-status { width: 64px; height: 16px; }
+.dictation-bar.is-expanded .dictation-handle.has-status, .dictation-bar.is-expanded .dictation-handle.has-label { width: 64px; height: 16px; }
 .dictation-bar.is-expanded .dictation-stage { display: none; }
 .dictation-bar.is-done .dictation-handle { color: #a8ebce; }
 .dictation-bar.is-recovery .dictation-handle { color: #efc88b; }
@@ -33,18 +33,31 @@
 .dictation-wave { position: relative; display: flex; align-items: center; justify-content: center; gap: 1px; width: 38px; height: 12px; color: #a6afbc; transition: color 160ms ease; }
 .dictation-wave::before { content: ''; position: absolute; left: 3px; right: 3px; top: 5px; height: 2px; border-radius: 2px; background: currentColor; }
 .dictation-wave > span { display: block; flex: 0 0 2px; height: 10px; border-radius: 3px; background: currentColor; transform: scaleY(.2); opacity: 0; }
-.is-recording .dictation-wave { color: #a8ebce; }
+.is-recording .dictation-wave { color: #9df5cc; }
+.dictation-bar.is-recording:not(.is-expanded) .dictation-wave { width: 58px; gap: 2px; }
+.dictation-bar.is-recording:not(.is-expanded) .dictation-wave > span { flex-basis: 2.5px; }
+/* Listening is unmistakable: the pill is wider and brighter than at rest. */
+.dictation-bar.is-recording:not(.is-expanded) .dictation-handle { width: calc(100% - 10px); gap: 8px; }
+.dictation-bar .dictation-handle.has-label { height: 100%; }
+.dictation-bar.is-recording { border-color: #9df5cc55; }
 .is-recording .dictation-wave::before { opacity: 0; }
 .is-recording .dictation-wave > span { opacity: 1; transition: transform 90ms ease-out; }
 .is-busy .dictation-wave { color: #b5c1e8; }
 .is-done .dictation-wave { color: #a8ebce; }
 .needs-attention .dictation-wave, .is-recovery .dictation-wave, .dictation-bar .needs-attention { color: #efc88b; }
 .dictation-call-note { margin: -2px 0 0; font-size: 10px; line-height: 1.35; color: #d4bb94; }
+.dictation-call-note .link { font-size: 10px; color: #c8d6ff; }
+.dictation-prompt .link { font-size: 12px; color: #c8d6ff; }
+/* A warning in the resting pill itself: muted, no sound, the key taken. */
+.dictation-bar .dictation-handle.has-alert { color: #f3c47e; }
+.dictation-call-label { font-size: 10px; color: #f0c98f; white-space: nowrap; }
 .is-recovery .dictation-details { padding: 10px 13px 7px; }
 .dictation-bar .dictation-note { font-size: 11px; color: #b9c3d2; line-height: 1.45; margin: 0; overflow-wrap: anywhere; max-height: 64px; overflow-y: auto; flex-shrink: 0; }
 .dictation-result { flex: 1; min-height: 28px; overflow-y: auto; padding: 9px; background: #ffffff04; border: 1px solid #ffffff12; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; user-select: text; }
-.dictation-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; }
-.dictation-actions .primary { font-size: 11px; padding: 5px 10px; }
+.dictation-actions { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+.dictation-actions .primary, .dictation-actions .ghost { font-size: 11px; padding: 5px 10px; }
+.dictation-actions .ghost { border: 1px solid #ffffff24; color: #d5dde9; }
+.dictation-actions .dictation-icon { margin-left: auto; }
 .dictation-action-error { margin: 0; color: #ffb5b5; font-size: 10px; line-height: 1.35; }
 @media (prefers-reduced-motion: reduce) {
   .dictation-hit, .dictation-bar, .dictation-details, .dictation-wave, .is-recording .dictation-wave > span { transition: none; }

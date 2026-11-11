@@ -58,15 +58,6 @@ test('an API-key or cloud-provider CLI login is not accepted as a Claude subscri
   }
 })
 
-test('Claude speech profile comes from the official account status and rejects missing metadata or sign-out', async () => {
-  const directory = process.platform === 'win32' ? 'C:\\accounts\\claude' : '/accounts/claude'
-  const { auth } = scripted([{ ...signedIn(), configDirectory: directory, orgId: 'team-one' }, { loggedIn: false }])
-  assert.deepEqual(await auth.speechProfile(), { directory, email: 'test@example.com', organization: 'team-one', keychainService: 'Claude Code-credentials' })
-  await assert.rejects(auth.speechProfile(), /Sign in/)
-  const missing = scripted([signedIn()])
-  await assert.rejects(missing.auth.speechProfile(), /Sign in/)
-})
-
 test('subscription processes cannot inherit API keys, gateway routing or exported tokens', (t) => {
   const values = {
     ANTHROPIC_API_KEY: 'foreign-key', ANTHROPIC_AUTH_TOKEN: 'foreign-token', ANTHROPIC_BASE_URL: 'https://foreign.test',

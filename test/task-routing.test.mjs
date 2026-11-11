@@ -8,7 +8,7 @@ const catalog = [
   { source: { id: 'personal-codex', provider: 'chatgpt', subscription: true, ready: true, label: 'Personal Codex' }, models: ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'].map(id => ({ id, label: id, reasoningLevels: ['low', 'medium', 'high'] })) }
 ]
 test('three versioned recipes select real account catalog models for all four tasks', () => {
-  assert.deepEqual(T.PRESETS.map(preset => preset.id), ['claude', 'codex', 'mixed'])
+  assert.deepEqual(T.PRESETS.map(preset => preset.id), ['codex', 'claude', 'mixed'])
   for (const id of ['claude', 'codex', 'mixed']) {
     const profile = T.presetProfile(id, catalog)
     assert.equal(profile.version, T.PRESET_VERSION)
@@ -55,7 +55,8 @@ test('agent sections inherit separately and resets do not mutate global defaults
   assert.equal(T.effectiveAI(settings, agent).tasks.deep.sourceId, 'work-claude')
   const effective = T.effectiveSettings(settings, agent)
   assert.equal(effective.dictation.polish, false); assert.equal(effective.dictation.microphoneId, 'headset')
-  assert.equal(effective.transcription.accountId, settings.transcription.accountId)
+  assert.equal(effective.dictation.accountId, settings.dictation.accountId)
+  assert.equal(effective.transcription.language, settings.transcription.language)
   assert.notEqual(settings.dictation.microphoneId, 'headset')
   assert.equal(T.effectiveAI(settings, { preferences: {} }).tasks.deep.sourceId, 'personal-codex')
   assert.throws(() => T.validateAIProfile({ tasks: { quick: {} } }), /Choose/)

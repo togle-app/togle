@@ -530,7 +530,6 @@ export interface CallSessionInfo {
   /** The subscription pinned when the call started. Older calls may not have one. */
   accountId?: string
   /** Speech may use a different subscription from the agent's answer model. */
-  speechAccountId?: string
   speechLanguage?: string
   ai?: AIProfile
   speechSettings?: Settings['transcription']
@@ -758,8 +757,6 @@ export interface Settings {
   /** Hubs of agents to browse and install from (GitHub repositories: "owner/repo"), besides Togle's own. */
   hubs?: string[]
   transcription: {
-    /** Shared subscription for meeting transcription and voice typing without an override. */
-    accountId?: string
     /** Whisper language code, or "auto". */
     language: string
     /** What hears my voice (the microphone). */
@@ -776,7 +773,11 @@ export interface Settings {
   window: WindowSettings
   /** Local outgoing audio for other call apps, independent of transcription and F9. */
   microphone: import('./microphone').MicrophoneSettings
-  /** Dictation is independent of the call and never falls back to a paid API key. */
+  /**
+   * Dictation is independent of the call and never falls back to a paid API key. `accountId` is the subscription
+   * account that cleans up what's dictated and keeps its word list and history ('': the AI's account, see
+   * automaticVoiceAccount); this computer hears the speech either way.
+   */
   dictation: { speech: 'auto' | 'local' | 'chatgpt' | 'claude'; accountId: string; mode: 'hold' | 'toggle'; polish: boolean; showBar: boolean; microphoneId: string }
   /** Shortcuts given other keys than their own (empty: turned off); the others keep theirs. */
   hotkeys: Partial<Record<HotkeyId, string>>
@@ -858,13 +859,13 @@ export interface SubscriptionAccount {
  * speech API, another server that speaks it (a model run on this PC, or a service's), or the dictation of the ChatGPT
  * plan Togle is signed in to.
  */
-export type Recognizer = 'local' | 'openai' | 'server' | 'chatgpt' | 'claude'
+export type Recognizer = 'local' | 'openai' | 'server' | 'chatgpt'
 
 /** The speech APIs that can hear a side in place of this PC's models. */
 export type SpeechApiId = Exclude<Recognizer, 'local'>
 
-/** The models Togle can install to hear on this PC. */
-export type LocalModelId = 'parakeet' | 'whisper-turbo' | 'whisper-base'
+/** The models Togle can install to hear on this PC (Whisper base only for installs from before Whisper small). */
+export type LocalModelId = 'parakeet' | 'whisper-turbo' | 'whisper-small' | 'whisper-base'
 
 /** Speech recognition on this PC, for Settings: what's installed, what installing it would download, and an install under way. */
 export interface LocalSpeechState {
@@ -890,8 +891,6 @@ export interface SttStatus {
   callId?: string
   state: SttState
   detail?: string
-  /** The actual subscription profile used to transcribe call audio. Public metadata only. */
-  transcriptionAccount?: Pick<SubscriptionAccount, 'id' | 'provider' | 'label' | 'shared' | 'email' | 'signedIn'>
   transcriptionLanguage?: string
   /** Why the API picked for a side can't hear it, or didn't hear its last line: this PC hears that side meanwhile, if it can. */
   problem?: string
@@ -964,7 +963,8 @@ export interface AskedAgain {
   withScreen?: boolean
 }
 
-export type HotkeyAction = 'toggle-listening' | 'toggle-recording' | 'snapshot' | 'ask' | 'copy' | 'dictation-settings'
+/** 'start-call-unseen': the call shortcut while Togle's window is hidden or minimized (no picker it couldn't show). */
+export type HotkeyAction = 'toggle-listening' | 'start-call-unseen' | 'toggle-recording' | 'snapshot' | 'ask' | 'copy' | 'dictation-settings'
 
 /** A shortcut that works from any app (see shared/hotkeys.ts). */
 export interface HotkeyInfo {

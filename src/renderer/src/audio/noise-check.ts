@@ -2,7 +2,7 @@ import { noiseVerdict, type NoiseReport } from '@shared/microphone'
 
 /**
  * What the microphone picks up when nobody speaks: measured during calls (and by the microphone check in Settings) so
- * Togle can show the user, with Togle Microphone as the way to remove it. It takes the 16 kHz frames of the pcm-tap
+ * Togle can show the user, with Togle Studio as the way to remove it. It takes the 16 kHz frames of the pcm-tap
  * worklet from a microphone stream without noise suppression or automatic gain, so the background is measured as the
  * microphone hears it. Only levels are kept, and a few seconds of background audio in memory to play back to the user;
  * nothing is saved or sent.

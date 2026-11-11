@@ -40,7 +40,7 @@ function HistoryEditor({ accountId, accountName }: { accountId: string; accountN
   return <div className="dictation-history-body">
     <p className="hint">Recent text for {accountName}. Each account keeps its own history.</p>
     {history ? <>
-      <Toggle name="Keep recent text" checked={history.enabled} disabled={busy} onChange={enabled => void run(() => window.togle.keepDictationHistory(accountId, enabled))} note="Up to 50 dictations for 7 days, encrypted on this device. Audio is never saved." />
+      <Toggle name="Keep recent text" checked={history.enabled} disabled={busy} onChange={enabled => void run(() => window.togle.keepDictationHistory(accountId, enabled))} note="Up to 50 dictations for 7 days, encrypted on this computer. Audio is never saved." />
       {!history.enabled && history.entries.length > 0 && <p className="hint">New dictations are not saved. You can clear the older text below.</p>}
       {history.entries.length > 0 ? <>
         <div className="dictation-history-heading"><span>{history.entries.length} recent {history.entries.length === 1 ? 'dictation' : 'dictations'}</span><button className="ghost" disabled={busy} onClick={() => setClearing(true)}>Clear history</button></div>
@@ -85,7 +85,7 @@ function HistoryEntry({ entry, accountId, remove, disabled }: { entry: Dictation
     </form>}
     {proposal && <button className="remember-spelling ghost" disabled={busy || disabled} onClick={() => void run(async () => {
       await window.togle.editDictationVocabulary(accountId, { kind: 'word', ...proposal })
-      if (alive.current) { setProposal(undefined); setStatus('Spelling remembered for this account. Manage it under Words & shortcuts.') }
+      if (alive.current) { setProposal(undefined); setStatus('Spelling remembered for this account. Manage it under Words & snippets.') }
     })}>Remember “{proposal.heardAs}” as “{proposal.word}”</button>}
     {status && <p className="hint" role="status">{status}</p>}
     {error && <p className="error" role="alert">{error}</p>}
