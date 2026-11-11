@@ -14,7 +14,10 @@ import { DictationTargetBridge } from './dictation-target'
 import { DictationWindow } from './dictation-window'
 import { MicrophoneLink } from './microphone-link'
 import type { CloseWarning } from '@shared/close-warning'
+import { NoticeWindow } from './notice-window'
+import { Attention } from './runners/attention'
 import type { RunnerHub } from './runners/hub'
+import type { Backend } from './runners/types'
 import { registerRunners } from './runners/register'
 import { StoredRecords, StoredTitles } from './runners/titles'
 import { MICROPHONE_PRODUCT, microphonePage } from '@shared/microphone-link'
@@ -241,6 +244,9 @@ let tray: TogleTray | undefined
 let quitting = false
 // The coding agents' tasks (Codex, Claude Code): the Tasks screen's side of the app.
 let runners: RunnerHub | null = null
+// The small notice in a corner of the screen, and what it tells: a task waits for the person, or one finished.
+const noticeWindow = new NoticeWindow()
+const attention = new Attention()
 /** Set by the window right before it opens the recorder stream: what getDisplayMedia should capture. */
 let pendingRecordSource: string | null = null
 
@@ -619,6 +625,27 @@ async function setVoiceBar(visible: boolean): Promise<void> {
   else { const settings = await updateSettings({ dictation: { showBar: visible } }); send('settings:changed', settings) }
   refreshVoiceSettings()
 }
+/** Whether Togle's own window is in front: it shows everything a notice would say. */
+function mainWindowActive(): boolean {
+  return !!win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused()
+}
+/** Tells the person what waits for them: a small notice while Togle's window is not in front, and a dot on the tray. */
+function refreshNotices(): void {
+  if (quitting || !runners) return
+  const look = attention.look(runners.attention())
+  tray?.setWaiting(look.waiting)
+  if (mainWindowActive()) { noticeWindow.show(null); return }
+  const first = look.notices[0]
+  if (first) noticeWindow.show(first)
+  // Nothing waits any more. A task that finished is only news, shown a few seconds (and it takes the place of the notice that was answered).
+  else if (look.finished.length) noticeWindow.show(look.finished[look.finished.length - 1], 8000)
+  else if (noticeWindow.shown?.kind === 'waiting') noticeWindow.show(null)
+}
+/** Opens Togle on its Tasks screen, on one task when there is one to show. */
+function showTask(key: string): void {
+  openWindow()
+  send('tasks:show', key)
+}
 /** What quitting would stop: a call, a recording or dictation, and the tasks Togle runs that have not finished. */
 function closeWarning(): CloseWarning {
   return { call: copilot.isListening || recording || dictation.active, tasks: runners?.busy().map(task => task.title) ?? [] }
@@ -879,6 +906,8 @@ function createWindow(): void {
   })
   win.on('unresponsive', () => (pageDown = true))
   win.on('responsive', () => (pageDown = false))
+  // What waits for the person is told by a notice only while Togle's own window is not in front.
+  for (const event of ['focus', 'blur', 'show', 'hide', 'minimize', 'restore'] as const) win.on(event as 'focus', refreshNotices)
   win.webContents.on('did-finish-load', () => {
     pageDown = false
     pageFailed = false
@@ -1878,6 +1907,21 @@ function registerIpc(): void {
     if (confirmed) { void requestQuit(true); return }
     win?.close()
   })
+  // The notice window's own messages: how tall it is, open a task, close a notice. Nothing else may send them.
+  ipcMain.on('notice:size', (event, height: unknown) => {
+    if (noticeWindow.owns(event.sender) && typeof height === 'number') noticeWindow.resize(height)
+  })
+  ipcMain.on('notice:open', (event, key: unknown) => {
+    if (!noticeWindow.owns(event.sender) || typeof key !== 'string' || !key) return
+    noticeWindow.show(null)
+    showTask(key)
+  })
+  ipcMain.on('notice:dismiss', (event, id: unknown) => {
+    if (!noticeWindow.owns(event.sender) || typeof id !== 'string') return
+    attention.dismiss(id)
+    noticeWindow.show(null)
+    refreshNotices()
+  })
 }
 
 // Dev only: lets scripts drive the UI over the Chrome DevTools Protocol.
@@ -1960,11 +2004,15 @@ if (!app.requestSingleInstanceLock()) {
     const runnerTitles = new StoredTitles()
     const runnerRecords = new StoredRecords()
     await Promise.all([runnerTitles.load(), runnerRecords.load()])
+    // A test run can stand in for the agents with programs of its own. A packaged Togle never looks.
+    const standIns = !app.isPackaged && process.env.TOGLE_TEST_RUNNERS ? await (require(process.env.TOGLE_TEST_RUNNERS) as { backends(): Promise<Backend[]> }).backends() : undefined
     runners = registerRunners({
+      backends: standIns,
       handle: (channel, listener) => ipcMain.handle(channel, (_event, ...args) => listener(...args)),
       send,
       titles: runnerTitles,
       records: runnerRecords,
+      changed: refreshNotices,
       pickFolder: async () => {
         const chosen = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] }) : await dialog.showOpenDialog({ properties: ['openDirectory'] })
         return chosen.canceled ? null : (chosen.filePaths[0] ?? null)
@@ -1979,7 +2027,7 @@ if (!app.requestSingleInstanceLock()) {
     if (app.isPackaged || process.env.TOGLE_HEADLESS !== '1' || process.env.TOGLE_TEST_TRAY === '1') {
       try {
         tray = new TogleTray(path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'build'), process.platform === 'win32' ? 'icon.ico' : 'icon.png'), {
-          open: openWindow, settings: openDictationSettings, toggle: () => void dictation.toggle(), cancel: () => dictation.cancel(), copy: () => { void copyLastDictation().catch(() => {}) },
+          open: openWindow, tasks: () => showTask(runners?.attention().find(task => task.pending.length)?.key ?? ''), settings: openDictationSettings, toggle: () => void dictation.toggle(), cancel: () => dictation.cancel(), copy: () => { void copyLastDictation().catch(() => {}) },
           indicator: visible => { void setVoiceBar(visible).catch(error => console.warn('[voice bar]', (error as Error).message)) },
           quit: () => void requestQuit()
         })
@@ -2019,6 +2067,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', () => {
     quitting = true
     dictationWindow.close()
+    noticeWindow.close()
     microphoneLink.stop()
     dictation.dispose()
     tray?.close()

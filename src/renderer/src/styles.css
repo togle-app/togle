@@ -3133,3 +3133,24 @@ ul.pending-lessons > li > span:first-child { flex: 1 1 260px; min-width: 0; over
   .tasks.has-detail .tasks-list, .tasks:not(.has-detail) .tasks-detail { display: none; }
   .tasks-back { display: inline-flex; }
 }
+/* The small notice in the corner of the screen: a task waits for the person, or one finished. */
+body.notice-surface { background: transparent; color: var(--text); overflow: hidden; }
+.notice-surface #root { padding: 0; }
+.task-notice-frame { padding: 12px; }
+.task-notice { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid #5a4a22; border-radius: 12px; background: #2a2418; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
+.task-notice[data-kind='done'] { border-color: #2f5a3d; background: #17221b; }
+.task-notice[data-kind='failed'] { border-color: #7a3340; background: #2e1b20; }
+.task-notice p { margin: 0; }
+.task-notice-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.task-notice-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.task-notice-head .icon { flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.task-notice-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--them); }
+.task-notice[data-kind='done'] .task-notice-dot { background: var(--ok); }
+.task-notice[data-kind='failed'] .task-notice-dot { background: var(--danger); }
+.task-notice-says { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.task-notice-detail { margin: 0; padding: 7px 9px; max-height: 110px; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: 12px/1.5 ui-monospace, 'Cascadia Mono', Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-notice-detail.question, .task-notice-detail.words { font-family: inherit; }
+.task-notice-danger, .task-notice-error { font-size: 12px; color: var(--danger); }
+.task-notice-danger .task-danger { margin-left: 0; margin-right: 4px; }
+.task-notice-note, .task-notice-more { font-size: 11px; color: var(--faint); }
+.task-notice-actions { display: flex; flex-wrap: wrap; gap: 6px; }

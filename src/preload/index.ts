@@ -223,6 +223,11 @@ const api: TogleApi = {
   closeRunnerTask: key => ipcRenderer.invoke('runners:close', key),
   pickRunnerFolder: () => ipcRenderer.invoke('runners:pick-folder'),
   onRunnersChanged: cb => subscribe('runners:changed', () => cb()),
+  onTaskNotice: cb => subscribe('notice:state', cb),
+  sizeTaskNotice: height => ipcRenderer.send('notice:size', height),
+  openTaskFromNotice: key => ipcRenderer.send('notice:open', key),
+  dismissTaskNotice: id => ipcRenderer.send('notice:dismiss', id),
+  onShowTask: cb => subscribe('tasks:show', cb),
 
   listHotkeys: () => ipcRenderer.invoke('hotkeys:list'),
   setHotkey: (id, keys) => ipcRenderer.invoke('hotkeys:set', id, keys),

@@ -210,6 +210,8 @@ export default function App() {
   const [timelineOpen, setTimelineOpen] = useState(false)
   // Closing waits for a yes while in a call, or while a task Togle runs has not finished.
   const [confirmClose, setConfirmClose] = useState<CloseWarning | null>(null)
+  // The task a notice or the tray opened Togle on; `seq` makes the same task again a new request.
+  const [taskFocus, setTaskFocus] = useState<{ key: string; seq: number }>({ key: '', seq: 0 })
   const keepGoing = useRef<HTMLButtonElement>(null)
   // Until the call so far is back in the window, an empty window mustn't be saved over it.
   const callLoaded = useRef(false)
@@ -446,6 +448,12 @@ export default function App() {
       api.onScreenRefresh(id => recorder.current?.captureNow(id)),
       // The question shows in the main view: Settings or Agents may be open.
       api.onConfirmClose(warning => setConfirmClose(warning)),
+      // From a notice or the tray: Togle opens on the task that waits.
+      api.onShowTask(key => {
+        setSidebarOpen(false)
+        setTaskFocus(previous => ({ key, seq: previous.seq + 1 }))
+        setView('tasks')
+      }),
       api.onAuthChanged(setAuth),
       api.onSettingsChanged(setSettings),
       api.onClaudeAuthChanged(setClaudeAuth),
@@ -1520,7 +1528,7 @@ export default function App() {
       {view === 'settings' && settings && (
         <Settings settings={settings} auth={auth} claudeAuth={claudeAuth} stt={stt} at={settingsAt} onChange={setSettings} onDone={() => setView(workspaceReturn.current)} onArchive={() => { setSelectedCallId(undefined); setView('archive') }} />
       )}
-      {view === 'tasks' && <Tasks />}
+      {view === 'tasks' && <Tasks focus={taskFocus} />}
       {view === 'archive' && <div className="settings archived-calls"><CallHistory agents={agents} enabled={settings?.assist.rememberCalls !== false} selectedId={selectedCallId} onSelect={setSelectedCallId} onAgent={replaceAgent} onDone={() => setView('settings')} /></div>}
       {/* Kept while the conversation shows: an agent's page, and a reading of a website, are there to come back to. */}
       {settings && (

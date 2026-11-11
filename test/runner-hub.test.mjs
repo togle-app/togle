@@ -459,6 +459,34 @@ test('closing the hub lets go of every task and every agent', async () => {
   assert.equal(changes.length, seen, 'a closed hub tells the window nothing more')
 })
 
+test('what the tasks Togle runs need is told without asking the agents anything', async () => {
+  const claude = new FakeBackend('claude', { tasks: [info('claude', 'elsewhere', 'In a terminal', 'waiting', 5, { pid: 41, waitingFor: 'permission prompt' })] })
+  const { hub } = hubOf([claude])
+  const folder = scratch()
+  try {
+    assert.deepEqual(hub.attention(), [], 'a task in another program is not told: it cannot be answered here')
+    await hub.start({ runner: 'claude', folder, prompt: 'Clean up', title: 'Clean up' })
+    const [task] = claude.started
+    const asked = task.want({ id: 'r1', kind: 'command', command: 'rm -rf build', raw: 'bash -c "rm -rf build"', folder, offersAlways: true })
+    const listsBefore = claude.lists
+    const [seen] = hub.attention()
+    assert.equal(claude.lists, listsBefore, 'the agents were not asked')
+    assert.deepEqual({ key: seen.key, runner: seen.runner, title: seen.title, folder: seen.folder, state: seen.state, line: seen.line }, { key: 'claude:new1', runner: 'claude', title: 'Clean up', folder, state: 'waiting', line: 'Wants to run rm -rf build' })
+    assert.equal(seen.pending.length, 1)
+    assert.equal(seen.pending[0].danger, 'It deletes files or folders for good.', 'the mark comes with it')
+    hub.answer('claude:new1', 'r1', 'refuse')
+    await asked
+    task.say('Left the build folder alone. It is still there.')
+    task.done()
+    const [after] = hub.attention()
+    assert.equal(after.state, 'idle')
+    assert.deepEqual(after.pending, [])
+    assert.equal(after.line, 'Left the build folder alone.', 'what it said last, in a line')
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('what would stop if Togle quit is the tasks it runs that are working or waiting, and closing twice closes once', async () => {
   const claude = new FakeBackend('claude', { tasks: [info('claude', 'elsewhere', 'In a terminal', 'working', 5, { pid: 41 })] })
   const { hub } = hubOf([claude])

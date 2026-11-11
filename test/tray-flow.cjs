@@ -68,6 +68,8 @@ async function run() {
   await wait(() => js("document.querySelector('#settings-dictation option[value=headset]')?.textContent.includes('not listed')"))
   assert.equal(invoke('settings:get').dictation.microphoneId, 'headset', 'Removing a device never silently switches the saved choice')
   fs.writeFileSync(path.join(profile, 'dictation-settings.png'), (await main.webContents.capturePage()).toPNG())
+  // The accounts arrive after the page opens: choosing one before its option is there would choose nothing.
+  await wait(() => js("!!document.querySelector('[aria-label=\"Voice typing account\"] option[value=\"claude-default\"]')"))
   await js("(()=>{const select=document.querySelector('[aria-label=\"Voice typing account\"]');select.value='claude-default';select.dispatchEvent(new Event('change',{bubbles:true}))})()")
   await wait(() => invoke('settings:get').dictation.accountId === 'claude-default')
   await wait(() => js("document.querySelector('#settings-dictation').textContent.includes('Claude adds punctuation')"))

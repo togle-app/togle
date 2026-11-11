@@ -30,7 +30,8 @@ function ago(at: number, now: number): string {
 
 const isDetail = (value: unknown): value is TaskDetail => typeof value === 'object' && value !== null && 'task' in value && 'log' in value
 
-export function Tasks() {
+/** `focus`: a task to show, asked for from outside (a notice); a new `seq` asks again. */
+export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   const [tasks, setTasks] = useState<TaskView[]>([])
   const [status, setStatus] = useState<RunnerStatus[]>([])
   const [selected, setSelected] = useState<string | undefined>(remembered)
@@ -75,6 +76,13 @@ export function Tasks() {
     remembered = selected
     void refresh()
   }, [selected, refresh])
+
+  // Opened on a task from outside: it is the one shown.
+  useEffect(() => {
+    if (!focus?.key) return
+    setStarting(false)
+    setSelected(focus.key)
+  }, [focus?.key, focus?.seq])
 
   /** Does something for the person, and shows what went wrong in plain words. */
   const act = useCallback(

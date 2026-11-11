@@ -17,7 +17,7 @@ app.on('window-all-closed', () => {})
 let checkpoint = 'startup'
 const timeout = setTimeout(() => { console.error('Tasks UI checks timed out at ' + checkpoint); app.exit(1) }, 120000)
 
-async function open(T, agent, width) {
+async function open(T, agent, width, surface) {
   checkpoint = 'opening at ' + width + 'px'
   const settings = structuredClone(T.getSettings())
   settings.provider = 'claude'
@@ -68,8 +68,8 @@ async function open(T, agent, width) {
     await paint()
   }
   const calls = name => evaluate("window.togleUITest.calls().filter(call=>call.name===" + JSON.stringify(name) + ")")
-  await window.loadFile(process.env.TOGLE_UI_RENDERER || path.join(project, 'out/renderer/index.html'))
-  await wait("!!document.querySelector('.workspace-nav')")
+  await window.loadFile(process.env.TOGLE_UI_RENDERER || path.join(project, 'out/renderer/index.html'), surface ? { query: { surface } } : undefined)
+  await wait(surface ? "document.body.classList.contains('" + surface + "-surface')" : "!!document.querySelector('.workspace-nav')")
   return { window, errors, evaluate, paint, wait, click, fill, capture, calls, task }
 }
 
@@ -221,6 +221,81 @@ async function checkQuit(T, agent) {
   ui.window.destroy()
 }
 
+async function checkNotice(T, agent) {
+  const ui = await open(T, agent, 392, 'notice')
+  const emit = value => ui.evaluate("window.togleUITest.emit('onTaskNotice', " + JSON.stringify(value) + ")")
+  const waiting = (extra = {}) => ({ id: 'codex:t1#r1', kind: 'waiting', key: 'codex:t1', title: 'Add the status column', where: 'Codex · api-server', says: 'wants to run', detail: 'npm run migrate', detailKind: 'command', requestId: 'r1', canRefuse: true, canAllow: true, others: 0, ...extra })
+  const buttons = () => texts(ui, '.task-notice-actions button')
+  const disabled = label => ui.evaluate("[...document.querySelectorAll('.task-notice-actions button')].find(b=>b.textContent==='" + label + "').disabled")
+  assert.equal(await ui.evaluate("document.querySelector('.task-notice')"), null, 'nothing shows until there is something to say')
+
+  // A command that waits: shown in full; Allow once cannot be pressed the moment the notice appears, Refuse can.
+  await emit(waiting({ others: 2 }))
+  await ui.wait("!!document.querySelector('.task-notice')")
+  assert.equal(await ui.evaluate("document.querySelector('.task-notice-head strong').textContent"), 'Add the status column')
+  assert.equal((await texts(ui, '.task-notice-says'))[0], 'Codex · api-server wants to run')
+  assert.equal(await ui.evaluate("document.querySelector('.task-notice-detail').textContent"), 'npm run migrate')
+  assert.deepEqual(await buttons(), ['Allow once', 'Refuse', 'Open'])
+  assert.equal(await disabled('Allow once'), true, 'a click meant for what was under the notice cannot allow a command')
+  assert.equal(await disabled('Refuse'), false)
+  assert.equal((await texts(ui, '.task-notice-more'))[0], '2 other tasks wait')
+  assert.equal(await ui.evaluate("document.querySelector('.task-notice').dataset.kind"), 'waiting')
+  await ui.capture('tasks-notice')
+  await ui.wait("document.querySelector('.task-notice-actions .primary').disabled===false")
+  await ui.click('.task-notice-actions button', 'Allow once')
+  assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args), [['codex:t1', 'r1', 'allow-once']])
+  await emit(waiting({ id: 'codex:t1#r2', requestId: 'r2' }))
+  assert.equal(await disabled('Allow once'), true, 'the next notice is held for a moment as well')
+  await ui.click('.task-notice-actions button', 'Refuse')
+  assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args[2]), ['allow-once', 'refuse'])
+
+  // A command that looks dangerous, or does not fit, is allowed in the window and nowhere else.
+  await emit(waiting({ id: 'claude:s1#r3', key: 'claude:s1', requestId: 'r3', detail: 'rm -rf build', danger: 'It deletes files or folders for good.', canAllow: false }))
+  await ui.wait("!!document.querySelector('.task-notice-danger')")
+  assert.deepEqual(await buttons(), ['Refuse', 'Open'])
+  assert.equal(await ui.evaluate("document.querySelector('.task-notice-danger .task-danger').textContent"), 'Dangerous')
+  assert.ok((await texts(ui, '.task-notice-danger'))[0].includes('It deletes files or folders for good.'))
+  assert.ok((await texts(ui, '.task-notice-note'))[0].includes('allowed in the Togle window'))
+  await ui.capture('tasks-notice-danger')
+  await emit(waiting({ id: 'claude:s1#r4', key: 'claude:s1', requestId: 'r4', detail: 'npm run build -- --flag --flag…', canAllow: false }))
+  await ui.wait("!document.querySelector('.task-notice-danger')")
+  assert.deepEqual(await buttons(), ['Refuse', 'Open'])
+  assert.ok((await texts(ui, '.task-notice-note'))[0].startsWith('Not all of it fits here'))
+
+  // A question can only be answered in the window.
+  await emit(waiting({ id: 'claude:s1#r5', key: 'claude:s1', requestId: 'r5', says: 'asks', detail: 'Which pricing table?', detailKind: 'question', canRefuse: false, canAllow: false }))
+  await ui.wait("document.querySelector('.task-notice-detail')?.textContent==='Which pricing table?'")
+  assert.deepEqual(await buttons(), ['Open'])
+  assert.equal((await ui.calls('answerRunnerTask')).length, 2, 'nothing was answered by showing it')
+  await ui.click('.task-notice-actions button', 'Open')
+  assert.deepEqual((await ui.calls('openTaskFromNotice')).map(call => call.args), [['claude:s1']])
+
+  // A task that finished is only news: it can be opened or closed.
+  await emit({ id: 'codex:t1#end1', kind: 'done', key: 'codex:t1', title: 'Add the status column', where: 'Codex · api-server', says: 'finished', detail: 'Added the column and ran the tests.', detailKind: 'words', canRefuse: false, canAllow: false, others: 0 })
+  await ui.wait("document.querySelector('.task-notice')?.dataset.kind==='done'")
+  assert.deepEqual(await buttons(), ['Open'])
+  assert.equal((await texts(ui, '.task-notice-says'))[0], 'Codex · api-server finished')
+  await ui.capture('tasks-notice-done')
+  await ui.click('.task-notice-head button', 'Close notice')
+  assert.deepEqual((await ui.calls('dismissTaskNotice')).map(call => call.args), [['codex:t1#end1']])
+
+  // A refused answer says why, and the buttons come back.
+  await emit(waiting({ id: 'codex:gone#r1', key: 'codex:gone', title: 'Gone' }))
+  await ui.wait("document.querySelector('.task-notice-head strong')?.textContent==='Gone'")
+  await ui.click('.task-notice-actions button', 'Refuse')
+  await ui.wait("!!document.querySelector('.task-notice-error')")
+  assert.equal((await texts(ui, '.task-notice-error'))[0], 'That task is gone.')
+  assert.equal(await disabled('Refuse'), false, 'it can be tried again')
+
+  // Told to show nothing, it shows nothing; and it always says how tall it is.
+  await emit(null)
+  await ui.wait("!document.querySelector('.task-notice')")
+  const heights = (await ui.calls('sizeTaskNotice')).map(call => call.args[0])
+  assert.ok(heights.length > 3 && heights.every(height => Number.isFinite(height) && height > 60 && height < 480), 'sizes: ' + heights)
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 async function checkNarrow(T, agent) {
   const ui = await open(T, agent, 600)
   await ui.click('.workspace-nav button', 'Tasks')
@@ -248,7 +323,8 @@ app.whenReady().then(async () => {
     await checkTasks(T, agent)
     await checkNarrow(T, agent)
     await checkQuit(T, agent)
-    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout and the question before quitting passed')
+    await checkNotice(T, agent)
+    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting and the notice passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

@@ -90,6 +90,46 @@ export interface AgentQuestion {
   secret: boolean
 }
 
+/** What a task Togle runs needs from the person right now, for the small notice and the mark on the tray. */
+export interface TaskAttention {
+  key: string
+  runner: RunnerKind
+  title: string
+  folder: string
+  state: TaskState
+  /** What waits to be allowed or answered, oldest first. */
+  pending: ViewRequest[]
+  /** What the task is doing or said last, in a line. */
+  line: string
+}
+
+/** A small notice: a task waits for the person, or it finished. */
+export interface TaskNotice {
+  /** What it is about, so the same thing is not shown twice: the task and its request, or the task and the turn that ended. */
+  id: string
+  kind: 'waiting' | 'done' | 'failed'
+  /** The task, by its key. */
+  key: string
+  title: string
+  /** The agent and the folder: "Codex · api-server". */
+  where: string
+  /** Follows `where`: "wants to run", "wants to change", "asks", "finished", "stopped with an error". */
+  says: string
+  /** The command in full, the files, the question, or what the finished task said last. */
+  detail: string
+  detailKind: 'command' | 'files' | 'question' | 'words'
+  /** The request the buttons answer. */
+  requestId?: string
+  /** Refuse is offered: a command or a change can always be refused. */
+  canRefuse: boolean
+  /** Allow once is offered: only when all of what is asked is shown here and it does not look dangerous. */
+  canAllow: boolean
+  /** Why the command looks dangerous, in plain words. */
+  danger?: string
+  /** How many other tasks wait too. */
+  others: number
+}
+
 /** What a waiting task asks. */
 export interface PendingRequest {
   id: string

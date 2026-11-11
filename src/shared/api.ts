@@ -58,7 +58,7 @@ import type { SavedConversation } from './chat'
 import type { NoiseReport, TogleMicrophoneStatus } from './microphone'
 import type { MicrophoneLinkPage } from './microphone-link'
 import type { CloseWarning } from './close-warning'
-import type { Decision, RunnerStatus, StartRequest, TaskDetail, TaskView } from './runner'
+import type { Decision, RunnerStatus, StartRequest, TaskDetail, TaskNotice, TaskView } from './runner'
 
 export type Unsubscribe = () => void
 
@@ -372,6 +372,16 @@ export interface TogleApi {
   pickRunnerFolder(): Promise<string | null>
   /** Something in the tasks changed: ask again for what is shown. */
   onRunnersChanged(cb: () => void): Unsubscribe
+  /** The small notice window is told what to show: a task that waits or finished, or null for nothing. */
+  onTaskNotice(cb: (notice: TaskNotice | null) => void): Unsubscribe
+  /** The notice window is this tall, in pixels, so the window is no taller. */
+  sizeTaskNotice(height: number): void
+  /** Opens Togle on the task a notice is about. */
+  openTaskFromNotice(key: string): void
+  /** Closes a notice: it does not come back. */
+  dismissTaskNotice(id: string): void
+  /** Togle was opened on a task, from a notice or the tray: show it. */
+  onShowTask(cb: (key: string) => void): Unsubscribe
 
   listHotkeys(): Promise<HotkeyInfo[]>
   /** Gives a shortcut other keys (empty: turns it off); rejected with why, when they can't be its. */

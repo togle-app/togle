@@ -14,6 +14,8 @@ export interface RunnerDeps {
   titles: TitleStore
   /** Which tasks Togle started, for the agents that cannot list their own. */
   records?: RecordStore
+  /** Something in the tasks changed, told to the main process as it is told to the window. */
+  changed?: () => void
   /** Asks the person for a folder; null when they close the dialog. */
   pickFolder(): Promise<string | null>
   /** Togle's version, told to the agents that ask who is talking. */
@@ -32,7 +34,10 @@ function word(value: unknown, what: string): string {
 export function registerRunners(deps: RunnerDeps): RunnerHub {
   const hub = new RunnerHub({
     backends: deps.backends ?? [new CodexBackend({ version: deps.version }), new ClaudeBackend(), new HermesBackend({ version: deps.version })],
-    changed: () => deps.send('runners:changed', null),
+    changed: () => {
+      deps.send('runners:changed', null)
+      deps.changed?.()
+    },
     titles: deps.titles,
     records: deps.records
   })
