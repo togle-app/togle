@@ -514,7 +514,7 @@ const callFile = new CallFile((hasCards) => {
 copilot.onChange = () => callFile.changed()
 const voiceMemory = new VoiceMemory(VOICE_MODEL.sha256, () => send('voices:people-changed', undefined))
 const voices = new VoiceTracker((segment, voice, person) => copilot.identifyVoice(segment, voice, person), status => send('voices:status', status), {
-  memory: voiceMemory, enabled: () => getSettings().assist.rememberVoices !== false,
+  memory: voiceMemory, enabled: () => getSettings().assist.rememberVoices === true,
   remembered: (voice, person) => copilot.rememberVoice(voice, person), revoked: segment => copilot.forgetVoiceSegment(segment)
 })
 const dictationTarget = new DictationTargetBridge(path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'), 'dictation-windows.ps1'))

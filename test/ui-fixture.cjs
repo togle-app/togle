@@ -111,7 +111,7 @@ module.exports = function install(fixture) {
   api.renameVoice = async (id, name, identity) => {
     record('renameVoice', [id, name, identity])
     let person
-    if (fixture.settings.assist.rememberVoices !== false) {
+    if (fixture.settings.assist.rememberVoices === true) {
       person = remembered.find(person => person.id === identity)
       if (!person) { person = { id: 'person-' + ++sequence, name, createdAt: Date.now(), updatedAt: Date.now() }; remembered.push(person) }
     }

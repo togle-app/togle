@@ -40,7 +40,8 @@ export const DEFAULT_SETTINGS: Settings = {
     }
   },
   compat: { baseUrl: 'https://api.openai.com/v1', model: '' },
-  assist: { auto: true, rememberVoices: true, autoNotes: true },
+  // Other people's voices are remembered only when the person turns it on (Settings → Speakers).
+  assist: { auto: true, rememberVoices: false, autoNotes: true },
   activeAgentId: '',
   // Calls are heard by this PC (no sign-in includes transcription), which detects the spoken language, unless a speech
   // API is picked for them.

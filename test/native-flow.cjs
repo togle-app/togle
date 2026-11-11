@@ -161,7 +161,7 @@ async function run() {
     assert.equal(invoke('screen-monitor:status').id, newer.id, 'a slow old lookup cannot overwrite the selected source')
     monitorScope = newer.id
   } finally { desktopCapturer.getSources = getSources }
-  const other = await invoke('agents:create', 'interview')
+  const other = await invoke('agents:create', 'support')
   await assert.rejects(Promise.resolve().then(() => invoke('settings:update', { activeAgentId: other.id })), /new call/)
   await assert.rejects(invoke('calls:delete', live.id), /End the call/)
   invoke('dev:transcript', 'them', 'Can you send the SOC2 report?', 'native-first', 'native:1')

@@ -29,6 +29,8 @@ async function open(T, agent, scenario, width = 640) {
   settings.transcription.language = 'en'
   settings.activeAgentId = agent.id
   if (scenario === 'private-call') settings.assist.rememberCalls = false
+  // Voices are remembered only when turned on, so the scenario that tests remembering turns it on first.
+  if (scenario === 'ready') settings.assist.rememberVoices = true
   settings.transcription.me = settings.transcription.them = readyAudio ? 'local' : 'chatgpt'
   const names = [...fs.readFileSync(path.join(project, 'src/shared/api.ts'), 'utf8').matchAll(/^  (\w+)\(/gm)].map(m => m[1])
   const fixtureAgents = [agent, { ...agent, id: agent.id + '-support', name: 'Support' }]
@@ -1288,12 +1290,13 @@ app.whenReady().then(async () => {
   assert.equal(await manage.evaluate("(async()=> (await window.togle.listAgents())[0].learning)()"), 'ask')
   await manage.capture('agent-learning')
   await manage.click('.new-agent-button', 'New agent')
-  await manage.wait("document.querySelectorAll('.template-card').length>=8")
-  await manage.click('.template-card', 'Use Job interview template')
+  await manage.wait("document.querySelectorAll('.template-card').length>=7")
+  assert.equal(await manage.evaluate("[...document.querySelectorAll('.template-card')].some(card=>/Job interview/i.test(card.getAttribute('aria-label')||card.textContent))"), false, 'there is no job interview template')
+  await manage.click('.template-card', 'Use Sales call template')
   await manage.capture('agent-templates')
   await manage.click('.new-agent button', 'Create agent')
-  await manage.wait("document.querySelector('.workspace-head h2')?.textContent==='Job interview'")
-  assert.equal(await manage.evaluate("window.togleUITest.calls().filter(call=>call.name==='createAgent').at(-1).args[0]"), 'interview')
+  await manage.wait("document.querySelector('.workspace-head h2')?.textContent==='Sales call'")
+  assert.equal(await manage.evaluate("window.togleUITest.calls().filter(call=>call.name==='createAgent').at(-1).args[0]"), 'sales')
   assert.equal(await manage.evaluate("window.togleUITest.calls().filter(call=>call.name==='draftAgent').length"), 0, 'creating a template must not consume an AI request')
   await manage.click('.agent-detail-tabs button', 'Call history')
   await manage.wait("document.querySelector('.history-empty')?.textContent.includes('No calls yet')")
@@ -1321,7 +1324,7 @@ app.whenReady().then(async () => {
   await manage.click('.popover.menu button', 'Delete call')
   await manage.click('.notice button', 'Delete call')
   await manage.wait("!!document.querySelector('.history-empty')")
-  await manage.click('.sidebar-agent', 'Chat with Job interview')
+  await manage.click('.sidebar-agent', 'Chat with Sales call')
   await manage.wait("!!document.querySelector('.composer')")
   assert.ok(await manage.evaluate("!document.querySelector('.main .assist')"))
   assert.deepEqual(manage.errors, [])
@@ -1506,7 +1509,7 @@ app.whenReady().then(async () => {
   await narrow.capture('history-narrow')
   await narrow.click('.workspace-nav button', 'Explore agents')
   await narrow.click('.new-agent-button', 'New agent')
-  await narrow.wait("document.querySelectorAll('.template-card').length>=8")
+  await narrow.wait("document.querySelectorAll('.template-card').length>=7")
   assert.ok(await narrow.evaluate("document.querySelector('.page:not([hidden]) .agents').scrollWidth<=document.querySelector('.page:not([hidden]) .agents').clientWidth"))
   await narrow.capture('templates-narrow')
   assert.deepEqual(narrow.errors, [])

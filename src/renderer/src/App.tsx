@@ -1356,7 +1356,7 @@ export default function App() {
         <span className="spacer" />
         {planShown && <PlanMeter plan={planShown} listening={listening} onOpen={() => setView('settings')} />}
       </div>
-      <CallPeople key={callKey} transcript={transcript} group={group} onGroup={value => { setGroup(value); api.setGroupCall(value) }} auto={!!settings?.assist.auto} onAuto={() => void toggleAuto()} remember={settings?.assist.rememberVoices !== false} />
+      <CallPeople key={callKey} transcript={transcript} group={group} onGroup={value => { setGroup(value); api.setGroupCall(value) }} auto={!!settings?.assist.auto} onAuto={() => void toggleAuto()} remember={settings?.assist.rememberVoices === true} />
     </>
   )
   // What the AI sees during the call, on the strip's status line: the screen, or audio only.

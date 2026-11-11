@@ -31,9 +31,9 @@ export function VoiceMemorySettings({ settings, save }: { settings: Settings; sa
   const [error, setError] = useState('')
   return <Section id="settings-speakers" title="Speakers">
     <Toggle name="Recognize speakers" note="Match voices locally and suggest names from introductions. Confirm or correct them under People during a call." checked={settings.assist.voiceLabels !== false} onChange={voiceLabels => void save({ assist: { voiceLabels } })} />
-    <Toggle name="Remember confirmed people" note="Recognize them in future calls. Confirming a name saves an encrypted voice profile on this computer. No recordings are saved." checked={settings.assist.rememberVoices !== false} onChange={rememberVoices => void save({ assist: { rememberVoices } })} />
+    <Toggle name="Remember confirmed people" note="Recognize them in future calls. Confirming a name saves an encrypted voice profile on this computer. No recordings are saved. A voice profile identifies a person, so turn this on only for people who agree to it." checked={settings.assist.rememberVoices === true} onChange={rememberVoices => void save({ assist: { rememberVoices } })} />
     <details className="more remembered-people"><summary>Remembered people{people.length ? ` · ${people.length}` : ''}</summary>
-      {!people.length && !loadError && <p className="hint">Confirm a speaker’s name during a call to remember their voice.</p>}
+      {!people.length && !loadError && <p className="hint">{settings.assist.rememberVoices === true ? 'Confirm a speaker’s name during a call to remember their voice.' : 'No one is remembered. Turn on “Remember confirmed people” first, then confirm a speaker’s name during a call.'}</p>}
       {people.map(person => <Row key={person.id} name={person.name} label={false} note={`Remembered ${new Date(person.createdAt).toLocaleDateString()}`}>
         <button className="ghost small" aria-label={`Forget ${person.name}'s voice`} disabled={!!busy} onClick={async () => {
           setBusy(person.id); setError('')

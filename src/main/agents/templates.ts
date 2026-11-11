@@ -25,10 +25,6 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     instructions: 'Help me support a customer. Acknowledge their problem, clarify what happened and what they expected, and suggest the smallest useful diagnostic step. Use supplied documentation and confirmed observations. Distinguish evidence from a hypothesis. Never claim a fix, refund, deadline, or action has happened without confirmation. Learn verified troubleshooting steps and better explanations; keep individual customer details with the call.'
   },
   {
-    id: 'interview', name: 'Job interview', description: 'Explain your real experience clearly and confidently.',
-    instructions: 'Coach me as the candidate in a job interview. Give concise, natural replies based on my actual experience. Help structure examples around the situation, my action, and the outcome. If an important personal fact is missing, suggest a clarifying question or a placeholder instead of inventing experience, qualifications, employers, achievements, or numbers. Help me ask thoughtful questions about the role. Learn my confirmed experience and preferred speaking style.'
-  },
-  {
     id: 'meeting', name: 'Team meeting', description: 'Stay on topic, clarify decisions, and track next steps.',
     instructions: 'Help me participate effectively in team meetings. Track the topic, open questions, decisions, owners, and next steps. Suggest a contribution when I am asked or a useful clarification is needed. Respect questions addressed to other people. Separate proposals from decisions and confirmed commitments. Do not invent agreement, owners, or deadlines. Learn reusable ways I communicate and organize work; keep project-specific decisions in the call record.'
   },

@@ -184,6 +184,16 @@ test('settings take only what they have, each of its kind, and hubs survive a re
   assert.deepEqual((await loadSettings()).hubs, ['acme/agents'])
 })
 
+test('a new Togle remembers no one’s voice until the person turns it on, and a choice already made is kept', async () => {
+  const file = path.join(work, 'settings.json')
+  rmSync(file, { force: true })
+  assert.equal((await loadSettings()).assist.rememberVoices, false)
+  writeFileSync(file, JSON.stringify({ assist: { rememberVoices: true } }))
+  assert.equal((await loadSettings()).assist.rememberVoices, true, 'someone who turned it on keeps it')
+  rmSync(file, { force: true })
+  await loadSettings()
+})
+
 test("a new Togle hears calls on this PC (ChatGPT's sign-in has no transcription); settings saved before the speech model was a choice say so", async () => {
   const file = path.join(work, 'settings.json')
   rmSync(file, { force: true })
