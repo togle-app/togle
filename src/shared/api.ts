@@ -57,6 +57,7 @@ import type { DictationHistory, DictationReceipt, DictationState, DictationVocab
 import type { SavedConversation } from './chat'
 import type { NoiseReport, TogleMicrophoneStatus } from './microphone'
 import type { MicrophoneLinkPage } from './microphone-link'
+import type { CloseWarning } from './close-warning'
 import type { Decision, RunnerStatus, StartRequest, TaskDetail, TaskView } from './runner'
 
 export type Unsubscribe = () => void
@@ -389,8 +390,8 @@ export interface TogleApi {
   close(confirmed?: boolean): void
   /** The window shows an error instead of the app: it can't ask before closing. */
   pageFailed(): void
-  /** Closing was asked for during a call: the window asks whether to. */
-  onConfirmClose(cb: () => void): Unsubscribe
+  /** Closing was asked for during a call, or while tasks Togle runs have not finished: the window asks whether to. */
+  onConfirmClose(cb: (warning: CloseWarning) => void): Unsubscribe
 }
 
 export interface ImportResult {

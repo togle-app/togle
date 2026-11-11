@@ -38,6 +38,8 @@ export interface HubOptions {
   records?: RecordStore
   /** How long the agents' lists are reused, in milliseconds. */
   cacheMs?: number
+  /** How long quitting waits for the commands of stopped tasks to end, in milliseconds. */
+  quitWaitMs?: number
 }
 
 interface Owned {
@@ -69,6 +71,7 @@ export class RunnerHub {
   private timer: NodeJS.Timeout | null = null
   private nextLog = 1
   private disposed = false
+  private disposing: Promise<void> | null = null
   private readonly cacheMs: number
 
   constructor(private readonly options: HubOptions) {
@@ -193,14 +196,42 @@ export class RunnerHub {
     this.fresh()
   }
 
-  async dispose(): Promise<void> {
+  /** The tasks Togle runs that would stop in the middle if Togle quit now: working, or waiting for the person. */
+  busy(): { key: string; title: string; waiting: boolean }[] {
+    return [...this.owned.values()]
+      .filter(({ handle }) => handle.state === 'working' || handle.state === 'waiting')
+      .map(({ key, handle }) => ({ key, title: this.titleOf(key, handle.title), waiting: handle.state === 'waiting' }))
+  }
+
+  /** Lets go of every task and ends the agents' programs. Asked twice, it is done once. */
+  dispose(): Promise<void> {
+    this.disposing ??= this.shutDown()
+    return this.disposing
+  }
+
+  private async shutDown(): Promise<void> {
     this.disposed = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     const owned = [...this.owned.values()]
+    // A task still at work is stopped as the Stop button stops it. Closing the agent's program is not enough: Claude
+    // Code and Hermes leave the command they were running behind, running with nobody watching.
+    await Promise.all(owned.filter(({ handle }) => handle.state === 'working' || handle.state === 'waiting').map((task) => this.stopForQuit(task)))
     this.owned.clear()
     await Promise.all(owned.map(async (task) => { task.off(); await task.handle.close().catch(() => undefined) }))
     await Promise.all(this.options.backends.map((backend) => backend.close().catch(() => undefined)))
+  }
+
+  /** Stops a task and the commands it runs, and waits a moment for them to end. */
+  private async stopForQuit(task: Owned): Promise<void> {
+    try {
+      await task.handle.stop()
+      await task.handle.endCommands()
+      const limit = this.options.quitWaitMs ?? 3_000
+      for (let waited = 0; task.running > 0 && waited < limit; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50))
+    } catch {
+      // The task is going away either way.
+    }
   }
 
   // ---- Inside ----

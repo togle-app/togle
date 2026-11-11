@@ -459,6 +459,100 @@ test('closing the hub lets go of every task and every agent', async () => {
   assert.equal(changes.length, seen, 'a closed hub tells the window nothing more')
 })
 
+test('what would stop if Togle quit is the tasks it runs that are working or waiting, and closing twice closes once', async () => {
+  const claude = new FakeBackend('claude', { tasks: [info('claude', 'elsewhere', 'In a terminal', 'working', 5, { pid: 41 })] })
+  const { hub } = hubOf([claude])
+  const folder = scratch()
+  try {
+    assert.deepEqual(hub.busy(), [], 'a task in another program is not Togle’s to stop')
+    await hub.start({ runner: 'claude', folder, prompt: 'Rebuild the pricing page', title: 'Pricing page' })
+    await hub.start({ runner: 'claude', folder, prompt: 'Clean up', title: 'Clean up' })
+    const [pricing, cleanup] = claude.started
+    assert.deepEqual(hub.busy().map((t) => [t.key, t.title, t.waiting]), [['claude:new1', 'Pricing page', false], ['claude:new2', 'Clean up', false]])
+    const asked = cleanup.want({ id: 'r1', kind: 'command', command: 'npm test', raw: 'npm test', folder, offersAlways: false })
+    assert.deepEqual(hub.busy().map((t) => [t.title, t.waiting]), [['Pricing page', false], ['Clean up', true]], 'a task waiting for the person has not finished either')
+    pricing.done()
+    assert.deepEqual(hub.busy().map((t) => t.title), ['Clean up'], 'a task that finished its turn is safe to quit on')
+    hub.answer('claude:new2', 'r1', 'refuse')
+    await asked
+    cleanup.done()
+    assert.deepEqual(hub.busy(), [])
+    await hub.stop('claude:new1')
+    assert.deepEqual(hub.busy(), [], 'a stopped task is not running')
+
+    await hub.send('claude:new1', 'Go on')
+    assert.equal(hub.busy().length, 1)
+    const first = hub.dispose()
+    assert.strictEqual(hub.dispose(), first, 'asked again, it is the same closing')
+    await first
+    assert.equal(claude.started[0].closed, true)
+    assert.deepEqual(hub.busy(), [], 'a closed hub runs nothing')
+  } finally {
+    await hub.dispose()
+  }
+})
+
+test('quitting stops what is still at work first, waits briefly for its commands, and leaves finished tasks alone', async () => {
+  const claude = new FakeBackend('claude')
+  const { hub } = hubOf([claude], { quitWaitMs: 400 })
+  const folder = scratch()
+  for (const title of ['Obedient', 'Stubborn', 'Waiting', 'Finished']) await hub.start({ runner: 'claude', folder, prompt: title, title })
+  const [obedient, stubborn, waiting, finished] = claude.started
+  const calls = []
+  const running = (task, command) => task.emit({ type: 'command', command, status: 'started', exitCode: null })
+  for (const [name, task] of Object.entries({ obedient, stubborn, waiting, finished })) {
+    const stop = task.stop.bind(task)
+    task.stop = async () => {
+      calls.push(`${name}:stop`)
+      await stop()
+      // Its command ends when it is stopped.
+      if (name === 'obedient') task.emit({ type: 'command', command: 'npm run build', status: 'failed', exitCode: 1 })
+    }
+    const end = task.endCommands.bind(task)
+    task.endCommands = async () => {
+      calls.push(`${name}:end`)
+      return end()
+    }
+  }
+  running(obedient, 'npm run build')
+  running(stubborn, 'ping -n 61 127.0.0.1')
+  waiting.want({ id: 'r1', kind: 'command', command: 'npm test', raw: 'npm test', folder, offersAlways: false })
+  finished.done()
+  const began = Date.now()
+  await hub.dispose()
+  const took = Date.now() - began
+  assert.deepEqual(calls.sort(), ['obedient:end', 'obedient:stop', 'stubborn:end', 'stubborn:stop', 'waiting:end', 'waiting:stop'], 'a finished task is not stopped')
+  assert.ok(took >= 350, `it waited for the command that did not end (${took} ms)`)
+  assert.ok(took < 2500, `but not for long (${took} ms)`)
+  assert.ok([obedient, stubborn, waiting, finished].every((task) => task.closed), 'then every task was let go')
+
+  // A command that ends when it is stopped does not make quitting wait.
+  const quick = new FakeBackend('claude')
+  const second = hubOf([quick], { quitWaitMs: 5000 })
+  await second.hub.start({ runner: 'claude', folder, prompt: 'One', title: 'One' })
+  const [one] = quick.started
+  const stopOne = one.stop.bind(one)
+  one.stop = async () => {
+    await stopOne()
+    one.emit({ type: 'command', command: 'npm run build', status: 'finished', exitCode: 0 })
+  }
+  running(one, 'npm run build')
+  const quickBegan = Date.now()
+  await second.hub.dispose()
+  assert.ok(Date.now() - quickBegan < 1500, 'it did not wait for a command that had ended')
+})
+
+test('the question before quitting says what would stop, and the call wording is as it was', () => {
+  assert.equal(T.quitQuestion({ call: true, tasks: [] }), 'Quit Togle? Call assistance and dictation will stop. Your call is saved.')
+  assert.equal(T.quitQuestion({ call: false, tasks: ['Add the status column'] }), 'Quit Togle? “Add the status column” has not finished. Quitting stops it. You can continue it from Tasks.')
+  assert.equal(T.quitQuestion({ call: false, tasks: ['One', 'Two', 'Three'] }), 'Quit Togle? 3 tasks have not finished. Quitting stops them. You can continue them from Tasks.')
+  assert.equal(T.quitQuestion({ call: true, tasks: ['One'] }), 'Quit Togle? Call assistance and dictation will stop, and so will a task that has not finished. Your call is saved.')
+  assert.equal(T.quitQuestion({ call: true, tasks: ['One', 'Two'] }), 'Quit Togle? Call assistance and dictation will stop, and so will 2 tasks that have not finished. Your call is saved.')
+  const long = 'x'.repeat(80)
+  const said = T.quitQuestion({ call: false, tasks: [long] })
+  assert.ok(said.includes(`“${'x'.repeat(47)}…”`) && !said.includes('x'.repeat(48)), 'a long name is cut')
+})
+
 test('the window can ask for everything through its messages, and is told when something changes', async () => {
   const handlers = new Map()
   const sent = []

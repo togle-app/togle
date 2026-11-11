@@ -44,6 +44,7 @@ import { MeetingNotice } from './Meetings'
 import { onOpenSettings, openSettings, type SettingsPart } from './open-settings'
 import { PlanMeter, PlanNotice } from './Plan'
 import { MANAGE_USAGE_URL } from '@shared/plan'
+import { quitQuestion, type CloseWarning } from '@shared/close-warning'
 import { ScreenPicker } from './ScreenPicker'
 import { ScreenTiming } from './ScreenTiming'
 import { SessionPicker } from './SessionPicker'
@@ -207,8 +208,8 @@ export default function App() {
   const [sessionPick, setSessionPick] = useState(false)
   // What was said and shown, unfolded above the call strip (during the call, or after it, asked for on its stretch).
   const [timelineOpen, setTimelineOpen] = useState(false)
-  // Closing waits for a yes while in a call.
-  const [confirmClose, setConfirmClose] = useState(false)
+  // Closing waits for a yes while in a call, or while a task Togle runs has not finished.
+  const [confirmClose, setConfirmClose] = useState<CloseWarning | null>(null)
   const keepGoing = useRef<HTMLButtonElement>(null)
   // Until the call so far is back in the window, an empty window mustn't be saved over it.
   const callLoaded = useRef(false)
@@ -444,7 +445,7 @@ export default function App() {
       }),
       api.onScreenRefresh(id => recorder.current?.captureNow(id)),
       // The question shows in the main view: Settings or Agents may be open.
-      api.onConfirmClose(() => setConfirmClose(true)),
+      api.onConfirmClose(warning => setConfirmClose(warning)),
       api.onAuthChanged(setAuth),
       api.onSettingsChanged(setSettings),
       api.onClaudeAuthChanged(setClaudeAuth),
@@ -532,9 +533,9 @@ export default function App() {
     void api.planUsage().then(setPlan)
   }, [auth.signedIn, settings?.provider])
 
-  // The call ended: closing doesn't need asking any more.
+  // The call ended: closing doesn't need asking about it any more (a task that has not finished still does).
   useEffect(() => {
-    if (!listening && !recording) setConfirmClose(false)
+    if (!listening && !recording) setConfirmClose(warning => (warning?.tasks.length ? { ...warning, call: false } : null))
   }, [listening, recording])
 
   const startMonitoring = useCallback(async (source: CaptureSource) => {
@@ -759,7 +760,7 @@ export default function App() {
     const keep = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || e.defaultPrevented) return
       e.preventDefault()
-      setConfirmClose(false)
+      setConfirmClose(null)
     }
     window.addEventListener('keydown', keep, true)
     return () => window.removeEventListener('keydown', keep, true)
@@ -1499,9 +1500,9 @@ export default function App() {
         <div className="workspace-content" inert={sidebarOpen}>
         {confirmClose && (
           <div className="notice ask" role="alert" aria-label="Confirm quit Togle">
-            <span>Quit Togle? Call assistance and dictation will stop. Your call is saved.</span>
+            <span>{quitQuestion(confirmClose)}</span>
             <div className="row">
-              <button ref={keepGoing} className="ghost" onClick={() => setConfirmClose(false)}>
+              <button ref={keepGoing} className="ghost" onClick={() => setConfirmClose(null)}>
                 Keep going
               </button>
               <button className="primary stop" onClick={() => api.close(true)}>

@@ -13,6 +13,7 @@ import type { DictationVocabularyEdit } from '@shared/dictation'
 import { DictationTargetBridge } from './dictation-target'
 import { DictationWindow } from './dictation-window'
 import { MicrophoneLink } from './microphone-link'
+import type { CloseWarning } from '@shared/close-warning'
 import type { RunnerHub } from './runners/hub'
 import { registerRunners } from './runners/register'
 import { StoredRecords, StoredTitles } from './runners/titles'
@@ -618,19 +619,26 @@ async function setVoiceBar(visible: boolean): Promise<void> {
   else { const settings = await updateSettings({ dictation: { showBar: visible } }); send('settings:changed', settings) }
   refreshVoiceSettings()
 }
+/** What quitting would stop: a call, a recording or dictation, and the tasks Togle runs that have not finished. */
+function closeWarning(): CloseWarning {
+  return { call: copilot.isListening || recording || dictation.active, tasks: runners?.busy().map(task => task.title) ?? [] }
+}
 async function requestQuit(confirmed = false): Promise<void> {
   if (quitting) return
-  if (!confirmed && !pageDown && !pageFailed && (copilot.isListening || recording || dictation.active)) {
-    openWindow(); send('window:confirm-close', true); return
+  if (!confirmed && !pageDown && !pageFailed) {
+    const warning = closeWarning()
+    if (warning.call || warning.tasks.length) { openWindow(); send('window:confirm-close', warning); return }
   }
   quitting = true; closeConfirmed = true
   dictation.dispose(); voices.stop()
   // What Togle turned on for the call goes off with it; Togle Studio itself keeps running.
   await Promise.race([microphoneLink.endCall(), new Promise(resolve => setTimeout(resolve, 1500))])
   microphoneLink.stop()
+  // The agents' programs are ended here, where it can be waited for: left to the last moment of the quit, a task in the middle of its turn would be left running.
+  const agentsEnded = Promise.race([runners?.dispose(), new Promise(resolve => setTimeout(resolve, 5000))])
   try { await Promise.all([meetingNotes.stop(), callTitles.stop()]); await voices.flush(); await callFile.flush(); await dictationHistory.flush() }
   catch (error) { console.warn('[quit] could not finish saving:', (error as Error).message) }
-  finally { app.quit() }
+  finally { await agentsEnded; app.quit() }
 }
 function dictationEscape(): void {
   if (dictation.active && dictation.status().phase !== 'inserting' && !hotkeysOff) {
@@ -881,11 +889,14 @@ function createWindow(): void {
     if (!quitting && !closeConfirmed && tray?.available && !pageDown && !pageFailed) {
       e.preventDefault(); win?.hide(); return
     }
-    if (!closeConfirmed && !pageDown && !pageFailed && (copilot.isListening || recording)) {
-      e.preventDefault()
-      win?.show()
-      send('window:confirm-close', true)
-      return
+    if (!closeConfirmed && !pageDown && !pageFailed) {
+      const warning = closeWarning()
+      if (copilot.isListening || recording || warning.tasks.length) {
+        e.preventDefault()
+        win?.show()
+        send('window:confirm-close', warning)
+        return
+      }
     }
     // Once: a save that keeps failing (a full disk) doesn't keep Togle from closing.
     if ((callFile.pending || voices.pending) && !savedForClose) {

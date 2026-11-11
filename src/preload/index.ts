@@ -235,7 +235,10 @@ const api: TogleApi = {
   minimize: () => ipcRenderer.send('window:minimize'),
   close: (confirmed) => ipcRenderer.send('window:close', confirmed),
   pageFailed: () => ipcRenderer.send('window:page-failed'),
-  onConfirmClose: (cb) => subscribe('window:confirm-close', () => cb())
+  onConfirmClose: (cb) => subscribe<{ call?: boolean; tasks?: unknown } | undefined>('window:confirm-close', warning => cb({
+    call: warning?.call !== false,
+    tasks: Array.isArray(warning?.tasks) ? warning.tasks.filter((task): task is string => typeof task === 'string') : []
+  }))
 }
 
 contextBridge.exposeInMainWorld('togle', api)

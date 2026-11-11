@@ -189,6 +189,38 @@ async function checkTasks(T, agent) {
   ui.window.destroy()
 }
 
+async function checkQuit(T, agent) {
+  const ui = await open(T, agent, 1024)
+  const notice = () => ui.evaluate("document.querySelector('[aria-label=\"Confirm quit Togle\"] span')?.textContent ?? null")
+  const warn = warning => ui.evaluate("window.togleUITest.emit('onConfirmClose', " + JSON.stringify(warning) + ")")
+
+  // A task that has not finished: the question names it, Keep going leaves it, and Quit goes ahead.
+  await warn({ call: false, tasks: ['Add the status column'] })
+  await ui.wait("!!document.querySelector('[aria-label=\"Confirm quit Togle\"]')")
+  assert.equal(await notice(), 'Quit Togle? “Add the status column” has not finished. Quitting stops it. You can continue it from Tasks.')
+  await ui.capture('tasks-quit')
+  await ui.click('[aria-label="Confirm quit Togle"] button', 'Keep going')
+  await ui.wait("!document.querySelector('[aria-label=\"Confirm quit Togle\"]')")
+  assert.equal((await ui.calls('close')).length, 0, 'Keep going quits nothing')
+  await warn({ call: false, tasks: ['One', 'Two'] })
+  await ui.wait("!!document.querySelector('[aria-label=\"Confirm quit Togle\"]')")
+  assert.equal(await notice(), 'Quit Togle? 2 tasks have not finished. Quitting stops them. You can continue them from Tasks.')
+  await ui.click('[aria-label="Confirm quit Togle"] button', 'Quit Togle')
+  assert.deepEqual((await ui.calls('close')).map(call => call.args), [[true]])
+
+  // A call alone is asked as it always was; a call with tasks says both; Escape means Keep going.
+  await warn({ call: true, tasks: [] })
+  await ui.wait("!!document.querySelector('[aria-label=\"Confirm quit Togle\"]')")
+  assert.equal(await notice(), 'Quit Togle? Call assistance and dictation will stop. Your call is saved.')
+  await warn({ call: true, tasks: ['One'] })
+  await ui.wait("document.querySelector('[aria-label=\"Confirm quit Togle\"] span').textContent.includes('so will a task')")
+  await ui.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))")
+  await ui.wait("!document.querySelector('[aria-label=\"Confirm quit Togle\"]')")
+  assert.equal((await ui.calls('close')).length, 1, 'Escape quits nothing')
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 async function checkNarrow(T, agent) {
   const ui = await open(T, agent, 600)
   await ui.click('.workspace-nav button', 'Tasks')
@@ -215,7 +247,8 @@ app.whenReady().then(async () => {
     const agent = store.list()[0]
     await checkTasks(T, agent)
     await checkNarrow(T, agent)
-    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task and narrow layout passed')
+    await checkQuit(T, agent)
+    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout and the question before quitting passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {
