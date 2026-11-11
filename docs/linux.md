@@ -13,8 +13,8 @@ npm run dist -- --linux
 Outputs include a `.deb`, an AppImage and `dist/linux-unpacked`. Do not relabel an x64 build as arm64. Current Ubuntu CI
 targets x64.
 
-Removing background noise from your microphone for every call app is Togle Microphone's job, a separate app. When it's
-installed, Togle finds it by itself, shows whether it's on, and can turn it on for calls (Settings → Togle Microphone).
+Removing background noise from your microphone for every call app is Togle Studio's job, a separate app. When it's
+installed, Togle finds it by itself, shows whether it's on, and can turn it on for calls (Settings → Togle Studio).
 
 ```sh
 # Requires an ordinary desktop or Xvfb and a working audio service.

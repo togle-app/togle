@@ -18,7 +18,7 @@ An explicit first-person lesson such as “When I say so three, write SOH 3” s
 
 Rules are readable lines in the existing agent vocabulary. Matching uses complete Unicode word boundaries, longest phrases first, and one replacement pass. Legacy comma-separated vocabulary remains valid. Corrected spellings receive priority in the transcription hint budget. Teaching phrases retain their original wording so an old correction cannot rewrite a new lesson before it is learned.
 
-Call recognition uses its owning agent’s rules. Dictation snapshots the selected agent’s rules and its speech account’s dictionary before recording; agent-specific aliases take precedence. Later agent, account, or vocabulary changes cannot reroute that recording. Cleanup-off dictation still applies explicit spelling corrections.
+Call recognition uses its owning agent’s rules. Dictation snapshots the selected agent’s rules and its voice typing account’s dictionary before recording; agent-specific aliases take precedence. Later agent, account, or vocabulary changes cannot reroute that recording. Cleanup-off dictation still applies explicit spelling corrections.
 
 Routine automatic review is hidden from chat. Knowledge shows learned words and names; Learning retains corrections, evidence, pending approvals and Undo. Undo of one wording line preserves later independent corrections. Existing review safeguards for sensitive or conflicting changes remain in place. Learning changes stored context and assistance policies, rather than training model weights.
 

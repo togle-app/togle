@@ -40,7 +40,7 @@ These are development builds. Distribution with Developer ID signing and Apple n
 - **Screen sharing:** modern apps using ScreenCaptureKit can capture Togle even when Hide from screen sharing is enabled. Share a specific call or document window rather than relying on that setting. Togle's own snapshots mask its window when capture exclusion cannot be verified. The call indicator only claims verified capture hiding on Windows.
 - **Dictation:** the Mac uses press-to-start/stop and offers **Copy text** for pasting into the destination app. Automatic insertion and hold-to-speak remain Windows-only. No Accessibility permission is required for this copy workflow. F9 may require Fn; choose another shortcut in Settings if macOS uses it.
 - **Shortcuts:** the default call shortcuts use Control + Option (shown as Ctrl + Alt). The native Edit menu provides Command + C/V/X/A and undo/redo. Command + W follows the window's normal close-to-menu-bar behavior; Command + Q uses Togle's existing confirmation and save flow.
-- **Local speech:** choose On this device under Settings → Speech → Advanced speech settings → Call transcription, then install it there. `npm run setup:whisper` is a Windows-only development helper.
+- **Local speech:** choose On this computer under Settings → Speech → Advanced speech settings → Call transcription, then install it there. `npm run setup:whisper` is a Windows-only development helper.
 
 ## Verification
 
@@ -68,7 +68,7 @@ The native and UI suites use isolated test profiles and scripted accounts, trans
 
 The macOS GitHub Actions workflow builds separately on Apple silicon and Intel. It runs type checking, unit tests, UI/native integration, tray and dictation UI checks, and DMG/ZIP packaging. The installers and reports are separate workflow artifacts, retained for 14 days; installers are uploaded only after every check passes. It runs for pull requests, pushes to `main`, and manual dispatch. Check both reports; a successful build does not certify physical audio hardware.
 
-Removing background noise from your microphone for every call app is Togle Microphone's job, a separate app with its own driver. When it's installed, Togle finds it by itself, shows whether it's on, and can turn it on for calls (Settings → Togle Microphone).
+Removing background noise from your microphone for every call app is Togle Studio's job, a separate app with its own driver. When it's installed, Togle finds it by itself, shows whether it's on, and can turn it on for calls (Settings → Togle Studio).
 
 Before treating a build as ready for daily calls, complete these checks on the packaged app:
 

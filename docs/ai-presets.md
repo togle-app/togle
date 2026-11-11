@@ -23,7 +23,7 @@ Call learning reviews use the deep route to reason about durable facts and skill
 
 ## Scope and inheritance
 
-General settings owns connected accounts, default AI, speech and voice typing preferences. An agent's Settings tab has independent inheritance switches for AI, speech, and voice typing. Enabled overrides use the same controls as General. Restoring one section preserves the others. Knowledge and Learning have separate tabs.
+App settings owns connected accounts, default AI, speech and voice typing preferences. An agent's Settings tab has independent inheritance switches for AI, speech, and voice typing. Enabled overrides use the same controls as App settings. Restoring one section preserves the others. Knowledge and Learning have separate tabs.
 
 F9 uses the selected agent's speech/voice preferences outside calls and the owning agent's preferences during a call. A recording snapshots its account, microphone, language and cleanup preferences. Changing pages or preferences does not reroute an existing recording. Shortcut keys themselves remain shared across agents.
 
