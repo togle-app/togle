@@ -578,6 +578,10 @@ export interface CallSession extends CallSessionInfo {
   personalNotes?: string
   minutes?: CallMinutes
   learning: SessionLearning
+  /** When the person said they had told the others on the call that it was being written down (absent: they did not). */
+  toldOthers?: number
+  /** The moments the person marked during the call, on the call's clock like the transcript's `at`. */
+  marks?: number[]
   /** Older versions saved summaries only. Keep them inspectable without inventing a transcript. */
   legacy?: { agentId: string; id: string }
 }
@@ -618,6 +622,10 @@ export interface CurrentCall {
   brief: string
   /** A call with several people: suggestions only when the user is the one asked. */
   group: boolean
+  /** When the person said they had told the others the call is written down (0: not yet). */
+  toldOthers?: number
+  /** The moments marked so far, on the call's clock. */
+  marks?: number[]
   /** Set when the call was picked up from disk as Togle started: when it was last saved. */
   restoredFrom?: number
   /** The parts of its cards still being answered ("<card id>:main", "<card id>:deep"). */
@@ -787,6 +795,11 @@ export interface Settings {
     notices: boolean
     /** One as well when a task finishes or stops with an error. */
     finished: boolean
+  }
+  /** Writing calls down. */
+  meetings: {
+    /** The first-call notice (rules differ by place, where the words and the sound go) was shown and understood. */
+    introSeen: boolean
   }
 }
 

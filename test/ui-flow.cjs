@@ -31,6 +31,8 @@ async function open(T, agent, scenario, width = 640) {
   if (scenario === 'private-call') settings.assist.rememberCalls = false
   // Voices are remembered only when turned on, so the scenario that tests remembering turns it on first.
   if (scenario === 'ready') settings.assist.rememberVoices = true
+  // The first-call notice is said once; every scenario but its own has had it said already.
+  settings.meetings.introSeen = scenario !== 'first-call'
   settings.transcription.me = settings.transcription.them = readyAudio ? 'local' : 'chatgpt'
   const names = [...fs.readFileSync(path.join(project, 'src/shared/api.ts'), 'utf8').matchAll(/^  (\w+)\(/gm)].map(m => m[1])
   const fixtureAgents = [agent, { ...agent, id: agent.id + '-support', name: 'Support' }]
@@ -96,7 +98,8 @@ async function open(T, agent, scenario, width = 640) {
 }
 
 async function fits(ui, selector) {
-  assert.ok(await ui.evaluate("(()=>{const el=document.querySelector(" + JSON.stringify(selector) + ");if(!el)return false;const r=el.getBoundingClientRect();return r.width>0&&r.left>=7&&r.top>=7&&r.right<=innerWidth-7&&r.bottom<=innerHeight-7&&el.scrollWidth<=el.clientWidth+1})()"), selector + ' must fit the window without horizontal clipping')
+  const where = await ui.evaluate("(()=>{const el=document.querySelector(" + JSON.stringify(selector) + ");if(!el)return null;const r=el.getBoundingClientRect();return {ok:r.width>0&&r.left>=7&&r.top>=7&&r.right<=innerWidth-7&&r.bottom<=innerHeight-7&&el.scrollWidth<=el.clientWidth+1,rect:[r.left,r.top,r.right,r.bottom].map(Math.round),window:[innerWidth,innerHeight],scroll:[el.scrollWidth,el.clientWidth]}})()")
+  assert.ok(where?.ok, selector + ' must fit the window without horizontal clipping: ' + JSON.stringify(where))
 }
 
 /** As wide as the window allows, with nothing cut off at the side (a long settings section may scroll). */
@@ -887,7 +890,20 @@ app.whenReady().then(async () => {
   await ready.click('.answer-evidence > summary', 'Reference notes')
   assert.ok(await ready.evaluate("document.querySelector('.answer-evidence').open&&document.querySelector('.answer-evidence').textContent.includes('Demo notes')"))
   await ready.click('.answer-evidence > summary', 'Reference notes')
-  assert.equal(await ready.evaluate("document.querySelectorAll('.strip-row.tools > button').length"), 3)
+  assert.equal(await ready.evaluate("document.querySelectorAll('.strip-row.tools > button').length"), 4, 'Suggest reply, Mark, and the two switches')
+  // The line to tell the others stays until it is ticked, and says where the sound goes; Mark counts the moments marked.
+  assert.equal(await ready.evaluate("document.querySelector('.tell-others .tell-line')?.textContent"), "I'm writing this call down with Togle. The sound stays on my computer.")
+  await ready.click('.tell-others button', 'Copy the line')
+  assert.equal(await ready.evaluate("document.querySelectorAll('.tell-others').length"), 1, 'copying the line is not telling the others')
+  await ready.capture('tell-the-others')
+  await ready.click('.strip-row.tools > button', 'Mark this moment')
+  await ready.wait("document.querySelector('.mark-moment .mark-count')?.textContent==='1'")
+  await ready.click('.strip-row.tools > button', 'Mark this moment')
+  await ready.wait("document.querySelector('.mark-moment .mark-count')?.textContent==='2'")
+  assert.equal(await ready.evaluate("window.togleUITest.calls().filter(c=>c.name==='markCall').length"), 2)
+  await ready.click('.tell-others button', 'I told them')
+  await ready.wait("!document.querySelector('.tell-others')")
+  assert.equal(await ready.evaluate("window.togleUITest.calls().filter(c=>c.name==='setToldOthers').map(c=>c.args[0]).join()"), 'true')
   await ready.click('button', 'Collapse suggestion')
   assert.ok(await ready.evaluate("!!document.querySelector('.assist.line [aria-expanded=false]')"))
   await ready.click('.sidebar-agent', 'Chat with Support')
@@ -1083,6 +1099,28 @@ app.whenReady().then(async () => {
   assert.deepEqual(ready.errors, [])
   ready.window.destroy()
   console.log('Call workspace: private preparation, independent agent setup, read-only history, follow-ups, and explicit new-call isolation passed.')
+
+  // The first call says two things plainly, once: the rules differ by place, and where the words and the sound go.
+  const firstCall = await open(T, agent, 'first-call')
+  assert.equal(await firstCall.evaluate("!!document.querySelector('.first-call')"), false, 'nothing is said before a call')
+  await firstCall.click('button.listen', 'Start call')
+  await firstCall.wait("!!document.querySelector('.first-call')")
+  const said = await firstCall.evaluate("document.querySelector('.first-call').textContent")
+  assert.match(said, /rules for writing down a call differ by place/)
+  assert.match(said, /The words of the call go to your Claude account/)
+  assert.match(said, /The sound stays on this computer\./)
+  await firstCall.capture('first-call-notice')
+  await firstCall.click('.first-call button', 'Got it')
+  await firstCall.wait("!document.querySelector('.first-call')")
+  assert.equal(await firstCall.evaluate('window.togleUITest.settings().meetings.introSeen'), true)
+  await firstCall.click('button.listen', 'End call')
+  await firstCall.click('button.listen', 'New call')
+  await firstCall.wait("document.querySelector('button.listen')?.textContent.includes('End call')")
+  assert.equal(await firstCall.evaluate("!!document.querySelector('.first-call')"), false, 'said once')
+  assert.equal(await firstCall.evaluate("!!document.querySelector('.tell-others')"), true, 'the line to tell the others comes with every call')
+  await firstCall.click('button.listen', 'End call')
+  assert.deepEqual(firstCall.errors, [])
+  firstCall.window.destroy()
 
   const privateCall = await open(T, agent, 'private-call')
   await privateCall.click('button.listen', 'Start call')
@@ -1463,8 +1501,8 @@ app.whenReady().then(async () => {
   await narrow.capture('call-narrow')
   narrow.window.setContentSize(400, 520)
   await narrow.wait('innerHeight===520')
-  assert.ok(await narrow.evaluate("document.querySelector('.composer').getBoundingClientRect().bottom<=innerHeight&&document.querySelector('.sidebar-footer').getBoundingClientRect().bottom<=innerHeight"), 'compact call windows retain the message box and navigation')
   await narrow.capture('call-compact')
+  assert.ok(await narrow.evaluate("document.querySelector('.composer').getBoundingClientRect().bottom<=innerHeight&&document.querySelector('.sidebar-footer').getBoundingClientRect().bottom<=innerHeight"), 'compact call windows retain the message box and navigation: ' + await narrow.evaluate("JSON.stringify({composer:document.querySelector('.composer').getBoundingClientRect().bottom,footer:document.querySelector('.sidebar-footer').getBoundingClientRect().bottom,inner:innerHeight,doc:document.documentElement.scrollHeight})"))
   narrow.window.setContentSize(400, 850)
   await narrow.wait('innerHeight===850')
   assert.ok(await narrow.evaluate("document.querySelector('.call-strip').scrollWidth<=document.querySelector('.call-strip').clientWidth"))
@@ -1647,8 +1685,8 @@ app.whenReady().then(async () => {
   await ux.click('button.listen', 'Start call')
   await ux.wait("!!document.querySelector('.call-strip')")
   await ux.click('button', 'Call tools')
-  await fits(ux, '.menu-overlay')
   await ux.capture('menu-tools-compact')
+  await fits(ux, '.menu-overlay')
   await ux.click('.menu-overlay button', 'Save a picture of it for the call')
   await ux.wait("document.querySelectorAll('.screen-choice').length===2")
   await fits(ux, '.picker-dialog')

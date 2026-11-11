@@ -1,4 +1,13 @@
-import type { TranscriptEntry } from './types'
+import type { Settings, TranscriptEntry } from './types'
+
+/**
+ * What the person can tell the others on a call, so they know it is being written down: true for how this computer
+ * hears it. With the speech models on this computer the sound never leaves it; with a speech service it goes there.
+ */
+export function tellOthersLine(transcription: Pick<Settings['transcription'], 'me' | 'them'>): string {
+  const here = transcription.me === 'local' && transcription.them === 'local'
+  return `I'm writing this call down with Togle. ${here ? 'The sound stays on my computer.' : 'The sound is sent to a speech service to turn it into text.'}`
+}
 
 /** A prompt to check group mode, never a claim to count voices from text. */
 export function groupCue(lines: TranscriptEntry[]): boolean {

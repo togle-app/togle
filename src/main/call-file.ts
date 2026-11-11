@@ -25,6 +25,10 @@ export interface CallState {
   briefAt?: number
   /** A call with several people (see Copilot.setGroup). */
   group?: boolean
+  /** When the person said they had told the others the call is written down (absent or 0: not yet). */
+  toldOthers?: number
+  /** The moments the person marked, on the call's clock. */
+  marks?: number[]
   /** The frames still waiting for a description (ids), to be described when the call is picked up again. */
   undescribed?: string[]
 }

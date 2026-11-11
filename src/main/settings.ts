@@ -55,7 +55,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // Shortcuts given other keys (or turned off): here so that loading keeps them.
   hotkeys: {},
   // A task that waits is told in a notice, and one that finished too, until turned off in Settings → Coding agents.
-  tasks: { notices: true, finished: true }
+  tasks: { notices: true, finished: true },
+  // Said once, before the first call is written down.
+  meetings: { introSeen: false }
 }
 
 let current: Settings = DEFAULT_SETTINGS

@@ -190,6 +190,12 @@ export interface TogleApi {
   setGroupCall(group: boolean): void
   /** What the call is, as the agent set it from what it was told in the conversation. */
   onBrief(cb: (call: { brief: string; group: boolean }) => void): Unsubscribe
+  /** The person told the others on the call that it is being written down (or took that back). */
+  setToldOthers(told: boolean): void
+  /** Marks this moment of the call; gives every mark of the call so far. */
+  markCall(): Promise<number[]>
+  /** Told the others, and the marks, whenever either changes. */
+  onCallFlags(cb: (flags: { toldOthers: number; marks: number[] }) => void): Unsubscribe
   onTranscript(cb: (entry: TranscriptEntry) => void): Unsubscribe
   onTranscriptUpdated(cb: (entries: TranscriptEntry[]) => void): Unsubscribe
   renameVoice(id: string, name: string, identity?: string): Promise<RememberVoiceResult>

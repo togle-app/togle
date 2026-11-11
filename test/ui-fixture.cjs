@@ -145,7 +145,11 @@ module.exports = function install(fixture) {
     const { transcript, suggestions, notes, callAnswers, learning, ...info } = session
     return { ...info, lines: transcript.length, replies: suggestions.length, learningState: learning.state, pendingLessons: count(learning.pending), learned: learning.changes.length }
   }
-  const current = () => ({ session: currentInfo, transcript: clone(transcript), frames: [], brief, group, unreviewedAnswers: 0, answering: [], recalled: [], view: { key: currentKey, cards: [], reviewedLines: 0 } })
+  // What the person did during the call besides listening: told the others, and the moments they marked.
+  let flags = { toldOthers: 0, marks: [] }
+  const current = () => ({ session: currentInfo, transcript: clone(transcript), frames: [], brief, group, toldOthers: flags.toldOthers, marks: [...flags.marks], unreviewedAnswers: 0, answering: [], recalled: [], view: { key: currentKey, cards: [], reviewedLines: 0 } })
+  api.setToldOthers = told => { record('setToldOthers', [told]); flags = { ...flags, toldOthers: told ? flags.toldOthers || Date.now() : 0 }; emit('onCallFlags', clone(flags)) }
+  api.markCall = async () => { record('markCall', []); flags = { ...flags, marks: [...flags.marks, Date.now()] }; emit('onCallFlags', clone(flags)); return [...flags.marks] }
   const capture = () => {
     if (!currentInfo || fixture.settings.assist.rememberCalls === false) return
     const previous = sessions.find(session => session.id === currentKey)
@@ -239,7 +243,7 @@ module.exports = function install(fixture) {
   api.setGroupCall = value => { record('setGroupCall', [value]); group = value; emit('onBrief', { brief, group }) }
   api.clearTranscript = async () => {
     record('clearTranscript', []); if (holdClear) await new Promise(resolve => { releaseClear = resolve })
-    brief = ''; group = false; currentInfo = undefined; currentKey = 'current-call-' + ++sequence; transcript.splice(0); cards.clear(); return current()
+    brief = ''; group = false; flags = { toldOthers: 0, marks: [] }; currentInfo = undefined; currentKey = 'current-call-' + ++sequence; transcript.splice(0); cards.clear(); return current()
   }
   api.pastCalls = async () => []
   api.callSessions = async () => { record('callSessions', []); return clone(sessions.map(summary)) }

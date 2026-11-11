@@ -1466,6 +1466,8 @@ function registerIpc(): void {
   })
   ipcMain.on('call:brief', (_e, text: string) => copilot.setBrief(String(text ?? '')))
   ipcMain.on('call:group', (_e, group: boolean) => copilot.setGroup(!!group))
+  ipcMain.on('call:told-others', (_e, told: boolean) => copilot.setToldOthers(!!told))
+  ipcMain.handle('call:mark', () => copilot.mark())
 
   ipcMain.handle('calls:list', listCallSessions)
   ipcMain.handle('calls:get', (_e, id: string) => getCallSession(id))

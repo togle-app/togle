@@ -179,6 +179,7 @@ export class CallSessions extends EventEmitter {
         customTitle: previous?.customTitle, brief, group,
         transcript, suggestions, notes, callAnswers,
         personalNotes: previous?.personalNotes, minutes: previous?.minutes,
+        toldOthers: state.toldOthers || previous?.toldOthers || undefined, marks: state.marks?.length ? [...state.marks] : previous?.marks,
         summary: previous?.summary || incoming.find(card => card.kind === 'summary')?.text || '',
         learning: previous?.learning ?? { state: 'not-reviewed', pending: emptyLessons(), changes: [] }
       })
@@ -225,9 +226,21 @@ export class CallSessions extends EventEmitter {
   }
 }
 
+/** Whether the person told the others the call was written down, in words, for the notes and for an export. */
+export function toldOthersLine(session: Pick<CallSession, 'toldOthers' | 'startedAt'>): string {
+  return session.toldOthers ? `Told the others on the call it was written down: yes, ${intoCall(session.toldOthers - session.startedAt)} into the call.` : 'Told the others on the call it was written down: not ticked.'
+}
+
+/** Time into a call ("3:07", "75:20"), as the notes cite it. */
+export function intoCall(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+
 export function exportCall(session: CallSession): string {
   return [
-    `# ${session.title}`, `Agent: ${session.agentName}`, `Started: ${new Date(session.startedAt).toISOString()}`,
+    `# ${session.title}`, `Agent: ${session.agentName}`, `Started: ${new Date(session.startedAt).toISOString()}`, toldOthersLine(session),
+    session.marks?.length && `Marked: ${session.marks.map(at => intoCall(at - session.startedAt)).join(', ')}`,
     session.brief && `## Call context\n\n${session.brief}`, session.personalNotes && `## My notes\n\n${session.personalNotes}`, session.summary && `## Summary\n\n${session.summary}`,
     `## Transcript\n\n${session.transcript.length ? speechTurns(session.transcript).map(line => `${speakerLabel(line)}: ${line.text}`).join('\n\n') : 'No transcript was saved.'}`,
     `## Suggestions\n\n${session.suggestions.map(card => `### ${card.question || card.kind}\n\n${card.text}${card.deep ? `\n\n${card.deep}` : ''}`).join('\n\n')}`,

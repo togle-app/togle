@@ -166,6 +166,8 @@ async function run() {
   await assert.rejects(invoke('calls:delete', live.id), /End the call/)
   invoke('dev:transcript', 'them', 'Can you send the SOC2 report?', 'native-first', 'native:1')
   invoke('dev:transcript', 'me', 'I will send it by Tuesday.')
+  assert.equal((await invoke('voices:rename', 'native:1', 'Diana')).state, 'off', 'no voice is remembered until the person turns it on')
+  await invoke('settings:update', { assist: { rememberVoices: true } })
   assert.equal((await invoke('voices:rename', 'native:1', 'Diana')).state, 'unavailable', 'text-only fixtures cannot invent a voice profile')
   invoke('dev:transcript', 'them', 'I also need the appendix.', 'native-duplicate', 'native:2')
   await invoke('voices:merge', 'native:2', 'native:1')

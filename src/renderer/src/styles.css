@@ -3246,3 +3246,14 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .taskbox-error { margin: 0; font-size: 12px; color: var(--danger); }
 .taskbox-none { margin: 0; padding: 20px 4px; color: var(--muted); font-size: 13px; }
 .tasks-connect-compact { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* During a call: the line to tell the others, and the button that marks a moment. In a short window the line folds away
+   (it is the button's copy, and the card's tooltip), so the call's own controls keep their room. */
+.tell-others { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 10px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--panel); font-size: 12px; }
+.tell-others strong { font-size: 12px; }
+.tell-others .tell-actions { display: flex; gap: 6px; margin-left: auto; }
+.tell-others .tell-line { flex: 1 0 100%; margin: 0; color: var(--text); font-size: 12px; line-height: 1.4; user-select: text; }
+@media (max-height: 700px) { .tell-others .tell-line { display: none; } }
+.notice.first-call strong { color: inherit; }
+.strip-row.tools button.mark-moment { display: inline-flex; align-items: center; gap: 6px; }
+.mark-moment .mark-count { min-width: 16px; padding: 0 4px; border-radius: 999px; background: var(--panel-2); color: var(--muted); font-size: 10px; line-height: 16px; text-align: center; }

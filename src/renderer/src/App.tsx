@@ -33,6 +33,7 @@ import { MicrophoneSuggestion, type NoiseFinding } from './MicrophoneSuggestion'
 import { isMicrophoneOn, type TogleMicrophoneStatus } from '@shared/microphone'
 import { CallPeople } from './CallPeople'
 import { CallToggle } from './CallToggle'
+import { FirstCallNotice, TellOthers } from './TellOthers'
 import { CallHistory } from './CallHistory'
 import { useChats, type LessonOffer, type Review, type ReviewEntry } from './chats'
 import { Conversation } from './Conversation'
@@ -192,6 +193,8 @@ export default function App() {
   // What this call is, in the user's words (told to the agent), and whether several people are on it.
   const [brief, setBrief] = useState('')
   const [group, setGroup] = useState(false)
+  // Whether the person told the others the call is written down (when: 0 is not yet), and the moments they marked.
+  const [flags, setFlags] = useState<{ toldOthers: number; marks: number[] }>({ toldOthers: 0, marks: [] })
   const [frames, setFrames] = useState<Frame[]>([])
   const [recording, setRecording] = useState(false)
   const [monitorStatus, setMonitorStatus] = useState<ScreenMonitorStatus>({ state: 'off', ready: false, reads: 0, imagesSent: 0 })
@@ -381,6 +384,7 @@ export default function App() {
     setRecalled([])
     setBrief('')
     setGroup(false)
+    setFlags({ toldOthers: call?.toldOthers ?? 0, marks: call?.marks ?? [] })
     lines.current = 0
     assistsNow.current = []
     setTranscript([])
@@ -414,6 +418,7 @@ export default function App() {
       setFrames(call.frames)
       setBrief(call.brief)
       setGroup(call.group)
+      setFlags({ toldOthers: call.toldOthers ?? 0, marks: call.marks ?? [] })
       setRecalled(call.recalled ?? [])
       setListeningSince(call.session?.startedAt ?? 0)
       let cards: AnswerItem[] = []
@@ -465,6 +470,7 @@ export default function App() {
         setBrief(call.brief)
         setGroup(call.group)
       }),
+      api.onCallFlags(setFlags),
       api.onPlanUsage(setPlan),
       api.onSttStatus(setStt),
       api.onTranscript((entry) => {
@@ -1318,6 +1324,9 @@ export default function App() {
         <button className="suggest-reply" aria-label="Suggest reply" title={withKeys('Suggest a reply', keys.suggest)} onClick={() => api.assist({ kind: 'suggest' })}>
           Suggest reply{keys.suggest && <kbd className="wide-only">{keys.suggest}</kbd>}
         </button>
+        <button className="mark-moment" aria-label="Mark this moment" title="Mark this moment. The notes list marked moments first." disabled={!listening} onClick={() => void api.markCall().then(marks => setFlags(previous => ({ ...previous, marks })), () => undefined)}>
+          Mark{flags.marks.length > 0 && <span className="mark-count" aria-label={`${flags.marks.length} marked`}>{flags.marks.length}</span>}
+        </button>
         <CallToggle
           label="Auto-suggest" short="Auto" accessibleLabel="Automatic suggestions" checked={!!settings?.assist.auto}
           disabled={changingAuto}
@@ -1603,6 +1612,9 @@ export default function App() {
             </button>
           </div>
         ))}
+        {/* While a call is written down: what the first call says, once, and the line to tell the others until it is ticked. */}
+        {listening && settings && !settings.meetings.introSeen && <FirstCallNotice settings={settings} onDone={() => void changeSettings({ meetings: { introSeen: true } })} />}
+        {listening && settings && !flags.toldOthers && <TellOthers transcription={settings.transcription} onTold={() => api.setToldOthers(true)} />}
 
         {shownAgent && <>
           <div className="workspace-head">

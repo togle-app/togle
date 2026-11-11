@@ -116,6 +116,8 @@ const NEWER = 'newer'
 const BRIEF_CHARS = CALL_NOTES_CHARS
 // A brief is for a call today: this long after it was told, with no call since, it was for one that didn't happen.
 const BRIEF_KEEP_MS = 12 * 3600_000
+// Moments the person can mark in one call: more than anyone marks on purpose, so a stuck key cannot fill the call file.
+const MAX_MARKS = 200
 // What I wrote to the agent that answers a question on a call: looked for in the last month of it.
 const TALK_ANSWERS_DAYS = 30
 // Lines a card shows the moment the question ends: a glance, not a page.
@@ -540,6 +542,10 @@ export class Copilot {
   private briefTimer: NodeJS.Timeout | null = null
   /** A call with several people: automatic suggestions only for questions meant for me. */
   private group = false
+  /** When the person said they had told the others that the call is being written down (0: not yet). */
+  private toldOthersAt = 0
+  /** The moments the person marked, on the call's clock. */
+  private marks: number[] = []
   /**
    * Calls the review found taught me (newest last), as they were when reviewed, to write up as a document if I say:
    * kept in memory only, until written up or replaced by newer ones.
@@ -567,7 +573,7 @@ export class Copilot {
   callState(): CallState {
     const { transcript, frames, notes, notesUntil, answeredUntil, callAnswers, brief, briefAt, group } = this
     const undescribed = [...this.describingNow, ...this.undescribed, ...this.comparing].map((f) => f.id)
-    return { transcript, frames, notes, notesUntil, answeredUntil, callAnswers, brief, briefAt, group, undescribed }
+    return { transcript, frames, notes, notesUntil, answeredUntil, callAnswers, brief, briefAt, group, toldOthers: this.toldOthersAt, marks: this.marks, undescribed }
   }
 
   /**
@@ -586,6 +592,8 @@ export class Copilot {
     this.brief = state.brief ?? ''
     this.briefAt = state.briefAt ?? 0
     this.group = state.group ?? false
+    this.toldOthersAt = Number.isFinite(state.toldOthers) ? state.toldOthers! : 0
+    this.marks = Array.isArray(state.marks) ? state.marks.filter(Number.isFinite).slice(0, MAX_MARKS) : []
     this.forgetOldBrief()
     for (const e of this.transcript) if (e.speaker === 'them') this.autoHandled.add(e.id)
     // The frames still waiting for a description when Togle closed (not the ones left to their neighbours'): the
@@ -603,9 +611,38 @@ export class Copilot {
       unreviewedAnswers: this.callAnswers.filter((a) => !a.reviewed).length,
       brief: this.brief,
       group: this.group,
+      toldOthers: this.toldOthersAt,
+      marks: this.marks,
       answering: [...this.answering],
       recalled: this.recalled
     }
+  }
+
+  /** Whether there is a call to attach a mark or a note about the others to: one running, or one with words in it. */
+  private inCall(): boolean {
+    return this.listening || this.transcript.length > 0
+  }
+
+  /**
+   * The person told the others on the call that it is being written down (or took that back): the call's notes
+   * record it, and the reminder to do so goes. Said once, the first time stays.
+   */
+  setToldOthers(told: boolean): void {
+    if (told && !this.inCall()) return
+    const at = told ? this.toldOthersAt || this.now() : 0
+    if (at === this.toldOthersAt) return
+    this.toldOthersAt = at
+    this.onChange?.()
+    this.send('call:flags', { toldOthers: this.toldOthersAt, marks: this.marks })
+  }
+
+  /** The person marked this moment: the notes list marked moments first. Returns every mark of the call. */
+  mark(): number[] {
+    if (!this.inCall() || this.marks.length >= MAX_MARKS) return this.marks
+    this.marks = [...this.marks, this.now()]
+    this.onChange?.()
+    this.send('call:flags', { toldOthers: this.toldOthersAt, marks: this.marks })
+    return this.marks
   }
 
   /** The call for the Train chat to read: what was said and shown, the brief, and the answers approved or corrected. */
@@ -774,6 +811,8 @@ export class Copilot {
     this.recalledIds = ''
     this.recalled = []
     this.group = false
+    this.toldOthersAt = 0
+    this.marks = []
     if (this.noteTimer) clearTimeout(this.noteTimer)
     this.noteTimer = null
     await this.store.reset()
