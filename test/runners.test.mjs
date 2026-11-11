@@ -557,6 +557,190 @@ test('a Claude Code program that cannot be started fails the start, and nothing 
   }
 })
 
+// ---- Hermes ----
+
+const fakeHermes = path.join(import.meta.dirname, 'fake-hermes.mjs')
+const hermes = (env = {}, options = {}) => new T.HermesBackend({ command: [process.execPath, fakeHermes], env: { ...process.env, ...env }, ...options })
+const callsOf = (file) => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [])
+
+test('Hermes starts a task, keeps the name given, asks in its asking mode, and ends the turn by what it said', { timeout: 30_000 }, async () => {
+  const calls = path.join(scratch(), 'calls.jsonl')
+  const backend = hermes({ FAKE_CALLS: calls }, { model: 'openai-codex:gpt-6.1-sol' })
+  try {
+    assert.deepEqual(await backend.detect(), { installed: true, command: process.execPath, version: 'Hermes Agent v0.0.0-fake' })
+    const task = await backend.start({ folder: os.tmpdir(), prompt: 'say ok', title: 'Port the settings screen', asks: true })
+    const events = watch(task)
+    assert.equal(task.runner, 'hermes')
+    assert.equal(task.id, 's1')
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    assert.deepEqual(events.filter((e) => e.type === 'message').map((e) => e.text), ['ok'], 'the pieces of what it said are one message')
+    assert.equal(task.title, 'Port the settings screen', 'the name Hermes gives a session does not replace the one chosen')
+    assert.equal(task.state, 'idle')
+    const made = callsOf(calls)
+    assert.deepEqual(made.map((c) => c.method), ['session/new', 'session/set_model', 'session/set_mode'])
+    assert.deepEqual([made[1].modelId, made[2].modeId], ['openai-codex:gpt-6.1-sol', 'default'])
+    await task.send('say ok')
+    await until(() => events.filter((e) => e.type === 'turn-ended').length === 2, 'the next turn to end')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a Hermes command waits as a request, and only allow once lets it run', { timeout: 30_000 }, async () => {
+  const backend = hermes()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'run note', asks: true })
+    const events = watch(task)
+    const request = await until(() => task.pending[0], 'the command to wait')
+    assert.equal(request.kind, 'command')
+    assert.equal(request.command, 'echo x > note.txt')
+    assert.equal(request.offersAlways, true)
+    assert.equal(task.state, 'waiting')
+    task.answer(request.id, 'allow-once')
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    assert.deepEqual(events.filter((e) => e.type === 'command').map((e) => e.status), ['started', 'finished'])
+    assert.deepEqual(events.filter((e) => e.type === 'message').map((e) => e.text), ['ran it'])
+
+    await task.send('run other')
+    const second = await until(() => task.pending[0], 'the second command to wait')
+    task.answer(second.id, 'refuse')
+    await until(() => events.filter((e) => e.type === 'turn-ended').length === 2, 'the second turn to end')
+    assert.deepEqual(events.filter((e) => e.type === 'command').map((e) => e.status), ['started', 'finished', 'started', 'declined'])
+    assert.equal(events.filter((e) => e.type === 'message').at(-1).text, 'it was refused')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a Hermes edit shows its file, and an ask with no way to allow once is refused, not widened', { timeout: 30_000 }, async () => {
+  const backend = hermes()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'edit page' })
+    const events = watch(task)
+    const edit = await until(() => task.pending[0], 'the edit to wait')
+    assert.equal(edit.kind, 'edit')
+    assert.deepEqual(edit.files, ['C:\\work\\page.txt'])
+    task.answer(edit.id, 'allow-once')
+    await until(() => events.some((e) => e.type === 'files'), 'the edit to be reported')
+    assert.deepEqual(events.find((e) => e.type === 'files'), { type: 'files', paths: ['C:\\work\\page.txt'] })
+    await until(() => task.state === 'idle', 'the turn to end')
+
+    await task.send('noonce')
+    const ask = await until(() => task.pending[0], 'the ask to wait')
+    task.answer(ask.id, 'allow-once')
+    await until(() => task.state === 'idle', 'the turn to end')
+    assert.ok(events.some((e) => e.type === 'error' && /no way to allow this once/.test(e.message)))
+    assert.deepEqual(events.filter((e) => e.type === 'command' && e.status !== 'started').at(-1), { type: 'command', command: 'echo y', status: 'failed', exitCode: null }, 'it did not run')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Hermes that never asks just runs, and the person sees what it did', { timeout: 30_000 }, async () => {
+  const backend = hermes()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'free' })
+    const events = watch(task)
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    assert.equal(events.some((e) => e.type === 'request'), false)
+    assert.deepEqual(events.filter((e) => e.type === 'command').map((e) => [e.command, e.status]), [['dir', 'started'], ['dir', 'finished']])
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Stop cancels Hermes, which ends the running command itself, and a reply goes on in the same task', { timeout: 60_000 }, async () => {
+  const dir = scratch()
+  const pidFile = path.join(dir, 'pid')
+  const backend = hermes({ FAKE_PID_FILE: pidFile })
+  try {
+    const task = await backend.start({ folder: dir, prompt: 'sleep' })
+    const events = watch(task)
+    const childPid = Number(await until(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8'), 'the command to start'))
+    assert.ok(alive(childPid))
+    await task.stop()
+    assert.equal(task.state, 'stopped')
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    assert.deepEqual(events.find((e) => e.type === 'turn-ended'), { type: 'turn-ended', outcome: 'interrupted', error: null })
+    await until(() => !alive(childPid), 'the command to end')
+    assert.equal(task.state, 'stopped')
+    assert.equal(await task.endCommands(), 0)
+    await task.send('say ok')
+    await until(() => task.state === 'idle', 'the reply to be answered')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Stop with a Hermes request open refuses it', { timeout: 30_000 }, async () => {
+  const backend = hermes()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'run late' })
+    const events = watch(task)
+    const request = await until(() => task.pending[0], 'the command to wait')
+    await task.stop()
+    assert.equal(task.pending.length, 0)
+    assert.deepEqual(events.find((e) => e.type === 'request-ended'), { type: 'request-ended', id: request.id, outcome: 'cancelled' })
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a turn Hermes cannot finish says why in its own words', { timeout: 30_000 }, async () => {
+  const backend = hermes()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'fail' })
+    const events = watch(task)
+    await until(() => task.state === 'idle', 'the turn to end')
+    assert.deepEqual(events.find((e) => e.type === 'error'), { type: 'error', message: 'The provider rejected the request.' })
+    assert.deepEqual(events.find((e) => e.type === 'turn-ended'), { type: 'turn-ended', outcome: 'failed', error: 'The provider rejected the request.' })
+    await task.send('say ok')
+    await until(() => events.some((e) => e.type === 'message' && e.text === 'ok'), 'the next turn to be answered')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a Hermes session is picked up again, by resuming when Hermes can and by loading when it cannot, without replaying its past', { timeout: 30_000 }, async () => {
+  for (const env of [{}, { FAKE_NO_RESUME: '1' }]) {
+    const dir = scratch()
+    const calls = path.join(dir, 'calls.jsonl')
+    const backend = hermes({ FAKE_CALLS: calls, ...env })
+    try {
+      const task = await backend.resume('old-session', { folder: dir, asks: true })
+      const events = watch(task)
+      assert.equal(task.id, 'old-session')
+      await task.send('say ok')
+      await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+      assert.deepEqual(events.filter((e) => e.type === 'message').map((e) => e.text), ['ok'], 'what Hermes replays of the past is not news')
+      assert.equal(events.some((e) => e.type === 'command'), false, 'neither are the commands it ran then')
+      assert.equal(callsOf(calls)[0].method, env.FAKE_NO_RESUME ? 'session/load' : 'session/resume')
+      assert.equal(callsOf(calls)[0].cwd, dir)
+      assert.equal((await backend.resume('old-session', { folder: dir })).id, 'old-session', 'a task already picked up is the same one')
+    } finally {
+      await backend.close()
+    }
+  }
+})
+
+test('when Hermes ends under a task, the task fails; and one that cannot start fails the start', { timeout: 30_000 }, async () => {
+  const backend = hermes()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'run gone' })
+    const events = watch(task)
+    await until(() => task.pending[0], 'the command to wait')
+    process.kill(Number(await until(async () => (await T.listProcesses()).find((p) => p.command.includes('fake-hermes.mjs') && p.ppid === process.pid)?.pid, 'the program to be found')))
+    await until(() => task.state === 'failed', 'the task to fail', 10_000)
+    assert.equal(task.pending.length, 0)
+    assert.ok(events.some((e) => e.type === 'ended' && e.reason === 'crashed'))
+  } finally {
+    await backend.close()
+  }
+  const missing = new T.HermesBackend({ command: [path.join(os.tmpdir(), 'no-such-hermes-program')] })
+  await assert.rejects(missing.start({ folder: os.tmpdir(), prompt: 'say ok' }), /Hermes did not start/)
+  assert.deepEqual(await missing.list(), [], 'what Hermes would not list is left to the hub\'s record')
+})
+
 test('someone who starts listening late hears what already happened, in order', { timeout: 30_000 }, async () => {
   const backend = claude()
   try {

@@ -15,11 +15,27 @@ export interface TitleStore {
   set(key: string, title: string): void
 }
 
+/** A task Togle started or picked up, remembered: some agents cannot list their own sessions. */
+export interface TaskRecord {
+  runner: RunnerKind
+  id: string
+  title: string
+  folder: string
+  /** When it was started or picked up, in milliseconds. */
+  at: number
+}
+
+export interface RecordStore {
+  all(): TaskRecord[]
+  add(record: TaskRecord): void
+}
+
 export interface HubOptions {
   backends: Backend[]
   /** Something the window shows has changed. Called at most about every 100 ms. */
   changed: () => void
   titles?: TitleStore
+  records?: RecordStore
   /** How long the agents' lists are reused, in milliseconds. */
   cacheMs?: number
 }
@@ -206,6 +222,12 @@ export class RunnerHub {
     const installed = new Set((await this.status()).filter((status) => status.installed).map((status) => status.runner))
     const lists = await Promise.allSettled(this.options.backends.filter((backend) => installed.has(backend.runner)).map((backend) => backend.list()))
     const infos = lists.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+    // What the agents do not list themselves, from the record of what Togle started.
+    for (const record of this.options.records?.all() ?? []) {
+      if (installed.has(record.runner) && !infos.some((info) => info.runner === record.runner && info.id === record.id)) {
+        infos.push({ id: record.id, runner: record.runner, title: record.title, folder: record.folder, state: 'idle', updatedAt: record.at })
+      }
+    }
     this.cache = { at: Date.now(), infos }
     return infos
   }
@@ -239,6 +261,7 @@ export class RunnerHub {
     if (before) return before
     const owned: Owned = { key, handle, log: [], running: 0, updatedAt: Date.now(), off: () => undefined }
     this.owned.set(key, owned)
+    this.options.records?.add({ runner: handle.runner, id: handle.id, title: this.titleOf(key, handle.title), folder: handle.folder, at: Date.now() })
     owned.off = handle.on((event) => {
       this.record(owned, event)
       this.changedSoon()

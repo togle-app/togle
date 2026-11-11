@@ -3,7 +3,8 @@
 import type { RunnerKind } from '@shared/runner'
 import { ClaudeBackend } from './claude'
 import { CodexBackend } from './codex'
-import { RunnerHub, type TitleStore } from './hub'
+import { HermesBackend } from './hermes'
+import { RunnerHub, type RecordStore, type TitleStore } from './hub'
 import type { Backend } from './types'
 
 export interface RunnerDeps {
@@ -11,11 +12,13 @@ export interface RunnerDeps {
   handle(channel: string, listener: (...args: unknown[]) => unknown): void
   send(channel: string, payload: unknown): void
   titles: TitleStore
+  /** Which tasks Togle started, for the agents that cannot list their own. */
+  records?: RecordStore
   /** Asks the person for a folder; null when they close the dialog. */
   pickFolder(): Promise<string | null>
   /** Togle's version, told to the agents that ask who is talking. */
   version: string
-  /** The agents to work with: Codex and Claude Code when left out. */
+  /** The agents to work with: Codex, Claude Code and Hermes when left out. */
   backends?: Backend[]
 }
 
@@ -28,9 +31,10 @@ function word(value: unknown, what: string): string {
 
 export function registerRunners(deps: RunnerDeps): RunnerHub {
   const hub = new RunnerHub({
-    backends: deps.backends ?? [new CodexBackend({ version: deps.version }), new ClaudeBackend()],
+    backends: deps.backends ?? [new CodexBackend({ version: deps.version }), new ClaudeBackend(), new HermesBackend({ version: deps.version })],
     changed: () => deps.send('runners:changed', null),
-    titles: deps.titles
+    titles: deps.titles,
+    records: deps.records
   })
   const { handle } = deps
   handle('runners:status', () => hub.status())

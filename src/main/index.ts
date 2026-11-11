@@ -15,7 +15,7 @@ import { DictationWindow } from './dictation-window'
 import { MicrophoneLink } from './microphone-link'
 import type { RunnerHub } from './runners/hub'
 import { registerRunners } from './runners/register'
-import { StoredTitles } from './runners/titles'
+import { StoredRecords, StoredTitles } from './runners/titles'
 import { MICROPHONE_PRODUCT, microphonePage } from '@shared/microphone-link'
 import { readNoiseReport, shouldSuggest } from '@shared/microphone'
 import { TogleTray } from './tray'
@@ -1947,11 +1947,13 @@ if (!app.requestSingleInstanceLock()) {
     setupMediaAccess()
     registerIpc()
     const runnerTitles = new StoredTitles()
-    await runnerTitles.load()
+    const runnerRecords = new StoredRecords()
+    await Promise.all([runnerTitles.load(), runnerRecords.load()])
     runners = registerRunners({
       handle: (channel, listener) => ipcMain.handle(channel, (_event, ...args) => listener(...args)),
       send,
       titles: runnerTitles,
+      records: runnerRecords,
       pickFolder: async () => {
         const chosen = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] }) : await dialog.showOpenDialog({ properties: ['openDirectory'] })
         return chosen.canceled ? null : (chosen.filePaths[0] ?? null)

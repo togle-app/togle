@@ -385,6 +385,65 @@ test('taking over ends the terminal program that runs a task, and only if it is 
   }
 })
 
+test('a task Togle started is remembered for an agent that cannot list its own, and comes back after a restart', async () => {
+  const kept = []
+  const records = { all: () => [...kept], add: (record) => kept.push(record) }
+  const folder = scratch()
+  const first = new FakeBackend('hermes')
+  const one = hubOf([first], { records })
+  await one.hub.start({ runner: 'hermes', folder, prompt: 'Rebuild the pricing page' })
+  await one.hub.dispose()
+  assert.deepEqual(kept.map((r) => [r.runner, r.id, r.title, r.folder]), [['hermes', 'new1', 'Rebuild the pricing page', folder]])
+
+  const second = new FakeBackend('hermes')
+  const two = hubOf([second], { records })
+  try {
+    const listed = await two.hub.list()
+    assert.deepEqual(listed.map((t) => [t.key, t.title, t.state, t.mine, t.folder]), [['hermes:new1', 'Rebuild the pricing page', 'idle', false, folder]])
+    const view = await two.hub.open('hermes:new1')
+    assert.equal(view.mine, true)
+    assert.deepEqual(second.resumed[0].resumeOptions, { asks: true, folder }, 'it is picked up in the folder it was started in')
+  } finally {
+    await two.hub.dispose()
+  }
+  const away = new FakeBackend('hermes', { installed: false })
+  const three = hubOf([away], { records })
+  try {
+    assert.deepEqual(await three.hub.list(), [], 'what belongs to an agent that is not installed is not shown')
+  } finally {
+    await three.hub.dispose()
+  }
+})
+
+test('the saved record and names come back from their files, and a damaged file is ignored', async () => {
+  const records = new T.StoredRecords()
+  await records.load()
+  assert.deepEqual(records.all(), [])
+  records.add({ runner: 'hermes', id: 'a', title: 'First', folder: 'C:\\work', at: 1 })
+  records.add({ runner: 'hermes', id: 'b', title: 'Second', folder: 'C:\\work', at: 2 })
+  records.add({ runner: 'hermes', id: 'a', title: 'First again', folder: 'C:\\work', at: 3 })
+  const titles = new T.StoredTitles()
+  await titles.load()
+  titles.set('hermes:a', '  Named  ')
+  titles.set('hermes:b', '   ')
+  await new Promise((r) => setTimeout(r, 900))
+  const reread = new T.StoredRecords()
+  await reread.load()
+  assert.deepEqual(reread.all().map((r) => [r.id, r.title]), [['b', 'Second'], ['a', 'First again']], 'one record for a task, the latest')
+  const names = new T.StoredTitles()
+  await names.load()
+  assert.equal(names.get('hermes:a'), 'Named')
+  assert.equal(names.get('hermes:b'), undefined)
+  await T.writeJson('runner-tasks.json', [{ runner: 'hermes', id: 'ok', title: 'Fine', folder: 'x', at: 1 }, { nonsense: true }, 7, null])
+  const damaged = new T.StoredRecords()
+  await damaged.load()
+  assert.deepEqual(damaged.all().map((r) => r.id), ['ok'])
+  await T.writeJson('runner-tasks.json', { not: 'a list' })
+  const wrong = new T.StoredRecords()
+  await wrong.load()
+  assert.deepEqual(wrong.all(), [])
+})
+
 test('closing the hub lets go of every task and every agent', async () => {
   const claude = new FakeBackend('claude')
   const codex = new FakeBackend('codex')

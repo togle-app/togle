@@ -254,7 +254,7 @@ function NewTask({ installed, folders, onCancel, onStart }: { installed: RunnerS
         <span>Task</span>
         <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} placeholder="Say what it should do" aria-label="Task" autoFocus />
       </label>
-      <p className="hint">Every command and every change asks you first.</p>
+      <p className="hint">{runner === 'hermes' ? 'Hermes asks before a command only when its own settings are set to.' : 'Every command and every change asks you first.'}</p>
       <div className="row">
         <button className="primary" disabled={busy || !folder.trim() || !prompt.trim()}>
           {busy ? 'Starting…' : 'Start'}

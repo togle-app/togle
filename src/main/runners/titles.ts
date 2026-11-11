@@ -1,17 +1,32 @@
-// The names Togle gave tasks ("Port the settings screen"), kept between runs: the agents name their own sessions by what
-// was asked first, and a name chosen here is the one the person knows the task by.
+// What Togle remembers of its tasks between runs: the names it gave them ("Port the settings screen"), and which tasks
+// it started, for the agents that cannot list their own sessions.
 import { readJson, writeJson } from '../storage'
-import type { TitleStore } from './hub'
+import type { RecordStore, TaskRecord, TitleStore } from './hub'
 
-const FILE = 'runner-titles.json'
+const TITLES = 'runner-titles.json'
+const RECORDS = 'runner-tasks.json'
 const KEEP = 500
+
+/** Writes a file a moment after the last change, not once for each. */
+class Later {
+  private timer: NodeJS.Timeout | null = null
+  constructor(private readonly save: () => Promise<void>) {}
+  ask(): void {
+    if (this.timer) return
+    this.timer = setTimeout(() => {
+      this.timer = null
+      void this.save().catch(() => undefined)
+    }, 500)
+    this.timer.unref?.()
+  }
+}
 
 export class StoredTitles implements TitleStore {
   private titles: Record<string, string> = {}
-  private timer: NodeJS.Timeout | null = null
+  private readonly later = new Later(() => writeJson(TITLES, this.titles))
 
   async load(): Promise<void> {
-    this.titles = await readJson<Record<string, string>>(FILE, {})
+    this.titles = await readJson<Record<string, string>>(TITLES, {})
   }
 
   get(key: string): string | undefined {
@@ -25,10 +40,25 @@ export class StoredTitles implements TitleStore {
     this.titles[key] = clean
     const keys = Object.keys(this.titles)
     for (const old of keys.slice(0, Math.max(0, keys.length - KEEP))) delete this.titles[old]
-    if (this.timer) return
-    this.timer = setTimeout(() => {
-      this.timer = null
-      void writeJson(FILE, this.titles).catch(() => undefined)
-    }, 500)
+    this.later.ask()
+  }
+}
+
+export class StoredRecords implements RecordStore {
+  private records: TaskRecord[] = []
+  private readonly later = new Later(() => writeJson(RECORDS, this.records))
+
+  async load(): Promise<void> {
+    const saved = await readJson<unknown>(RECORDS, [])
+    this.records = Array.isArray(saved) ? saved.filter((r): r is TaskRecord => typeof r?.id === 'string' && typeof r?.runner === 'string' && typeof r?.folder === 'string') : []
+  }
+
+  all(): TaskRecord[] {
+    return [...this.records]
+  }
+
+  add(record: TaskRecord): void {
+    this.records = [...this.records.filter((r) => !(r.runner === record.runner && r.id === record.id)), record].slice(-KEEP)
+    this.later.ask()
   }
 }
