@@ -2,8 +2,9 @@
 // backends (codex.ts, claude.ts) know how to talk to their agent; this joins them: the tasks they keep on this computer,
 // the ones Togle runs (with what happened in each, so the window can show it), and the actions on a task by its key.
 import { promises as fs } from 'node:fs'
-import type { Decision, LogEntry, RunnerKind, RunnerStatus, StartRequest, TaskAttention, TaskDetail, TaskEvent, TaskInfo, TaskView, ViewRequest } from '@shared/runner'
+import type { Changes, Decision, LogEntry, RunnerKind, RunnerStatus, StartRequest, TaskAttention, TaskDetail, TaskEvent, TaskInfo, TaskView, ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
+import { changesIn } from './changes'
 import { endTree, listProcesses } from './process-tree'
 import type { Backend, Detected, TaskHandle } from './types'
 
@@ -194,6 +195,13 @@ export class RunnerHub {
     owned.off()
     await owned.handle.close()
     this.fresh()
+  }
+
+  /** What differs from the last commit in the folder a task works in. */
+  async changes(key: string): Promise<Changes> {
+    const folder = this.owned.get(key)?.handle.folder || (await this.infos()).find((task) => keyOf(task.runner, task.id) === key)?.folder
+    if (!folder) throw new Error('That task is gone.')
+    return changesIn(folder)
   }
 
   /** What the tasks Togle runs need now. Asks the agents nothing, so it is cheap enough to ask at every change. */

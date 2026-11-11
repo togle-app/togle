@@ -594,7 +594,7 @@ test('the window can ask for everything through its messages, and is told when s
     backends: [claude]
   })
   try {
-    for (const channel of ['status', 'list', 'detail', 'start', 'open', 'take-over', 'send', 'answer', 'reply', 'stop', 'end-commands', 'close', 'pick-folder']) assert.ok(handlers.has(`runners:${channel}`), channel)
+    for (const channel of ['status', 'list', 'detail', 'changes', 'start', 'open', 'take-over', 'send', 'answer', 'reply', 'stop', 'end-commands', 'close', 'pick-folder']) assert.ok(handlers.has(`runners:${channel}`), channel)
     assert.equal((await handlers.get('runners:list')()).length, 1)
     assert.equal(await handlers.get('runners:pick-folder')(), 'C:\\picked')
     assert.throws(() => handlers.get('runners:start')({ runner: 'nope', folder: 'x', prompt: 'y' }), /Pick an agent/)

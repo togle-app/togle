@@ -210,6 +210,7 @@ const api: TogleApi = {
   saveConversation: (agentId, conversation) => ipcRenderer.send('conversation:save', agentId, conversation),
 
   runnerStatus: () => ipcRenderer.invoke('runners:status'),
+  runnerChanges: key => ipcRenderer.invoke('runners:changes', key),
   runnerTasks: () => ipcRenderer.invoke('runners:list'),
   runnerDetail: key => ipcRenderer.invoke('runners:detail', key),
   startRunnerTask: request => ipcRenderer.invoke('runners:start', request),

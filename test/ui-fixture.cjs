@@ -398,6 +398,18 @@ module.exports = function install(fixture) {
   api.endRunnerCommands = async key => { record('endRunnerCommands', [key]); runnerFind(key).commandsRunning = false; runnerChanged(); return 1 }
   api.closeRunnerTask = async key => { record('closeRunnerTask', [key]); runnerFind(key).mine = false; runnerChanged() }
   api.pickRunnerFolder = async () => { record('pickRunnerFolder', []); return 'C:\\work\\picked' }
+  // What differs from the last commit: a repository for every folder but the notes one.
+  const sampleDiff = [
+    'diff --git a/src/status.ts b/src/status.ts', 'index 1111111..2222222 100644', '--- a/src/status.ts', '+++ b/src/status.ts', '@@ -1,3 +1,3 @@',
+    " export const columns = ['id', 'name']", "+export const status = 'status'", '-const old = 1', ' export default columns',
+    'diff --git a/migrations/003_add_status.sql b/migrations/003_add_status.sql', 'new file', '--- /dev/null', '+++ b/migrations/003_add_status.sql', '@@ -0,0 +1,2 @@',
+    '+ALTER TABLE orders ADD COLUMN status text;', "+UPDATE orders SET status = 'open';", ''
+  ].join('\n')
+  api.runnerChanges = async key => {
+    record('runnerChanges', [key])
+    if (runnerFind(key).folder === 'C:\\work\\notes') return { git: false, problem: 'This folder is not in a git repository, so Togle cannot tell what changed.', files: [], diff: '', truncated: false }
+    return clone({ git: true, branch: 'main', files: [{ path: 'src/status.ts', status: 'modified', added: 1, removed: 1 }, { path: 'migrations/003_add_status.sql', status: 'new', added: 2, removed: 0 }], diff: sampleDiff, truncated: false })
+  }
   // The to-do list, in memory: the lines of its file, each with the words it had when it was shown.
   const todoItems = fixture.scenario === 'tasks' ? [
     { text: 'Review the onboarding copy', done: false },

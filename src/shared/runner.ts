@@ -53,6 +53,30 @@ export interface ViewRequest extends PendingRequest {
   danger?: string
 }
 
+/** One file that differs from the last commit in a task's folder. */
+export interface ChangedFile {
+  /** Relative to the folder's repository, with forward slashes. */
+  path: string
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'new'
+  /** Lines added and removed; null for a file that is not text. */
+  added: number | null
+  removed: number | null
+}
+
+/** What differs from the last commit in the folder a task works in. */
+export interface Changes {
+  /** Whether the folder is in a git repository that could be read. */
+  git: boolean
+  /** Why it could not be read, in words. */
+  problem?: string
+  /** The repository's branch. */
+  branch?: string
+  files: ChangedFile[]
+  /** All the differences as a unified diff, cut where it gets too long. */
+  diff: string
+  truncated: boolean
+}
+
 /** A task as the window shows it. */
 export interface TaskView extends TaskInfo {
   /** `runner:id`. */

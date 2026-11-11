@@ -59,7 +59,7 @@ import type { NoiseReport, TogleMicrophoneStatus } from './microphone'
 import type { MicrophoneLinkPage } from './microphone-link'
 import type { CloseWarning } from './close-warning'
 import type { TodoList, TodoRef } from './todo'
-import type { Decision, RunnerStatus, StartRequest, TaskDetail, TaskNotice, TaskView } from './runner'
+import type { Changes, Decision, RunnerStatus, StartRequest, TaskDetail, TaskNotice, TaskView } from './runner'
 
 export type Unsubscribe = () => void
 
@@ -354,6 +354,8 @@ export interface TogleApi {
   runnerTasks(): Promise<TaskView[]>
   /** One task with what happened in it, as far as Togle ran it. */
   runnerDetail(key: string): Promise<TaskDetail>
+  /** What differs from the last commit in the folder a task works in (read with git). */
+  runnerChanges(key: string): Promise<Changes>
   /** Starts a task. It asks before every command and edit. */
   startRunnerTask(request: StartRequest): Promise<TaskView>
   /** Continues a task that was started earlier, so it can be answered and replied to here. */

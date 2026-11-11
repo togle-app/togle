@@ -41,7 +41,7 @@ function asking(request: ViewRequest | undefined, task: TaskView): { says: strin
 }
 
 /** The to-do list: what waits for the person at the top, then their own list, kept in a plain text file. */
-export function Todo({ onOpenTask }: { onOpenTask: (key: string) => void }) {
+export function Todo({ onOpenTask }: { onOpenTask: (key: string, changes?: boolean) => void }) {
   const [list, setList] = useState<TodoList | null>(null)
   const [tasks, setTasks] = useState<TaskView[]>([])
   const [status, setStatus] = useState<RunnerStatus[]>([])
@@ -184,6 +184,11 @@ export function Todo({ onOpenTask }: { onOpenTask: (key: string) => void }) {
           {chip && (
             <button className={`todo-chip ${chip.tone}`} title="Open the task" disabled={!task} onClick={() => task && onOpenTask(task.key)}>
               {chip.text}
+            </button>
+          )}
+          {task?.state === 'idle' && !item.done && (
+            <button className="small" onClick={() => onOpenTask(task.key, true)}>
+              See changes
             </button>
           )}
           {!item.done && !item.task && !!installed.length && (

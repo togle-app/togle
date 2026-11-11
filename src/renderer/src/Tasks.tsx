@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { LogEntry, RunnerKind, RunnerStatus, TaskDetail, TaskView, ViewRequest } from '@shared/runner'
+import { Changes } from './Changes'
 import { Icon } from './Icon'
 import { Markdown } from './Markdown'
 
@@ -30,9 +31,11 @@ function ago(at: number, now: number): string {
 
 const isDetail = (value: unknown): value is TaskDetail => typeof value === 'object' && value !== null && 'task' in value && 'log' in value
 
-/** `focus`: a task to show, asked for from outside (a notice); a new `seq` asks again. */
-export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
+/** `focus`: a task to show, asked for from outside (a notice, the to-do list), on what it changed if `changes`; a new `seq` asks again. */
+export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?: boolean } }) {
   const [tasks, setTasks] = useState<TaskView[]>([])
+  // The task whose changes are shown in place of the task itself.
+  const [seeing, setSeeing] = useState<string | null>(null)
   const [status, setStatus] = useState<RunnerStatus[]>([])
   const [selected, setSelected] = useState<string | undefined>(remembered)
   const [detail, setDetail] = useState<TaskDetail | null>(null)
@@ -82,7 +85,8 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
     if (!focus?.key) return
     setStarting(false)
     setSelected(focus.key)
-  }, [focus?.key, focus?.seq])
+    setSeeing(focus.changes ? focus.key : null)
+  }, [focus?.key, focus?.seq, focus?.changes])
 
   /** Does something for the person, and shows what went wrong in plain words. */
   const act = useCallback(
@@ -161,11 +165,14 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
               })
             }
           />
+        ) : detail && seeing === detail.task.key ? (
+          <Changes taskKey={detail.task.key} title={detail.task.title} folder={detail.task.folder} onBack={() => setSeeing(null)} />
         ) : detail ? (
           <TaskPanel
             key={detail.task.key}
             detail={detail}
             now={now}
+            onSeeChanges={() => setSeeing(detail.task.key)}
             onBack={() => setSelected(undefined)}
             onAnswer={(requestId, decision) => act(() => api.answerRunnerTask(detail.task.key, requestId, decision))}
             onReply={(requestId, text) => act(() => api.replyRunnerTask(detail.task.key, requestId, text))}
@@ -279,6 +286,7 @@ export function NewTask({ installed, folders, prompt: given = '', heading = 'New
 interface PanelProps {
   detail: TaskDetail
   now: number
+  onSeeChanges: () => void
   onBack: () => void
   onAnswer: (requestId: string, decision: 'allow-once' | 'refuse') => void
   onReply: (requestId: string, text: string) => void
@@ -290,7 +298,7 @@ interface PanelProps {
   onClose: () => void
 }
 
-function TaskPanel({ detail, now, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, onTakeOver, onClose }: PanelProps) {
+function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, onTakeOver, onClose }: PanelProps) {
   const { task, log } = detail
   const [text, setText] = useState('')
   const [confirmTakeOver, setConfirmTakeOver] = useState(false)
@@ -317,6 +325,14 @@ function TaskPanel({ detail, now, onBack, onAnswer, onReply, onSend, onStop, onE
           <p>
             {NAMES[task.runner]} · {task.folder || 'No folder'} · <span className="task-state" data-state={task.state}>{STATE_WORDS[task.state]}</span>
             {task.updatedAt && !running ? ` · ${ago(task.updatedAt, now)}` : ''}
+            {task.folder && (
+              <>
+                {' · '}
+                <button className="link" onClick={onSeeChanges} title="What differs from the last commit in this folder">
+                  See changes
+                </button>
+              </>
+            )}
           </p>
         </div>
         <div className="task-actions">

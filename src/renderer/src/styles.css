@@ -3192,3 +3192,30 @@ body.notice-surface { background: transparent; color: var(--text); overflow: hid
 .todo-remove:hover { color: var(--danger); }
 .todo-give { padding: 12px 4px 4px; }
 .todo-file { margin: 4px 0 0; }
+
+/* What differs from the last commit in the folder a task works in. */
+.task-title p .link { padding: 0; font-size: inherit; }
+.changes { display: grid; align-content: start; gap: 10px; min-width: 0; }
+.changes-problem { margin: 6px 0; }
+.changes-body { display: grid; grid-template-columns: minmax(180px, 34%) minmax(0, 1fr); gap: 10px; min-height: 0; }
+.changes-files { display: grid; align-content: start; gap: 4px; margin: 0; padding: 0; list-style: none; max-height: 60vh; overflow-y: auto; }
+.changes-file { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 8px; width: 100%; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; text-align: left; font-size: 12px; }
+.changes-file:hover { background: var(--panel-2); }
+.changes-file.on { border-color: var(--accent-strong); background: var(--panel-2); }
+.changes-status { font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.changes-file[data-status='new'] .changes-status, .changes-file[data-status='added'] .changes-status { color: var(--ok); }
+.changes-file[data-status='deleted'] .changes-status { color: var(--danger); }
+.changes-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.changes-count { font: 11px ui-monospace, 'Cascadia Mono', Consolas, monospace; white-space: nowrap; }
+.changes-count .add { color: var(--ok); }
+.changes-count .del { color: var(--danger); }
+.changes-diff { margin: 0; padding: 8px 0; max-height: 60vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font: 12px/1.55 ui-monospace, 'Cascadia Mono', Consolas, monospace; white-space: pre; }
+.diff-line { display: block; padding: 0 10px; min-width: max-content; }
+.diff-line.add { background: rgba(127, 212, 155, 0.1); color: var(--ok); }
+.diff-line.del { background: rgba(255, 122, 122, 0.1); color: var(--danger); }
+.diff-line.hunk { color: var(--accent); }
+.diff-line.meta { color: var(--faint); }
+@media (max-width: 760px) {
+  .changes-body { grid-template-columns: minmax(0, 1fr); }
+  .changes-files { max-height: 160px; }
+}

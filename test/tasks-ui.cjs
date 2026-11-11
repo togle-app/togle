@@ -212,7 +212,7 @@ async function checkTodo(T, agent) {
   assert.deepEqual(await texts(ui, '.todo-chip'), ['Claude Code · working', 'Claude Code · done'])
   assert.equal(await ui.evaluate("document.querySelector('.todo-item.done .todo-text').textContent"), 'Send the invoice to Marta')
   assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.todo-item.done .todo-text')).textDecorationLine"), 'line-through')
-  assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['Give to an agent'], 'only an item with no agent and not ticked can be given')
+  assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['Give to an agent', 'See changes'], 'only an item with no agent can be given, and only one whose agent is done has changes to see')
   assert.ok((await texts(ui, '.todo-file'))[0].startsWith('Your list is a plain text file on this computer.'))
 
   // Allow once and Refuse go to the task.
@@ -263,7 +263,7 @@ async function checkTodo(T, agent) {
   assert.ok(/^claude:new\d+$/.test(linked[0].args[1]), 'linked to the task that started: ' + linked[0].args[1])
   await ui.wait("document.querySelectorAll('.todo-chip').length===3")
   assert.equal(await ui.evaluate("document.querySelector('.todo-item:nth-child(1) .todo-chip').textContent"), 'Claude Code · working')
-  assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), [], 'an item with an agent cannot be given again')
+  assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['See changes'], 'an item with an agent cannot be given again')
 
   // A chip opens the task, and Show the file shows the file.
   await ui.click('.todo-item:nth-child(2) .todo-chip', 'Claude Code · working')
@@ -284,6 +284,51 @@ async function checkTodo(T, agent) {
   await ui.wait("!!document.querySelector('.todo .error')")
   assert.ok((await texts(ui, '.todo .error'))[0].startsWith('The list changed while you were looking at it'))
   await ui.wait("document.querySelectorAll('.todo-item').length===2")
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
+async function checkChanges(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Tasks')
+  await ui.wait("document.querySelectorAll('.task-row').length===6")
+
+  // From a task: the files, and what changed in the one that is picked.
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("!!document.querySelector('.task-title .link')")
+  await ui.click('.task-title .link', 'See changes')
+  await ui.wait("!!document.querySelector('.changes-file')")
+  assert.deepEqual((await ui.calls('runnerChanges')).map(call => call.args), [['claude:s2']])
+  assert.equal(await ui.evaluate("document.querySelector('.changes .task-title h2').textContent"), 'Changes in website')
+  assert.ok((await texts(ui, '.changes > .hint'))[0].startsWith('Everything in this folder that differs from the last commit on main.'))
+  assert.deepEqual(await texts(ui, '.changes-file'), ['changedsrc/status.ts+1 −1', 'newmigrations/003_add_status.sql+2 −0'])
+  assert.equal(await ui.evaluate("document.querySelector('.changes-file.on .changes-path').textContent"), 'src/status.ts', 'the first file is open')
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.changes-diff .diff-line')].map(line=>line.className.replace('diff-line ','')+':'+line.textContent.trim())"), [
+    'meta:diff --git a/src/status.ts b/src/status.ts', 'meta:index 1111111..2222222 100644', 'meta:--- a/src/status.ts', 'meta:+++ b/src/status.ts', 'hunk:@@ -1,3 +1,3 @@',
+    "plain:export const columns = ['id', 'name']", "add:+export const status = 'status'", 'del:-const old = 1', 'plain:export default columns', 'plain:'
+  ])
+  await ui.capture('tasks-changes')
+  await ui.click('.changes-file', 'newmigrations/003_add_status.sql+2 −0')
+  assert.equal(await ui.evaluate("document.querySelector('.changes-diff').getAttribute('aria-label')"), 'Changes in migrations/003_add_status.sql')
+  assert.equal(await ui.evaluate("document.querySelectorAll('.changes-diff .diff-line.add').length"), 2, 'the new file is all added, and its +++ line is not one of the added lines')
+  await ui.click('.changes .tasks-back-to-task', 'Back to the task')
+  await ui.wait("!!document.querySelector('.task-panel')")
+  assert.equal(await ui.evaluate("document.querySelector('.task-title h2').textContent"), 'Rebuild the pricing page')
+
+  // A folder that is not in a repository says so.
+  await ui.task('Write the release notes')
+  await ui.click('.task-title .link', 'See changes')
+  await ui.wait("!!document.querySelector('.changes-problem')")
+  assert.equal((await texts(ui, '.changes-problem'))[0], 'This folder is not in a git repository, so Togle cannot tell what changed.')
+  assert.equal(await ui.evaluate("!!document.querySelector('.changes-file')"), false)
+
+  // From the to-do list: a finished item has See changes, and it opens on them.
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.wait("document.querySelectorAll('.todo-item').length===4")
+  await ui.click('.todo-item .todo-row > button.small', 'See changes')
+  await ui.wait("!!document.querySelector('.changes')")
+  assert.equal(await ui.evaluate("document.querySelector('.changes .task-title p').textContent"), 'Fix the login redirect', 'the task the item was given to (a task has its own title)')
+  assert.deepEqual((await ui.calls('runnerChanges')).map(call => call.args[0]).slice(-1), ['claude:s3'])
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -424,7 +469,8 @@ app.whenReady().then(async () => {
     await checkQuit(T, agent)
     await checkNotice(T, agent)
     await checkTodo(T, agent)
-    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice and the to-do list passed')
+    await checkChanges(T, agent)
+    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list and the changes passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

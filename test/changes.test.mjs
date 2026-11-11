@@ -1,186 +1,161 @@
-// The recorder's choice of frames, fed synthetic screens 10 looks per second: one frame per visible change,
-// and none for people moving on camera.
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { after, test } from 'node:test'
+import { workDir } from './helpers.mjs'
+workDir('changes')
+const T = await import('./.build/togle.mjs')
 
-const { ChangeDetector, PROBE_WIDTH: W, PROBE_HEIGHT: H } = await import('./.build/changes.mjs')
-
-/** Shows `scene(t)` (t in seconds) for `seconds`; returns when frames were kept, and when their change began. */
-function record(scene, seconds) {
-  const changes = new ChangeDetector()
-  const kept = []
-  kept.changedAt = []
-  for (let look = 0; look <= seconds * 10; look++) {
-    const t = look / 10
-    if (!changes.see(scene(t), 1_000_000 + look * 100)) continue
-    kept.push(t)
-    kept.changedAt.push((changes.changedAt - 1_000_000) / 1000)
+const hasGit = (() => {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
   }
-  return kept
+})()
+
+const made = []
+const scratch = () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'togle-changes-'))
+  made.push(dir)
+  return dir
+}
+after(() => {
+  for (const dir of made) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+})
+const git = (folder, ...args) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.test', '-c', 'commit.gpgsign=false', '-C', folder, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+const repo = () => {
+  const dir = scratch()
+  git(dir, 'init', '-q', '-b', 'main')
+  return dir
 }
 
-const picture = (level) => new Uint8Array(W * H).fill(level)
-function box(lum, x, y, w, h, level) {
-  for (let row = y; row < y + h; row++) lum.fill(level, row * W + x, row * W + x + w)
-}
-/** Lines of "text" whose lengths depend on `page`, starting `offset` pixels up. */
-function text(lum, page, offset = 0) {
-  for (let line = 0; line < 30; line++) {
-    const y = 20 + line * 6 - offset
-    if (y >= 10 && y < H - 4) box(lum, 30, y, 100 + ((page * 37 + line * 53) % 120), 3, 60)
-  }
-}
-/** Someone on camera: never the same picture twice. */
-let seed = 1
-function person(lum, x, y, w, h) {
-  for (let row = y; row < y + h; row++) {
-    for (let col = x; col < x + w; col++) {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff
-      lum[row * W + col] = 60 + (seed % 140)
-    }
-  }
-}
-const near = (kept, expected) => kept.length === expected.length && kept.every((t, i) => Math.abs(t - expected[i]) <= 0.6)
-
-test("slides with the speaker's video beside them: a frame per slide, where its transition ended", () => {
-  const slide = (n) => {
-    const lum = picture(230)
-    text(lum, n)
-    return lum
-  }
-  const kept = record((t) => {
-    // New slides at 10 s and 20 s, each fading in over a second.
-    const n = t < 10 ? 0 : t < 20 ? 1 : 2
-    const fade = Math.min(1, t - n * 10)
-    const next = slide(n)
-    const lum = n && fade < 1 ? slide(n - 1).map((v, i) => Math.round(v + (next[i] - v) * fade)) : next
-    person(lum, 270, 0, 50, 30)
-    return lum
-  }, 30)
-  assert.ok(near(kept, [0, 11.4, 21.4]), `kept at ${kept.join(', ')} s`)
-  // Kept once the fade ended, each frame stands for the moment the slide changed: words said meanwhile are about it.
-  assert.ok(near(kept.changedAt, [0, 10.1, 20.1]), `changed at ${kept.changedAt.join(', ')} s`)
+test('git status in its machine form is read into states and paths, and a rename has its old path after', () => {
+  const raw = ' M src/a.ts\0A  src/b.ts\0?? notes with spaces.md\0R  new-name.ts\0old-name.ts\0 D gone.ts\0'
+  assert.deepEqual(T.parseStatus(raw), [
+    { code: ' M', path: 'src/a.ts' }, { code: 'A ', path: 'src/b.ts' }, { code: '??', path: 'notes with spaces.md' }, { code: 'R ', path: 'new-name.ts' }, { code: ' D', path: 'gone.ts' }
+  ])
+  assert.deepEqual(T.parseStatus(''), [])
 })
 
-test('beside a strip of video tiles a third of the picture high, edits on the slide are kept at once', () => {
-  const kept = record((t) => {
-    const lum = picture(230)
-    text(lum, 2)
-    if (t >= 10) box(lum, 150, 64, 80, 1, 20) // a new arrow
-    if (t >= 20) box(lum, 30, 106, 125, 2, 40) // a new bullet, in the cells right above the tiles
-    // Typing right above the tiles from 30 s to 35 s, five characters a second.
-    const typed = Math.max(0, Math.min(25, Math.floor((t - 30) * 5)))
-    for (let i = 0; i < typed; i++) box(lum, 170 + i * 6, 112, 2, 3, 30)
-    for (let tile = 0; tile < 6; tile++) person(lum, tile * 53 + 2, 136, 49, 44)
-    return lum
-  }, 40)
-  const after = (t) => kept.find((k) => k >= t) - t
-  assert.ok(after(10) <= 0.6, `the arrow: kept at ${kept.join(', ')} s`)
-  assert.ok(after(20) <= 0.6, `the bullet: kept at ${kept.join(', ')} s`)
-  assert.ok(kept.filter((k) => k >= 30 && k <= 36).length >= 2, `the typing: kept at ${kept.join(', ')} s`)
+test('a long diff is cut at the end of a file, and says so', () => {
+  const file = (name, size) => `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n${'+x'.repeat(size)}\n`
+  const diff = file('one.txt', 40) + file('two.txt', 40) + file('three.txt', 40)
+  assert.deepEqual(T.cutDiff(diff, 100000), { diff, truncated: false })
+  // Whole files are kept while they fit; the one that goes past the limit is left out.
+  const cut = T.cutDiff(diff, diff.indexOf('diff --git a/three.txt') + 10)
+  assert.equal(cut.truncated, true)
+  assert.ok(cut.diff.endsWith('\n') && cut.diff.includes('one.txt') && cut.diff.includes('two.txt') && !cut.diff.includes('three.txt'), cut.diff)
+  assert.ok(T.cutDiff(diff, diff.indexOf('diff --git a/two.txt') + 10).diff.includes('one.txt') && !T.cutDiff(diff, diff.indexOf('diff --git a/two.txt') + 10).diff.includes('two.txt'))
+  assert.equal(T.cutDiff('x'.repeat(500), 100).diff.length, 100, 'one long file is cut where it stands')
 })
 
-test('a speaker view keeps a frame when a screen share starts, not while people move', () => {
-  const kept = record((t) => {
-    if (t < 20) {
-      const lum = picture(100)
-      person(lum, 80, 20, 160, 160)
-      return lum
-    }
-    // The shared screen, and at 30 s a new arrow drawn on it (80 pixels).
-    const lum = picture(230)
-    text(lum, 4)
-    if (t >= 30) box(lum, 150, 170, 80, 1, 20)
-    return lum
-  }, 40)
-  assert.ok(near(kept, [0, 20.4, 30.4]), `kept at ${kept.join(', ')} s`)
+test('a folder that is not in a repository says so in words', { skip: !hasGit && 'git is not installed' }, async () => {
+  const none = await T.changesIn(scratch())
+  assert.equal(none.git, false)
+  assert.match(none.problem, /not in a git repository/)
+  assert.deepEqual([none.files, none.diff, none.truncated], [[], '', false])
 })
 
-test('typing keeps a frame every couple of seconds while it goes on', () => {
-  const kept = record((t) => {
-    const lum = picture(30)
-    // Five characters a second for 10 s, from 5 s on: 6 pixels each.
-    const typed = Math.max(0, Math.min(50, Math.floor((t - 5) * 5)))
-    for (let i = 0; i < typed; i++) box(lum, 20 + (i % 40) * 6, 40 + Math.floor(i / 40) * 8, 2, 3, 200)
-    return lum
-  }, 20)
-  const typing = kept.filter((t) => t > 5)
-  assert.ok(typing.length >= 4, `kept at ${kept.join(', ')} s`)
-  assert.ok(typing.every((t, i) => i === 0 || t - typing[i - 1] <= 2.5), `kept at ${kept.join(', ')} s`)
+test('what differs from the last commit is listed with its lines, and shown as a diff', { skip: !hasGit && 'git is not installed' }, async () => {
+  const dir = repo()
+  writeFileSync(path.join(dir, 'keep.txt'), 'one\ntwo\nthree\n')
+  writeFileSync(path.join(dir, 'edit.txt'), 'a\nb\nc\nd\n')
+  writeFileSync(path.join(dir, 'remove.txt'), 'x\ny\n')
+  writeFileSync(path.join(dir, 'move.txt'), 'this file keeps its words\nand a second line\nand a third\n')
+  git(dir, 'add', '-A')
+  git(dir, 'commit', '-q', '-m', 'first')
+  assert.deepEqual((await T.changesIn(dir)).files, [], 'nothing changed yet')
+  assert.equal((await T.changesIn(dir)).branch, 'main')
+
+  writeFileSync(path.join(dir, 'edit.txt'), 'a\nB\nc\nd\ne\n')
+  rmSync(path.join(dir, 'remove.txt'))
+  git(dir, 'mv', 'move.txt', 'moved.txt')
+  mkdirSync(path.join(dir, 'sub dir'))
+  writeFileSync(path.join(dir, 'sub dir', 'new file.txt'), 'brand new\nsecond\n')
+  writeFileSync(path.join(dir, 'binary.bin'), Buffer.from([1, 2, 0, 3, 0, 4]))
+  writeFileSync(path.join(dir, 'staged.txt'), 'staged\n')
+  git(dir, 'add', 'staged.txt')
+
+  const result = await T.changesIn(dir)
+  assert.equal(result.git, true)
+  assert.equal(result.truncated, false)
+  const by = Object.fromEntries(result.files.map((f) => [f.path, f]))
+  assert.deepEqual(Object.keys(by).sort(), ['binary.bin', 'edit.txt', 'moved.txt', 'remove.txt', 'staged.txt', 'sub dir/new file.txt'])
+  assert.deepEqual([by['edit.txt'].status, by['edit.txt'].added, by['edit.txt'].removed], ['modified', 2, 1])
+  assert.deepEqual([by['remove.txt'].status, by['remove.txt'].added, by['remove.txt'].removed], ['deleted', 0, 2])
+  assert.equal(by['moved.txt'].status, 'renamed')
+  assert.deepEqual([by['sub dir/new file.txt'].status, by['sub dir/new file.txt'].added, by['sub dir/new file.txt'].removed], ['new', 2, 0])
+  assert.deepEqual([by['binary.bin'].status, by['binary.bin'].added, by['binary.bin'].removed], ['new', null, null], 'a file that is not text has no lines to count')
+  assert.deepEqual([by['staged.txt'].status, by['staged.txt'].added], ['added', 1], 'a file added to git but never committed')
+  assert.ok(result.diff.includes('diff --git a/edit.txt b/edit.txt'))
+  assert.ok(result.diff.includes('-b\n+B'), 'the change itself')
+  assert.ok(result.diff.includes('diff --git a/sub dir/new file.txt b/sub dir/new file.txt\nnew file\n--- /dev/null\n+++ b/sub dir/new file.txt\n@@ -0,0 +1,2 @@\n+brand new\n+second'), 'a new file is shown as all added')
+  assert.ok(result.diff.includes('Binary file binary.bin'))
+  assert.ok(result.diff.includes('-x\n-y'), 'what was deleted')
 })
 
-test('a long scroll is left out while it moves, and kept where it stopped', () => {
-  const page = (offset) => {
-    const lum = picture(240)
-    text(lum, 7, offset)
-    return lum
-  }
-  const changes = new ChangeDetector()
-  const kept = []
-  let last
-  for (let look = 0; look <= 250; look++) {
-    const t = look / 10
-    // Scrolls 2 pixels a look from 10 s to 15 s.
-    const lum = page(Math.min(100, Math.max(0, look - 100) * 2))
-    if (changes.see(lum, 1_000_000 + look * 100)) {
-      kept.push(t)
-      last = lum
-    }
-  }
-  const after = kept.filter((t) => t >= 15)
-  assert.equal(after.length, 1, `kept at ${kept.join(', ')} s`)
-  assert.ok(after[0] <= 18, `kept at ${kept.join(', ')} s`)
-  assert.deepEqual(last, page(100), 'the frame kept is where the scroll ended')
-  assert.ok(kept.filter((t) => t > 10 && t < 15).length <= 3, `kept at ${kept.join(', ')} s`)
+test('a repository with no commit yet lists its files as new', { skip: !hasGit && 'git is not installed' }, async () => {
+  const dir = repo()
+  writeFileSync(path.join(dir, 'first.txt'), 'hello\n')
+  const result = await T.changesIn(dir)
+  assert.equal(result.git, true)
+  assert.deepEqual(result.files, [{ path: 'first.txt', status: 'new', added: 1, removed: 0 }])
+  assert.ok(result.diff.includes('+hello'))
 })
 
-test('a message in a chat beside the video counts as new content; the person moving in the tile does not', () => {
-  const changes = new ChangeDetector()
-  const kinds = []
-  for (let look = 0; look <= 700; look++) {
-    const t = look / 10
-    const lum = picture(235)
-    // The video tile on the left: someone on camera the whole time.
-    person(lum, 20, 30, 180, 120)
-    // The chat on the right: an old message, and from 60 s a pasted stack trace below it.
-    box(lum, 250, 12, 60, 3, 40)
-    box(lum, 250, 18, 40, 3, 40)
-    if (t >= 60) for (let line = 0; line < 8; line++) box(lum, 250, 100 + line * 6, 30 + ((line * 17) % 35), 3, 40)
-    if (changes.see(lum, 1_000_000 + look * 100)) kinds.push([t, changes.content])
-  }
-  const paste = kinds.find(([t]) => t >= 60)
-  assert.ok(paste, `the paste is kept: ${JSON.stringify(kinds)}`)
-  assert.equal(paste[1], true, 'and counts as content')
-  assert.deepEqual(
-    kinds.filter(([t]) => t > 0 && t < 60).map(([, content]) => content),
-    kinds.filter(([t]) => t > 0 && t < 60).map(() => false),
-    'whatever is kept for the person moving is not content'
-  )
+test('a big new file is shown only in part, and a big diff is cut', { skip: !hasGit && 'git is not installed' }, async () => {
+  const dir = repo()
+  writeFileSync(path.join(dir, 'start.txt'), 'x\n')
+  git(dir, 'add', '-A')
+  git(dir, 'commit', '-q', '-m', 'first')
+  writeFileSync(path.join(dir, 'big.txt'), 'line of text\n'.repeat(5000))
+  const result = await T.changesIn(dir)
+  assert.deepEqual(result.files, [{ path: 'big.txt', status: 'new', added: 5000, removed: 0 }], 'its lines are counted in all of it')
+  assert.ok(result.diff.includes('the rest of the file is not shown'))
+  assert.ok(result.diff.length < 30000, 'but only the first part is shown: ' + result.diff.length)
+  const shown = /@@ -0,0 \+1,(\d+) @@/.exec(result.diff)
+  assert.ok(shown && Number(shown[1]) < 5000 && result.diff.split('\n+line of text').length - 1 === Number(shown[1]), 'the header counts what is shown')
+  assert.ok(!result.diff.includes('+line of tex\n'), 'a line cut in the middle is left out')
 })
 
-test('typing in a pane that scrolled a moment before is kept once it stops, not half a minute later', () => {
-  /** A pane of text lines, scrolled `offset` pixels, with `typed` characters typed into it. */
-  const pane = (offset, typed) => {
-    const lum = picture(230)
-    for (let line = 0; line < 120; line++) {
-      const y = 2 + line * 6 - offset
-      if (y >= 0 && y < 97) box(lum, 2, y, 20 + ((line * 53) % 75), 3, 60)
-    }
-    for (let i = 0; i < typed; i++) {
-      const y = 150 + Math.floor(i / 8) * 8 - offset
-      if (y >= 0 && y < 97) box(lum, 40 + (i % 8) * 6, y, 2, 3, 20)
-    }
-    return lum
+test('what a repository\'s own settings could start is not started', { skip: !hasGit && 'git is not installed' }, async () => {
+  const dir = repo()
+  writeFileSync(path.join(dir, 'a.txt'), 'a\n')
+  git(dir, 'add', '-A')
+  git(dir, 'commit', '-q', '-m', 'first')
+  const outside = scratch()
+  const marker = path.join(outside, 'RAN.txt')
+  const script = path.join(outside, 'hook.cjs')
+  writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran'); process.stdout.write('\\0')`)
+  // The three ways a repository can make git start a program when it only reads.
+  git(dir, 'config', 'core.fsmonitor', `node "${script.replace(/\\/g, '/')}"`)
+  git(dir, 'config', 'diff.external', `node "${script.replace(/\\/g, '/')}"`)
+  git(dir, 'config', 'core.pager', `node "${script.replace(/\\/g, '/')}"`)
+  writeFileSync(path.join(dir, 'a.txt'), 'a\nchanged\n')
+  const result = await T.changesIn(dir)
+  assert.equal(result.git, true)
+  assert.equal(result.files.length, 1)
+  assert.equal(existsSync(marker), false, 'nothing the repository asked for was run')
+})
+
+test('the window can ask what a task changed, by its key, and an unknown task is refused', async () => {
+  const dir = repo()
+  writeFileSync(path.join(dir, 'a.txt'), 'a\n')
+  class Backend {
+    constructor() { this.runner = 'claude' }
+    async detect() { return { installed: true, version: '1' } }
+    async list() { return [{ id: 'listed', runner: 'claude', title: 'Listed', folder: dir, state: 'idle', updatedAt: 1 }] }
+    async close() {}
   }
-  // Scrolled for 5 s from 5 s (to 100 px), then 12 characters typed in it from 13 s to 15.4 s.
-  const scene = (t) => pane(Math.round(Math.min(100, Math.max(0, (t - 5) * 20))), Math.max(0, Math.min(12, Math.floor((t - 13) * 5))))
-  const changes = new ChangeDetector()
-  const shown = []
-  for (let look = 0; look <= 300; look++) {
-    const t = look / 10
-    const lum = scene(t)
-    if (changes.see(lum, 1_000_000 + look * 100)) shown.push([t, lum[50 * W + 40] === 20])
+  const hub = new T.RunnerHub({ backends: [new Backend()], changed() {}, cacheMs: 60000 })
+  try {
+    assert.equal((await hub.changes('claude:listed')).files[0].path, 'a.txt')
+    await assert.rejects(hub.changes('claude:nope'), /gone/)
+  } finally {
+    await hub.dispose()
   }
-  const typed = shown.find(([, hasText]) => hasText)
-  assert.ok(typed && typed[0] < 20, `kept: ${JSON.stringify(shown)}`)
 })

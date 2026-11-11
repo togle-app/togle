@@ -45,6 +45,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   handle('runners:status', () => hub.status())
   handle('runners:list', () => hub.list())
   handle('runners:detail', (key) => hub.detail(word(key, 'The task')))
+  handle('runners:changes', (key) => hub.changes(word(key, 'The task')))
   handle('runners:start', (request) => {
     const given = (request ?? {}) as Record<string, unknown>
     const runner = given.runner as RunnerKind

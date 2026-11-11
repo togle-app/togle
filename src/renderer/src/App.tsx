@@ -212,7 +212,7 @@ export default function App() {
   // Closing waits for a yes while in a call, or while a task Togle runs has not finished.
   const [confirmClose, setConfirmClose] = useState<CloseWarning | null>(null)
   // The task a notice or the tray opened Togle on; `seq` makes the same task again a new request.
-  const [taskFocus, setTaskFocus] = useState<{ key: string; seq: number }>({ key: '', seq: 0 })
+  const [taskFocus, setTaskFocus] = useState<{ key: string; seq: number; changes?: boolean }>({ key: '', seq: 0 })
   const keepGoing = useRef<HTMLButtonElement>(null)
   // Until the call so far is back in the window, an empty window mustn't be saved over it.
   const callLoaded = useRef(false)
@@ -841,8 +841,8 @@ export default function App() {
     setView('agents')
   }
   /** Opens the Tasks screen on one task. */
-  const openTask = useCallback((key: string) => {
-    setTaskFocus(previous => ({ key, seq: previous.seq + 1 }))
+  const openTask = useCallback((key: string, changes?: boolean) => {
+    setTaskFocus(previous => ({ key, seq: previous.seq + 1, changes }))
     setView('tasks')
   }, [])
   const navigateSidebar = useCallback((page: SidebarPage) => {
