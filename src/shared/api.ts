@@ -58,6 +58,7 @@ import type { SavedConversation } from './chat'
 import type { NoiseReport, TogleMicrophoneStatus } from './microphone'
 import type { MicrophoneLinkPage } from './microphone-link'
 import type { CloseWarning } from './close-warning'
+import type { TodoList, TodoRef } from './todo'
 import type { Decision, RunnerStatus, StartRequest, TaskDetail, TaskNotice, TaskView } from './runner'
 
 export type Unsubscribe = () => void
@@ -382,6 +383,19 @@ export interface TogleApi {
   dismissTaskNotice(id: string): void
   /** Togle was opened on a task, from a notice or the tray: show it. */
   onShowTask(cb: (key: string) => void): Unsubscribe
+
+  /** The to-do list, kept in a plain text file on this PC. Each change answers with the whole list as it is after. */
+  todoList(): Promise<TodoList>
+  addTodo(text: string): Promise<TodoList>
+  setTodoDone(item: TodoRef, done: boolean): Promise<TodoList>
+  editTodo(item: TodoRef, text: string): Promise<TodoList>
+  removeTodo(item: TodoRef): Promise<TodoList>
+  /** Gives an item to an agent task (by its key), or takes it back (null). */
+  linkTodo(item: TodoRef, task: string | null): Promise<TodoList>
+  /** Shows the list's file in the file manager. */
+  showTodoFile(): Promise<void>
+  /** The file changed, in Togle or in an editor: ask for the list again. */
+  onTodoChanged(cb: () => void): Unsubscribe
 
   listHotkeys(): Promise<HotkeyInfo[]>
   /** Gives a shortcut other keys (empty: turns it off); rejected with why, when they can't be its. */

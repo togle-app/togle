@@ -3154,3 +3154,41 @@ body.notice-surface { background: transparent; color: var(--text); overflow: hid
 .task-notice-danger .task-danger { margin-left: 0; margin-right: 4px; }
 .task-notice-note, .task-notice-more { font-size: 11px; color: var(--faint); }
 .task-notice-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* The to-do list: what waits for the person on top, then their own items. */
+.todo { display: grid; align-content: start; gap: 14px; max-width: 760px; margin: 0 auto; padding: 20px 24px 28px; overflow-y: auto; height: 100%; }
+.todo-head h2 { margin: 0; font-size: 18px; }
+.todo-add { display: flex; align-items: center; gap: 10px; padding: 0 10px 0 0; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.todo-add:focus-within { border-color: var(--accent); }
+.todo-add input { flex: 1; min-width: 0; padding: 11px 12px; border: 0; background: transparent; }
+.todo-add input:focus { outline: none; }
+.todo-add kbd { padding: 2px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-2); font: 11px ui-monospace, 'Cascadia Mono', Consolas, monospace; color: var(--muted); }
+.todo-group { display: grid; gap: 6px; }
+.todo-group > [role='list'] { display: grid; gap: 6px; }
+.todo-row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.todo-row.need { align-items: flex-start; border-color: #5a4a22; background: #2a2418; }
+.todo-dot { flex: none; width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: var(--them); }
+.todo-grow { display: grid; flex: 1; gap: 3px; min-width: 0; }
+.todo-grow b { font-size: 13px; overflow-wrap: anywhere; }
+.todo-grow small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.todo-command { display: block; margin: 2px 0 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: 12px/1.5 ui-monospace, 'Cascadia Mono', Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.todo-command.question { font-family: inherit; }
+.todo-why { color: var(--danger); }
+.todo-why .task-danger { margin-left: 0; margin-right: 4px; }
+.todo-row.need > button { flex: none; }
+.todo-box { flex: none; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1.5px solid var(--faint); border-radius: 6px; background: transparent; color: var(--bg); }
+.todo-box[aria-checked='true'] { border-color: var(--ok); background: var(--ok); }
+.todo-text { flex: 1; min-width: 0; padding: 2px 4px; border: 0; background: transparent; color: var(--text); text-align: left; font-size: 13px; overflow-wrap: anywhere; }
+.todo-text:hover { background: var(--panel-2); }
+.todo-item.done .todo-text { color: var(--faint); text-decoration: line-through; }
+.todo-edit { flex: 1; min-width: 0; padding: 4px 6px; }
+.todo-chip { flex: none; padding: 2px 9px; border: 1px solid var(--border); border-radius: 999px; background: transparent; font-size: 11px; color: var(--muted); }
+.todo-chip:not(:disabled):hover { background: var(--panel-2); }
+.todo-chip.work { color: var(--accent); border-color: #2f3d6e; }
+.todo-chip.wait { color: var(--them); border-color: #5a4a22; }
+.todo-chip.done { color: var(--ok); border-color: #2f5a3d; }
+.todo-chip.fail { color: var(--danger); border-color: #5c2a33; }
+.todo-remove { flex: none; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--faint); }
+.todo-remove:hover { color: var(--danger); }
+.todo-give { padding: 12px 4px 4px; }
+.todo-file { margin: 4px 0 0; }

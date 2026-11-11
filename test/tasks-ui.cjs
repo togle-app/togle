@@ -80,7 +80,7 @@ const groupTitles = (ui, heading) => ui.evaluate("(()=>{const group=[...document
 
 async function checkTasks(T, agent) {
   const ui = await open(T, agent, 1024)
-  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.workspace-nav button')].map(button=>button.getAttribute('aria-label'))"), ['Tasks', 'Explore agents'])
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.workspace-nav button')].map(button=>button.getAttribute('aria-label'))"), ['To-do', 'Tasks', 'Explore agents'])
   await ui.click('.workspace-nav button', 'Tasks')
   await ui.wait("document.querySelectorAll('.task-row').length===6")
   assert.deepEqual(await texts(ui, '.task-group > h3'), ['Waiting for you', 'Working', 'Earlier · 2 tasks'])
@@ -185,6 +185,105 @@ async function checkTasks(T, agent) {
   assert.deepEqual((await ui.calls('startRunnerTask')).map(call => call.args), [[{ runner: 'codex', folder: 'C:\\work\\picked', prompt: 'Add a dark mode switch to the settings page' }]])
   assert.equal(await ui.evaluate("document.querySelector('.task-state').textContent"), 'Working')
 
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
+async function checkTodo(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.wait("document.querySelectorAll('.todo-item').length===4")
+  const todo = () => texts(ui, '.todo-item .todo-text')
+  assert.equal(await ui.evaluate("document.querySelector('.todo-head h2').textContent"), new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }), 'the day')
+  assert.equal(await ui.evaluate("document.querySelector('.todo-add input').placeholder"), 'Add a to-do, or hold F9 and say it')
+
+  // What waits for the person is on top, a command in full before it can be allowed, and one that looks dangerous only in the window.
+  assert.deepEqual(await texts(ui, '.todo-group > h3'), ['Waiting for you', 'To do'])
+  assert.deepEqual(await texts(ui, '.todo-row.need b'), ['Add the status column', 'Clean the build folder'])
+  assert.equal((await texts(ui, '.todo-row.need small'))[0], 'Codex · api-server · wants to run')
+  assert.deepEqual(await texts(ui, '.todo-row.need .todo-command'), ['npm run migrate', 'rm -rf build'])
+  assert.deepEqual(await texts(ui, '.todo-row.need:nth-child(1) button'), ['Allow once', 'Refuse', 'Open'])
+  assert.deepEqual(await texts(ui, '.todo-row.need:nth-child(2) button'), ['Refuse', 'Open'], 'a command that looks dangerous is not allowed from a row')
+  assert.equal(await ui.evaluate("document.querySelector('.todo-row.need:nth-child(2) .task-danger').textContent"), 'Dangerous')
+  await ui.capture('todo-list')
+
+  // The list: open items first, the ticked one last and struck through, a chip for what an agent does with an item.
+  assert.deepEqual(await todo(), ['Review the onboarding copy', 'Fix the login redirect', 'Write the release notes', 'Send the invoice to Marta'])
+  assert.deepEqual(await texts(ui, '.todo-chip'), ['Claude Code · working', 'Claude Code · done'])
+  assert.equal(await ui.evaluate("document.querySelector('.todo-item.done .todo-text').textContent"), 'Send the invoice to Marta')
+  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.todo-item.done .todo-text')).textDecorationLine"), 'line-through')
+  assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['Give to an agent'], 'only an item with no agent and not ticked can be given')
+  assert.ok((await texts(ui, '.todo-file'))[0].startsWith('Your list is a plain text file on this computer.'))
+
+  // Allow once and Refuse go to the task.
+  await ui.click('.todo-row.need button', 'Allow once')
+  assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args), [['codex:t1', 'r1', 'allow-once']])
+  await ui.wait("document.querySelectorAll('.todo-row.need').length===1")
+  await ui.click('.todo-row.need button', 'Refuse')
+  assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args[2]), ['allow-once', 'refuse'])
+  await ui.wait("!document.querySelector('.todo-row.need')")
+  assert.deepEqual(await texts(ui, '.todo-group > h3'), ['To do'], 'nothing waits, so that part is not there')
+
+  // Add, tick, change, delete.
+  await ui.fill('.todo-add input', '  Call the bank  ')
+  await ui.evaluate("document.querySelector('.todo-add').requestSubmit()")
+  await ui.wait("document.querySelectorAll('.todo-item').length===5")
+  assert.deepEqual((await ui.calls('addTodo')).map(call => call.args), [['Call the bank']])
+  assert.equal(await ui.evaluate("document.querySelector('.todo-add input').value"), '', 'the box is empty after adding')
+  await ui.click('.todo-box', 'Tick: Review the onboarding copy')
+  await ui.wait("document.querySelectorAll('.todo-item.done').length===2")
+  assert.deepEqual((await ui.calls('setTodoDone')).map(call => call.args), [[{ line: 0, text: 'Review the onboarding copy' }, true]])
+  assert.deepEqual(await todo(), ['Fix the login redirect', 'Write the release notes', 'Call the bank', 'Review the onboarding copy', 'Send the invoice to Marta'], 'a ticked item moves below the open ones')
+  await ui.click('.todo-box', 'Untick: Review the onboarding copy')
+  await ui.wait("document.querySelectorAll('.todo-item.done').length===1")
+  await ui.click('.todo-text', 'Call the bank')
+  await ui.wait("!!document.querySelector('.todo-edit')")
+  await ui.fill('.todo-edit', 'Call the bank about the card')
+  await ui.evaluate("document.querySelector('.todo-edit').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))")
+  await ui.wait("!!document.querySelector('.todo-text') && [...document.querySelectorAll('.todo-text')].some(e=>e.textContent==='Call the bank about the card')")
+  assert.deepEqual((await ui.calls('editTodo')).map(call => call.args), [[{ line: 4, text: 'Call the bank' }, 'Call the bank about the card']])
+  await ui.click('.todo-remove', 'Delete: Call the bank about the card')
+  await ui.wait("document.querySelectorAll('.todo-item').length===4")
+  assert.deepEqual((await ui.calls('removeTodo')).map(call => call.args), [[{ line: 4, text: 'Call the bank about the card' }]])
+
+  // Give an item to an agent: the form has its words, and the item is linked to the task that starts.
+  assert.deepEqual(await todo(), ['Review the onboarding copy', 'Fix the login redirect', 'Write the release notes', 'Send the invoice to Marta'], 'unticked, it is back where it was in the file')
+  await ui.click('.todo-item .todo-row > button.small', 'Give to an agent')
+  await ui.wait("!!document.querySelector('.todo-give .task-new')")
+  assert.equal(await ui.evaluate("document.querySelector('.todo-give .task-new h2').textContent"), 'Give to an agent')
+  assert.equal(await ui.evaluate("document.querySelector('.todo-give textarea').value"), 'Review the onboarding copy', 'the task has the item\'s words')
+  assert.deepEqual(await texts(ui, '.todo-give .task-new-agents label'), ['Claude Code', 'Codex'])
+  await ui.capture('todo-give')
+  await ui.click('.todo-give .task-new .primary', 'Start')
+  await ui.wait("!document.querySelector('.todo-give')")
+  assert.deepEqual((await ui.calls('startRunnerTask')).map(call => call.args[0]), [{ runner: 'claude', folder: 'C:\\work\\website', prompt: 'Review the onboarding copy', title: 'Review the onboarding copy' }], 'the folder is the one most recently used')
+  const linked = await ui.calls('linkTodo')
+  assert.equal(linked.length, 1)
+  assert.deepEqual(linked[0].args[0], { line: 0, text: 'Review the onboarding copy' }, 'the item as it was when the person looked')
+  assert.ok(/^claude:new\d+$/.test(linked[0].args[1]), 'linked to the task that started: ' + linked[0].args[1])
+  await ui.wait("document.querySelectorAll('.todo-chip').length===3")
+  assert.equal(await ui.evaluate("document.querySelector('.todo-item:nth-child(1) .todo-chip').textContent"), 'Claude Code · working')
+  assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), [], 'an item with an agent cannot be given again')
+
+  // A chip opens the task, and Show the file shows the file.
+  await ui.click('.todo-item:nth-child(2) .todo-chip', 'Claude Code · working')
+  await ui.wait("!!document.querySelector('.tasks')")
+  assert.equal(await ui.evaluate("document.querySelector('.task-title h2')?.textContent"), 'Rebuild the pricing page', 'the Tasks screen opens on that task')
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.wait("!!document.querySelector('.todo')")
+  await ui.click('.todo-file button', 'Show the file')
+  assert.equal((await ui.calls('showTodoFile')).length, 1)
+
+  // An item that was changed under the person's hands says so, and the list is shown again as it is.
+  await ui.evaluate("window.togle.removeTodo({line:3,text:'Send the invoice to Marta'}).then(()=>window.togleUITest.emit('onTodoChanged'))")
+  await ui.wait("document.querySelectorAll('.todo-item').length===3")
+  await ui.click('.todo-text', 'Fix the login redirect')
+  await ui.evaluate("window.togle.removeTodo({line:1,text:'Fix the login redirect'})")
+  await ui.fill('.todo-edit', 'Fix the login redirect and the logout')
+  await ui.evaluate("document.querySelector('.todo-edit').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))")
+  await ui.wait("!!document.querySelector('.todo .error')")
+  assert.ok((await texts(ui, '.todo .error'))[0].startsWith('The list changed while you were looking at it'))
+  await ui.wait("document.querySelectorAll('.todo-item').length===2")
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -324,7 +423,8 @@ app.whenReady().then(async () => {
     await checkNarrow(T, agent)
     await checkQuit(T, agent)
     await checkNotice(T, agent)
-    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting and the notice passed')
+    await checkTodo(T, agent)
+    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice and the to-do list passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

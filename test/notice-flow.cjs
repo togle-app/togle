@@ -110,6 +110,14 @@ async function run() {
   await js(notice, "document.querySelector('.task-notice-head button').click()")
   await wait(async () => !(await js(notice, "!!document.querySelector('.task-notice')")), 'the notice to close')
 
+  // The to-do list is a plain file in Togle's folder, and an item can be given to the task that was run.
+  const todoFile = path.join(profile, 'to-do.md')
+  const listed = await invoke('todo:add', 'Update the notes')
+  assert.deepEqual(listed, { items: [{ line: 2, text: 'Update the notes', done: false }], file: todoFile })
+  await invoke('todo:link', { line: 2, text: 'Update the notes' }, first.key)
+  assert.equal(fs.readFileSync(todoFile, 'utf8'), `# To do\n\n- [ ] Update the notes <!-- togle:task=${first.key} -->\n`)
+  assert.equal((await invoke('todo:list')).items[0].task, first.key)
+
   // While Togle's own window is in front nothing pops up, and the tray still counts. When it goes behind, the notice comes.
   main.isFocused = () => true
   main.isVisible = () => true

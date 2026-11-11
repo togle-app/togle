@@ -50,6 +50,7 @@ import { ScreenTiming } from './ScreenTiming'
 import { SessionPicker } from './SessionPicker'
 import { Settings } from './Settings'
 import { Tasks } from './Tasks'
+import { Todo } from './Todo'
 import { ScreenRecorder } from './video/recorder'
 
 const api = window.togle
@@ -122,7 +123,7 @@ function Elapsed({ since }: { since: number }) {
 }
 
 export default function App() {
-  const [view, setView] = useState<'main' | 'settings' | 'archive' | 'agents' | 'agent' | 'tasks'>('agent')
+  const [view, setView] = useState<'main' | 'settings' | 'archive' | 'agents' | 'agent' | 'tasks' | 'todo'>('agent')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
   const openCurrentCall = useCallback(() => { setSidebarOpen(false); setView('main') }, [])
@@ -839,10 +840,16 @@ export default function App() {
     setAgentsRequest((r) => ({ ...ask, seq: r.seq + 1 }))
     setView('agents')
   }
+  /** Opens the Tasks screen on one task. */
+  const openTask = useCallback((key: string) => {
+    setTaskFocus(previous => ({ key, seq: previous.seq + 1 }))
+    setView('tasks')
+  }, [])
   const navigateSidebar = useCallback((page: SidebarPage) => {
     setSidebarOpen(false)
     if (page === 'settings') { setSettingsAt(undefined); setView('settings') }
     else if (page === 'tasks') setView('tasks')
+    else if (page === 'todo') setView('todo')
     else { setAgentsRequest(previous => ({ seq: previous.seq + 1, create: page === 'new' })); setView('agents') }
   }, [])
 
@@ -1529,6 +1536,7 @@ export default function App() {
         <Settings settings={settings} auth={auth} claudeAuth={claudeAuth} stt={stt} at={settingsAt} onChange={setSettings} onDone={() => setView(workspaceReturn.current)} onArchive={() => { setSelectedCallId(undefined); setView('archive') }} />
       )}
       {view === 'tasks' && <Tasks focus={taskFocus} />}
+      {view === 'todo' && <Todo onOpenTask={openTask} />}
       {view === 'archive' && <div className="settings archived-calls"><CallHistory agents={agents} enabled={settings?.assist.rememberCalls !== false} selectedId={selectedCallId} onSelect={setSelectedCallId} onAgent={replaceAgent} onDone={() => setView('settings')} /></div>}
       {/* Kept while the conversation shows: an agent's page, and a reading of a website, are there to come back to. */}
       {settings && (
@@ -1546,7 +1554,7 @@ export default function App() {
         </div>
       )}
       {/* Kept while Settings or Agents is open: answers asked again keep coming in, and the call keeps its place. */}
-      <main className="main" hidden={view === 'settings' || view === 'archive' || view === 'agents' || view === 'tasks'}>
+      <main className="main" hidden={view === 'settings' || view === 'archive' || view === 'agents' || view === 'tasks' || view === 'todo'}>
         {group && !settings?.assist.names?.trim() && !knownUserName && !groupSeen && (
           <div className="notice info">
             <span>

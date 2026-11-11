@@ -1,33 +1,19 @@
 // Which tasks need the person, as small notices: a command, a change or a question waits, or a turn ended. This only
 // decides what to say and what has been said. The window that shows a notice and the mark on the tray are elsewhere.
 import type { TaskAttention, TaskNotice, ViewRequest } from '@shared/runner'
+import { canAllowHere, shownPart as shown } from '@shared/runner-command'
 import { RUNNER_NAMES } from './hub'
 
-/** A command or list of files longer than this, or with more lines, is not shown whole in a small notice. */
-const SHOWN_CHARS = 240
-const SHOWN_LINES = 4
-
 const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
-
-/** The part of a text a notice has room for. */
-function shown(text: string): string {
-  const lines = text.split('\n')
-  const kept = lines.slice(0, SHOWN_LINES).join('\n')
-  return kept.length > SHOWN_CHARS || lines.length > SHOWN_LINES ? `${kept.slice(0, SHOWN_CHARS)}…` : kept
-}
-
-const fits = (text: string): boolean => text.length > 0 && text.length <= SHOWN_CHARS && text.split('\n').length <= SHOWN_LINES
 
 function waitingNotice(task: TaskAttention, request: ViewRequest, others: number): TaskNotice {
   const base = { id: `${task.key}#${request.id}`, kind: 'waiting' as const, key: task.key, title: task.title, where: `${RUNNER_NAMES[task.runner]} · ${baseName(task.folder)}`, requestId: request.id, others }
   if (request.kind === 'question') return { ...base, says: 'asks', detail: shown(request.questions?.[0]?.text ?? 'A question'), detailKind: 'question', canRefuse: false, canAllow: false }
   if (request.kind === 'edit') {
-    const files = (request.files ?? []).join('\n')
-    return { ...base, says: 'wants to change', detail: shown(files || 'a file'), detailKind: 'files', canRefuse: true, canAllow: fits(files) }
+    return { ...base, says: 'wants to change', detail: shown((request.files ?? []).join('\n') || 'a file'), detailKind: 'files', canRefuse: true, canAllow: canAllowHere(request) }
   }
   // Allowing here means having read all of it: a long command, or one that looks dangerous, is allowed in the window.
-  const command = request.command ?? request.raw ?? ''
-  return { ...base, says: 'wants to run', detail: shown(command), detailKind: 'command', canRefuse: true, canAllow: fits(command) && !request.danger, ...(request.danger ? { danger: request.danger } : {}) }
+  return { ...base, says: 'wants to run', detail: shown(request.command ?? request.raw ?? ''), detailKind: 'command', canRefuse: true, canAllow: canAllowHere(request), ...(request.danger ? { danger: request.danger } : {}) }
 }
 
 export interface AttentionLook {

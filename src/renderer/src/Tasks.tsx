@@ -213,10 +213,11 @@ function TaskRow({ task, now, selected, onSelect }: { task: TaskView; now: numbe
   )
 }
 
-function NewTask({ installed, folders, onCancel, onStart }: { installed: RunnerStatus[]; folders: string[]; onCancel: () => void; onStart: (request: { runner: RunnerKind; folder: string; prompt: string }) => Promise<void> }) {
+/** The form that starts a task: the agent, the folder and what to do. `prompt` fills the task in, for a task made from something else. */
+export function NewTask({ installed, folders, prompt: given = '', heading = 'New task', onCancel, onStart }: { installed: RunnerStatus[]; folders: string[]; prompt?: string; heading?: string; onCancel: () => void; onStart: (request: { runner: RunnerKind; folder: string; prompt: string }) => Promise<void> }) {
   const [runner, setRunner] = useState<RunnerKind>(installed[0]?.runner ?? 'claude')
   const [folder, setFolder] = useState(folders[0] ?? '')
-  const [prompt, setPrompt] = useState('')
+  const [prompt, setPrompt] = useState(given)
   const [busy, setBusy] = useState(false)
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
@@ -230,7 +231,7 @@ function NewTask({ installed, folders, onCancel, onStart }: { installed: RunnerS
   }
   return (
     <form className="task-new" onSubmit={(event) => void submit(event)} aria-label="New task">
-      <h2>New task</h2>
+      <h2>{heading}</h2>
       <fieldset className="task-new-agents">
         <legend>Agent</legend>
         {installed.map((s) => (

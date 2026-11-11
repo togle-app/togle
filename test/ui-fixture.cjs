@@ -398,6 +398,22 @@ module.exports = function install(fixture) {
   api.endRunnerCommands = async key => { record('endRunnerCommands', [key]); runnerFind(key).commandsRunning = false; runnerChanged(); return 1 }
   api.closeRunnerTask = async key => { record('closeRunnerTask', [key]); runnerFind(key).mine = false; runnerChanged() }
   api.pickRunnerFolder = async () => { record('pickRunnerFolder', []); return 'C:\\work\\picked' }
+  // The to-do list, in memory: the lines of its file, each with the words it had when it was shown.
+  const todoItems = fixture.scenario === 'tasks' ? [
+    { text: 'Review the onboarding copy', done: false },
+    { text: 'Fix the login redirect', done: false, task: 'claude:s2' },
+    { text: 'Write the release notes', done: false, task: 'claude:s3' },
+    { text: 'Send the invoice to Marta', done: true }
+  ] : []
+  const todoView = () => ({ items: todoItems.map((item, line) => ({ line, text: item.text, done: item.done, ...(item.task ? { task: item.task } : {}) })), file: 'C:\\Users\\demo\\AppData\\Roaming\\Togle\\to-do.md' })
+  const todoAt = ref => { const item = todoItems[ref.line]; if (!item || item.text !== ref.text) throw new Error('The list changed while you were looking at it. Look at it again.'); return item }
+  api.todoList = async () => clone(todoView())
+  api.addTodo = async text => { record('addTodo', [text]); if (!text.trim()) throw new Error('Say what the item is.'); todoItems.push({ text: text.trim(), done: false }); return clone(todoView()) }
+  api.setTodoDone = async (ref, done) => { record('setTodoDone', [ref, done]); todoAt(ref).done = done; return clone(todoView()) }
+  api.editTodo = async (ref, text) => { record('editTodo', [ref, text]); todoAt(ref).text = text; return clone(todoView()) }
+  api.removeTodo = async ref => { record('removeTodo', [ref]); todoAt(ref); todoItems.splice(ref.line, 1); return clone(todoView()) }
+  api.linkTodo = async (ref, task) => { record('linkTodo', [ref, task]); const item = todoAt(ref); if (task) item.task = task; else delete item.task; return clone(todoView()) }
+  api.showTodoFile = async () => { record('showTodoFile', []) }
   contextBridge.exposeInMainWorld('togle', api)
   // A noisy call's measurement, as the capture's noise check reports it when the call ends (the audio here is silent).
   const noiseReport = () => ({ analyzedMs: 600000, speechMs: 180000, quietMs: 360000, noisyMs: 162000, bursts: 41, floorDb: -47, peakDb: -38, speechDb: -24, snrDb: 23, verdict: 'noisy', sample: new Float32Array(1600) })

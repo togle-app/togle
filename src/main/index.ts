@@ -18,6 +18,8 @@ import { NoticeWindow } from './notice-window'
 import { Attention } from './runners/attention'
 import type { RunnerHub } from './runners/hub'
 import type { Backend } from './runners/types'
+import type { TodoFile } from './todo'
+import { registerTodo } from './todo-register'
 import { registerRunners } from './runners/register'
 import { StoredRecords, StoredTitles } from './runners/titles'
 import { MICROPHONE_PRODUCT, microphonePage } from '@shared/microphone-link'
@@ -244,6 +246,8 @@ let tray: TogleTray | undefined
 let quitting = false
 // The coding agents' tasks (Codex, Claude Code): the Tasks screen's side of the app.
 let runners: RunnerHub | null = null
+// The to-do list: a plain text file in Togle's folder.
+let todo: TodoFile | null = null
 // The small notice in a corner of the screen, and what it tells: a task waits for the person, or one finished.
 const noticeWindow = new NoticeWindow()
 const attention = new Attention()
@@ -2006,6 +2010,13 @@ if (!app.requestSingleInstanceLock()) {
     await Promise.all([runnerTitles.load(), runnerRecords.load()])
     // A test run can stand in for the agents with programs of its own. A packaged Togle never looks.
     const standIns = !app.isPackaged && process.env.TOGLE_TEST_RUNNERS ? await (require(process.env.TOGLE_TEST_RUNNERS) as { backends(): Promise<Backend[]> }).backends() : undefined
+    todo = registerTodo({
+      handle: (channel, listener) => ipcMain.handle(channel, (_event, ...args) => listener(...args)),
+      send,
+      file: path.join(app.getPath('userData'), 'to-do.md'),
+      reveal: file => shell.showItemInFolder(file)
+    })
+    void todo.watch()
     runners = registerRunners({
       backends: standIns,
       handle: (channel, listener) => ipcMain.handle(channel, (_event, ...args) => listener(...args)),
@@ -2068,6 +2079,7 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true
     dictationWindow.close()
     noticeWindow.close()
+    todo?.dispose()
     microphoneLink.stop()
     dictation.dispose()
     tray?.close()

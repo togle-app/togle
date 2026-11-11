@@ -755,7 +755,7 @@ app.whenReady().then(async () => {
   assert.ok(await ready.evaluate("document.querySelector('.brand img').complete&&document.querySelector('.brand img').naturalWidth>0"))
   assert.equal(await ready.evaluate("document.querySelector('button.listen').textContent.trim()"), 'Start call')
   assert.ok(await ready.evaluate("!!document.querySelector('.composer')&&!!document.querySelector('.agent-detail-tabs')&&!document.querySelector('.call-home')"))
-  assert.deepEqual(await ready.evaluate("[...document.querySelectorAll('.workspace-nav button')].map(button=>button.getAttribute('aria-label'))"), ['Tasks', 'Explore agents'])
+  assert.deepEqual(await ready.evaluate("[...document.querySelectorAll('.workspace-nav button')].map(button=>button.getAttribute('aria-label'))"), ['To-do', 'Tasks', 'Explore agents'])
   assert.equal(await ready.evaluate("document.querySelectorAll('button[aria-label=\"Try a question\"]').length"), 1, 'practice has one entry point in the message box')
   assert.ok(await ready.evaluate("!document.querySelector('.welcome .avatar')&&!document.querySelector('.welcome-personalize')"), 'the empty state does not repeat the agent profile or settings')
   assert.equal(await ready.evaluate("document.querySelectorAll('[aria-label=\"New agent\"]').length"), 1)

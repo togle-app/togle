@@ -45,3 +45,27 @@ export function dangerOf(command: string): string | null {
   for (const [pattern, reason] of RULES) if (pattern.test(text)) return reason
   return null
 }
+
+/** A command or list of files longer than this, or with more lines, is not shown whole in a small place (a notice, a row of the list). */
+export const SHOWN_CHARS = 240
+export const SHOWN_LINES = 4
+
+/** Whether all of a text fits in a small place. */
+export const fitsWhole = (text: string): boolean => text.length > 0 && text.length <= SHOWN_CHARS && text.split('\n').length <= SHOWN_LINES
+
+/**
+ * Whether a request can be allowed from a small place: only when all of what it asks is shown there, and it does not
+ * look dangerous. A question is answered in words, so never.
+ */
+export function canAllowHere(request: { kind: 'command' | 'edit' | 'question'; command?: string; raw?: string; files?: string[]; danger?: string }): boolean {
+  if (request.kind === 'question') return false
+  if (request.kind === 'edit') return fitsWhole((request.files ?? []).join('\n'))
+  return fitsWhole(request.command ?? request.raw ?? '') && !request.danger
+}
+
+/** The part of a text a small place has room for, with "…" when some is left out. */
+export function shownPart(text: string): string {
+  const lines = text.split('\n')
+  const kept = lines.slice(0, SHOWN_LINES).join('\n')
+  return kept.length > SHOWN_CHARS || lines.length > SHOWN_LINES ? `${kept.slice(0, SHOWN_CHARS)}…` : kept
+}

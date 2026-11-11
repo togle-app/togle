@@ -67,6 +67,13 @@ const SHAPES = {
       <circle cx="19" cy="12" r="1" />
     </>
   ),
+  // The to-do list: a box with a tick in it.
+  todo: (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="3.5" />
+      <path d="m8.5 12.2 2.4 2.4 4.6-5.2" />
+    </>
+  ),
   // The coding agents' tasks: a checklist.
   tasks: (
     <>
