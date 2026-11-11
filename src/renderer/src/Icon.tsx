@@ -67,6 +67,13 @@ const SHAPES = {
       <circle cx="19" cy="12" r="1" />
     </>
   ),
+  // The coding agents' tasks: a checklist.
+  tasks: (
+    <>
+      <path d="M10 6h11M10 12h11M10 18h11" />
+      <path d="m3 6 1.5 1.5L7 4.5M3 12l1.5 1.5L7 10.5M3 18l1.5 1.5L7 16.5" />
+    </>
+  ),
   // The agent market: a shop's front.
   store: (
     <>

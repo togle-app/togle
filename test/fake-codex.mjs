@@ -1,6 +1,7 @@
 // A stand-in for `codex app-server`, for tests. It speaks the same JSON-RPC lines as the real one (as recorded from
 // Codex 0.166 on Windows) and acts on the words of the first prompt of a turn:
 //   "say ok"         answers "ok" at once
+//   "quick"          the same, with the whole turn told before the answer to turn/start
 //   "run <name>"     asks to run a PowerShell command and waits for the person (accept runs it, decline refuses it)
 //   "edit <name>"    asks to change a file
 //   "ask"            asks a question in words
@@ -133,6 +134,11 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       const turn = { id: `u${Math.random().toString(36).slice(2, 6)}`, status: 'inProgress', items: [] }
       thread.turn = turn.id
       thread.preview ||= params.input?.[0]?.text
+      // "quick": the whole turn is told before the answer to turn/start, as a fast agent can.
+      if (/^quick/.test(String(params.input?.[0]?.text ?? ''))) {
+        void runTurn(thread, turn, 'say ok').then(() => reply({ turn }))
+        return undefined
+      }
       reply({ turn })
       void runTurn(thread, turn, String(params.input?.[0]?.text ?? ''))
       return undefined

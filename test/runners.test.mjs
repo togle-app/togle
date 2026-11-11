@@ -111,6 +111,22 @@ test('Codex starts a task with its own approval policy, names it, and answers a 
   }
 })
 
+test('a turn that ends before the answer to starting it is read leaves the task done, not working', { timeout: 30_000 }, async () => {
+  const backend = codex()
+  try {
+    const task = await backend.start({ folder: os.tmpdir(), prompt: 'quick', asks: true })
+    const events = watch(task)
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    await new Promise((r) => setTimeout(r, 100))
+    assert.equal(task.state, 'idle')
+    await task.send('say ok')
+    await until(() => events.filter((e) => e.type === 'turn-ended').length === 2, 'the next turn to end')
+    assert.equal(task.state, 'idle')
+  } finally {
+    await backend.close()
+  }
+})
+
 test('a command waits as a request, shows its script, and runs once allowed', { timeout: 30_000 }, async () => {
   const backend = codex()
   try {

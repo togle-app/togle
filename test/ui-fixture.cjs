@@ -354,6 +354,50 @@ module.exports = function install(fixture) {
     api.exportAgent = async (id, choice) => { record('exportAgent', [id, choice]); return 'C:\\fixture\\agent.togle' }
     api.openAgentPackage = async () => ({ id: 'demo-package', name: 'Demo coach', description: 'Helps you present a product clearly.', instructions: 'Use concise talking points. Ask which audience is attending.', vocabulary: '', skills: [], answers: [], memory: [], docs: [], studies: 0, findings: [], from: 'demo-coach.togle', trust: 'community', notes: [] })
   }
+  // The coding agents' tasks (the Tasks screen), in memory so that a test can answer, stop and start them.
+  const hour = 3600000
+  const task = (key, props) => ({ key, runner: key.split(':')[0], id: key.split(':')[1], folder: 'C:\\work\\site', state: 'idle', updatedAt: Date.now(), mine: false, line: '', pending: [], commandsRunning: false, log: [], ...props })
+  const runnerTasks = fixture.scenario !== 'tasks' ? [] : [
+    task('codex:t1', { title: 'Add the status column', folder: 'C:\\work\\api-server', state: 'waiting', updatedAt: Date.now() - 60000, mine: true, line: 'Wants to run npm run migrate',
+      pending: [{ id: 'r1', kind: 'command', command: 'npm run migrate', raw: 'npm run migrate', folder: 'C:\\work\\api-server', offersAlways: true }],
+      log: [{ id: 1, at: 1, kind: 'you', text: 'Add a status column to the orders table.' }, { id: 2, at: 2, kind: 'agent', text: 'I will add the column and a migration.' }, { id: 3, at: 3, kind: 'command', text: 'git status', status: 'finished' }, { id: 4, at: 4, kind: 'files', text: 'Changed 2 files: src/db/orders.ts, migrations/004.sql' }] }),
+    task('claude:s5', { title: 'Clean the build folder', folder: 'C:\\work\\website', state: 'waiting', updatedAt: Date.now() - 120000, mine: true, line: 'Wants to run rm -rf build',
+      pending: [{ id: 'r2', kind: 'command', command: 'rm -rf build', raw: 'rm -rf build', folder: 'C:\\work\\website', offersAlways: false, danger: 'It deletes files or folders for good.' }],
+      log: [{ id: 5, at: 5, kind: 'you', text: 'Clean up the build folder.' }, { id: 6, at: 6, kind: 'asked', text: 'rm -rf build' }] }),
+    task('claude:s2', { title: 'Rebuild the pricing page', folder: 'C:\\work\\website', state: 'working', mine: true, line: 'Running npm test',
+      log: [{ id: 7, at: 7, kind: 'you', text: 'Rebuild the pricing page with two plans.' }, { id: 8, at: 8, kind: 'agent', text: '**Two plans** it is. I will start with the table.' }, { id: 9, at: 9, kind: 'command', text: 'npm test', status: 'running' }] }),
+    task('claude:s4', { title: 'Write the release notes', folder: 'C:\\work\\notes', state: 'working', pid: 4242, line: 'Working in its own window' }),
+    task('claude:s3', { title: 'Fix the login redirect', folder: 'C:\\work\\website', updatedAt: Date.now() - 5 * hour }),
+    task('codex:t9', { title: 'Port the settings screen', folder: 'C:\\work\\mobile-app', updatedAt: Date.now() - 72 * hour })
+  ]
+  const runnerView = ({ log, ...view }) => view
+  const runnerFind = key => { const found = runnerTasks.find(item => item.key === key); if (!found) throw new Error('That task is gone.'); return found }
+  const runnerRank = item => item.state === 'waiting' ? 0 : item.state === 'working' ? 1 : 2
+  const runnerChanged = () => emit('onRunnersChanged')
+  api.runnerStatus = async () => fixture.scenario === 'tasks' ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []
+  api.runnerTasks = async () => clone(runnerTasks.map(runnerView)).sort((a, b) => runnerRank(a) - runnerRank(b) || b.updatedAt - a.updatedAt)
+  api.runnerDetail = async key => { const found = runnerFind(key); return clone({ task: runnerView(found), log: found.log }) }
+  api.startRunnerTask = async request => {
+    record('startRunnerTask', [request])
+    const started = task('claude:new' + ++sequence, { title: request.prompt.slice(0, 40), folder: request.folder, runner: request.runner, state: 'working', mine: true, line: 'Working…', log: [{ id: 100 + sequence, at: Date.now(), kind: 'you', text: request.prompt }] })
+    started.key = request.runner + ':new' + sequence
+    runnerTasks.push(started); runnerChanged(); return clone(runnerView(started))
+  }
+  api.openRunnerTask = async key => { record('openRunnerTask', [key]); const found = runnerFind(key); found.mine = true; runnerChanged(); return clone(runnerView(found)) }
+  api.takeOverRunnerTask = async key => { record('takeOverRunnerTask', [key]); const found = runnerFind(key); found.mine = true; delete found.pid; found.line = ''; runnerChanged(); return clone(runnerView(found)) }
+  api.sendToRunnerTask = async (key, text) => { record('sendToRunnerTask', [key, text]); const found = runnerFind(key); found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged() }
+  api.answerRunnerTask = async (key, requestId, decision) => {
+    record('answerRunnerTask', [key, requestId, decision]); const found = runnerFind(key)
+    found.pending = found.pending.filter(request => request.id !== requestId)
+    found.log.push({ id: 300 + ++sequence, at: Date.now(), kind: 'note', text: decision === 'allow-once' ? 'You allowed it.' : 'You refused it.' })
+    if (!found.pending.length) { found.state = 'working'; found.line = 'Working…' }
+    runnerChanged()
+  }
+  api.replyRunnerTask = async (key, requestId, text) => { record('replyRunnerTask', [key, requestId, text]); runnerFind(key).pending = []; runnerChanged() }
+  api.stopRunnerTask = async key => { record('stopRunnerTask', [key]); const found = runnerFind(key); found.state = 'stopped'; found.pending = []; found.line = ''; if (found.runner === 'codex') found.commandsRunning = true; runnerChanged() }
+  api.endRunnerCommands = async key => { record('endRunnerCommands', [key]); runnerFind(key).commandsRunning = false; runnerChanged(); return 1 }
+  api.closeRunnerTask = async key => { record('closeRunnerTask', [key]); runnerFind(key).mine = false; runnerChanged() }
+  api.pickRunnerFolder = async () => { record('pickRunnerFolder', []); return 'C:\\work\\picked' }
   contextBridge.exposeInMainWorld('togle', api)
   // A noisy call's measurement, as the capture's noise check reports it when the call ends (the audio here is silent).
   const noiseReport = () => ({ analyzedMs: 600000, speechMs: 180000, quietMs: 360000, noisyMs: 162000, bursts: 41, floorDb: -47, peakDb: -38, speechDb: -24, snrDb: 23, verdict: 'noisy', sample: new Float32Array(1600) })

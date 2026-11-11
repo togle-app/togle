@@ -3,7 +3,7 @@ import type { Agent } from '@shared/types'
 import { Avatar } from './Avatar'
 import { Icon } from './Icon'
 
-export type SidebarPage = 'agents' | 'settings' | 'new'
+export type SidebarPage = 'agents' | 'settings' | 'new' | 'tasks'
 
 interface Props {
   agents: Agent[]
@@ -59,6 +59,7 @@ export const AgentSidebar = memo(function AgentSidebar({ agents, selectedId, cal
     </nav>
     <div className="sidebar-footer">
       <nav className="workspace-nav" aria-label="Workspace">
+        <button aria-label="Tasks" aria-current={page === 'tasks' ? 'page' : undefined} title="Tasks of the coding agents on this computer" onClick={() => onNavigate('tasks')}><Icon name="tasks" size={16} /><span>Tasks</span></button>
         <button aria-label="Explore agents" aria-current={page === 'agents' ? 'page' : undefined} title="Explore agents" onClick={() => onNavigate('agents')}><Icon name="store" size={16} /><span>Explore agents</span></button>
       </nav>
       <button className={`sidebar-settings ${page === 'settings' ? 'selected' : ''}`} aria-label="Settings" title="Settings" onClick={() => onNavigate('settings')}><Icon name="settings" size={16} /><span>Settings</span></button>

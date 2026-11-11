@@ -30,6 +30,7 @@
     "test:macos": "node scripts/test-macos.cjs",
     "test:linux": "node scripts/test-linux.cjs",
     "test:ui": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/ui-launch.cjs",
+    "test:tasks:ui": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/tasks-ui-launch.cjs",
     "test:native": "electron-vite build && node test/native-launch.cjs",
     "test:dictation:native": "electron-vite build && rolldown -c test/rolldown.config.mjs && rolldown -c eval/rolldown.config.mjs && node test/dictation-native-launch.cjs",
     "test:dictation:editors": "rolldown -c test/rolldown.config.mjs && node test/dictation-editors-launch.cjs",

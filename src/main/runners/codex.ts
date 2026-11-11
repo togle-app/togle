@@ -87,6 +87,8 @@ const decisionOf = (answer: Answer): 'accept' | 'decline' | 'cancel' => (answer.
 class CodexTask extends TaskBase {
   readonly runner = 'codex' as const
   private turnId: string | null = null
+  /** The turn that ended last: its end may be heard before the answer that named it. */
+  private lastEnded: string | null = null
   private stopped = false
   /** Commands in progress: item id to the command as Codex sent it. */
   private readonly running = new Map<string, string>()
@@ -114,9 +116,17 @@ class CodexTask extends TaskBase {
         // The turn had just ended: the words start the next.
       }
     }
-    const started = rec(await this.server.peer.request('turn/start', { threadId: this.id, input }))
-    this.turnId = text(rec(started.turn).id) || null
+    // Working from now on, and before the answer: a quick turn can end before the answer to this call is read, and
+    // what the app server said about it since is the later word.
     this.setBase('working')
+    try {
+      const started = rec(await this.server.peer.request('turn/start', { threadId: this.id, input }))
+      const turnId = text(rec(started.turn).id) || null
+      if (turnId !== this.lastEnded) this.turnId = turnId
+    } catch (error) {
+      this.setBase('idle')
+      throw error
+    }
   }
 
   async stop(): Promise<void> {
@@ -168,6 +178,7 @@ class CodexTask extends TaskBase {
   turnCompleted(turn: Record<string, unknown>): void {
     const status = text(turn.status)
     const error = Object.keys(rec(turn.error)).length ? text(rec(turn.error).message) || 'The turn failed.' : null
+    this.lastEnded = text(turn.id) || this.lastEnded
     this.turnId = null
     this.emit({ type: 'turn-ended', outcome: status === 'interrupted' ? 'interrupted' : status === 'failed' ? 'failed' : 'completed', error })
     if (error) this.emit({ type: 'error', message: error })
