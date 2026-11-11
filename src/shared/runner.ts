@@ -53,6 +53,25 @@ export interface ViewRequest extends PendingRequest {
   danger?: string
 }
 
+/** Whether Claude Code in a terminal asks Togle about its commands, and what that depends on. */
+export interface ClaudeHookStatus {
+  /** Whether Claude Code is on this computer. */
+  claude: boolean
+  version?: string
+  /** Whether that version can start Togle's hook. */
+  supported: boolean
+  /** The first version that can. */
+  minimum: string
+  /** Whether Claude Code's settings hold Togle's entry. */
+  installed: boolean
+  /** Whether that entry starts this Togle the way it would be started now. */
+  current: boolean
+  /** The settings file. */
+  file: string
+  /** Why the settings could not be read, in words. */
+  problem?: string
+}
+
 /** One file that differs from the last commit in a task's folder. */
 export interface ChangedFile {
   /** Relative to the folder's repository, with forward slashes. */

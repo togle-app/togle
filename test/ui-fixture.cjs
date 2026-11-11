@@ -398,6 +398,17 @@ module.exports = function install(fixture) {
   api.endRunnerCommands = async key => { record('endRunnerCommands', [key]); runnerFind(key).commandsRunning = false; runnerChanged(); return 1 }
   api.closeRunnerTask = async key => { record('closeRunnerTask', [key]); runnerFind(key).mine = false; runnerChanged() }
   api.pickRunnerFolder = async () => { record('pickRunnerFolder', []); return 'C:\\work\\picked' }
+  // Claude Code in a terminal asking Togle: the connection, as the window is told it.
+  let hookStatus = { claude: fixture.scenario === 'tasks', version: '2.1.322 (Claude Code)', supported: true, minimum: '2.1.139', installed: false, current: false, file: 'C:\\Users\\demo\\.claude\\settings.json' }
+  let failHook = false
+  api.claudeHookStatus = async () => clone(hookStatus)
+  api.connectClaudeHook = async () => {
+    record('connectClaudeHook', [])
+    if (failHook) { failHook = false; throw new Error("Claude Code's settings file is not valid JSON, so Togle left it alone.") }
+    hookStatus = { ...hookStatus, installed: true, current: true }
+    return clone(hookStatus)
+  }
+  api.disconnectClaudeHook = async () => { record('disconnectClaudeHook', []); hookStatus = { ...hookStatus, installed: false, current: false }; return clone(hookStatus) }
   // What differs from the last commit: a repository for every folder but the notes one.
   const sampleDiff = [
     'diff --git a/src/status.ts b/src/status.ts', 'index 1111111..2222222 100644', '--- a/src/status.ts', '+++ b/src/status.ts', '@@ -1,3 +1,3 @@',
@@ -431,6 +442,11 @@ module.exports = function install(fixture) {
   const noiseReport = () => ({ analyzedMs: 600000, speechMs: 180000, quietMs: 360000, noisyMs: 162000, bursts: 41, floorDb: -47, peakDb: -38, speechDb: -24, snrDb: 23, verdict: 'noisy', sample: new Float32Array(1600) })
   contextBridge.exposeInMainWorld('togleDev', { silentAudio: !['audio', 'start-failure'].includes(fixture.scenario), ...(fixture.scenario === 'noisy-call' ? { noiseReport } : {}) })
   contextBridge.exposeInMainWorld('togleUITest', {
+    // A session that runs in a terminal asks about a command and the question is held here: it waits, and can be answered.
+    askOutside: (key, request) => { const found = runnerFind(key); found.pending = [clone(request)]; found.state = 'waiting'; found.line = 'Wants to run ' + (request.command ?? ''); runnerChanged() },
+    // What the window is told of Claude Code's connection to Togle, changed by hand.
+    hook: patch => { hookStatus = { ...hookStatus, ...patch } },
+    failNextConnect: () => { failHook = true },
     microphone: status => { microphone = clone(status); microphoneChanged() },
     failNextCalendar: () => { rejectCalendar = true }, holdCalendarRefresh: () => { holdCalendar = true },
     releaseCalendarRefresh: () => { holdCalendar = false; releaseCalendar?.(); releaseCalendar = undefined },

@@ -45,6 +45,7 @@
     "test:notes:live": "electron-vite build && node test/meeting-notes-live-launch.cjs",
     "test:call-titles:live": "rolldown -c eval/rolldown.config.mjs && node test/call-titles-live-launch.cjs",
     "test:claude-connections:live": "rolldown -c test/rolldown.config.mjs && node test/claude-connections-live.mjs",
+    "test:claude-hook:live": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/claude-hook-live-launch.cjs",
     "test:calendar:live": "rolldown -c test/rolldown.config.mjs && node test/calendar-live.mjs",
     "test:voices:live": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/voices-launch.cjs",
     "test:voices:memory": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/voice-benchmark-launch.cjs --memory",

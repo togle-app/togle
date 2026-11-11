@@ -3219,3 +3219,12 @@ body.notice-surface { background: transparent; color: var(--text); overflow: hid
   .changes-body { grid-template-columns: minmax(0, 1fr); }
   .changes-files { max-height: 160px; }
 }
+
+/* Claude Code in a terminal asking Togle, in the list of tasks. */
+.tasks-connect { display: grid; gap: 8px; margin-top: 10px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); font-size: 12px; color: var(--muted); }
+.tasks-connect p { margin: 0; }
+.tasks-connect strong { color: var(--text); }
+.tasks-connect button { justify-self: start; }
+.tasks-connect details summary { cursor: pointer; color: var(--muted); }
+.tasks-connect details p { margin-top: 6px; overflow-wrap: anywhere; }
+.tasks-connect code { font: 11px ui-monospace, 'Cascadia Mono', Consolas, monospace; color: var(--text); }

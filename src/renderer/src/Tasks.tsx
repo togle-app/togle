@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import type { LogEntry, RunnerKind, RunnerStatus, TaskDetail, TaskView, ViewRequest } from '@shared/runner'
+import type { ClaudeHookStatus, LogEntry, RunnerKind, RunnerStatus, TaskDetail, TaskView, ViewRequest } from '@shared/runner'
 import { Changes } from './Changes'
 import { Icon } from './Icon'
 import { Markdown } from './Markdown'
@@ -14,6 +14,8 @@ const REFRESH_MS = 4_000
 const EARLIER_SHOWN = 8
 // The task looked at last, for when the screen is opened again.
 let remembered: string | undefined
+// What a banner says of a session in its own window that asks a question: the terminal asks too, and either answer counts.
+const ASKS_ELSEWHERE = 'It runs in its own window and asks there too. Answer here or there: the first answer counts.'
 
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
@@ -145,6 +147,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
         )}
         {loaded && !!installed.length && !tasks.length && <p className="empty">No tasks yet. Start one, or let an agent run in a terminal and it shows here.</p>}
         {!!installed.length && <p className="hint tasks-found">Found: {installed.map((s) => s.name).join(', ')}</p>}
+        <TerminalAnswers />
       </aside>
       <section className="tasks-detail">
         {error && (
@@ -190,6 +193,70 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
           </div>
         )}
       </section>
+    </div>
+  )
+}
+
+/** Whether Claude Code in a terminal asks Togle about its commands, and the button that turns that on or off. */
+function TerminalAnswers() {
+  const [status, setStatus] = useState<ClaudeHookStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    void api.claudeHookStatus().then(setStatus, () => undefined)
+  }, [])
+  if (!status?.claude) return null
+  const change = async (work: () => Promise<ClaudeHookStatus>): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      setStatus(await work())
+    } catch (caught) {
+      setError(errorText(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (!status.supported) {
+    return (
+      <p className="hint tasks-connect">
+        Claude Code {status.version?.replace(/\s*\(.*$/, '')} is older than {status.minimum}, so Togle cannot answer its terminal sessions. Update Claude Code to use this.
+      </p>
+    )
+  }
+  return (
+    <div className="tasks-connect" aria-label="Claude Code in a terminal">
+      {status.installed && status.current ? (
+        <>
+          <p>
+            <strong>Connected.</strong> Claude Code sessions in a terminal ask Togle about a command too. Answer here or in the terminal: the first answer counts.
+          </p>
+          <button className="small" disabled={busy} onClick={() => void change(() => api.disconnectClaudeHook())}>
+            Turn off
+          </button>
+        </>
+      ) : (
+        <>
+          <p>
+            <strong>{status.installed ? 'Togle has moved since this was set up.' : 'Answer from here.'}</strong>{' '}
+            {status.installed ? 'Connect again, so Claude Code finds it.' : 'Claude Code in a terminal can ask Togle about a command, so you can allow or refuse it from a notice or from this window. You can still answer in the terminal. The first answer counts.'}
+          </p>
+          <button className="primary small" disabled={busy || !!status.problem} onClick={() => void change(() => api.connectClaudeHook())}>
+            {status.installed ? 'Connect again' : 'Connect Claude Code'}
+          </button>
+          <details>
+            <summary>What this changes</summary>
+            <p className="hint">
+              It adds one entry to <code>{status.file}</code>, and keeps a copy of that file beside it the first time. Turn off takes the entry out again. When Togle is not running, Claude Code asks in the terminal as it always did.
+            </p>
+          </details>
+        </>
+      )}
+      {(error || status.problem) && (
+        <p className="error" role="alert">
+          {error || status.problem}
+        </p>
+      )}
     </div>
   )
 }
@@ -371,12 +438,14 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
               </>
             ) : (
               <>
-                <span>{task.line || 'It runs in its own window.'} Togle can see it, and cannot answer it there.</span>
+                <span>{task.pending.length ? ASKS_ELSEWHERE : `${task.line || 'It runs in its own window.'} Togle can see it, and cannot answer it there.`}</span>
                 <button className="small" onClick={() => setConfirmTakeOver(true)}>
                   Take over
                 </button>
               </>
             )
+          ) : task.pending.length ? (
+            <span>{ASKS_ELSEWHERE}</span>
           ) : (
             <>
               <span>Togle is not running this task. Continue it here to answer it and reply to it.</span>

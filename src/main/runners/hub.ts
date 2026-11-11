@@ -5,6 +5,7 @@ import { promises as fs } from 'node:fs'
 import type { Changes, Decision, LogEntry, RunnerKind, RunnerStatus, StartRequest, TaskAttention, TaskDetail, TaskEvent, TaskInfo, TaskView, ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
 import { changesIn } from './changes'
+import { ExternalRequests, type Held, type Look, type OutsideAsk } from './external'
 import { endTree, listProcesses } from './process-tree'
 import type { Backend, Detected, TaskHandle } from './types'
 
@@ -41,6 +42,9 @@ export interface HubOptions {
   cacheMs?: number
   /** How long quitting waits for the commands of stopped tasks to end, in milliseconds. */
   quitWaitMs?: number
+  /** How often the requests of sessions Togle does not run are looked at, and how long each is left alone first, in milliseconds. */
+  outsideEveryMs?: number
+  outsideGraceMs?: number
 }
 
 interface Owned {
@@ -60,6 +64,14 @@ const short = (value: string, longest = 90): string => {
   return line.length > longest ? `${line.slice(0, longest - 1)}…` : line
 }
 const firstSentence = (value: string): string => short(/^[^.!?\n]*[.!?]?/.exec(value.trim())?.[0] ?? value)
+const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
+
+/** What a request asks, in one line. */
+function requestLine(request: ViewRequest): string {
+  if (request.kind === 'question') return `Asks: ${short(request.questions?.[0]?.text ?? '')}`
+  if (request.kind === 'edit') return `Wants to change ${short(request.files?.join(', ') ?? 'a file', 70)}`
+  return `Wants to run ${short(request.command ?? '', 70)}`
+}
 
 /** Waiting for the person first, then what is working, then the rest, newest first. */
 const rank = (task: TaskView): number => (task.state === 'waiting' ? 0 : task.state === 'working' ? 1 : 2)
@@ -74,9 +86,25 @@ export class RunnerHub {
   private disposed = false
   private disposing: Promise<void> | null = null
   private readonly cacheMs: number
+  private readonly outside: ExternalRequests
 
   constructor(private readonly options: HubOptions) {
     this.cacheMs = options.cacheMs ?? 4_000
+    this.outside = new ExternalRequests({
+      changed: () => this.fresh(),
+      look: (held) => this.lookAt(held),
+      ...(options.outsideEveryMs ? { everyMs: options.outsideEveryMs } : {}),
+      ...(options.outsideGraceMs !== undefined ? { graceMs: options.outsideGraceMs } : {})
+    })
+  }
+
+  /**
+   * A question from a session Togle does not run, asked by its hook. It is held until the person answers it here, or
+   * until it is gone; the one who asked is told which. A session Togle runs itself is answered through its own route.
+   */
+  askOutside(ask: OutsideAsk, signal: AbortSignal): Promise<Decision | 'gone'> {
+    if (this.disposed || this.owned.has(keyOf(ask.runner, ask.asked.sessionId))) return Promise.resolve('gone')
+    return this.outside.hold(ask, signal)
   }
 
   /** Which agents are on this computer. */
@@ -96,6 +124,7 @@ export class RunnerHub {
     const views = new Map<string, TaskView>()
     for (const info of await this.infos()) views.set(keyOf(info.runner, info.id), this.viewOfInfo(info))
     for (const owned of this.owned.values()) views.set(owned.key, this.viewOfOwned(owned, views.get(owned.key)))
+    for (const key of this.outside.keys()) if (!this.owned.has(key)) views.set(key, this.viewOfOutside(key, views.get(key)))
     return [...views.values()].sort(order)
   }
 
@@ -165,6 +194,9 @@ export class RunnerHub {
 
   answer(key: string, requestId: string, decision: Decision): void {
     if (decision !== 'allow-once' && decision !== 'refuse') throw new Error('Allow once or refuse.')
+    // A question held for a session that runs elsewhere: the answer goes back to its hook.
+    if (this.outside.answer(key, requestId, decision)) return
+    if (!this.owned.has(key) && this.outside.keys().includes(key)) throw new Error('That question is gone: it was answered where the session runs.')
     this.mine(key).handle.answer(requestId, decision)
   }
 
@@ -206,10 +238,17 @@ export class RunnerHub {
 
   /** What the tasks Togle runs need now. Asks the agents nothing, so it is cheap enough to ask at every change. */
   attention(): TaskAttention[] {
-    return [...this.owned.values()].map((owned) => {
+    const mine = [...this.owned.values()].map((owned) => {
       const view = this.viewOfOwned(owned, undefined)
       return { key: owned.key, runner: view.runner, title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line }
     })
+    // Sessions that run elsewhere and ask about a command: answered here as well.
+    const elsewhere = this.outside.keys().filter((key) => !this.owned.has(key)).map((key) => {
+      const known = this.cache?.infos.find((info) => keyOf(info.runner, info.id) === key)
+      const view = this.viewOfOutside(key, known ? this.viewOfInfo(known) : undefined)
+      return { key, runner: view.runner, title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line }
+    })
+    return [...mine, ...elsewhere]
   }
 
   /** The tasks Togle runs that would stop in the middle if Togle quit now: working, or waiting for the person. */
@@ -229,6 +268,8 @@ export class RunnerHub {
     this.disposed = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+    // The hooks waiting on a question here are told nothing was decided: the question stays where its session asks it.
+    this.outside.dropAll()
     const owned = [...this.owned.values()]
     // A task still at work is stopped as the Stop button stops it. Closing the agent's program is not enough: Claude
     // Code and Hermes leave the command they were running behind, running with nobody watching.
@@ -381,6 +422,39 @@ export class RunnerHub {
     return { ...info, key, title: this.titleOf(key, info.title), mine: false, line, pending: [], commandsRunning: false }
   }
 
+  /** A session that runs elsewhere, as it is while one of its questions is held here: waiting, and answerable. */
+  private viewOfOutside(key: string, before: TaskView | undefined): TaskView {
+    const held = this.outside.forKey(key)
+    const first = held[0]
+    const pending = held.map((entry) => this.withMark(entry.request))
+    const base: TaskView = before ?? {
+      key,
+      runner: first.runner,
+      id: first.sessionId,
+      title: this.titleOf(key, baseName(first.folder) ? `${RUNNER_NAMES[first.runner]} in ${baseName(first.folder)}` : `${RUNNER_NAMES[first.runner]} session`),
+      folder: first.folder,
+      state: 'waiting',
+      updatedAt: first.at,
+      mine: false,
+      line: '',
+      pending: [],
+      commandsRunning: false
+    }
+    return { ...base, state: 'waiting', updatedAt: Math.max(base.updatedAt, first.at), mine: false, pending, line: requestLine(pending[0]) }
+  }
+
+  /** How a held request's session is: what its agent says about it, and whether its transcript grew since. */
+  private async lookAt(held: Held): Promise<Look> {
+    let transcriptGrew = false
+    if (held.transcript) {
+      const stat = await fs.stat(held.transcript).catch(() => null)
+      transcriptGrew = !!stat && stat.mtimeMs > held.at + 1_500
+    }
+    const backend = this.options.backends.find((candidate) => candidate.runner === held.runner)
+    const state = backend?.sessionState ? await backend.sessionState(held.sessionId).catch(() => null) : null
+    return { transcriptGrew, state }
+  }
+
   private viewOfOwned(owned: Owned, info: TaskView | undefined): TaskView {
     const { handle } = owned
     const pending = handle.pending.map((request) => this.withMark(request))
@@ -388,11 +462,7 @@ export class RunnerHub {
     const lastWords = [...owned.log].reverse().find((e) => e.kind === 'agent')
     const first = pending[0]
     const line = first
-      ? first.kind === 'question'
-        ? `Asks: ${short(first.questions?.[0]?.text ?? '')}`
-        : first.kind === 'edit'
-          ? `Wants to change ${short(first.files?.join(', ') ?? 'a file', 70)}`
-          : `Wants to run ${short(first.command ?? '', 70)}`
+      ? requestLine(first)
       : lastCommand
         ? `Running ${short(lastCommand.text, 70)}`
         : handle.state === 'working'

@@ -333,6 +333,78 @@ async function checkChanges(T, agent) {
   ui.window.destroy()
 }
 
+async function checkOutside(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Tasks')
+  await ui.wait("document.querySelectorAll('.task-row').length===6")
+
+  // Claude Code in a terminal: asking Togle is off until the person connects it, with the file it changes named.
+  await ui.wait("!!document.querySelector('.tasks-connect')")
+  assert.ok((await texts(ui, '.tasks-connect p'))[0].startsWith('Answer from here.'))
+  assert.deepEqual(await texts(ui, '.tasks-connect button'), ['Connect Claude Code'])
+  assert.equal(await ui.evaluate("document.querySelector('.tasks-connect details code').textContent"), 'C:\\Users\\demo\\.claude\\settings.json', 'the file it changes is named')
+  assert.ok((await texts(ui, '.tasks-connect details p'))[0].includes('Turn off takes the entry out again.'))
+  await ui.capture('tasks-connect')
+  await ui.evaluate("window.togleUITest.failNextConnect()")
+  await ui.click('.tasks-connect button', 'Connect Claude Code')
+  await ui.wait("!!document.querySelector('.tasks-connect .error')")
+  assert.equal((await texts(ui, '.tasks-connect .error'))[0], "Claude Code's settings file is not valid JSON, so Togle left it alone.")
+  assert.deepEqual(await texts(ui, '.tasks-connect button'), ['Connect Claude Code'], 'still not connected, and it can be tried again')
+  await ui.click('.tasks-connect button', 'Connect Claude Code')
+  await ui.wait("!document.querySelector('.tasks-connect .error') && document.querySelector('.tasks-connect strong')?.textContent==='Connected.'")
+  assert.equal((await ui.calls('connectClaudeHook')).length, 2)
+  assert.deepEqual(await texts(ui, '.tasks-connect button'), ['Turn off'])
+  await ui.click('.tasks-connect button', 'Turn off')
+  await ui.wait("document.querySelector('.tasks-connect strong')?.textContent==='Answer from here.'")
+  assert.equal((await ui.calls('disconnectClaudeHook')).length, 1)
+  // Togle moved since: connect again. An old Claude Code cannot run the hook, and says so.
+  const leaveAndReturn = async () => {
+    await ui.click('.workspace-nav button', 'To-do')
+    await ui.wait("!!document.querySelector('.todo')")
+    await ui.click('.workspace-nav button', 'Tasks')
+    await ui.wait("!!document.querySelector('.tasks-connect')")
+  }
+  await ui.evaluate("window.togleUITest.hook({ installed: true, current: false })")
+  await leaveAndReturn()
+  await ui.wait("document.querySelector('.tasks-connect strong')?.textContent==='Togle has moved since this was set up.'")
+  assert.deepEqual(await texts(ui, '.tasks-connect button'), ['Connect again'])
+  await ui.evaluate("window.togleUITest.hook({ installed: false, current: false, supported: false, version: '2.0.30 (Claude Code)' })")
+  await leaveAndReturn()
+  assert.equal((await texts(ui, '.tasks-connect'))[0], 'Claude Code 2.0.30 is older than 2.1.139, so Togle cannot answer its terminal sessions. Update Claude Code to use this.')
+  assert.deepEqual(await texts(ui, '.tasks-connect button'), [])
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
+async function checkOutsideAsk(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Tasks')
+  await ui.wait("document.querySelectorAll('.task-row').length===6")
+  // A session in a terminal asks about a command: it waits, and can be answered here as well as there.
+  await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'ext-1', kind: 'command', command: 'npm run build', raw: 'npm run build', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
+  await ui.wait("document.querySelector('.task-row[data-state=waiting] strong')")
+  await ui.task('Write the release notes')
+  await ui.wait("!!document.querySelector('.task-request')")
+  assert.equal(await ui.evaluate("document.querySelector('.task-request .task-command').textContent"), 'npm run build')
+  assert.deepEqual(await texts(ui, '.task-request button'), ['Allow once', 'Refuse'])
+  assert.equal((await texts(ui, '.task-banner'))[0].startsWith('It runs in its own window and asks there too. Answer here or there: the first answer counts.'), true)
+  await ui.capture('tasks-outside')
+  await ui.click('.task-request button', 'Allow once')
+  assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args), [['claude:s4', 'ext-1', 'allow-once']])
+  await ui.wait("!document.querySelector('.task-request')")
+  // The same question on the to-do list: the command in full, and the buttons.
+  await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'ext-2', kind: 'command', command: 'git status', raw: 'git status', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.wait("[...document.querySelectorAll('.todo-row.need b')].some(b=>b.textContent==='Write the release notes')")
+  const row = "[...document.querySelectorAll('.todo-row.need')].find(r=>r.querySelector('b').textContent==='Write the release notes')"
+  assert.equal(await ui.evaluate(row + ".querySelector('.todo-command').textContent"), 'git status')
+  assert.deepEqual(await ui.evaluate("[..." + row + ".querySelectorAll('button')].map(b=>b.textContent)"), ['Allow once', 'Refuse', 'Open'])
+  await ui.evaluate(row + ".querySelectorAll('button')[1].click()")
+  assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args[2]), ['allow-once', 'refuse'])
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 async function checkQuit(T, agent) {
   const ui = await open(T, agent, 1024)
   const notice = () => ui.evaluate("document.querySelector('[aria-label=\"Confirm quit Togle\"] span')?.textContent ?? null")
@@ -470,7 +542,9 @@ app.whenReady().then(async () => {
     await checkNotice(T, agent)
     await checkTodo(T, agent)
     await checkChanges(T, agent)
-    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list and the changes passed')
+    await checkOutside(T, agent)
+    await checkOutsideAsk(T, agent)
+    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes and Claude Code in a terminal passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

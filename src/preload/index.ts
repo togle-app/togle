@@ -211,6 +211,9 @@ const api: TogleApi = {
 
   runnerStatus: () => ipcRenderer.invoke('runners:status'),
   runnerChanges: key => ipcRenderer.invoke('runners:changes', key),
+  claudeHookStatus: () => ipcRenderer.invoke('claude-hook:status'),
+  connectClaudeHook: () => ipcRenderer.invoke('claude-hook:connect'),
+  disconnectClaudeHook: () => ipcRenderer.invoke('claude-hook:disconnect'),
   runnerTasks: () => ipcRenderer.invoke('runners:list'),
   runnerDetail: key => ipcRenderer.invoke('runners:detail', key),
   startRunnerTask: request => ipcRenderer.invoke('runners:start', request),

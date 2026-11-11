@@ -14,6 +14,10 @@ import { DictationTargetBridge } from './dictation-target'
 import { DictationWindow } from './dictation-window'
 import { MicrophoneLink } from './microphone-link'
 import type { CloseWarning } from '@shared/close-warning'
+import { ClaudeSettings, claudeSettingsFile } from './channel/claude-settings'
+import { hookAnswer, logHook, readInput } from './channel/hook-main'
+import { registerConnection, startChannel } from './channel/register'
+import type { ChannelServer } from './channel/server'
 import { NoticeWindow } from './notice-window'
 import { Attention } from './runners/attention'
 import type { RunnerHub } from './runners/hub'
@@ -248,6 +252,8 @@ let quitting = false
 let runners: RunnerHub | null = null
 // The to-do list: a plain text file in Togle's folder.
 let todo: TodoFile | null = null
+// What Togle answers to the programs that talk to it: a hook of Claude Code asking about a command.
+let hookChannel: ChannelServer | null = null
 // The small notice in a corner of the screen, and what it tells: a task waits for the person, or one finished.
 const noticeWindow = new NoticeWindow()
 const attention = new Attention()
@@ -1933,7 +1939,19 @@ if (!app.isPackaged && process.env.TOGLE_DEBUG_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.TOGLE_DEBUG_PORT)
 }
 
-if (!app.requestSingleInstanceLock()) {
+// Claude Code starts Togle as `Togle --togle-hook claude-permission --data <folder>` to ask it about a command: that run
+// hands the question to the running Togle and prints the answer. It opens nothing, and is not a second Togle. It must
+// exit without waiting for Electron to be ready: once ready, Electron starts helper processes that keep the pipes Claude
+// Code reads open after the hook has ended, which would hold Claude Code up.
+const hookAt = process.argv.indexOf('--togle-hook')
+if (hookAt !== -1) {
+  void hookAnswer(process.argv.slice(hookAt + 1), readInput)
+    .then(out => new Promise<void>(resolve => { if (out) process.stdout.write(out, () => resolve()); else resolve() }))
+    .finally(() => {
+      logHook('exiting')
+      app.exit(0)
+    })
+} else if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   app.on('second-instance', openWindow)
@@ -2030,6 +2048,25 @@ if (!app.requestSingleInstanceLock()) {
       },
       version: app.getVersion()
     })
+    // Connecting Claude Code in a terminal: one entry in its settings that starts Togle as `--togle-hook`.
+    const hubForClaude = runners
+    registerConnection({
+      handle: (name, listener) => ipcMain.handle(name, (_event, ...args) => listener(...args)),
+      settings: new ClaudeSettings(claudeSettingsFile(), () => ({
+        command: process.execPath,
+        args: [...(app.isPackaged ? [] : [app.getAppPath()]), '--togle-hook', 'claude-permission', '--data', app.getPath('userData')]
+      })),
+      claude: async () => {
+        const found = (await hubForClaude.status()).find(item => item.runner === 'claude')
+        return { installed: !!found?.installed, ...(found?.version ? { version: found.version } : {}) }
+      }
+    })
+    // A question from a Claude Code hook can only come once the channel is open; without it the hook finds nobody and
+    // the question stays with the person where the session runs.
+    startChannel({ dataFolder: app.getPath('userData'), hub: runners }).then(
+      server => { if (quitting) void server.close(); else hookChannel = server },
+      error => console.warn('[channel] could not open:', (error as Error).message)
+    )
     started.window = Date.now()
     createWindow()
     // Reminders check the Claude account they belong to: once its sign-in is read.
@@ -2080,6 +2117,7 @@ if (!app.requestSingleInstanceLock()) {
     dictationWindow.close()
     noticeWindow.close()
     todo?.dispose()
+    void hookChannel?.close()
     microphoneLink.stop()
     dictation.dispose()
     tray?.close()

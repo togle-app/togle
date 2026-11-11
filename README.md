@@ -4,6 +4,8 @@ Togle is free and open source, under the [MIT license](LICENSE). It runs on your
 
 **Togle Studio**, a separate app (not open source), removes background noise from your voice in every call app. Togle works without it, and finds it by itself when it's installed. See [Togle Studio](#togle-microphone).
 
+Togle also lists the coding agents on your computer (Claude Code, Codex and Hermes) in one place, lets you answer what they ask from a notice or a window, and keeps a to-do list as a plain text file. See [Coding agents on this computer](docs/agents-on-this-computer.md).
+
 An AI assistant for any video call, on Windows and macOS, with Linux packaging available. See [macOS setup and testing](docs/macos.md) and [Ubuntu setup and testing](docs/linux.md). Togle listens to your voice and video calls (Zoom, Meet, Teams, WhatsApp, anything that plays through your speakers), transcribes both sides, and suggests what to say when someone asks you something.
 
 **Optional recent dictation history.** In Settings → Dictate anywhere → Recent dictations, turn on Keep recent text for the selected account. Togle keeps the latest 50 completed dictations for seven days, encrypted on this device, including recognized words and the final text. Expired entries are removed while the app runs and on the next startup. Correct text in history, then explicitly choose Remember to keep a short spelling correction in that account’s vocabulary. History edits do not type into another app. Turning history off or clearing it invalidates pending saves from older recordings. Audio is never retained.

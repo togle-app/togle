@@ -228,7 +228,8 @@ export function Todo({ onOpenTask }: { onOpenTask: (key: string, changes?: boole
           <h3 className="tasks-label">Waiting for you</h3>
           <div role="list">
             {waiting.map((task) => {
-              const request = task.mine ? task.pending[0] : undefined
+              // A task that runs elsewhere has requests only when its question is held here, and then they can be answered here.
+              const request = task.pending[0]
               const { says, detail } = asking(request, task)
               const allowHere = !!request && canAllowHere(request)
               return (
