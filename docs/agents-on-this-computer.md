@@ -26,6 +26,14 @@ When a task waits and Togle is not in front, a small notice appears in the corne
 - A task that finishes or stops with an error shows a notice for a few seconds.
 - The tray icon carries an amber dot, and its menu says how many tasks wait, until none does.
 
+## Task box
+
+**F10** opens a small box over whatever you are doing. Pick the agent and the folder, type the task (or hold the dictation key and say it), and press Enter. It starts the task like **New task** does, and puts itself away. **Esc** closes it, and so does a click elsewhere; what you typed stays for next time, and so do the agent and folder you picked. The key is a setting like the others (**Settings → Coding agents**, or **Window & shortcuts**), and F10 can be changed there if another program needs it.
+
+## Settings
+
+**Settings → Coding agents** has the two notices (a task waits, a task finishes), the task box key, the Claude Code connection below, and where the to-do file is.
+
 ## To-do
 
 The **To-do** button opens your list. What waits for you is at the top, with the same buttons as in Tasks. Below it is your own list.

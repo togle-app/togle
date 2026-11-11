@@ -391,6 +391,12 @@ export interface TogleApi {
   dismissTaskNotice(id: string): void
   /** Togle was opened on a task, from a notice or the tray: show it. */
   onShowTask(cb: (key: string) => void): Unsubscribe
+  /** The task box was opened: its page is told, to make it ready to type in. */
+  onTaskBoxShown(cb: () => void): Unsubscribe
+  /** Puts the task box away. */
+  closeTaskBox(): void
+  /** Asks for a folder for a task, in a dialog that belongs to the task box. Null when it is closed without a choice. */
+  pickTaskBoxFolder(): Promise<string | null>
 
   /** The to-do list, kept in a plain text file on this PC. Each change answers with the whole list as it is after. */
   todoList(): Promise<TodoList>

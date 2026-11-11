@@ -781,6 +781,13 @@ export interface Settings {
   dictation: { speech: 'auto' | 'local' | 'chatgpt' | 'claude'; accountId: string; mode: 'hold' | 'toggle'; polish: boolean; showBar: boolean; microphoneId: string }
   /** Shortcuts given other keys than their own (empty: turned off); the others keep theirs. */
   hotkeys: Partial<Record<HotkeyId, string>>
+  /** The coding agents' tasks. */
+  tasks: {
+    /** A small notice in the corner of the screen when a task waits for you and Togle is not in front. */
+    notices: boolean
+    /** One as well when a task finishes or stops with an error. */
+    finished: boolean
+  }
 }
 
 export interface AuthStatus {

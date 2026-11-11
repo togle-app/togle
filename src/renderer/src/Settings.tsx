@@ -20,6 +20,7 @@ import { OpacitySlider } from './WindowControls'
 import { DictationSettings } from './DictationSettings'
 import { TogleMicrophoneSettings } from './TogleMicrophoneSettings'
 import { Shortcut } from './Shortcut'
+import { TerminalAnswers } from './Tasks'
 import { AISettings } from './AISettings'
 import { accountLabel, useAccounts } from './Accounts'
 import { localModelsFor, PARAKEET_LANGUAGES, SPEECH_LANGUAGES, speechLanguageCode, speechLanguageName } from '@shared/speech'
@@ -385,8 +386,22 @@ const PARTS: [id: string, label: string][] = [
   ['settings-privacy', 'Privacy'],
   ['settings-speakers', 'Speakers'],
   ['settings-microphone', 'Togle Studio'],
+  ['settings-agents', 'Coding agents'],
   ['settings-window', 'Window & shortcuts']
 ]
+
+/** Where the to-do list's file is, and a way to see it. */
+function TodoFileRow() {
+  const [file, setFile] = useState('')
+  useEffect(() => {
+    void api.todoList().then((list) => setFile(list.file), () => undefined)
+  }, [])
+  return (
+    <Row label={false} name="To-do list" note={file ? <code>{file}</code> : 'A plain text file on this computer.'}>
+      <button className="ghost" onClick={() => void api.showTodoFile()}>Show the file</button>
+    </Row>
+  )
+}
 
 /** Goes to a part of the page (unfolding it, if it's folded), its heading ready for the keyboard. */
 function jumpTo(id: string): void {
@@ -507,6 +522,27 @@ export function Settings({ settings, auth, claudeAuth, stt, at, onChange, onDone
       <VoiceMemorySettings settings={settings} save={save} />
       <TogleMicrophoneSettings settings={settings} save={save} />
 
+      <Section id="settings-agents" title="Coding agents" note="Claude Code, Codex and Hermes on this computer. Tasks and To-do are in the sidebar.">
+        <Toggle
+          name="Notice when a task waits"
+          note="A small notice in the corner of the screen when a task waits for you and Togle is not in front. The dot on the tray stays either way."
+          checked={settings.tasks.notices}
+          onChange={(notices) => void save({ tasks: { notices } })}
+        />
+        <Toggle
+          name="Notice when a task finishes"
+          note="Shown for a few seconds, when the notice above is on."
+          checked={settings.tasks.finished}
+          disabled={!settings.tasks.notices}
+          onChange={(finished) => void save({ tasks: { finished } })}
+        />
+        {hotkeys.filter((h) => h.id === 'task').map((h) => (
+          <Shortcut key={h.id} hotkey={h} />
+        ))}
+        <Row label={false} name="Claude Code in a terminal" note="Answer its questions from here too."><TerminalAnswers compact /></Row>
+        <TodoFileRow />
+      </Section>
+
       <details className="settings-extra" id="settings-window">
         <summary>Window &amp; shortcuts</summary>
         <Section title="Window">
@@ -522,7 +558,7 @@ export function Settings({ settings, auth, claudeAuth, stt, at, onChange, onDone
           ))}
           <details className="more">
             <summary>More shortcuts</summary>
-            {hotkeys.filter((h) => h.id !== 'dictate' && !CALL_SHORTCUTS.includes(h.id)).map((h) => (
+            {hotkeys.filter((h) => h.id !== 'dictate' && h.id !== 'task' && !CALL_SHORTCUTS.includes(h.id)).map((h) => (
               <Shortcut key={h.id} hotkey={h} />
             ))}
           </details>

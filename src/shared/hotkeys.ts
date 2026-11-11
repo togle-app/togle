@@ -2,7 +2,7 @@
 // and the keys pressed as they're recorded in Settings.
 
 /** Each thing a shortcut does. */
-export type HotkeyId = 'dictate' | 'suggest' | 'suggest-screen' | 'deeper' | 'listen' | 'snapshot' | 'record' | 'show' | 'ask' | 'copy'
+export type HotkeyId = 'dictate' | 'suggest' | 'suggest-screen' | 'deeper' | 'listen' | 'snapshot' | 'record' | 'show' | 'ask' | 'copy' | 'task'
 
 const MODIFIERS = ['Ctrl', 'Alt', 'Shift', 'Super'] as const
 type Modifier = (typeof MODIFIERS)[number]

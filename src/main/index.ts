@@ -19,6 +19,7 @@ import { hookAnswer, logHook, readInput } from './channel/hook-main'
 import { registerConnection, startChannel } from './channel/register'
 import type { ChannelServer } from './channel/server'
 import { NoticeWindow } from './notice-window'
+import { TaskBoxWindow } from './task-box-window'
 import { Attention } from './runners/attention'
 import type { RunnerHub } from './runners/hub'
 import type { Backend } from './runners/types'
@@ -254,6 +255,8 @@ let runners: RunnerHub | null = null
 let todo: TodoFile | null = null
 // What Togle answers to the programs that talk to it: a hook of Claude Code asking about a command.
 let hookChannel: ChannelServer | null = null
+// The box to start a task in, opened by its key from any app.
+const taskBox = new TaskBoxWindow()
 // The small notice in a corner of the screen, and what it tells: a task waits for the person, or one finished.
 const noticeWindow = new NoticeWindow()
 const attention = new Attention()
@@ -645,10 +648,12 @@ function refreshNotices(): void {
   const look = attention.look(runners.attention())
   tray?.setWaiting(look.waiting)
   if (mainWindowActive()) { noticeWindow.show(null); return }
-  const first = look.notices[0]
+  // Settings → Coding agents can turn either notice off; the tray's dot stays.
+  const { notices, finished } = getSettings().tasks
+  const first = notices ? look.notices[0] : undefined
   if (first) noticeWindow.show(first)
   // Nothing waits any more. A task that finished is only news, shown a few seconds (and it takes the place of the notice that was answered).
-  else if (look.finished.length) noticeWindow.show(look.finished[look.finished.length - 1], 8000)
+  else if (finished && look.finished.length) noticeWindow.show(look.finished[look.finished.length - 1], 8000)
   else if (noticeWindow.shown?.kind === 'waiting') noticeWindow.show(null)
 }
 /** Opens Togle on its Tasks screen, on one task when there is one to show. */
@@ -1027,7 +1032,9 @@ const HOTKEYS: { id: HotkeyId; keys: string; label: string; run: () => void }[] 
       send('hotkey', 'ask')
     }
   },
-  { id: 'copy', keys: '', label: 'Copy the newest suggestion', run: () => send('hotkey', 'copy') }
+  { id: 'copy', keys: '', label: 'Copy the newest suggestion', run: () => send('hotkey', 'copy') },
+  // The box to start a coding agent's task in, over whatever is on screen.
+  { id: 'task', keys: 'F10', label: 'Start a task for a coding agent', run: () => taskBox.toggle() }
 ]
 let hotkeyStatus: HotkeyInfo[] = []
 const keyDown = process.platform === 'win32' ? koffi.load('user32.dll').func('int16_t __stdcall GetAsyncKeyState(int)') : undefined
@@ -1169,6 +1176,7 @@ function registerIpc(): void {
     if (patch?.assist?.calendarReminders !== undefined) { calendar.cancel(); void calendar.refresh() }
     if (patch?.assist?.voiceLabels !== undefined && copilot.isListening) { if (patch.assist.voiceLabels) void voices.start(); else voices.stop() }
     if (patch?.assist?.rememberVoices !== undefined) void voices.memoryChanged()
+    if (patch?.tasks) refreshNotices()
     if (patch?.assist?.autoNotes === false || patch?.assist?.rememberCalls === false) meetingNotes.pauseAutomatic()
     if (patch?.assist?.rememberCalls === false) { callTitles.pause(); titleQueue.clear() }
     if (getSettings().activeAgentId !== previousAgent) void copilot.refreshAgent()
@@ -1932,6 +1940,14 @@ function registerIpc(): void {
     noticeWindow.show(null)
     refreshNotices()
   })
+  // The task box's own messages: put it away, and ask for a folder with it as the dialog's parent.
+  ipcMain.on('taskbox:close', (event) => {
+    if (taskBox.owns(event.sender)) taskBox.hide()
+  })
+  ipcMain.handle('taskbox:pick-folder', (event) => {
+    if (!taskBox.owns(event.sender)) throw new Error('That is not for this window.')
+    return taskBox.pickFolder()
+  })
 }
 
 // Dev only: lets scripts drive the UI over the Chrome DevTools Protocol.
@@ -2116,6 +2132,7 @@ if (hookAt !== -1) {
     quitting = true
     dictationWindow.close()
     noticeWindow.close()
+    taskBox.close()
     todo?.dispose()
     void hookChannel?.close()
     microphoneLink.stop()

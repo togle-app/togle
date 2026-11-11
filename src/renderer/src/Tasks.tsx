@@ -197,8 +197,11 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   )
 }
 
-/** Whether Claude Code in a terminal asks Togle about its commands, and the button that turns that on or off. */
-function TerminalAnswers() {
+/**
+ * Whether Claude Code in a terminal asks Togle about its commands, and the button that turns that on or off. `compact` is
+ * for a row of Settings, which has the name and the note itself.
+ */
+export function TerminalAnswers({ compact = false }: { compact?: boolean }) {
   const [status, setStatus] = useState<ClaudeHookStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -219,9 +222,32 @@ function TerminalAnswers() {
   }
   if (!status.supported) {
     return (
-      <p className="hint tasks-connect">
+      <p className={`hint ${compact ? '' : 'tasks-connect'}`}>
         Claude Code {status.version?.replace(/\s*\(.*$/, '')} is older than {status.minimum}, so Togle cannot answer its terminal sessions. Update Claude Code to use this.
       </p>
+    )
+  }
+  if (compact) {
+    return (
+      <span className="tasks-connect-compact">
+        {status.installed && status.current ? (
+          <>
+            <span className="hint">Connected</span>
+            <button className="ghost" disabled={busy} onClick={() => void change(() => api.disconnectClaudeHook())}>
+              Turn off
+            </button>
+          </>
+        ) : (
+          <button className="ghost" disabled={busy || !!status.problem} title={`Adds one entry to ${status.file}`} onClick={() => void change(() => api.connectClaudeHook())}>
+            {status.installed ? 'Connect again' : 'Connect Claude Code'}
+          </button>
+        )}
+        {(error || status.problem) && (
+          <span className="error" role="alert">
+            {error || status.problem}
+          </span>
+        )}
+      </span>
     )
   }
   return (

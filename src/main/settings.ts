@@ -52,7 +52,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // Hubs of agents added by hand (Togle's own comes first anyway). Here so that loading keeps them.
   hubs: [],
   // Shortcuts given other keys (or turned off): here so that loading keeps them.
-  hotkeys: {}
+  hotkeys: {},
+  // A task that waits is told in a notice, and one that finished too, until turned off in Settings → Coding agents.
+  tasks: { notices: true, finished: true }
 }
 
 let current: Settings = DEFAULT_SETTINGS

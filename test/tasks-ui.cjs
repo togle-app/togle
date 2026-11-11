@@ -405,6 +405,83 @@ async function checkOutsideAsk(T, agent) {
   ui.window.destroy()
 }
 
+async function checkTaskBox(T, agent) {
+  const ui = await open(T, agent, 600, 'taskbox')
+  await ui.wait("document.querySelectorAll('.taskbox-agents button').length===2")
+  assert.deepEqual(await texts(ui, '.taskbox-agents button'), ['Claude Code', 'Codex'], 'only the agents that are installed')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox-agents button').getAttribute('aria-checked')"), 'true', 'the first is picked')
+  await ui.wait("document.querySelectorAll('.taskbox-folder option').length===4")
+  assert.deepEqual(await texts(ui, '.taskbox-folder option'), ['api-server', 'website', 'notes', 'mobile-app'], 'the folders tasks were in lately')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox-folder select').value"), 'C:\\work\\api-server')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').placeholder"), 'Say what to do. Hold F9 to say it, then press Enter.')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox-foot .primary').disabled"), true, 'nothing to start yet')
+  assert.ok((await texts(ui, '.taskbox-foot span'))[0].startsWith('It asks before every command and every change.'))
+  await ui.capture('task-box')
+
+  // Another agent, another folder, the words: Enter starts it and puts the box away. Shift+Enter is a new line.
+  await ui.click('.taskbox-agents button', 'Codex')
+  await ui.click('.taskbox-folder button', 'Choose…')
+  await ui.wait("document.querySelector('.taskbox-folder select').value==='C:\\\\work\\\\chosen-for-box'")
+  assert.equal((await ui.calls('pickTaskBoxFolder')).length, 1)
+  assert.ok((await texts(ui, '.taskbox-folder option')).includes('chosen-for-box'))
+  await ui.fill('.taskbox textarea', 'Add a dark mode switch')
+  await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',shiftKey:true,bubbles:true,cancelable:true}))")
+  assert.equal((await ui.calls('startRunnerTask')).length, 0, 'Shift+Enter does not start')
+  await ui.evaluate("window.togleUITest.failNextTask()")
+  await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
+  await ui.wait("!!document.querySelector('.taskbox-error')")
+  assert.equal((await texts(ui, '.taskbox-error'))[0], 'That folder is not there.')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').value"), 'Add a dark mode switch', 'what was typed is still there')
+  assert.equal((await ui.calls('closeTaskBox')).length, 0, 'and the box stays')
+  await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
+  await ui.wait("document.querySelector('.taskbox textarea').value===''")
+  const asked = { runner: 'codex', folder: 'C:\\work\\chosen-for-box', prompt: 'Add a dark mode switch' }
+  assert.deepEqual((await ui.calls('startRunnerTask')).map(call => call.args[0]), [asked, asked], 'the first try failed, and the second started it')
+  assert.equal((await ui.calls('closeTaskBox')).length, 1, 'started: the box is put away')
+
+  // Escape puts it away. The choice is kept for the next time it opens.
+  await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))")
+  assert.equal((await ui.calls('closeTaskBox')).length, 2)
+  await ui.window.webContents.reload()
+  await ui.wait("document.querySelectorAll('.taskbox-agents button').length===2")
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox-agents button[aria-checked=true]').textContent"), 'Codex', 'the agent used last')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox-folder select').value"), 'C:\\work\\chosen-for-box', 'and the folder')
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
+async function checkAgentSettings(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.sidebar-settings', 'Settings')
+  await ui.wait("!!document.querySelector('#settings-agents')")
+  const section = "document.querySelector('#settings-agents')"
+  assert.deepEqual(await ui.evaluate(`[...${section}.querySelectorAll('.setting .name')].map(e=>e.textContent)`), ['Notice when a task waits', 'Notice when a task finishes', 'Start a task for a coding agent', 'Claude Code in a terminal', 'To-do list'])
+  assert.deepEqual(await ui.evaluate(`[...${section}.querySelectorAll('input[role=switch]')].map(e=>[e.checked,e.disabled])`), [[true, false], [true, false]], 'both notices are on to begin with')
+  assert.ok((await ui.evaluate(`${section}.textContent`)).includes('F10'), 'the key that opens the task box')
+  await ui.evaluate(`${section}.scrollIntoView({ block: 'start' })`)
+  await ui.capture('settings-agents')
+  await ui.evaluate(`${section}.querySelectorAll('input[role=switch]')[0].click()`)
+  await ui.wait(`${section}.querySelectorAll('input[role=switch]')[0].checked===false`)
+  assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).filter(patch => patch?.tasks), [{ tasks: { notices: false } }])
+  assert.equal(await ui.evaluate(`${section}.querySelectorAll('input[role=switch]')[1].disabled`), true, 'the one for finished waits for the first')
+  await ui.evaluate(`${section}.querySelectorAll('input[role=switch]')[0].click()`)
+  await ui.wait(`${section}.querySelectorAll('input[role=switch]')[0].checked===true`)
+  // Claude Code in a terminal, and the to-do list's file.
+  assert.deepEqual(await texts(ui, '#settings-agents .tasks-connect-compact button'), ['Connect Claude Code'])
+  await ui.click('#settings-agents .tasks-connect-compact button', 'Connect Claude Code')
+  await ui.wait("document.querySelector('#settings-agents .tasks-connect-compact .hint')?.textContent==='Connected'")
+  assert.equal((await ui.calls('connectClaudeHook')).length, 1)
+  assert.deepEqual(await texts(ui, '#settings-agents .tasks-connect-compact button'), ['Turn off'])
+  await ui.wait("[...document.querySelectorAll('#settings-agents .setting')].some(row=>row.textContent.includes('settings')===false&&row.querySelector('code'))")
+  assert.equal((await texts(ui, '#settings-agents .setting code'))[0], 'C:\\Users\\demo\\AppData\\Roaming\\Togle\\to-do.md')
+  await ui.click('#settings-agents button', 'Show the file')
+  assert.equal((await ui.calls('showTodoFile')).length, 1)
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('.settings-jump button')].some(b=>b.textContent==='Coding agents')"), true, 'it is in the list of parts at the top')
+  assert.ok(!(await ui.evaluate("document.querySelector('#settings-window').textContent")).includes('Start a task for a coding agent'), 'and not again among the other shortcuts')
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 async function checkQuit(T, agent) {
   const ui = await open(T, agent, 1024)
   const notice = () => ui.evaluate("document.querySelector('[aria-label=\"Confirm quit Togle\"] span')?.textContent ?? null")
@@ -462,6 +539,8 @@ async function checkNotice(T, agent) {
   assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args), [['codex:t1', 'r1', 'allow-once']])
   await emit(waiting({ id: 'codex:t1#r2', requestId: 'r2' }))
   assert.equal(await disabled('Allow once'), true, 'the next notice is held for a moment as well')
+  // The buttons are free again once the page has taken the new notice in.
+  await ui.wait("[...document.querySelectorAll('.task-notice-actions button')].find(b=>b.textContent==='Refuse').disabled===false")
   await ui.click('.task-notice-actions button', 'Refuse')
   assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args[2]), ['allow-once', 'refuse'])
 
@@ -544,7 +623,9 @@ app.whenReady().then(async () => {
     await checkChanges(T, agent)
     await checkOutside(T, agent)
     await checkOutsideAsk(T, agent)
-    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes and Claude Code in a terminal passed')
+    await checkTaskBox(T, agent)
+    await checkAgentSettings(T, agent)
+    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box and the settings for coding agents passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

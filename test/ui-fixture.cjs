@@ -162,7 +162,7 @@ module.exports = function install(fixture) {
     agent.updatedAt = Date.now(); emit('onAgentChanged', clone(agent))
   }
   api.platform = fixture.platform ?? process.platform
-  api.listHotkeys = async () => [{ id: 'dictate', keys: 'F9', defaultKeys: 'F9', label: 'Dictation', ok: true }]
+  api.listHotkeys = async () => [{ id: 'dictate', keys: 'F9', defaultKeys: 'F9', label: 'Dictation', ok: true }, ...(fixture.scenario === 'tasks' ? [{ id: 'task', keys: 'F10', defaultKeys: 'F10', label: 'Start a task for a coding agent', ok: true }] : [])]
   api.getSettings = async () => clone(fixture.settings)
   api.listAgents = async () => clone(fixture.agents)
   api.agentTemplates = async () => clone(fixture.templates)
@@ -377,8 +377,10 @@ module.exports = function install(fixture) {
   api.runnerStatus = async () => fixture.scenario === 'tasks' ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []
   api.runnerTasks = async () => clone(runnerTasks.map(runnerView)).sort((a, b) => runnerRank(a) - runnerRank(b) || b.updatedAt - a.updatedAt)
   api.runnerDetail = async key => { const found = runnerFind(key); return clone({ task: runnerView(found), log: found.log }) }
+  let failTask = false
   api.startRunnerTask = async request => {
     record('startRunnerTask', [request])
+    if (failTask) { failTask = false; throw new Error('That folder is not there.') }
     const started = task('claude:new' + ++sequence, { title: request.prompt.slice(0, 40), folder: request.folder, runner: request.runner, state: 'working', mine: true, line: 'Working…', log: [{ id: 100 + sequence, at: Date.now(), kind: 'you', text: request.prompt }] })
     started.key = request.runner + ':new' + sequence
     runnerTasks.push(started); runnerChanged(); return clone(runnerView(started))
@@ -398,6 +400,7 @@ module.exports = function install(fixture) {
   api.endRunnerCommands = async key => { record('endRunnerCommands', [key]); runnerFind(key).commandsRunning = false; runnerChanged(); return 1 }
   api.closeRunnerTask = async key => { record('closeRunnerTask', [key]); runnerFind(key).mine = false; runnerChanged() }
   api.pickRunnerFolder = async () => { record('pickRunnerFolder', []); return 'C:\\work\\picked' }
+  api.pickTaskBoxFolder = async () => { record('pickTaskBoxFolder', []); return 'C:\\work\\chosen-for-box' }
   // Claude Code in a terminal asking Togle: the connection, as the window is told it.
   let hookStatus = { claude: fixture.scenario === 'tasks', version: '2.1.322 (Claude Code)', supported: true, minimum: '2.1.139', installed: false, current: false, file: 'C:\\Users\\demo\\.claude\\settings.json' }
   let failHook = false
@@ -447,6 +450,7 @@ module.exports = function install(fixture) {
     // What the window is told of Claude Code's connection to Togle, changed by hand.
     hook: patch => { hookStatus = { ...hookStatus, ...patch } },
     failNextConnect: () => { failHook = true },
+    failNextTask: () => { failTask = true },
     microphone: status => { microphone = clone(status); microphoneChanged() },
     failNextCalendar: () => { rejectCalendar = true }, holdCalendarRefresh: () => { holdCalendar = true },
     releaseCalendarRefresh: () => { holdCalendar = false; releaseCalendar?.(); releaseCalendar = undefined },

@@ -31,6 +31,8 @@ process.env.TOGLE_HEADLESS = '1'
 process.env.TOGLE_TEST_TRAY = '1'
 process.env.TOGLE_SILENT_AUDIO = '1'
 process.env.TOGLE_TEST_RUNNERS = path.join(__dirname, 'notice-runners.cjs')
+// The development messages (a shortcut pressed as if from another app) are there only with a debug port.
+process.env.TOGLE_DEBUG_PORT = '0'
 process.env.TOGLE_SPEECH_HOME = path.join(profile, 'speech')
 process.env.TOGLE_SPEECH_SEEDS = ''
 process.env.CLAUDE_CONFIG_DIR = path.join(profile, 'claude')
@@ -46,6 +48,15 @@ const wait = async (check, what, ms = 10000) => {
   const began = Date.now()
   while (Date.now() - began < ms) {
     if (await check()) return
+    await sleep(30)
+  }
+  throw new Error('Timed out waiting for ' + what)
+}
+const find = async (check, what, ms = 10000) => {
+  const began = Date.now()
+  while (Date.now() - began < ms) {
+    const value = await check()
+    if (value) return value
     await sleep(30)
   }
   throw new Error('Timed out waiting for ' + what)
@@ -136,6 +147,30 @@ async function run() {
   await wait(() => js(main, "document.querySelector('.task-title h2')?.textContent==='Second task'"), 'the task to show')
   await wait(async () => !(await js(notice, "!!document.querySelector('.task-notice')")), 'the notice to go')
 
+  // The task box opens from its key, starts a task with what is typed in it, and keeps itself out of the way.
+  await invoke('dev:hotkey', 'task')
+  const boxWindow = () => BrowserWindow.getAllWindows().find((win) => win.webContents.getURL().includes('surface=taskbox'))
+  await wait(() => boxWindow(), 'the task box window')
+  const box = boxWindow()
+  await wait(() => js(box, "document.querySelectorAll('.taskbox-agents button').length>0 && document.querySelector('.taskbox-folder select').value!==''"), 'the box to show its agent and folder')
+  assert.deepEqual(await js(box, "[...document.querySelectorAll('.taskbox-agents button')].map(b=>b.textContent)"), ['Hermes'], 'the agents that are installed: here, the stand-in')
+  await js(box, "(() => { const area = document.querySelector('.taskbox textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(area, 'run frombox'); area.dispatchEvent(new Event('input', { bubbles: true })) })()")
+  await js(box, "document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
+  const fromBox = await find(async () => (await invoke('runners:list')).find((task) => task.title === 'run frombox'), 'the task from the box')
+  assert.equal(fromBox.runner, 'hermes')
+  await wait(() => js(box, "document.querySelector('.taskbox textarea').value===''"), 'the box to empty')
+  // Notices can be turned off in Settings: the tray still counts, and nothing appears; turned on again, it does.
+  await invoke('settings:update', { tasks: { notices: false } })
+  await wait(async () => !(await js(notice, "!!document.querySelector('.task-notice')")), 'the notice to go')
+  const waitingNow = await find(async () => (await invoke('runners:list')).find((task) => task.key === fromBox.key && task.state === 'waiting'), 'the task from the box to wait')
+  await sleep(400)
+  assert.equal(await js(notice, "!!document.querySelector('.task-notice')"), false, 'with notices off, nothing appears')
+  assert.ok(icon.tooltip.includes('waiting for you'), 'and the tray still says so')
+  await invoke('settings:update', { tasks: { notices: true } })
+  await wait(() => js(notice, "!!document.querySelector('.task-notice')"), 'the notice, once notices are on again')
+  await invoke('runners:answer', fromBox.key, waitingNow.pending[0].id, 'refuse')
+  await wait(async () => (await invoke('runners:list')).some((task) => task.key === fromBox.key && task.state === 'idle'), 'the task from the box to finish')
+
   // The task still waits: quitting asks, and says which.
   item('Quit Togle').click()
   await wait(() => js(main, "document.body.innerText.includes('Quit Togle?')"), 'the question')
@@ -150,7 +185,7 @@ async function run() {
       assert.equal(icon.destroyed, true)
       assert.equal(BrowserWindow.getAllWindows().length, 0, 'Quit removes every window, the notice too')
       clearTimeout(timeout)
-      console.log('NOTICE PASS: notice when a task waits, dot on the tray, Allow once held for a moment, finished notice, quiet while Togle is in front, Open, question before quitting')
+      console.log('NOTICE PASS: notice when a task waits, dot on the tray, Allow once held for a moment, finished notice, quiet while Togle is in front, Open, the task box, notices turned off and on, question before quitting')
     } catch (error) { console.error(error); app.exit(1) }
   })
   item('Quit Togle').click()

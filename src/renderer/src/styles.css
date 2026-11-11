@@ -3228,3 +3228,21 @@ body.notice-surface { background: transparent; color: var(--text); overflow: hid
 .tasks-connect details summary { cursor: pointer; color: var(--muted); }
 .tasks-connect details p { margin-top: 6px; overflow-wrap: anywhere; }
 .tasks-connect code { font: 11px ui-monospace, 'Cascadia Mono', Consolas, monospace; color: var(--text); }
+
+/* The box over whatever is on screen, to start a coding agent's task. */
+body.taskbox-surface { background: var(--panel); color: var(--text); overflow: hidden; }
+.taskbox-surface #root { padding: 0; }
+.taskbox { display: grid; gap: 10px; padding: 14px 16px; height: 100vh; border: 1px solid var(--border); background: var(--panel); grid-template-rows: auto 1fr auto auto; }
+.taskbox-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.taskbox-agents { display: flex; gap: 6px; flex-wrap: wrap; }
+.taskbox-agents button { padding: 5px 11px; border-radius: 999px; font-size: 12px; }
+.taskbox-agents button.on { border-color: var(--accent); color: var(--accent); background: var(--panel-2); }
+.taskbox-folder { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.taskbox-folder select { max-width: 190px; padding: 5px 8px; font-size: 12px; }
+.taskbox-folder button { padding: 5px 10px; font-size: 12px; }
+.taskbox textarea { width: 100%; min-height: 0; resize: none; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font: inherit; font-size: 14px; }
+.taskbox textarea:focus { outline: none; border-color: var(--accent); }
+.taskbox-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--faint); }
+.taskbox-error { margin: 0; font-size: 12px; color: var(--danger); }
+.taskbox-none { margin: 0; padding: 20px 4px; color: var(--muted); font-size: 13px; }
+.tasks-connect-compact { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }

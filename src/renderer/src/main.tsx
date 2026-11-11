@@ -2,6 +2,7 @@ import { Component, StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Icon } from './Icon'
 import { DictationBar } from './DictationBar'
+import { TaskBox } from './TaskBox'
 import { TaskNoticeSurface } from './TaskNoticeSurface'
 import './styles.css'
 
@@ -68,11 +69,14 @@ function Unloaded({ error }: { error: Error }): ReactNode {
 const surface = new URLSearchParams(location.search).get('surface')
 const dictationSurface = surface === 'dictation'
 const noticeSurface = surface === 'notice'
+const taskBoxSurface = surface === 'taskbox'
 if (dictationSurface) document.body.classList.add('dictation-surface')
 if (noticeSurface) document.body.classList.add('notice-surface')
+if (taskBoxSurface) document.body.classList.add('taskbox-surface')
 const root = createRoot(document.getElementById('root')!)
 if (dictationSurface) root.render(<DictationBar />)
 else if (noticeSurface) root.render(<TaskNoticeSurface />)
+else if (taskBoxSurface) root.render(<TaskBox />)
 else {
   // The always-visible voice bar doesn't load agents, call history, or the settings UI: the main window loads them
   // here, before its first render. Not with React.lazy: React 19 holds back what a Suspense boundary reveals for up to
