@@ -5,6 +5,17 @@ import os from 'node:os'
 import path from 'node:path'
 import { secretOf } from './protocol'
 
+/**
+ * Where an installed Togle keeps its data, for a program that is not Togle and cannot ask it (the `togle` command in a
+ * terminal). A development run keeps its data elsewhere: `TOGLE_DATA` names that folder.
+ */
+export function defaultDataFolder(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir(), platform: string = process.platform): string {
+  if (env.TOGLE_DATA?.trim()) return env.TOGLE_DATA.trim()
+  if (platform === 'win32') return path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Togle')
+  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'Togle')
+  return path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'Togle')
+}
+
 /** The folder Togle keeps the channel's secret in. */
 export const channelFolder = (dataFolder: string): string => path.join(dataFolder, 'channel')
 

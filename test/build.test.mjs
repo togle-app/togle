@@ -31,7 +31,7 @@ function fixture(t) {
   })
   write('package.json', JSON.stringify({ name: 'togle', version: '0.1.0' }))
   for (const name of ['src/main.ts', 'build/icon.png', 'build/icon.ico', 'resources/dictation-windows.ps1', 'resources/licenses/test.txt', 'hub-template/index.json']) write(name)
-  for (const name of ['main/index.js', 'main/reader-worker.js', 'main/parakeet-worker.js', 'main/whisper-worker.js', 'main/voice-worker.js', 'preload/index.js', 'renderer/index.html', 'renderer/pcm-tap.js', 'renderer/assets/current.js']) write('out/' + name)
+  for (const name of ['main/index.js', 'main/cli.js', 'main/reader-worker.js', 'main/parakeet-worker.js', 'main/whisper-worker.js', 'main/voice-worker.js', 'preload/index.js', 'renderer/index.html', 'renderer/pcm-tap.js', 'renderer/assets/current.js']) write('out/' + name)
   return { root, write }
 }
 

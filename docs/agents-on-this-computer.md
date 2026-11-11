@@ -42,6 +42,21 @@ Lines that are not items are left as they are. An item given to an agent keeps t
 
 **Give to an agent** opens the New task form with the item's words filled in. The item then shows what the task is doing, and **See changes** when it has finished. You tick the item yourself once you have looked.
 
+## From a terminal
+
+The `togle` command starts a task in the running Togle from any terminal, and lists the tasks:
+
+```
+togle run --agent codex --folder ./api "Add a status column to the orders table"
+togle run "Fix the failing login test"        # Claude Code, in the current folder
+echo "Review the onboarding copy" | togle run  # piped text is the task
+togle tasks
+```
+
+The task shows in Tasks like any other and asks before every command and every change. The command talks to Togle over the same local channel as the Claude Code hook below, so it needs Togle running, and it says so when it is not. It exits with 0 when it worked, 1 when Togle could not do it, and 2 when the command was not understood.
+
+The command is the program `out/main/cli.js`, started by Electron as plain Node (`ELECTRON_RUN_AS_NODE=1`). Putting a `togle` on your path comes with the installer. From a development run, name the data folder: `TOGLE_DATA`.
+
 ## Claude Code in a terminal
 
 Claude Code asks the person at its terminal. With Togle connected, it also asks Togle, so you can answer from a notice or from this window. Either answer counts, and the first one wins. In a test with a real Claude Code session, the terminal's own question appeared at the same time as Togle's notice, an answer in the terminal worked while Togle's notice was still up, and an answer in Togle ended the terminal's question.

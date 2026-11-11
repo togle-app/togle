@@ -1,5 +1,6 @@
 // What Togle answers on its local channel, the start of it, and what the window can ask about connecting Claude Code.
-import type { ClaudeHookStatus } from '@shared/runner'
+import path from 'node:path'
+import type { ClaudeHookStatus, RunnerKind } from '@shared/runner'
 import type { RunnerHub } from '../runners/hub'
 import { permissionFrom } from './claude-permission'
 import { MIN_CLAUDE_VERSION, versionAtLeast, type ClaudeSettings } from './claude-settings'
@@ -27,10 +28,34 @@ export async function answerPermission(hub: Pick<RunnerHub, 'askOutside'>, body:
   return { decision: 'none' }
 }
 
+const RUNNERS = ['claude', 'codex', 'hermes']
+
+/** A task asked for by the `togle` command: started in the folder it names, asking before every command. */
+export async function startTask(hub: Pick<RunnerHub, 'start'>, body: string): Promise<{ key: string; title: string; runner: string; folder: string }> {
+  let given: Record<string, unknown>
+  try {
+    given = (JSON.parse(body) ?? {}) as Record<string, unknown>
+  } catch {
+    throw new Error('That is not a task.')
+  }
+  const { runner, folder, prompt, title } = given
+  if (typeof runner !== 'string' || !RUNNERS.includes(runner)) throw new Error('Pick an agent: claude, codex or hermes.')
+  if (typeof folder !== 'string' || !path.isAbsolute(folder)) throw new Error('Name the folder in full.')
+  if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('Say what the task is.')
+  if (prompt.length > 20_000) throw new Error('That task is too long. Put it in a file and say where it is.')
+  const view = await hub.start({ runner: runner as RunnerKind, folder, prompt, ...(typeof title === 'string' && title.trim() ? { title: title.trim().slice(0, 120) } : {}) })
+  return { key: view.key, title: view.title, runner: view.runner, folder: view.folder }
+}
+
+/** The tasks Togle can see, waiting ones first, for the `togle` command to list. */
+export async function listTasks(hub: Pick<RunnerHub, 'list'>): Promise<{ key: string; title: string; runner: string; folder: string; state: string; line: string }[]> {
+  return (await hub.list()).slice(0, 60).map((task) => ({ key: task.key, title: task.title, runner: task.runner, folder: task.folder, state: task.state, line: task.line }))
+}
+
 export interface ChannelDeps {
   /** Togle's data folder: the secret is kept in it, and the channel's name comes from it. */
   dataFolder: string
-  hub: Pick<RunnerHub, 'askOutside'>
+  hub: Pick<RunnerHub, 'askOutside' | 'start' | 'list'>
 }
 
 /** Opens the channel. It throws when it cannot (another Togle is listening, or the secret cannot be kept). */
@@ -38,7 +63,11 @@ export async function startChannel(deps: ChannelDeps): Promise<ChannelServer> {
   const server = new ChannelServer({
     secret: await loadSecret(deps.dataFolder),
     address: channelAddress(deps.dataFolder),
-    handlers: { 'claude-permission': (body, call) => answerPermission(deps.hub, body, call) }
+    handlers: {
+      'claude-permission': (body, call) => answerPermission(deps.hub, body, call),
+      run: (body) => startTask(deps.hub, body),
+      tasks: () => listTasks(deps.hub)
+    }
   })
   await server.listen()
   return server

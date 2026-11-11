@@ -16,7 +16,9 @@ export default defineConfig({
           'whisper-worker': resolve(__dirname, 'src/main/stt/whisper-worker.ts'),
           'voice-worker': resolve(__dirname, 'src/main/stt/voice-worker.ts'),
           // Reads files the user teaches agents with, in a worker with its own memory and time limits.
-          'reader-worker': resolve(__dirname, 'src/main/agents/reader-worker.ts')
+          'reader-worker': resolve(__dirname, 'src/main/agents/reader-worker.ts'),
+          // The `togle` command in a terminal: plain Node, started by Electron with ELECTRON_RUN_AS_NODE.
+          cli: resolve(__dirname, 'src/main/cli/entry.ts')
         }
       }
     }
