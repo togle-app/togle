@@ -20,6 +20,8 @@ export abstract class TaskBase implements TaskHandle {
   private shown: TaskState = 'idle'
   private readonly listeners = new Set<(event: TaskEvent) => void>()
   private readonly waits = new Map<string, Wait>()
+  /** What happened so far, so that someone who starts listening late still hears all of it. */
+  private readonly past: TaskEvent[] = []
 
   /** `waiting` whenever a request is open, whatever the agent last said of itself. */
   get state(): TaskState {
@@ -31,11 +33,20 @@ export abstract class TaskBase implements TaskHandle {
   }
 
   on(listener: (event: TaskEvent) => void): () => void {
+    for (const event of [...this.past]) {
+      try {
+        listener(event)
+      } catch {
+        // A listener that fails does not stop the task.
+      }
+    }
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
   protected emit(event: TaskEvent): void {
+    this.past.push(event)
+    if (this.past.length > 500) this.past.shift()
     for (const listener of [...this.listeners]) {
       try {
         listener(event)

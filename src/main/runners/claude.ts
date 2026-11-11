@@ -386,7 +386,8 @@ export class ClaudeBackend implements Backend {
         folder: session.cwd ?? before?.folder ?? '',
         state: stateOfLive(session),
         updatedAt: before?.updatedAt ?? session.startedAt ?? 0,
-        ...(session.pid ? { pid: session.pid } : {})
+        ...(session.pid ? { pid: session.pid } : {}),
+        ...(session.waitingFor ? { waitingFor: session.waitingFor } : {})
       })
     }
     for (const task of this.tasks) {

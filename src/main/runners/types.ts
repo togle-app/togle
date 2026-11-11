@@ -36,6 +36,7 @@ export interface TaskHandle {
   readonly state: TaskState
   /** What it waits for now. */
   readonly pending: readonly PendingRequest[]
+  /** Hears what the task does, starting with what already happened (up to the last 500 events). */
   on(listener: (event: TaskEvent) => void): () => void
   /** The next thing it is asked: the first request of a task, or a reply to what it said. */
   send(text: string): Promise<void>

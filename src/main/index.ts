@@ -13,6 +13,9 @@ import type { DictationVocabularyEdit } from '@shared/dictation'
 import { DictationTargetBridge } from './dictation-target'
 import { DictationWindow } from './dictation-window'
 import { MicrophoneLink } from './microphone-link'
+import type { RunnerHub } from './runners/hub'
+import { registerRunners } from './runners/register'
+import { StoredTitles } from './runners/titles'
 import { MICROPHONE_PRODUCT, microphonePage } from '@shared/microphone-link'
 import { readNoiseReport, shouldSuggest } from '@shared/microphone'
 import { TogleTray } from './tray'
@@ -235,6 +238,8 @@ let protection: CaptureProtection | null = null
 let recording = false
 let tray: TogleTray | undefined
 let quitting = false
+// The coding agents' tasks (Codex, Claude Code): the Tasks screen's side of the app.
+let runners: RunnerHub | null = null
 /** Set by the window right before it opens the recorder stream: what getDisplayMedia should capture. */
 let pendingRecordSource: string | null = null
 
@@ -1941,6 +1946,18 @@ if (!app.requestSingleInstanceLock()) {
     void FrameStore.cleanup(saved?.frameSession)
     setupMediaAccess()
     registerIpc()
+    const runnerTitles = new StoredTitles()
+    await runnerTitles.load()
+    runners = registerRunners({
+      handle: (channel, listener) => ipcMain.handle(channel, (_event, ...args) => listener(...args)),
+      send,
+      titles: runnerTitles,
+      pickFolder: async () => {
+        const chosen = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] }) : await dialog.showOpenDialog({ properties: ['openDirectory'] })
+        return chosen.canceled ? null : (chosen.filePaths[0] ?? null)
+      },
+      version: app.getVersion()
+    })
     started.window = Date.now()
     createWindow()
     // Reminders check the Claude account they belong to: once its sign-in is read.
@@ -2003,5 +2020,6 @@ if (!app.requestSingleInstanceLock()) {
     dictationPress.reset()
     speech.cancel()
     stopLocalSpeech()
+    void runners?.dispose()
   })
 }

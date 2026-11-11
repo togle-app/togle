@@ -396,7 +396,7 @@ test('a Claude Code edit shows its file, and a question is answered in words', {
     task.answer(question.id, 'allow-once')
     assert.equal(task.pending.length, 1, 'Allow does not answer a question')
     task.reply(question.id, 'the one with three plans')
-    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    await until(() => events.filter((e) => e.type === 'turn-ended').length === 2, 'the second turn to end')
     assert.ok(events.some((e) => e.type === 'message' && e.text === 'you said the one with three plans'))
   } finally {
     await backend.close()
@@ -536,6 +536,21 @@ test('a Claude Code program that cannot be started fails the start, and nothing 
     await assert.rejects(backend.start({ folder: os.tmpdir(), prompt: 'say ok' }), /Claude Code could not be started/)
     await assert.rejects(backend.resume('session-old', { folder: os.tmpdir() }), /Claude Code could not be started/, 'the failure is not remembered')
     assert.deepEqual(await backend.list(), [], 'the failed task is not listed')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('someone who starts listening late hears what already happened, in order', { timeout: 30_000 }, async () => {
+  const backend = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'say ok' })
+    await until(() => task.state === 'idle', 'the turn to end')
+    const events = watch(task)
+    assert.deepEqual(events.map((e) => e.type), ['state', 'message', 'turn-ended', 'state'], 'working, what was said, the turn, idle')
+    assert.deepEqual(events.filter((e) => e.type === 'state').map((e) => e.state), ['working', 'idle'])
+    await task.send('say ok')
+    await until(() => events.filter((e) => e.type === 'turn-ended').length === 2, 'the next turn to end')
   } finally {
     await backend.close()
   }

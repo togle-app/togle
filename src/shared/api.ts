@@ -57,6 +57,7 @@ import type { DictationHistory, DictationReceipt, DictationState, DictationVocab
 import type { SavedConversation } from './chat'
 import type { NoiseReport, TogleMicrophoneStatus } from './microphone'
 import type { MicrophoneLinkPage } from './microphone-link'
+import type { Decision, RunnerStatus, StartRequest, TaskDetail, TaskView } from './runner'
 
 export type Unsubscribe = () => void
 
@@ -344,6 +345,32 @@ export interface TogleApi {
   /** An agent's conversation, as it was last saved (none yet: null). */
   loadConversation(agentId: string): Promise<SavedConversation | null>
   saveConversation(agentId: string, conversation: SavedConversation): void
+
+  /** The coding agents on this PC (Codex, Claude Code), and whether each is installed. */
+  runnerStatus(): Promise<RunnerStatus[]>
+  /** Every agent task on this PC in one list: waiting for the person first, then working, then the rest. */
+  runnerTasks(): Promise<TaskView[]>
+  /** One task with what happened in it, as far as Togle ran it. */
+  runnerDetail(key: string): Promise<TaskDetail>
+  /** Starts a task. It asks before every command and edit. */
+  startRunnerTask(request: StartRequest): Promise<TaskView>
+  /** Continues a task that was started earlier, so it can be answered and replied to here. */
+  openRunnerTask(key: string): Promise<TaskView>
+  /** Ends the program a task runs in elsewhere (a terminal), and picks the task up here. */
+  takeOverRunnerTask(key: string): Promise<TaskView>
+  sendToRunnerTask(key: string, text: string): Promise<void>
+  /** Allows or refuses one command or edit a task waits to do. Allowing is once only. */
+  answerRunnerTask(key: string, requestId: string, decision: Decision): Promise<void>
+  replyRunnerTask(key: string, requestId: string, text: string): Promise<void>
+  /** The first press: the task starts nothing new. */
+  stopRunnerTask(key: string): Promise<void>
+  /** The second press: ends the commands a stopped task still has running. How many. */
+  endRunnerCommands(key: string): Promise<number>
+  /** Lets go of a task Togle runs. It stays on this PC. */
+  closeRunnerTask(key: string): Promise<void>
+  pickRunnerFolder(): Promise<string | null>
+  /** Something in the tasks changed: ask again for what is shown. */
+  onRunnersChanged(cb: () => void): Unsubscribe
 
   listHotkeys(): Promise<HotkeyInfo[]>
   /** Gives a shortcut other keys (empty: turns it off); rejected with why, when they can't be its. */
