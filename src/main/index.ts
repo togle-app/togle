@@ -46,7 +46,6 @@ import type { SettingsPatch } from '@shared/api'
 import type { SavedConversation } from '@shared/chat'
 import {
   MEMORY_LIMIT,
-  MIN_OPACITY,
   type AgentPatch,
   type Agent,
   type ApprovedAnswer,
@@ -960,9 +959,11 @@ const started: Record<string, number> = {}
  */
 function applyWindowSettings(): void {
   if (!win || win.isDestroyed()) return
-  const { alwaysOnTop, opacity, hideFromCapture } = getSettings().window
-  if (win.isAlwaysOnTop() !== alwaysOnTop) win.setAlwaysOnTop(alwaysOnTop, 'floating')
-  win.setOpacity(Math.min(1, Math.max(MIN_OPACITY, opacity || 1)))
+  // An ordinary window, as the design has it: it no longer floats over other apps or fades, as the call assistant's did.
+  // During a call the strip is the part that stays in sight.
+  const { hideFromCapture } = getSettings().window
+  if (win.isAlwaysOnTop()) win.setAlwaysOnTop(false)
+  win.setOpacity(1)
   protection?.set(recording || hideFromCapture)
 }
 

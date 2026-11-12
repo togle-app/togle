@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SettingsPatch } from '@shared/api'
-import type { AuthStatus, ClaudeAuthStatus, Settings as SettingsData, SttStatus } from '@shared/types'
+import type { AuthStatus, Settings as SettingsData, SttStatus } from '@shared/types'
 import { needsYou } from '@shared/runner'
 import { MANAGE_USAGE_URL } from '@shared/plan'
 import { quitQuestion, type CloseWarning } from '@shared/close-warning'
@@ -11,7 +11,7 @@ import { Elapsed, LiveCall } from './LiveCall'
 import { MeetingsPage } from './MeetingsPage'
 import { MicrophoneSuggestion } from './MicrophoneSuggestion'
 import { onOpenSettings, openSettings, type SettingsPart } from './open-settings'
-import { Settings } from './Settings'
+import { SettingsPage } from './SettingsPage'
 import { Tasks } from './Tasks'
 import { Todo } from './Todo'
 import { useCall } from './useCall'
@@ -32,7 +32,6 @@ const PLACES: { id: View; label: string; icon: string; title: string }[] = [
 export function Shell() {
   const [settings, setSettings] = useState<SettingsData | null>(null)
   const [auth, setAuth] = useState<AuthStatus>({ signedIn: false })
-  const [claudeAuth, setClaudeAuth] = useState<ClaudeAuthStatus>({ available: true, signedIn: false })
   const [stt, setStt] = useState<SttStatus>({ state: 'starting' } as SttStatus)
   const [microphone, setMicrophone] = useState<TogleMicrophoneStatus>()
   const [view, setView] = useState<View>('todo')
@@ -67,7 +66,6 @@ export function Shell() {
     const subs = [
       api.onSettingsChanged(setSettings),
       api.onAuthChanged(setAuth),
-      api.onClaudeAuthChanged(setClaudeAuth),
       api.onSttStatus(setStt),
       api.onMicrophone(setMicrophone),
       api.onConfirmClose((warning) => setConfirmClose(warning)),
@@ -76,7 +74,6 @@ export function Shell() {
     ]
     return () => { for (const stop of subs) stop() }
   }, [])
-  useEffect(() => { if (settings?.claude.auth === 'subscription') void api.claudeAuthStatus().then(setClaudeAuth) }, [settings?.claude.auth])
   // Voice typing follows the settings of the one agent the call part keeps.
   useEffect(() => { if (settings?.activeAgentId) void api.setDictationAgent(settings.activeAgentId).catch(() => undefined) }, [settings?.activeAgentId])
   useEffect(() => onOpenSettings((at) => { setSettingsAt(at); setView('settings') }), [])
@@ -178,9 +175,7 @@ export function Shell() {
             ? <LiveCall settings={settings} title={call.title} since={call.since} transcript={call.transcript} flags={call.flags} inputs={call.inputs}
                 onMark={() => void api.markCall().catch(() => undefined)} onStop={() => void call.stop()} onReconnect={() => void call.reconnect()} onFirstCallSeen={() => void changeSettings({ meetings: { ...settings.meetings, introSeen: true } })} />
             : <div className="settings meetings-page"><MeetingsPage agents={[]} liveId={call.listening ? call.callKey : undefined} onOpenLive={showLive} onWriteDown={() => void writeDown()} focus={meetingFocus} /></div>)}
-          {view === 'settings' && settings && (
-            <Settings settings={settings} auth={auth} claudeAuth={claudeAuth} stt={stt} at={settingsAt} onChange={setSettings} onDone={() => setView('todo')} onArchive={() => setView('meetings')} />
-          )}
+          {view === 'settings' && settings && <SettingsPage settings={settings} stt={stt} at={settingsAt} onChange={setSettings} />}
         </main>
       </div>
     </div>

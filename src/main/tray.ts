@@ -60,7 +60,7 @@ export class TogleTray {
     const recording = state.phase === 'recording'
     const busy = ['starting', 'finishing', 'polishing', 'inserting'].includes(state.phase)
     const status = recording ? 'Listening to dictation' : state.phase === 'starting' ? 'Preparing dictation' : state.phase === 'finishing' ? 'Transcribing dictation' : state.phase === 'polishing' ? 'Cleaning up dictation' : state.phase === 'inserting' ? 'Entering dictated text'
-      : state.phase === 'error' ? 'Dictation needs attention' : state.phase === 'ready' ? 'Dictation ready to review' : inCall ? 'Call assistance is on' : 'Ready to dictate'
+      : state.phase === 'error' ? 'Dictation needs attention' : state.phase === 'ready' ? 'Dictation ready to review' : inCall ? 'Writing down a call' : 'Ready to dictate'
     const waiting = this.waiting ? `${this.waiting} task${this.waiting === 1 ? '' : 's'} waiting for you` : ''
     this.tray!.setToolTip(`Togle · ${waiting ? `${waiting} · ` : ''}${status}${keys ? ` · ${keys}` : ''}`)
     this.tray!.setContextMenu(Menu.buildFromTemplate([

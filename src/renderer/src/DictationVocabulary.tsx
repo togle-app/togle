@@ -4,15 +4,7 @@ import type { DictationVocabulary as Vocabulary, DictationVocabularyEdit } from 
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 type Draft = { kind: 'word' | 'snippet'; id?: string; phrase: string; value: string }
 
-export function DictationVocabulary({ accountId, accountName }: { accountId: string; accountName: string }) {
-  const [expanded, setExpanded] = useState(false)
-  return <details className="dictation-vocabulary" onToggle={event => setExpanded(event.currentTarget.open)}>
-    <summary>Words &amp; snippets</summary>
-    {expanded && <VocabularyEditor key={accountId} accountId={accountId} accountName={accountName} />}
-  </details>
-}
-
-function VocabularyEditor({ accountId, accountName }: { accountId: string; accountName: string }) {
+export function VocabularyEditor({ accountId, accountName }: { accountId: string; accountName?: string }) {
   const [vocabulary, setVocabulary] = useState<Vocabulary>()
   const [draft, setDraft] = useState<Draft>()
   const [busy, setBusy] = useState(false)
@@ -38,7 +30,7 @@ function VocabularyEditor({ accountId, accountName }: { accountId: string; accou
   }
   const edit = (value: Draft): void => { setDraft(value); setError(''); setStatus('') }
   return <div className="vocabulary-editor">
-    <p className="hint">Kept with {accountName}, on this computer. Another account has its own words and snippets.</p>
+    {accountName && <p className="hint">Kept with {accountName}, on this computer. Another account has its own words and snippets.</p>}
     {!vocabulary && !error && <p className="hint" role="status">Loading words…</p>}
     {vocabulary && <>
       <div className="vocabulary-heading"><h4>Words</h4><button className="ghost" disabled={busy || !!draft} onClick={() => edit({ kind: 'word', phrase: '', value: '' })}>Add word</button></div>

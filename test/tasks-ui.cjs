@@ -495,31 +495,15 @@ async function checkTaskBox(T, agent) {
 async function checkAgentSettings(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.shell-settings', 'Settings')
-  await ui.wait("!!document.querySelector('#settings-agents')")
-  const section = "document.querySelector('#settings-agents')"
-  assert.deepEqual(await ui.evaluate(`[...${section}.querySelectorAll('.setting .name')].map(e=>e.textContent)`), ['Notice when a task waits', 'Notice when a task finishes', 'Start a task for a coding agent', 'Claude Code in a terminal', 'To-do list'])
-  assert.deepEqual(await ui.evaluate(`[...${section}.querySelectorAll('input[role=switch]')].map(e=>[e.checked,e.disabled])`), [[true, false], [true, false]], 'both notices are on to begin with')
-  assert.ok((await ui.evaluate(`${section}.textContent`)).includes('F10'), 'the key that opens the task box')
-  await ui.evaluate(`${section}.scrollIntoView({ block: 'start' })`)
+  // The agents Togle found, as the design's Settings lists them.
+  await ui.wait("document.querySelectorAll('#settings-agents .setting').length===3")
+  assert.deepEqual(await texts(ui, '#settings-agents .setting .name'), ['Claude Code', 'Codex', 'Hermes'])
+  assert.deepEqual(await texts(ui, '#settings-agents .setting-value'), ['Found', 'Found', 'Not found'])
+  // The task box's key is with the other key, as Task.
+  assert.deepEqual(await texts(ui, '#settings-keys .shortcut-what'), ['Talk', 'Task'])
+  assert.deepEqual(await texts(ui, '#settings-keys button.keys'), ['F9', 'F10'])
+  await ui.evaluate("document.querySelector('#settings-agents').scrollIntoView({ block: 'start' })")
   await ui.capture('settings-agents')
-  await ui.evaluate(`${section}.querySelectorAll('input[role=switch]')[0].click()`)
-  await ui.wait(`${section}.querySelectorAll('input[role=switch]')[0].checked===false`)
-  assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).filter(patch => patch?.tasks), [{ tasks: { notices: false } }])
-  assert.equal(await ui.evaluate(`${section}.querySelectorAll('input[role=switch]')[1].disabled`), true, 'the one for finished waits for the first')
-  await ui.evaluate(`${section}.querySelectorAll('input[role=switch]')[0].click()`)
-  await ui.wait(`${section}.querySelectorAll('input[role=switch]')[0].checked===true`)
-  // Claude Code in a terminal, and the to-do list's file.
-  assert.deepEqual(await texts(ui, '#settings-agents .tasks-connect-compact button'), ['Connect Claude Code'])
-  await ui.click('#settings-agents .tasks-connect-compact button', 'Connect Claude Code')
-  await ui.wait("document.querySelector('#settings-agents .tasks-connect-compact .hint')?.textContent==='Connected'")
-  assert.equal((await ui.calls('connectClaudeHook')).length, 1)
-  assert.deepEqual(await texts(ui, '#settings-agents .tasks-connect-compact button'), ['Turn off'])
-  await ui.wait("[...document.querySelectorAll('#settings-agents .setting')].some(row=>row.textContent.includes('settings')===false&&row.querySelector('code'))")
-  assert.equal((await texts(ui, '#settings-agents .setting code'))[0], 'C:\\Users\\demo\\AppData\\Roaming\\Togle\\to-do.md')
-  await ui.click('#settings-agents button', 'Show the file')
-  assert.equal((await ui.calls('showTodoFile')).length, 1)
-  assert.equal(await ui.evaluate("[...document.querySelectorAll('.settings-jump button')].some(b=>b.textContent==='Coding agents')"), true, 'it is in the list of parts at the top')
-  assert.ok(!(await ui.evaluate("document.querySelector('#settings-window').textContent")).includes('Start a task for a coding agent'), 'and not again among the other shortcuts')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -750,7 +734,7 @@ app.whenReady().then(async () => {
     await checkCallStrip(T, agent)
     await checkStoppedTasks(T, agent)
     await checkAgentSettings(T, agent)
-    console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box and the settings for coding agents passed')
+    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box and the agents in Settings passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

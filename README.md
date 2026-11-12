@@ -18,8 +18,7 @@ Hold **F9** and talk. Togle types the words where your cursor is: a chat, an edi
 - Speech is heard on this computer. Your plan gets words, never sound.
 - Togle never presses Enter or sends anything. In a terminal it types everything as one line. When it can't type into the box (a password field, a window that changed, an app run as administrator), the voice bar keeps your words for **Copy text**, and the tray menu lists your last ten dictations under **Copy a recent dictation**, in memory only.
 - **Names and terms** (Settings): tell Togle once how a name or a word is spelled, or a phrase that stands for a longer text ("my work email"), and it writes it that way from then on.
-- **Recent dictations** is off unless you turn it on: then the last 50 are kept for seven days, encrypted on this computer.
-- The voice bar is a small strip that shows when the microphone listens. While idle, the microphone is off. You can hide the idle bar in Settings or the tray menu.
+- The voice bar is a small strip that shows when the microphone listens. While idle, the microphone is off. You can hide the idle bar from the tray menu.
 
 [How dictation reaches the box](docs/dictation-insertion.md).
 
@@ -63,7 +62,7 @@ They work from any app. Settings can give each other keys: click it and press th
 
 ## Your AI plan
 
-Togle has no account and no bill of its own. **Sign in with ChatGPT** uses your ChatGPT plan: what Togle uses counts toward its limit. Without a ChatGPT plan, use a key from any OpenAI-compatible service (OpenAI's API, OpenRouter, Groq, or a model on your computer with Ollama or LM Studio).
+Togle has no account and no bill of its own. **Sign in with ChatGPT** (Settings → Accounts → AI plan) uses your ChatGPT plan: what Togle uses counts toward its limit. Without a ChatGPT plan, **Use a key** from Gemini, Grok, Kimi or any OpenAI-compatible service (OpenRouter, Groq, or a model on your computer with Ollama or LM Studio). Togle checks the key by listing the service's models, then uses one model for every job: the key cleans up dictation and writes the notes, as the plan would. The service bills you for it.
 
 | | With your plan | Without it |
 | --- | --- | --- |
@@ -87,12 +86,12 @@ Requires Windows 10/11, macOS 14.2+ or Ubuntu 22.04+ (with PulseAudio, or PipeWi
 
 ```sh
 npm ci
-npm run dev             # then Settings → Speech → Install
+npm run dev             # then Settings → Voice → Install
 ```
 
 On Windows, `npm run setup:whisper` sets up a development copy in `resources/whisper` instead (~1.9 GB with an NVIDIA GPU), which Togle runs while nothing is installed from Settings. It uses the CUDA build and `large-v3-turbo` when it finds an NVIDIA GPU, otherwise the CPU build and Whisper `small`. You can override both: `npm run setup:whisper -- --cpu --model ggml-medium-q5_0.bin`. It also downloads Parakeet TDT v3 (~670 MB, skip with `--no-parakeet`; Whisper then does everything). Interrupted downloads resume where they stopped.
 
-**An OpenAI-compatible server** (Settings, AI): OpenAI's API, OpenRouter, Groq, Ollama, LM Studio. A reasoning model's thinking that comes inside the answer text (`<think>…</think>`) is left out.
+**A key instead of a plan** (Settings → Accounts → AI plan → Use a key): Gemini, Grok and Kimi are ready to pick; **Another service** takes the address of any OpenAI-compatible one (OpenRouter, Groq, Ollama, LM Studio). A reasoning model's thinking that comes inside the answer text (`<think>…</think>`) is left out.
 
 **A build to install.** Build on the system it's for. `npm run dist` makes what installs Togle: on Windows `dist\Togle Setup 0.1.0.exe`, on macOS a `.dmg` and a `.zip` for the build Mac's architecture, on Linux an AppImage and a `.deb`. `npm run pack` makes only the app, to try it (`dist\win-unpacked` on Windows), and checks the packaged code against a build manifest; `npm run open` opens that copy. Speech recognition isn't in any of them: Togle downloads it for the computer it's on. The app keeps its data where `npm run dev` does (`%APPDATA%\togle` on Windows). Nothing is signed yet: Windows SmartScreen warns before the first run, and macOS distribution needs Apple Developer ID signing and notarization; see [the Mac build guide](docs/macos.md).
 
@@ -102,8 +101,8 @@ On Windows, `npm run setup:whisper` sets up a development copy in `resources/whi
 src/main/              Electron main process
   auth/chatgpt.ts      Sign in with ChatGPT: browser PKCE, ID token checks, refresh, revocation
   providers/           the AI: chatgpt.ts (Responses API with ChatGPT plan usage), compat.ts (Chat Completions),
-                       claude.ts (Anthropic's API, with a key), claude-subscription.ts (a Claude subscription
-                       through the Agent SDK, marked experimental)
+                       claude.ts (Anthropic's own API) and claude-subscription.ts (a Claude subscription through
+                       the Agent SDK): Settings offers neither for now; a Claude sign-in waits for Anthropic
   plan.ts              the ChatGPT plan's usage limit
   dictation*.ts        voice typing: the shortcut, the voice bar window, cleanup, inserting the words, history
   stt/                 speech recognition on this computer: Parakeet (main), Whisper (unclear speech), downloads
@@ -121,7 +120,7 @@ src/main/              Electron main process
 src/shared/            what the main process and the window share (types, the IPC api, hotkeys, call apps)
 src/preload/           the window.togle bridge
 src/renderer/src/      React: Shell.tsx (the window), Todo.tsx, Tasks.tsx (Agents), MeetingsPage.tsx,
-                       LiveCall.tsx and useCall.ts (a call), ConfirmNames.tsx, Settings.tsx, TaskBox.tsx,
+                       LiveCall.tsx and useCall.ts (a call), ConfirmNames.tsx, SettingsPage.tsx, TaskBox.tsx,
                        DictationBar.tsx; audio/capture.ts opens the microphone and the call's sound
 test/                  automated tests
 eval/                  evaluations with real models and real speech

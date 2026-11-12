@@ -3344,3 +3344,15 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .live-line p { grid-column: 1 / -1; margin: 0; line-height: 1.45; }
 .live-line.partial { opacity: 0.6; }
 .marked-tag { margin-left: 8px; padding: 1px 6px; border-radius: 6px; background: var(--panel-2); color: var(--them); font-size: 10px; vertical-align: 1px; }
+
+/* Settings on one screen, as the design has it: Keys, Voice, Meetings, Agents, Accounts. */
+.settings-one .settings-content { max-width: 680px; }
+.settings-title { margin: 4px 2px 14px; font-size: 17px; }
+.settings .setting-value { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.settings .setting-value.found { color: var(--ok); }
+.settings .setting-detail { padding: 8px 12px 12px; background: var(--bg); }
+.settings .setting-detail > .setting { padding-left: 0; padding-right: 0; }
+.settings .setting-detail > .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.settings .setting-detail > .hint { margin: 0 0 6px; }
+.settings .ai-plan-other { font-size: 12px; }
+.settings-foot { margin: 6px 2px 0; color: var(--faint); font-size: 11px; }

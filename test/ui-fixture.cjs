@@ -180,7 +180,7 @@ module.exports = function install(fixture) {
     agent.updatedAt = Date.now(); emit('onAgentChanged', clone(agent))
   }
   api.platform = fixture.platform ?? process.platform
-  api.listHotkeys = async () => [{ id: 'dictate', keys: 'F9', defaultKeys: 'F9', label: 'Dictation', ok: true }, ...(fixture.scenario === 'tasks' ? [{ id: 'task', keys: 'F10', defaultKeys: 'F10', label: 'Start a task for a coding agent', ok: true }] : [])]
+  api.listHotkeys = async () => [{ id: 'dictate', keys: 'F9', defaultKeys: 'F9', label: 'Talk', ok: true }, { id: 'task', keys: 'F10', defaultKeys: 'F10', label: 'Task', ok: true }]
   api.getSettings = async () => clone(fixture.settings)
   api.listAgents = async () => clone(fixture.agents)
   api.agentTemplates = async () => clone(fixture.templates)

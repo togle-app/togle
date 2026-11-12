@@ -22,9 +22,9 @@ const timeout = setTimeout(() => { console.error('Window checks timed out at ' +
 async function open(T, agent, scenario, width = 1024, height = 850) {
   checkpoint = scenario + ' at ' + width + 'px'
   const settings = structuredClone(T.getSettings())
-  settings.provider = 'claude'
-  settings.claude.auth = 'subscription'
-  settings.dictation.accountId = 'claude-default'
+  // The plan is ChatGPT's, not signed in yet (the fixture's ChatGPT account is signed out).
+  settings.provider = 'chatgpt'
+  settings.dictation.accountId = ''
   settings.transcription.language = 'en'
   settings.activeAgentId = agent.id
   settings.transcription.me = settings.transcription.them = 'local'
@@ -301,7 +301,8 @@ async function checkProblems(T, agent) {
   const setup = await open(T, agent, 'speech', 640)
   await setup.click('.workspace-nav button', 'Meetings')
   await setup.click('.meetings .page-head button', 'Write down now')
-  await setup.wait("document.activeElement?.closest('section')?.id==='settings-speech'")
+  await setup.wait("document.activeElement?.id==='settings-speech'")
+  assert.ok((await setup.evaluate("document.querySelector('#settings-speech').textContent")).includes('Install'), 'with the way to get it')
   assert.equal(await place(setup), 'Settings')
   assert.deepEqual(await setup.calls('setListening'), [])
   assert.deepEqual(setup.errors, [])
@@ -385,6 +386,82 @@ async function checkNoisyCall(T, agent) {
   console.log('Noisy room: offered after the call only, with the page and a way to stop it, passed.')
 }
 
+/** Settings on one screen: Keys, Voice, Meetings, Agents, Accounts; the plan or a key instead; Togle Studio. */
+async function checkSettings(T, agent) {
+  const ui = await open(T, agent, 'settings', 1024)
+  await ui.click('.workspace-nav button', 'Settings')
+  await ui.wait("!!document.querySelector('#settings-accounts .ai-plan')")
+  assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Voice', 'Meetings', 'Agents', 'Accounts'])
+  assert.deepEqual(await texts(ui, '#settings-keys .shortcut-what'), ['Talk', 'Task'])
+  assert.deepEqual(await texts(ui, '#settings-keys button.keys'), ['F9', 'F10'])
+  const names = await texts(ui, '#settings-voice .setting > .name')
+  assert.deepEqual(names.slice(0, 4), ['Microphone', 'Language', 'Names and terms', 'Clean up what I say'])
+  assert.equal(await ui.evaluate("document.querySelector('#settings-voice [aria-label=\"Microphone\"]').value"), '', 'the system default')
+  assert.equal(await ui.evaluate("document.querySelector('#settings-voice [aria-label=\"Language\"] option[value=auto]').textContent"), 'Detected')
+  assert.ok((await ui.evaluate("document.querySelector('#settings-voice').textContent")).includes('Needs your AI plan'), 'cleanup says what it needs while no plan is signed in')
+  if (process.platform === 'win32') assert.deepEqual(await texts(ui, '#settings-meetings .setting > .name'), ['Zoom', 'Meet', 'Teams', 'Webex', 'Skype', 'Slack', 'Remembered voices'])
+  assert.equal(await ui.evaluate("document.querySelector('#settings-meetings .setting:last-of-type .setting-value')?.textContent"), 'None')
+  await ui.capture('settings')
+
+  // Names and terms open where they are, and close again.
+  await ui.click('#settings-voice button', 'Change')
+  await ui.wait("!!document.querySelector('#settings-voice .vocabulary-editor')")
+  await ui.click('#settings-voice button', 'Done')
+  // Remembered voices: nobody until it is turned on.
+  await ui.click('#settings-meetings button', 'Change')
+  await ui.wait("!!document.querySelector('.remembered-people [role=switch]')")
+  assert.equal(await ui.evaluate("document.querySelector('.remembered-people [role=switch]').checked"), false)
+  await ui.evaluate("document.querySelector('.remembered-people [role=switch]').click()")
+  await ui.wait('window.togleUITest.settings().assist.rememberVoices===true')
+  if (process.platform === 'win32') {
+    await ui.evaluate("(()=>{const select=document.querySelector('[aria-label=\"When a call starts in Zoom\"]');select.value='always';select.dispatchEvent(new Event('change',{bubbles:true}))})()")
+    await ui.wait("window.togleUITest.settings().meetings.apps.zoom==='always'")
+  }
+
+  // The AI plan: one sign-in, or a key from another service instead.
+  assert.equal(await ui.evaluate("document.querySelector('.ai-plan .control button')?.textContent"), 'Sign in with ChatGPT')
+  assert.ok((await ui.evaluate("document.querySelector('.ai-plan-other').textContent")).includes('No ChatGPT plan? Use a key from Gemini, Grok, Kimi or any other.'))
+  await ui.click('.ai-plan-other button', 'Use a key')
+  await ui.wait("!!document.querySelector('form.ai-key-form')")
+  assert.deepEqual(await texts(ui, '.ai-key-form [aria-label=Service] option'), ['Gemini', 'Grok', 'Kimi', 'Another service'])
+  await ui.fill('.ai-key-form input[aria-label=Key]', 'fictional-gemini-key')
+  await ui.click('.ai-key-form button', 'Use this key')
+  await ui.wait("document.querySelector('.ai-plan .note')?.textContent==='Gemini · key'")
+  const [added] = (await ui.calls('addApiConnection')).map(args => args[0])
+  assert.deepEqual({ ...added, key: added.key ? 'given' : 'none' }, { kind: 'compatible', label: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', key: 'given' })
+  const ai = await ui.evaluate('window.togleUITest.settings().ai')
+  assert.deepEqual(Object.values(ai.tasks).map(task => task.model), ['local-fixture', 'local-fixture', 'local-fixture', 'local-fixture'], 'every job uses the model the service lists')
+  assert.equal(await ui.evaluate('window.togleUITest.settings().provider'), 'compat')
+  assert.ok(!(await ui.evaluate("document.querySelector('#settings-voice').textContent")).includes('Needs your AI plan'), 'with a key, cleanup has what it needs')
+  await ui.capture('settings-key')
+  // Signing in with ChatGPT makes the plan the AI again. (A menu opens only on a button in sight.)
+  await ui.evaluate("document.querySelector('.ai-plan').scrollIntoView({ block: 'center' })")
+  await ui.paint()
+  await ui.click('.ai-plan .control button', 'Manage')
+  await ui.click('.menu-item, [role=menuitem]', 'Sign in with ChatGPT instead')
+  await ui.wait("document.querySelector('.ai-plan .note')?.textContent.startsWith('ChatGPT · signed in')")
+  assert.equal(await ui.evaluate('window.togleUITest.settings().ai'), null)
+  assert.equal(await ui.evaluate('window.togleUITest.settings().provider'), 'chatgpt')
+
+  // Togle Studio: where it stands and the one thing to do, and one switch for mentioning it.
+  assert.equal(await ui.evaluate("document.querySelector('.studio-row .setting-value').textContent"), 'Not installed')
+  await ui.click('.studio-row button', 'See Togle Studio')
+  assert.deepEqual(await ui.calls('openMicrophonePage'), [['settings']])
+  const mention = "[...document.querySelectorAll('#settings-accounts .setting')].find(row=>row.querySelector('.name')?.textContent==='Mention Togle Studio').querySelector('[role=switch]')"
+  assert.equal(await ui.evaluate(mention + '.checked'), true)
+  await ui.evaluate(mention + '.click()')
+  await ui.wait('window.togleUITest.settings().microphone.suggestions===false')
+  for (const width of [640, 420]) {
+    ui.window.setSize(width, 800)
+    await ui.paint()
+    await ui.fitsWidth()
+    await ui.capture('settings-' + width)
+  }
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+  console.log('Settings: Keys, Voice, Meetings, Agents and Accounts on one screen, names and terms, remembered voices, a call app, the ChatGPT sign-in and a Gemini key instead, Togle Studio and its mentions, and narrow sizes passed.')
+}
+
 /** Meeting notes in Markdown: what it can hold, links that open outside, code to copy, and nothing that loads or runs. */
 async function checkRichText(T, agent) {
   const samples = require('./rich-text-fixtures.cjs')
@@ -434,6 +511,7 @@ app.whenReady().then(async () => {
     await checkProblems(T, agent)
     await checkNoisyCall(T, agent)
     await checkRichText(T, agent)
+    await checkSettings(T, agent)
     clearTimeout(timeout)
     app.exit(0)
   } catch (error) {
