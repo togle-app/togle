@@ -28,6 +28,8 @@ test('what follows togle run is read: the agent, the folder, a title, and the wo
   assert.equal(T.parseRun(['  spaced  ', 'out'], cwd).prompt, 'spaced   out', 'the words are joined as typed, and trimmed at the ends')
   assert.equal(T.parseRun([], cwd).prompt, '', 'no words is an empty task, which the command refuses')
   assert.throws(() => T.parseRun(['--agent', 'gpt', 'x'], cwd), /Pick an agent/)
+  assert.equal(T.parseRun(['--agent', 'acp-gemini-cli', 'x'], cwd).agent, 'acp-gemini-cli', 'an agent added in Settings, by its id')
+  assert.throws(() => T.parseRun(['--agent', 'acp-', 'x'], cwd), /Pick an agent/)
   assert.throws(() => T.parseRun(['--folder'], cwd), /--folder needs a value/)
   assert.throws(() => T.parseRun(['--agent='], cwd), /--agent needs a value/)
   assert.throws(() => T.parseRun(['--fast', 'x'], cwd), /does not know --fast/)
@@ -84,7 +86,7 @@ test('togle run starts a task in the running Togle, which asks before every comm
     const folder = scratch()
     const result = await run(['run', '--title', 'Dark mode', 'Add', 'a', 'dark', 'mode', 'switch'], { dataFolder: running.dataFolder, cwd: folder })
     assert.equal(result.code, 0, result.err)
-    assert.equal(result.out, `Started in Togle: Dark mode (Claude Code, ${folder}). It asks before every command. Answer in Togle's Tasks.\n`)
+    assert.equal(result.out, `Started in Togle: Dark mode (Claude Code, ${folder}). It asks before every command. Answer it in Togle, under Agents.\n`)
     assert.equal(result.err, '')
     const [task] = running.backend.started
     assert.deepEqual({ folder: task.options.folder, prompt: task.options.prompt, title: task.options.title, asks: task.options.asks }, { folder, prompt: 'Add a dark mode switch', title: 'Dark mode', asks: true })
@@ -180,6 +182,11 @@ test('Togle checks what it is asked: the agent, a folder in full, words, and a l
   assert.equal(hub.started[1].title.length, 120)
   await ask({ runner: 'hermes', folder, prompt: 'x', title: '   ' })
   assert.equal('title' in hub.started[2], false, 'a blank title is no title')
+  // An agent added in Settings: whatever the hub works with.
+  const added = { ...hub, has: (runner) => ['claude', 'acp-gemini'].includes(runner) }
+  await T.startTask(added, JSON.stringify({ runner: 'acp-gemini', folder, prompt: 'x' }))
+  assert.equal(hub.started.at(-1).runner, 'acp-gemini')
+  await assert.rejects(T.startTask(added, JSON.stringify({ runner: 'codex', folder, prompt: 'x' })), /Pick an agent/, 'one the hub does not work with')
 })
 
 // ---- the program itself, started the way the command starts it ----

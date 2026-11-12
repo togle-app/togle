@@ -49,7 +49,7 @@ One list of every agent task on your computer: Claude Code, Codex and Hermes. A 
 
 When an agent starts waiting or finishes, one notice appears in the corner. It never takes your keyboard, and **Allow once** is held for a moment so a stray click can't allow anything. The tray icon carries an amber dot until nothing waits.
 
-Togle starts each agent's own program and uses the agent's own sign-in. It never reads an agent's login or keys. See [Coding agents on this computer](docs/agents-on-this-computer.md).
+Any other agent that speaks ACP, the open standard Hermes uses, can be added in **Settings → Agents → Add an agent**, with the command its own docs give for ACP. Togle starts each agent's own program and uses the agent's own sign-in. It never reads an agent's login or keys. See [Coding agents on this computer](docs/agents-on-this-computer.md).
 
 ### To-do
 
@@ -117,7 +117,8 @@ src/main/              Electron main process
   call-sessions.ts     calls saved encrypted; meeting-notes.ts and call-titles.ts write their notes and titles
   confirm-sound.ts     the one short clip of each voice that Who spoke? plays, deleted within a day
   call-detect.ts       which call app uses the microphone (Windows); call-notice-window.ts, call-strip-window.ts
-  runners/             Claude Code, Codex and Hermes: their tasks, requests and stops; hub.ts holds them together
+  runners/             Claude Code, Codex, Hermes and added agents (acp.ts speaks ACP for Hermes and any agent added):
+                       their tasks, requests and stops; hub.ts holds them together
   channel/, cli/       Claude Code in a terminal asking Togle, and the togle command
   todo.ts              the to-do list as a plain text file
   task-box-window.ts   the F10 box; notice-window.ts the corner notice; tray.ts the tray

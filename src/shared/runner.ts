@@ -1,7 +1,50 @@
 // Coding agents on this computer (Codex, Claude Code, Hermes) as the rest of Togle sees them: tasks, the state each is
 // in, and what a waiting one asks. Each agent has one backend in src/main/runners that turns its own protocol into this.
 
-export type RunnerKind = 'codex' | 'claude' | 'hermes'
+/** An agent, by its id in task keys: one Togle knows (`codex`, `claude`, `hermes`), or one the person added (`acp-…`). */
+export type RunnerKind = string
+
+/** Whether Togle can make the agent ask before every command and every change: Claude Code and Codex. Hermes and an added
+ * agent ask as their own settings say. */
+export const asksEveryTime = (runner: RunnerKind): boolean => runner === 'claude' || runner === 'codex'
+
+/** The agents Togle knows by name, before any is added. */
+export const KNOWN_AGENTS: Readonly<Record<string, string>> = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
+
+/**
+ * An agent the person added in Settings: any agent that speaks ACP, started by the command its docs give for that.
+ * `id` is its id in task keys ("acp-gemini").
+ */
+export interface AddedAgent {
+  id: string
+  name: string
+  command: string
+}
+
+/** The id an added agent gets from its name: "acp-" and the name's letters and digits ("Gemini CLI" is acp-gemini-cli). */
+export const agentIdOf = (name: string): string => `acp-${name.toLowerCase().normalize('NFKD').replace(/\p{M}+/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'agent'}`
+
+/** Why a name and a command cannot be an added agent, or undefined when they can. */
+export function addedAgentProblem(name: unknown, command: unknown): string | undefined {
+  if (typeof name !== 'string' || !name.trim()) return 'Give the agent a name.'
+  if (name.trim().length > 40) return 'Keep the name under 40 characters.'
+  if (typeof command !== 'string' || !command.trim()) return 'Give the command that starts it.'
+  if (command.length > 500) return 'Keep the command under 500 characters.'
+  if (/[\r\n\0]/.test(command)) return 'The command goes on one line.'
+  return undefined
+}
+
+/** The added agents a settings file holds, each checked: what is not one is left out. */
+export function addedAgentsFrom(value: unknown): AddedAgent[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  return value.flatMap((item) => {
+    const agent = item as Partial<AddedAgent> | null
+    if (!agent || typeof agent.id !== 'string' || !/^acp-[a-z0-9-]{1,40}$/.test(agent.id) || seen.has(agent.id) || addedAgentProblem(agent.name, agent.command)) return []
+    seen.add(agent.id)
+    return [{ id: agent.id, name: agent.name!.trim(), command: agent.command!.trim() }]
+  })
+}
 
 /**
  * What a task is doing. `working`: a turn is running. `waiting`: the agent needs the person (a command to allow, a
@@ -34,6 +77,8 @@ export interface RunnerStatus {
   name: string
   installed: boolean
   version?: string
+  /** One the person added, which they can remove. */
+  added?: boolean
 }
 
 /** One line of what happened in a task, for the window to show. */
@@ -109,6 +154,8 @@ export interface TaskView extends TaskInfo {
   pending: ViewRequest[]
   /** Whether a command may still be running after Stop (Codex lets one finish), so the second press is offered. */
   commandsRunning: boolean
+  /** Its agent's name, as the person reads it ("Codex", or the name given to an added agent). */
+  agent?: string
 }
 
 /**
@@ -168,6 +215,8 @@ export interface AgentQuestion {
 export interface TaskAttention {
   key: string
   runner: RunnerKind
+  /** Its agent's name, for an agent Togle does not know by name. */
+  agent?: string
   title: string
   folder: string
   state: TaskState

@@ -650,6 +650,29 @@ test('a Hermes command waits as a request, and only allow once lets it run', { t
   }
 })
 
+test('an added agent speaks ACP as Hermes does, started by the command given, under its own name', { timeout: 30_000 }, async () => {
+  const backend = T.addedBackend({ id: 'acp-fake', name: 'Fake Agent', command: `"${process.execPath}" "${fakeHermes}" acp` }, '9.9.9')
+  try {
+    assert.equal(backend.runner, 'acp-fake')
+    assert.equal((await backend.detect()).installed, true)
+    const task = await backend.start({ folder: scratch(), prompt: 'run note', asks: true })
+    assert.equal(task.runner, 'acp-fake')
+    const events = watch(task)
+    const request = await until(() => task.pending[0], 'the command to wait')
+    assert.equal(request.command, 'echo x > note.txt')
+    assert.equal(request.always, 'Always allow (Fake Agent keeps it)', 'its own words, and its own name')
+    task.answer(request.id, 'allow-once')
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    assert.deepEqual(events.filter((e) => e.type === 'message').map((e) => e.text), ['ran it'])
+  } finally {
+    await backend.close()
+  }
+  // A program that is not on this computer: not installed, and starting says so by name.
+  const missing = T.addedBackend({ id: 'acp-gone', name: 'Gone', command: 'togle-no-such-agent-here --acp' }, '9.9.9')
+  assert.equal((await missing.detect()).installed, false)
+  await assert.rejects(missing.start({ folder: os.tmpdir(), prompt: 'x' }), /Gone is not installed on this computer/)
+})
+
 test('always, for Hermes, picks its own always option, in its own words', { timeout: 30_000 }, async () => {
   const backend = hermes()
   try {

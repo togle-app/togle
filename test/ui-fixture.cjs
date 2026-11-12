@@ -408,7 +408,12 @@ module.exports = function install(fixture) {
   const runnerFind = key => { const found = runnerTasks.find(item => item.key === key); if (!found) throw new Error('That task is gone.'); return found }
   const runnerRank = item => item.state === 'waiting' ? 0 : item.state === 'working' ? 1 : 2
   const runnerChanged = () => emit('onRunnersChanged')
-  api.runnerStatus = async () => fixture.scenario === 'tasks' ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []
+  // Agents added in Settings, in memory: any that speaks ACP, by name and command.
+  const addedAgents = []
+  const knownAgents = () => fixture.scenario === 'tasks' ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []
+  api.runnerStatus = async () => [...knownAgents(), ...clone(addedAgents)]
+  api.addCodingAgent = async (name, command) => { record('addCodingAgent', [name, command]); addedAgents.push({ runner: 'acp-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, installed: true, added: true }); return api.runnerStatus() }
+  api.removeCodingAgent = async id => { record('removeCodingAgent', [id]); addedAgents.splice(addedAgents.findIndex(agent => agent.runner === id), 1); return api.runnerStatus() }
   api.runnerTasks = async () => clone(runnerTasks.map(runnerView)).sort((a, b) => runnerRank(a) - runnerRank(b) || b.updatedAt - a.updatedAt)
   api.runnerDetail = async key => { const found = runnerFind(key); return clone({ task: runnerView(found), log: found.log }) }
   let failTask = false

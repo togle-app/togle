@@ -34,7 +34,9 @@ When a task waits and Togle is not in front, a small notice appears in the corne
 
 ## Settings
 
-**Settings → Coding agents** has the two notices (a task waits, a task finishes), the task box key, the Claude Code connection below, and where the to-do file is.
+**Settings → Agents** lists Claude Code, Codex and Hermes, found or not. The task box key is under **Keys** (Task, F10). Connecting Claude Code in a terminal is on the Agents screen, and the to-do file is shown on To-do.
+
+**Add an agent** takes any other agent that speaks ACP, the open standard Hermes uses: give it a name and the command that starts it for ACP, as its own docs give it. Togle runs that command on this computer the way a terminal would (an agent installed with npm on Windows starts through cmd.exe). The agent then shows like the others: in the list, in New task and the task box, and as `togle run --agent acp-<name>`. It asks before a command as its own settings say, and "always allow" is its own option, in its words. **Remove** takes it off again; what it ran is not undone.
 
 ## To-do
 

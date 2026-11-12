@@ -7,7 +7,7 @@ import { RUNNER_NAMES } from './hub'
 const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
 
 function waitingNotice(task: TaskAttention, request: ViewRequest, others: number): TaskNotice {
-  const base = { id: `${task.key}#${request.id}`, kind: 'waiting' as const, key: task.key, title: task.title, where: `${RUNNER_NAMES[task.runner]} · ${baseName(task.folder)}`, requestId: request.id, others }
+  const base = { id: `${task.key}#${request.id}`, kind: 'waiting' as const, key: task.key, title: task.title, where: `${task.agent ?? RUNNER_NAMES[task.runner] ?? task.runner} · ${baseName(task.folder)}`, requestId: request.id, others }
   if (request.kind === 'question') return { ...base, says: 'asks', detail: shown(request.questions?.[0]?.text ?? 'A question'), detailKind: 'question', canRefuse: false, canAllow: false }
   if (request.kind === 'edit') {
     return { ...base, says: 'wants to change', detail: shown((request.files ?? []).join('\n') || 'a file'), detailKind: 'files', canRefuse: true, canAllow: canAllowHere(request) }
@@ -81,7 +81,7 @@ export class Attention {
       kind,
       key: task.key,
       title: task.title,
-      where: `${RUNNER_NAMES[task.runner]} · ${baseName(task.folder)}`,
+      where: `${task.agent ?? RUNNER_NAMES[task.runner] ?? task.runner} · ${baseName(task.folder)}`,
       says: kind === 'done' ? 'finished' : 'stopped with an error',
       detail: shown(task.line),
       detailKind: 'words',

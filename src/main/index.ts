@@ -2319,7 +2319,10 @@ if (hookAt !== -1) {
         const chosen = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] }) : await dialog.showOpenDialog({ properties: ['openDirectory'] })
         return chosen.canceled ? null : (chosen.filePaths[0] ?? null)
       },
-      version: app.getVersion()
+      version: app.getVersion(),
+      // Agents added in Settings: kept with the other settings.
+      added: () => getSettings().addedAgents,
+      saveAdded: async (agents) => { await updateSettings({ addedAgents: agents }) }
     })
     // Connecting Claude Code in a terminal: one entry in its settings that starts Togle as `--togle-hook`.
     const hubForClaude = runners

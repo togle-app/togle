@@ -368,6 +368,10 @@ export interface TogleApi {
 
   /** The coding agents on this PC (Codex, Claude Code), and whether each is installed. */
   runnerStatus(): Promise<RunnerStatus[]>
+  /** Adds an agent that speaks ACP, by its name and the command that starts it; answers with every agent as it is now. */
+  addCodingAgent(name: string, command: string): Promise<RunnerStatus[]>
+  /** Removes an agent the person added. */
+  removeCodingAgent(id: string): Promise<RunnerStatus[]>
   /** Every agent task on this PC in one list: waiting for the person first, then working, then the rest. */
   runnerTasks(): Promise<TaskView[]>
   /** One task with what happened in it, as far as Togle ran it. */

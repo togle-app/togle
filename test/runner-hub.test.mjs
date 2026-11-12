@@ -641,6 +641,68 @@ test('the window can ask for everything through its messages, and is told when s
   }
 })
 
+test('an added agent: its command read in words, its id from its name, and only what is one kept from a settings file', () => {
+  assert.deepEqual(T.commandWords('gemini --experimental-acp'), ['gemini', '--experimental-acp'])
+  assert.deepEqual(T.commandWords('  "C:\\Program Files\\Agent\\agent.exe"   --acp  "a b" '), ['C:\\Program Files\\Agent\\agent.exe', '--acp', 'a b'])
+  assert.deepEqual(T.commandWords('agent ""'), ['agent', ''], 'an empty word in quotes stays a word')
+  assert.equal(T.agentIdOf('Gemini CLI'), 'acp-gemini-cli')
+  assert.equal(T.agentIdOf('  Goose!  '), 'acp-goose')
+  assert.equal(T.agentIdOf('Ünïcode'), 'acp-unicode')
+  assert.equal(T.agentIdOf('???'), 'acp-agent')
+  assert.equal(T.addedAgentProblem('', 'x'), 'Give the agent a name.')
+  assert.equal(T.addedAgentProblem('A', ' '), 'Give the command that starts it.')
+  assert.equal(T.addedAgentProblem('A', 'x\ny'), 'The command goes on one line.')
+  assert.equal(T.addedAgentProblem('A', 'agent --acp'), undefined)
+  assert.deepEqual(T.addedAgentsFrom([
+    { id: 'acp-gemini', name: ' Gemini ', command: ' gemini --acp ' },
+    { id: 'acp-gemini', name: 'Twice', command: 'x' },
+    { id: 'codex', name: 'Codex', command: 'x' },
+    { id: 'acp-bad', name: 'Bad', command: 'a\nb' },
+    'not one',
+    null
+  ]), [{ id: 'acp-gemini', name: 'Gemini', command: 'gemini --acp' }], 'each once, by an added id, on one line')
+  assert.deepEqual(T.addedAgentsFrom('nope'), [])
+})
+
+test('agents the person adds are checked, saved, worked with, and removed; the ones Togle knows cannot be', async () => {
+  const handlers = new Map()
+  let saved = [{ id: 'acp-goose', name: 'Goose', command: 'goose acp' }]
+  const claude = new FakeBackend('claude')
+  const hub = T.registerRunners({
+    handle: (channel, listener) => handlers.set(channel, listener),
+    send: () => {},
+    titles: memoryTitles(),
+    pickFolder: async () => null,
+    version: '9.9.9',
+    backends: [claude],
+    added: () => saved,
+    saveAdded: async (agents) => { saved = agents }
+  })
+  try {
+    // One added before Togle started works with the rest, by its own name.
+    let status = await handlers.get('runners:status')()
+    assert.deepEqual(status.map((agent) => [agent.runner, agent.name, !!agent.added]), [['claude', 'Claude Code', false], ['acp-goose', 'Goose', true]])
+    assert.equal(hub.nameOf('acp-goose'), 'Goose')
+    status = await handlers.get('runners:add-agent')('Gemini CLI', 'gemini --experimental-acp')
+    assert.deepEqual(saved.map((agent) => agent.id), ['acp-goose', 'acp-gemini-cli'])
+    assert.ok(status.some((agent) => agent.runner === 'acp-gemini-cli' && agent.name === 'Gemini CLI' && agent.added))
+    await handlers.get('runners:add-agent')('Gemini CLI', 'gemini --other')
+    assert.equal(saved.at(-1).id, 'acp-gemini-cli-2', 'the same name twice gets its own id')
+    await assert.rejects(handlers.get('runners:add-agent')('codex', 'codex app-server'), /Togle finds codex by itself/)
+    await assert.rejects(handlers.get('runners:add-agent')('Tricky', 'agent\n--acp'), /one line/)
+    await assert.rejects(handlers.get('runners:add-agent')('', 'agent'), /Give the agent a name/)
+    // Starting a task asks for an agent Togle works with.
+    assert.throws(() => handlers.get('runners:start')({ runner: 'acp-nope', folder: 'x', prompt: 'y' }), /Pick an agent/)
+    await assert.rejects(handlers.get('runners:remove-agent')('claude'), /Only an agent you added/)
+    status = await handlers.get('runners:remove-agent')('acp-goose')
+    assert.deepEqual(saved.map((agent) => agent.id), ['acp-gemini-cli', 'acp-gemini-cli-2'])
+    assert.ok(!status.some((agent) => agent.runner === 'acp-goose'))
+    assert.equal(hub.has('acp-goose'), false)
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('an open task says what it did in one line: steps, commands run, files changed, refused', () => {
   const entry = (kind, extra = {}) => ({ id: Math.random(), at: 1, kind, text: '', ...extra })
   assert.equal(T.stepsLine([entry('you'), entry('agent')]), undefined, 'only talk: nothing to sum up')

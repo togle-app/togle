@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import type { RunnerKind, RunnerStatus } from '@shared/runner'
+import { asksEveryTime, type RunnerKind, type RunnerStatus } from '@shared/runner'
 import { useHotkeys } from './hotkeys'
 
 const api = window.togle
@@ -165,7 +165,7 @@ export function TaskBox() {
             </p>
           )}
           <div className="taskbox-foot">
-            <span>{runner === 'hermes' ? 'Hermes asks before a command only when its own settings say so.' : 'It asks before every command and every change.'} Enter starts. Esc closes.</span>
+            <span>{!runner || asksEveryTime(runner) ? 'It asks before every command and every change.' : `${installed.find((status) => status.runner === runner)?.name ?? 'It'} asks before a command only when its own settings say so.`} Enter starts. Esc closes.</span>
             <button className="primary" disabled={busy || !runner || !folder || !text.trim()}>
               {busy ? 'Starting…' : 'Start'}
             </button>

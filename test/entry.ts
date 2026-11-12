@@ -142,3 +142,6 @@ export { CallDetector, browsersIn, callAppsIn, parseMicrophoneUse, parseWindowTi
 export { callSitesIn } from '../src/shared/call-apps'
 export { RECENT_DICTATIONS, recentLabel, withRecent } from '../src/main/recent-dictations'
 export { changedFiles, needsYou, stepsLine } from '../src/shared/runner'
+export { AcpBackend, commandWords, whereIs } from '../src/main/runners/acp'
+export { addedBackend } from '../src/main/runners/register'
+export { KNOWN_AGENTS, addedAgentProblem, addedAgentsFrom, agentIdOf } from '../src/shared/runner'

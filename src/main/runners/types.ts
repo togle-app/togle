@@ -54,6 +54,8 @@ export interface TaskHandle {
 
 export interface Backend {
   readonly runner: RunnerKind
+  /** Its name as the person reads it, for an agent Togle does not know by name (one added in Settings). */
+  readonly name?: string
   detect(): Promise<Detected>
   /** The tasks this agent has on this computer, newest first. */
   list(): Promise<TaskInfo[]>

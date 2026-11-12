@@ -2,14 +2,15 @@
 // backends (codex.ts, claude.ts) know how to talk to their agent; this joins them: the tasks they keep on this computer,
 // the ones Togle runs (with what happened in each, so the window can show it), and the actions on a task by its key.
 import { promises as fs } from 'node:fs'
-import type { Changes, Decision, LogEntry, RunnerKind, RunnerStatus, StartRequest, TaskAttention, TaskDetail, TaskEvent, TaskInfo, TaskView, ViewRequest } from '@shared/runner'
+import { KNOWN_AGENTS, type Changes, type Decision, type LogEntry, type RunnerKind, type RunnerStatus, type StartRequest, type TaskAttention, type TaskDetail, type TaskEvent, type TaskInfo, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
 import { changesIn } from './changes'
 import { ExternalRequests, type Held, type Look, type OutsideAsk } from './external'
 import { endTree, listProcesses } from './process-tree'
 import type { Backend, Detected, TaskHandle } from './types'
 
-export const RUNNER_NAMES: Record<RunnerKind, string> = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
+/** The agents Togle knows by name; an added agent is named by its backend. */
+export const RUNNER_NAMES: Readonly<Record<RunnerKind, string>> = KNOWN_AGENTS
 
 /** The names Togle gave tasks, kept between runs. */
 export interface TitleStore {
@@ -113,7 +114,7 @@ export class RunnerHub {
     const status = await Promise.all(
       this.options.backends.map(async (backend): Promise<RunnerStatus> => {
         const detected: Detected = await backend.detect().catch(() => ({ installed: false }))
-        return { runner: backend.runner, name: RUNNER_NAMES[backend.runner], installed: detected.installed, ...(detected.version ? { version: detected.version } : {}) }
+        return { runner: backend.runner, name: this.nameOf(backend.runner), installed: detected.installed, ...(detected.version ? { version: detected.version } : {}), ...(backend.runner in KNOWN_AGENTS ? {} : { added: true }) }
       })
     )
     this.found = { at: Date.now(), status }
@@ -125,7 +126,35 @@ export class RunnerHub {
     for (const info of await this.infos()) views.set(keyOf(info.runner, info.id), this.viewOfInfo(info))
     for (const owned of this.owned.values()) views.set(owned.key, this.viewOfOwned(owned, views.get(owned.key)))
     for (const key of this.outside.keys()) if (!this.owned.has(key)) views.set(key, this.viewOfOutside(key, views.get(key)))
-    return [...views.values()].sort(order)
+    return [...views.values()].map((view) => ({ ...view, agent: this.nameOf(view.runner) })).sort(order)
+  }
+
+  /** An agent's name as the person reads it. */
+  nameOf(runner: RunnerKind): string {
+    return this.options.backends.find((backend) => backend.runner === runner)?.name ?? KNOWN_AGENTS[runner] ?? runner
+  }
+
+  /** Whether Togle works with this agent. */
+  has(runner: RunnerKind): boolean {
+    return this.options.backends.some((backend) => backend.runner === runner)
+  }
+
+  /** An agent the person added: Togle works with it from now on. */
+  addBackend(backend: Backend): void {
+    if (this.disposed || this.has(backend.runner)) return
+    this.options.backends.push(backend)
+    this.found = null
+    this.fresh()
+  }
+
+  /** An agent the person removed: its program is closed; tasks of it that Togle runs end with it. */
+  async removeBackend(runner: RunnerKind): Promise<void> {
+    const at = this.options.backends.findIndex((backend) => backend.runner === runner)
+    if (at < 0) return
+    const [backend] = this.options.backends.splice(at, 1)
+    this.found = null
+    await backend.close().catch(() => undefined)
+    this.fresh()
   }
 
   async detail(key: string): Promise<TaskDetail> {
@@ -170,7 +199,7 @@ export class RunnerHub {
     const info = (await this.infos()).find((task) => keyOf(task.runner, task.id) === key)
     if (!info) throw new Error('That task is gone.')
     if (this.owned.has(key) || !info.pid) return this.open(key)
-    if (info.runner !== 'claude') throw new Error(`${RUNNER_NAMES[info.runner]} tasks cannot be taken over.`)
+    if (info.runner !== 'claude') throw new Error(`${this.nameOf(info.runner)} tasks cannot be taken over.`)
     const program = (await listProcesses()).find((proc) => proc.pid === info.pid)
     if (!program || !/claude/i.test(program.command)) throw new Error('That program is not Claude Code any more, so it was left alone.')
     await endTree(info.pid)
@@ -245,13 +274,13 @@ export class RunnerHub {
   attention(): TaskAttention[] {
     const mine = [...this.owned.values()].map((owned) => {
       const view = this.viewOfOwned(owned, undefined)
-      return { key: owned.key, runner: view.runner, title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line }
+      return { key: owned.key, runner: view.runner, agent: this.nameOf(view.runner), title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line }
     })
     // Sessions that run elsewhere and ask about a command: answered here as well.
     const elsewhere = this.outside.keys().filter((key) => !this.owned.has(key)).map((key) => {
       const known = this.cache?.infos.find((info) => keyOf(info.runner, info.id) === key)
       const view = this.viewOfOutside(key, known ? this.viewOfInfo(known) : undefined)
-      return { key, runner: view.runner, title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line }
+      return { key, runner: view.runner, agent: this.nameOf(view.runner), title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line }
     })
     return [...mine, ...elsewhere]
   }
@@ -300,7 +329,7 @@ export class RunnerHub {
 
   private backend(runner: RunnerKind): Backend {
     const found = this.options.backends.find((backend) => backend.runner === runner)
-    if (!found) throw new Error(`${RUNNER_NAMES[runner]} is not set up in this version of Togle.`)
+    if (!found) throw new Error(`${this.nameOf(runner)} is not set up in this version of Togle.`)
     return found
   }
 
@@ -346,7 +375,7 @@ export class RunnerHub {
   private async adopt(handle: TaskHandle): Promise<Owned> {
     // Claude Code tells a task's id with its first answer: wait for it, as the key is built from it.
     for (let waited = 0; !handle.id; waited += 50) {
-      if (handle.state === 'failed' || waited > 20_000) throw new Error(`${RUNNER_NAMES[handle.runner]} did not start the task.`)
+      if (handle.state === 'failed' || waited > 20_000) throw new Error(`${this.nameOf(handle.runner)} did not start the task.`)
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
     const key = keyOf(handle.runner, handle.id)
@@ -439,7 +468,7 @@ export class RunnerHub {
       key,
       runner: first.runner,
       id: first.sessionId,
-      title: this.titleOf(key, baseName(first.folder) ? `${RUNNER_NAMES[first.runner]} in ${baseName(first.folder)}` : `${RUNNER_NAMES[first.runner]} session`),
+      title: this.titleOf(key, baseName(first.folder) ? `${this.nameOf(first.runner)} in ${baseName(first.folder)}` : `${this.nameOf(first.runner)} session`),
       folder: first.folder,
       state: 'waiting',
       updatedAt: first.at,

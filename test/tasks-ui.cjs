@@ -511,8 +511,8 @@ async function checkAgentSettings(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.shell-settings', 'Settings')
   // The agents Togle found, as the design's Settings lists them.
-  await ui.wait("document.querySelectorAll('#settings-agents .setting').length===3")
-  assert.deepEqual(await texts(ui, '#settings-agents .setting .name'), ['Claude Code', 'Codex', 'Hermes'])
+  await ui.wait("document.querySelectorAll('#settings-agents .setting').length===4")
+  assert.deepEqual(await texts(ui, '#settings-agents .setting .name'), ['Claude Code', 'Codex', 'Hermes', 'Add an agent'])
   assert.deepEqual(await texts(ui, '#settings-agents .setting-value'), ['Found', 'Found', 'Not found'])
   // The task box's key is with the other key, as Task.
   assert.deepEqual(await texts(ui, '#settings-keys .shortcut-what'), ['Talk', 'Show', 'Task'])

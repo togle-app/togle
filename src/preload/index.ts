@@ -219,6 +219,8 @@ const api: TogleApi = {
   saveConversation: (agentId, conversation) => ipcRenderer.send('conversation:save', agentId, conversation),
 
   runnerStatus: () => ipcRenderer.invoke('runners:status'),
+  addCodingAgent: (name, command) => ipcRenderer.invoke('runners:add-agent', name, command),
+  removeCodingAgent: (id) => ipcRenderer.invoke('runners:remove-agent', id),
   runnerChanges: key => ipcRenderer.invoke('runners:changes', key),
   claudeHookStatus: () => ipcRenderer.invoke('claude-hook:status'),
   connectClaudeHook: () => ipcRenderer.invoke('claude-hook:connect'),

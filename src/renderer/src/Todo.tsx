@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { needsYou, type RunnerKind, type RunnerStatus, type TaskView, type ViewRequest } from '@shared/runner'
+import { KNOWN_AGENTS, needsYou, type RunnerKind, type RunnerStatus, type TaskView, type ViewRequest } from '@shared/runner'
 import { canAllowHere, shownPart } from '@shared/runner-command'
 import type { TodoItem, TodoList } from '@shared/todo'
 import type { CallOffer, TodoOffer } from '@shared/call-todo'
@@ -9,7 +9,8 @@ import { NewTask } from './Tasks'
 
 const api = window.togle
 
-const NAMES: Record<RunnerKind, string> = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
+/** A task's agent by name: the name it came with, else the one Togle knows it by. */
+const agentOf = (task: Pick<TaskView, 'runner' | 'agent'>): string => task.agent ?? KNOWN_AGENTS[task.runner] ?? task.runner
 // How often the tasks are asked for again: what runs in a terminal of its own sends no message when it changes.
 const REFRESH_MS = 4_000
 
@@ -19,7 +20,7 @@ const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split
 /** What the task an item was given to is doing, as a short chip. */
 function chipOf(task: TaskView | undefined): { text: string; tone: 'work' | 'wait' | 'done' | 'fail' | 'gone' } {
   if (!task) return { text: 'Task not found', tone: 'gone' }
-  const who = NAMES[task.runner]
+  const who = agentOf(task)
   switch (task.state) {
     case 'working':
       return { text: `${who} · working`, tone: 'work' }
@@ -261,7 +262,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
                   <span className="todo-grow">
                     <b>{task.title}</b>
                     <small>
-                      {NAMES[task.runner]} · {baseName(task.folder)} · {says}
+                      {agentOf(task)} · {baseName(task.folder)} · {says}
                     </small>
                     {detail && <code className={`todo-command ${request?.kind ?? ''}`}>{detail}</code>}
                     {request?.danger && (

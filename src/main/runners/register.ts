@@ -1,11 +1,26 @@
 // What the window can ask of the agents' tasks: each a message from the window to the hub, and one back when
 // something changed (the window then asks again for what it shows).
-import type { RunnerKind } from '@shared/runner'
+import { addedAgentProblem, agentIdOf, KNOWN_AGENTS, type AddedAgent, type RunnerKind } from '@shared/runner'
+import { AcpBackend, commandWords, whereIs } from './acp'
 import { ClaudeBackend } from './claude'
 import { CodexBackend } from './codex'
 import { HermesBackend } from './hermes'
 import { RunnerHub, type RecordStore, type TitleStore } from './hub'
 import type { Backend } from './types'
+
+/** An agent the person added: started by their command, its program found the way a terminal would find it. */
+export function addedBackend(agent: AddedAgent, version: string): AcpBackend {
+  return new AcpBackend({
+    runner: agent.id,
+    name: agent.name,
+    version,
+    command: async () => {
+      const [program, ...args] = commandWords(agent.command)
+      const found = program ? await whereIs(program) : null
+      return found ? [found, ...args] : null
+    }
+  })
+}
 
 export interface RunnerDeps {
   /** `ipcMain.handle`, without the event the window's message came with. */
@@ -22,9 +37,10 @@ export interface RunnerDeps {
   version: string
   /** The agents to work with: Codex, Claude Code and Hermes when left out. */
   backends?: Backend[]
+  /** The agents the person added (any that speaks ACP), and keeping a changed list. */
+  added?(): AddedAgent[]
+  saveAdded?(agents: AddedAgent[]): Promise<void>
 }
-
-const RUNNERS: readonly RunnerKind[] = ['codex', 'claude', 'hermes']
 
 function word(value: unknown, what: string): string {
   if (typeof value !== 'string' || !value) throw new Error(`${what} is missing.`)
@@ -33,7 +49,10 @@ function word(value: unknown, what: string): string {
 
 export function registerRunners(deps: RunnerDeps): RunnerHub {
   const hub = new RunnerHub({
-    backends: deps.backends ?? [new CodexBackend({ version: deps.version }), new ClaudeBackend(), new HermesBackend({ version: deps.version })],
+    backends: [
+      ...(deps.backends ?? [new CodexBackend({ version: deps.version }), new ClaudeBackend(), new HermesBackend({ version: deps.version })]),
+      ...(deps.added?.() ?? []).map((agent) => addedBackend(agent, deps.version))
+    ],
     changed: () => {
       deps.send('runners:changed', null)
       deps.changed?.()
@@ -49,7 +68,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   handle('runners:start', (request) => {
     const given = (request ?? {}) as Record<string, unknown>
     const runner = given.runner as RunnerKind
-    if (!RUNNERS.includes(runner)) throw new Error('Pick an agent.')
+    if (typeof runner !== 'string' || !hub.has(runner)) throw new Error('Pick an agent.')
     return hub.start({ runner, folder: word(given.folder, 'The folder'), prompt: word(given.prompt, 'The task'), title: typeof given.title === 'string' ? given.title : undefined })
   })
   handle('runners:open', (key) => hub.open(word(key, 'The task')))
@@ -61,5 +80,27 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   handle('runners:end-commands', (key) => hub.endCommands(word(key, 'The task')))
   handle('runners:close', (key) => hub.close(word(key, 'The task')))
   handle('runners:pick-folder', () => deps.pickFolder())
+  // Settings → Agents → Add an agent: any agent that speaks ACP, by its name and the command that starts it.
+  handle('runners:add-agent', async (name, command) => {
+    const problem = addedAgentProblem(name, command)
+    if (problem) throw new Error(problem)
+    const given = (name as string).trim()
+    if (Object.values(KNOWN_AGENTS).some((known) => known.toLowerCase() === given.toLowerCase())) throw new Error(`Togle finds ${given} by itself.`)
+    const added = deps.added?.() ?? []
+    const base = agentIdOf(given)
+    let id = base
+    for (let n = 2; hub.has(id) || added.some((agent) => agent.id === id); n++) id = `${base}-${n}`
+    const agent: AddedAgent = { id, name: given, command: (command as string).trim() }
+    await deps.saveAdded?.([...added, agent])
+    hub.addBackend(addedBackend(agent, deps.version))
+    return hub.status()
+  })
+  handle('runners:remove-agent', async (id) => {
+    const added = deps.added?.() ?? []
+    if (!added.some((agent) => agent.id === id)) throw new Error('Only an agent you added can be removed.')
+    await deps.saveAdded?.(added.filter((agent) => agent.id !== id))
+    await hub.removeBackend(id as string)
+    return hub.status()
+  })
   return hub
 }

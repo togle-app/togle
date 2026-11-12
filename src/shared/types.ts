@@ -822,6 +822,8 @@ export interface Settings {
   }
   /** The first minute (talk, sign in with the plan, what Togle found) was gone through, once. */
   firstMinute: { done: boolean }
+  /** Agents the person added in Settings: any that speaks ACP, by the command that starts it. */
+  addedAgents: import('./runner').AddedAgent[]
 }
 
 export interface AuthStatus {

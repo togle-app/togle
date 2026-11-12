@@ -31,7 +31,7 @@ export async function answerPermission(hub: Pick<RunnerHub, 'askOutside'>, body:
 const RUNNERS = ['claude', 'codex', 'hermes']
 
 /** A task asked for by the `togle` command: started in the folder it names, asking before every command. */
-export async function startTask(hub: Pick<RunnerHub, 'start'>, body: string): Promise<{ key: string; title: string; runner: string; folder: string }> {
+export async function startTask(hub: Pick<RunnerHub, 'start'> & Partial<Pick<RunnerHub, 'has'>>, body: string): Promise<{ key: string; title: string; runner: string; folder: string }> {
   let given: Record<string, unknown>
   try {
     given = (JSON.parse(body) ?? {}) as Record<string, unknown>
@@ -39,7 +39,8 @@ export async function startTask(hub: Pick<RunnerHub, 'start'>, body: string): Pr
     throw new Error('That is not a task.')
   }
   const { runner, folder, prompt, title } = given
-  if (typeof runner !== 'string' || !RUNNERS.includes(runner)) throw new Error('Pick an agent: claude, codex or hermes.')
+  // Claude Code, Codex, Hermes, or an agent added in Settings (its id starts with acp-).
+  if (typeof runner !== 'string' || !(hub.has ? hub.has(runner) : RUNNERS.includes(runner))) throw new Error('Pick an agent: claude, codex, hermes, or one added in Settings.')
   if (typeof folder !== 'string' || !path.isAbsolute(folder)) throw new Error('Name the folder in full.')
   if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('Say what the task is.')
   if (prompt.length > 20_000) throw new Error('That task is too long. Put it in a file and say where it is.')

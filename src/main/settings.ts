@@ -4,6 +4,7 @@ import { readJson, writeJson } from './storage'
 import { validateAIProfile } from '@shared/preferences'
 import { MICROPHONE_DEFAULTS } from '@shared/microphone'
 import { mergedVoiceAccount, type OldVoiceAccounts } from '@shared/speech'
+import { addedAgentsFrom } from '@shared/runner'
 
 const FILE = 'settings.json'
 
@@ -59,7 +60,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // Said once, before the first call is written down.
   meetings: { introSeen: false, confirmNames: true, notice: true, apps: {} },
   // The first minute: once, on a Togle that has never run.
-  firstMinute: { done: false }
+  firstMinute: { done: false },
+  // Agents added in Settings (Codex, Claude Code and Hermes are found by themselves).
+  addedAgents: []
 }
 
 let current: Settings = DEFAULT_SETTINGS
@@ -138,6 +141,8 @@ export async function loadSettings(): Promise<Settings> {
   // Togle gives no answer or advice during a call that the person did not ask for: suggestions that came by themselves
   // are gone, whatever an older version saved.
   current.assist = { ...current.assist, auto: false }
+  // Added agents, each checked: a hand-edited file cannot make Togle start something that is not one.
+  current.addedAgents = addedAgentsFrom(current.addedAgents)
   // The first minute is for a Togle that has never run: settings saved before it existed have been through setup.
   if (Object.keys(stored).length > 0 && stored.firstMinute === undefined) current.firstMinute = { done: true }
   // Voice typing's account was two settings: a speech account it shared with calls (which never used it), and its own

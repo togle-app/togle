@@ -227,22 +227,61 @@ function RememberedVoices({ settings, save }: { settings: Settings; save: (patch
   )
 }
 
-/** The coding agents Togle found on this computer. */
+/** The coding agents Togle found on this computer, and the ones the person added: any agent that speaks ACP. */
 function Agents() {
   const [found, setFound] = useState<RunnerStatus[] | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
   useEffect(() => {
     let current = true
     void api.runnerStatus().then((list) => { if (current) setFound(list) }, () => { if (current) setFound([]) })
     return () => { current = false }
   }, [])
+  const remove = async (agent: RunnerStatus): Promise<void> => {
+    setBusy(agent.runner); setError('')
+    try { setFound(await api.removeCodingAgent(agent.runner)) } catch (failure) { setError(errorText(failure)) } finally { setBusy('') }
+  }
   return (
     <Section id="settings-agents" title="Agents" note="Togle uses each agent's own sign-in, and never reads it.">
       {found === null ? <Row label={false} name="Looking…" /> : !found.length ? <Row label={false} name="No agent found" note="Install Claude Code, Codex or Hermes, and Togle finds it." /> : found.map((agent) => (
         <Row key={agent.runner} label={false} name={agent.name}>
-          <span className={`setting-value ${agent.installed ? 'found' : ''}`}>{agent.installed ? 'Found' : 'Not found'}</span>
+          <span className={`setting-value ${agent.installed ? 'found' : ''}`}>{agent.installed ? (agent.added ? 'Added' : 'Found') : 'Not found'}</span>
+          {agent.added && <button className="ghost small" aria-label={`Remove ${agent.name}`} disabled={!!busy} onClick={() => void remove(agent)}>{busy === agent.runner ? 'Removing…' : 'Remove'}</button>}
         </Row>
       ))}
+      {adding ? <AddAgent onAdded={(list) => { setFound(list); setAdding(false) }} onCancel={() => setAdding(false)} /> : (
+        <Row label={false} name="Add an agent" note="Any agent that speaks ACP, the open standard Hermes and others share.">
+          <button className="ghost small" onClick={() => { setError(''); setAdding(true) }}>Add</button>
+        </Row>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
     </Section>
+  )
+}
+
+/** The name an agent is shown by, and the command that starts it for ACP, as its own docs give it. */
+function AddAgent({ onAdded, onCancel }: { onAdded: (agents: RunnerStatus[]) => void; onCancel: () => void }) {
+  const [name, setName] = useState('')
+  const [command, setCommand] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  return (
+    <form className="setting-detail add-agent" aria-label="Add an agent" onSubmit={(event) => {
+      event.preventDefault()
+      setBusy(true); setError('')
+      void api.addCodingAgent(name, command).then(onAdded, (failure) => setError(errorText(failure))).finally(() => setBusy(false))
+    }}>
+      <Row stacked name="Name"><input aria-label="Agent name" required maxLength={40} autoFocus value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></Row>
+      <Row stacked name="Command" note="The command that starts it for ACP, as its own docs give it. Togle runs it on this computer, the way a terminal would.">
+        <input aria-label="Command" required maxLength={500} spellCheck={false} value={command} disabled={busy} onChange={(event) => setCommand(event.target.value)} />
+      </Row>
+      <div className="row">
+        <button className="primary" disabled={busy || !name.trim() || !command.trim()}>{busy ? 'Adding…' : 'Add'}</button>
+        <button type="button" className="ghost" disabled={busy} onClick={onCancel}>Cancel</button>
+      </div>
+      {error && <p className="error" role="alert">{error}</p>}
+    </form>
   )
 }
 

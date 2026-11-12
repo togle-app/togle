@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { changedFiles, needsYou, stepsLine, type ClaudeHookStatus, type LogEntry, type RunnerKind, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
+import { asksEveryTime, changedFiles, KNOWN_AGENTS, needsYou, stepsLine, type ClaudeHookStatus, type LogEntry, type RunnerKind, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
 import { Changes } from './Changes'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
@@ -7,7 +7,8 @@ import { Markdown } from './Markdown'
 
 const api = window.togle
 
-const NAMES: Record<RunnerKind, string> = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
+/** A task's agent by name: the name it came with, else the one Togle knows it by. */
+const agentOf = (task: Pick<TaskView, 'runner' | 'agent'>): string => task.agent ?? KNOWN_AGENTS[task.runner] ?? task.runner
 const STATE_WORDS: Record<TaskView['state'], string> = { working: 'Working', waiting: 'Waiting for you', idle: 'Done', stopped: 'Stopped', failed: 'Stopped by an error' }
 // How often the list is asked for again: what runs in a terminal of its own sends no message when it changes.
 const REFRESH_MS = 4_000
@@ -310,7 +311,7 @@ function TaskRow({ task, now, selected, onSelect }: { task: TaskView; now: numbe
       <span className="task-copy">
         <strong>{task.title}</strong>
         <span>
-          {NAMES[task.runner]} · {where} · {detail}
+          {agentOf(task)} · {where} · {detail}
         </span>
       </span>
       {dangerous && <span className="task-danger">Dangerous</span>}
@@ -368,7 +369,7 @@ export function NewTask({ installed, folders, prompt: given = '', heading = 'New
         <span>Task</span>
         <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} placeholder="Say what it should do" aria-label="Task" autoFocus />
       </label>
-      <p className="hint">{runner === 'hermes' ? 'Hermes asks before a command only when its own settings are set to.' : 'Every command and every change asks you first.'}</p>
+      <p className="hint">{asksEveryTime(runner) ? 'Every command and every change asks you first.' : `${installed.find((s) => s.runner === runner)?.name ?? 'It'} asks before a command only when its own settings say so.`}</p>
       <div className="row">
         <button className="primary" disabled={busy || !folder.trim() || !prompt.trim()}>
           {busy ? 'Starting…' : 'Start'}
@@ -425,7 +426,7 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
         <div className="task-title">
           <h2 title={task.title}>{task.title}</h2>
           <p>
-            {NAMES[task.runner]} · <span title={task.folder}>{task.folder ? baseName(task.folder) : 'No folder'}</span> · <span className="task-state" data-state={task.state}>{STATE_WORDS[task.state]}</span>
+            {agentOf(task)} · <span title={task.folder}>{task.folder ? baseName(task.folder) : 'No folder'}</span> · <span className="task-state" data-state={task.state}>{STATE_WORDS[task.state]}</span>
             {task.updatedAt && !running ? ` · ${ago(task.updatedAt, now)}` : ''}
             {changed > 0 && ` · ${changed} ${changed === 1 ? 'file' : 'files'} changed`}
             {task.folder && (
@@ -462,7 +463,7 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
           {task.pid ? (
             confirmTakeOver ? (
               <>
-                <span>This ends the {NAMES[task.runner]} running in its terminal. The conversation is kept and goes on here.</span>
+                <span>This ends the {agentOf(task)} running in its terminal. The conversation is kept and goes on here.</span>
                 <span className="row">
                   <button className="primary small" onClick={onTakeOver}>
                     End it and take over

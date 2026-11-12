@@ -1,9 +1,10 @@
 // The `togle` command: starts a task from a terminal, and lists the tasks, through the running Togle. It asks over the
-// local channel, so a task started this way shows in Togle's Tasks and asks before every command like any other.
+// local channel, so a task started this way shows in Togle's Agents and asks before every command like any other.
 // Plain Node: it loads nothing of Electron, and starts as fast as Node does.
 import path from 'node:path'
 import { askChannel, ChannelRefused, ChannelUnavailable } from '../channel/client'
 import { channelAddress, defaultDataFolder, readSecret } from '../channel/paths'
+import { asksEveryTime } from '@shared/runner'
 
 export interface CliIo {
   cwd: string
@@ -17,8 +18,9 @@ export interface CliIo {
 const AGENTS = ['claude', 'codex', 'hermes'] as const
 const NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes' }
 
-export const USAGE = `togle run [--agent claude|codex|hermes] [--folder <folder>] [--title <name>] <what to do>
-    Starts a task in the running Togle. It asks before every command and every change.
+export const USAGE = `togle run [--agent claude|codex|hermes|acp-…] [--folder <folder>] [--title <name>] <what to do>
+    Starts a task in the running Togle. Claude Code and Codex ask before every command and every change;
+    Hermes and an agent added in Settings (by its id there, acp-…) ask as their own settings say.
     The folder is the current one when left out, and the agent is Claude Code. Piped text is the task when none is given.
 togle tasks
     Lists the tasks Togle can see, the ones waiting for you first.
@@ -55,7 +57,7 @@ export function parseRun(args: string[], cwd: string): RunArgs {
     else if (flag[1] === 'folder') folder = value
     else title = value
   }
-  if (!(AGENTS as readonly string[]).includes(agent)) throw new Error('Pick an agent: claude, codex or hermes.')
+  if (!(AGENTS as readonly string[]).includes(agent) && !/^acp-[a-z0-9-]{1,40}$/.test(agent)) throw new Error('Pick an agent: claude, codex, hermes, or one added in Settings (acp-…).')
   return { agent, folder: path.resolve(cwd, folder), ...(title ? { title } : {}), prompt: words.join(' ').trim() }
 }
 
@@ -103,7 +105,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     const result = JSON.parse(answer.result) as unknown
     if (command === 'run') {
       const started = result as { title: string; runner: string; folder: string }
-      io.out(`Started in Togle: ${started.title} (${NAMES[started.runner] ?? started.runner}, ${started.folder}). It asks before every command. Answer in Togle's Tasks.\n`)
+      io.out(`Started in Togle: ${started.title} (${NAMES[started.runner] ?? started.runner}, ${started.folder}). ${asksEveryTime(started.runner) ? 'It asks before every command.' : 'It asks as its own settings say.'} Answer it in Togle, under Agents.\n`)
     } else {
       const tasks = result as { title: string; runner: string; folder: string; state: string; line: string }[]
       if (!tasks.length) io.out('No tasks.\n')

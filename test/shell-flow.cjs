@@ -560,6 +560,22 @@ async function checkSettings(T, agent) {
   assert.equal(await ui.evaluate(mention + '.checked'), true)
   await ui.evaluate(mention + '.click()')
   await ui.wait('window.togleUITest.settings().microphone.suggestions===false')
+
+  // Agents: one that speaks ACP is added by its name and its command, and removed again.
+  await ui.evaluate("document.querySelector('#settings-agents').scrollIntoView({ block: 'center' })")
+  assert.ok((await texts(ui, '#settings-agents .setting > .name')).includes('Add an agent'))
+  await ui.click('#settings-agents button', 'Add')
+  await ui.wait("!!document.querySelector('form.add-agent')")
+  await ui.fill('form.add-agent input[aria-label="Agent name"]', 'Gemini CLI')
+  await ui.fill('form.add-agent input[aria-label=Command]', 'gemini --acp')
+  await ui.capture('settings-add-agent')
+  await ui.click('form.add-agent button', 'Add')
+  await ui.wait("[...document.querySelectorAll('#settings-agents .setting > .name')].some(name=>name.textContent==='Gemini CLI')")
+  assert.deepEqual(await ui.calls('addCodingAgent'), [['Gemini CLI', 'gemini --acp']])
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('#settings-agents .setting')].find(row=>row.querySelector('.name').textContent==='Gemini CLI').querySelector('.setting-value').textContent"), 'Added')
+  await ui.click('#settings-agents button', 'Remove Gemini CLI')
+  await ui.wait("![...document.querySelectorAll('#settings-agents .setting > .name')].some(name=>name.textContent==='Gemini CLI')")
+  assert.deepEqual(await ui.calls('removeCodingAgent'), [['acp-gemini-cli']])
   for (const width of [640, 420]) {
     ui.window.setSize(width, 800)
     await ui.paint()
