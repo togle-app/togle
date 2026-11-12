@@ -8,7 +8,7 @@ import electron from './electron.mjs'
 import { workDir } from './helpers.mjs'
 const directory = workDir('confirm-names')
 globalThis.__dirname = import.meta.dirname
-const { addressedNames, confirmVoices, namesToConfirm, ConfirmSound, VoiceTracker } = await import('./.build/togle.mjs')
+const { addressedNames, confirmVoices, namesToConfirm, pruneConfirm, ConfirmSound, VoiceTracker } = await import('./.build/togle.mjs')
 
 const known = new Set(['marta', 'dario', 'ivan'])
 const line = (id, speaker, voiceId, text, at, end, name, by) => ({ id, speaker, voiceId, text, at, end, ...(name ? { voiceName: name, voiceNamedBy: by } : {}) })
@@ -74,6 +74,23 @@ test('a remembered voice is asked to be confirmed, and the clip shown with what 
   const [without] = confirmVoices(transcript, known)
   assert.equal(without.clip, undefined)
   assert.equal(without.said, 'A longer thing said much later in the call.', 'with no clip, the longest line shows')
+})
+
+test('a voice merged into another is no longer asked about, and when none is left it closes', () => {
+  const confirm = { until: 10_000, voices: [{ id: 'a', seconds: 5 }, { id: 'b', seconds: 5, answered: 'Marta' }, { id: 'c', seconds: 5 }] }
+  const line = voiceId => ({ id: voiceId, speaker: 'them', voiceId, text: 'x', at: 0, end: 1 })
+  const kept = pruneConfirm(confirm, [line('a'), line('b'), line('c')], 5000)
+  assert.deepEqual(kept.voices.map(voice => voice.id), ['a', 'b', 'c'])
+  assert.equal(kept.closed, undefined, 'two are still to answer')
+  const merged = pruneConfirm(confirm, [line('a'), line('b')], 5000)
+  assert.deepEqual(merged.voices.map(voice => voice.id), ['a', 'b'], 'c was merged into another voice')
+  assert.equal(merged.closed, undefined)
+  const done = pruneConfirm(confirm, [line('b')], 5000)
+  assert.deepEqual(done.voices.map(voice => voice.id), ['b'])
+  assert.equal(done.closed, 5000, 'the one left was answered')
+  assert.equal(pruneConfirm(confirm, [], 5000).closed, 5000, 'none left')
+  assert.equal(pruneConfirm({ ...confirm, closed: 3000 }, [line('a')], 5000).closed, 3000, 'closed stays as it was')
+  assert.equal(namesToConfirm(confirm, 5000), 2)
 })
 
 test('only voices not yet answered count, and none once it is closed or the sound has expired', () => {
@@ -143,9 +160,21 @@ test('a kept clip comes back as it was heard and is gone when removed or swept',
   const file = path.join(directory, 'confirm-sound', 'call-one', 'v0.bin')
   assert.ok(fs.readFileSync(file, 'utf8').startsWith('ENC:'), 'kept encrypted')
   await store.save('call-two', [{ name: 'v0', pcm: wave }])
-  await store.sweep(id => id === 'call-two')
+  await store.sweep(id => id === 'call-two', 60_000)
+  assert.notEqual(await store.pcm('call-one', 'v0'), null, 'just written: the call may not say it keeps them yet')
+  await store.sweep(id => id === 'call-two', 0)
   assert.equal(await store.pcm('call-one', 'v0'), null, 'swept: not asked for any more')
   assert.notEqual(await store.pcm('call-two', 'v0'), null)
+  // Closing Togle deletes what is a day old, and nothing newer.
+  const old = new Date(Date.now() - 25 * 3600_000)
+  fs.utimesSync(path.join(directory, 'confirm-sound', 'call-two'), old, old)
+  await store.save('call-three', [{ name: 'v0', pcm: wave }])
+  store.sweepOld(24 * 3600_000)
+  assert.equal(await store.pcm('call-two', 'v0'), null, 'a day old: gone')
+  assert.notEqual(await store.pcm('call-three', 'v0'), null, 'new: kept')
+  await store.remove('call-three')
+  assert.equal(await store.pcm('call-three', 'v0'), null)
+  await store.save('call-two', [{ name: 'v0', pcm: wave }])
   await store.remove('call-two')
   assert.equal(await store.pcm('call-two', 'v0'), null)
   assert.equal(fs.existsSync(path.join(directory, 'confirm-sound', 'call-two')), false)

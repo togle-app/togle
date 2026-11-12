@@ -892,7 +892,7 @@ app.whenReady().then(async () => {
   await ready.click('.answer-evidence > summary', 'Reference notes')
   assert.equal(await ready.evaluate("document.querySelectorAll('.strip-row.tools > button').length"), 4, 'Suggest reply, Mark, and the two switches')
   // The line to tell the others stays until it is ticked, and says where the sound goes; Mark counts the moments marked.
-  assert.equal(await ready.evaluate("document.querySelector('.tell-others .tell-line')?.textContent"), "I'm writing this call down with Togle. The sound stays on my computer.")
+  assert.equal(await ready.evaluate("document.querySelector('.tell-others .tell-line')?.textContent"), "I'm writing this call down with Togle. The sound stays on my computer, and an AI writes the notes from the words.")
   await ready.click('.tell-others button', 'Copy the line')
   assert.equal(await ready.evaluate("document.querySelectorAll('.tell-others').length"), 1, 'copying the line is not telling the others')
   await ready.capture('tell-the-others')
@@ -1127,7 +1127,7 @@ app.whenReady().then(async () => {
   await firstCall.wait("!!document.querySelector('.first-call')")
   const said = await firstCall.evaluate("document.querySelector('.first-call').textContent")
   assert.match(said, /rules for writing down a call differ by place/)
-  assert.match(said, /The words of the call go to your Claude account/)
+  assert.match(said, /The words of the call go to the AI you set up/)
   assert.match(said, /The sound stays on this computer\./)
   await firstCall.capture('first-call-notice')
   await firstCall.click('.first-call button', 'Got it')

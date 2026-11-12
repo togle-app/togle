@@ -6,7 +6,7 @@ import type { Settings, TranscriptEntry } from './types'
  */
 export function tellOthersLine(transcription: Pick<Settings['transcription'], 'me' | 'them'>): string {
   const here = transcription.me === 'local' && transcription.them === 'local'
-  return `I'm writing this call down with Togle. ${here ? 'The sound stays on my computer.' : 'The sound is sent to a speech service to turn it into text.'}`
+  return `I'm writing this call down with Togle. ${here ? 'The sound stays on my computer' : 'The sound is sent to a speech service to turn it into text'}, and an AI writes the notes from the words.`
 }
 
 /** A prompt to check group mode, never a claim to count voices from text. */

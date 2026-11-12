@@ -86,6 +86,9 @@ export class CallDetector {
   private seen = new Map<CallApp, number>()
   private announced = new Set<CallApp>()
   private first = true
+  // Not looking for a while (a call was written down, or the notice was off): when it looks again, what is on the
+  // microphone is a call that was already going, not a new one.
+  private resumed = false
   private busy = false
 
   constructor(private options: Options) {}
@@ -104,16 +107,22 @@ export class CallDetector {
   /** One look. Exposed so a test can drive it. */
   async poll(): Promise<void> {
     if (this.busy) return
-    if (!this.options.active()) { this.seen.clear(); this.first = true; return }
+    if (!this.options.active()) { this.seen.clear(); this.resumed = true; return }
     this.busy = true
     try {
       const now = (this.options.now ?? Date.now)()
       const found = callAppsIn(parseMicrophoneUse(await this.options.read()))
       const here = new Set(found.map(item => item.app))
-      for (const app of [...this.seen.keys()]) {
+      for (const app of new Set([...this.seen.keys(), ...this.announced])) {
         if (here.has(app)) continue
         this.seen.delete(app)
         if (this.announced.delete(app)) this.options.onEnd?.(app)
+      }
+      if (this.resumed) {
+        for (const { app } of found) this.announced.add(app)
+        this.resumed = false
+        this.first = false
+        return
       }
       for (const { app, since } of found) {
         const looks = (this.seen.get(app) ?? 0) + 1

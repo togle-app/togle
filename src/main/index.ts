@@ -91,7 +91,7 @@ import { SubscriptionAccounts, accountChoice, defaultAccountId } from './auth/ac
 import { CallFile } from './call-file'
 import { CallSessions, callForAgent, exportCall, legacySession, sessionSummary } from './call-sessions'
 import { ConfirmSound } from './confirm-sound'
-import { confirmVoices, namesToConfirm, type CallConfirm } from '@shared/confirm-names'
+import { confirmVoices, namesToConfirm, pruneConfirm, type CallConfirm } from '@shared/confirm-names'
 import { myTodoItems, type CallOffer, type TodoOffer } from '@shared/call-todo'
 import { FIRST_NAMES } from './names'
 import { CallLearning } from './call-learning'
@@ -854,7 +854,8 @@ async function prepareConfirm(id: string | undefined): Promise<void> {
     if (!record || record.status === 'live' || !record.transcript.length) return
     const files: { name: string; pcm: Float32Array }[] = []
     const kept = new Map<string, { name: string; at: number; end: number }>()
-    for (const [voice, clip] of clips) {
+    // Turned off during the call: the clips taken before are dropped, and the names are still asked about from the text.
+    for (const [voice, clip] of getSettings().meetings.confirmNames ? clips : []) {
       if (files.length >= 20 || !record.transcript.some(line => line.voiceId === voice)) continue
       const name = 'v' + files.length
       files.push({ name, pcm: clip.pcm }); kept.set(voice, { name, at: clip.at, end: clip.end })
@@ -864,7 +865,11 @@ async function prepareConfirm(id: string | undefined): Promise<void> {
     await confirmSound.save(id, files.filter(file => asked.some(voice => voice.clip === file.name)))
     const confirm: CallConfirm = { until: Date.now() + CONFIRM_KEEP_MS, voices: asked }
     await callSessions.update(id, saved => ({ ...saved, confirm }))
-  } catch (error) { console.warn('[confirm names]', (error as Error).message) }
+  } catch (error) {
+    console.warn('[confirm names]', (error as Error).message)
+    // A call deleted while its clips were being kept leaves nothing that points at them.
+    if (id) await confirmSound.remove(id).catch(() => undefined)
+  }
 }
 /** Removes the plain text copies of calls given to an agent, once they are two weeks old. */
 async function sweepSharedCalls(): Promise<void> {
@@ -1552,22 +1557,32 @@ function registerIpc(): void {
     const before = await storedCallSession(callId)
     if (before.status === 'live') throw new Error('End the call first.')
     if (!before.confirm || before.confirm.closed || !before.confirm.voices.some(voice => voice.id === voiceId)) throw new Error('This voice is not waiting to be confirmed.')
+    if (!before.transcript.some(line => line.voiceId === voiceId)) throw new Error('That speaker is no longer in this call.')
     const value = typeof name === 'string' ? name.replace(/[\r\n\[\]<>]/g, '').trim().slice(0, 60) : ''
+    // The call that just ended is still the current call: its own copy of the names is corrected too, or the next save
+    // of it (Start again, a change, reopening Togle) would bring the old names back.
+    if (callId === currentSession?.id) {
+      try { if (value) copilot.renameVoice(voiceId, value); else copilot.dropVoiceName(voiceId) } catch { throw new Error('That speaker is no longer in this call.') }
+      await callFile.flush()
+    }
     const saved = await callSessions.update(callId, record => {
       const current = record.confirm
       if (!current || current.closed) return record
-      const answered = current.voices.map(voice => voice.id === voiceId ? { ...voice, answered: value } : voice)
-      const done = answered.every(voice => voice.answered !== undefined)
       const transcript = record.transcript.map(line => line.voiceId !== voiceId ? line
         : value ? { ...line, voiceName: value, voiceNamedBy: 'user' as const, voiceIdentityId: line.voiceName === value ? line.voiceIdentityId : undefined }
         // Not them: the guess is taken off its lines.
         : line.voiceNamedBy === 'user' ? line : { ...line, voiceName: undefined, voiceNamedBy: undefined, voiceIdentityId: undefined })
-      return { ...record, transcript, confirm: { ...current, voices: answered, closed: done ? Date.now() : undefined } }
+      const confirm = pruneConfirm({ ...current, voices: current.voices.map(voice => voice.id === voiceId ? { ...voice, answered: value } : voice) }, transcript, Date.now())
+      return { ...record, transcript, confirm }
     })
     if (saved.confirm?.closed) {
       await confirmSound.remove(callId)
-      // The notes are corrected with the confirmed names: written again, unless the person edited them.
-      void meetingNotes.generate(callId, undefined, undefined, true).catch(error => console.warn('[meeting notes]', (error as Error).message))
+      // The notes are corrected with the confirmed names: written again, unless the person edited them, turned automatic
+      // notes off, keeps no calls, or a call is being written down.
+      const settings = getSettings()
+      if (settings.assist.autoNotes !== false && settings.assist.rememberCalls !== false && !copilot.isListening) {
+        void meetingNotes.generate(callId, undefined, undefined, true).catch(error => console.warn('[meeting notes]', (error as Error).message))
+      }
     }
     return saved
   })
@@ -1581,13 +1596,19 @@ function registerIpc(): void {
     if (typeof from !== 'string' || typeof into !== 'string') throw new Error('Choose two speakers.')
     const record = await storedCallSession(callId)
     mergeSpeakers(record.transcript, from, into)
+    let merged: CallSession | undefined
     if (callId === currentSession?.id) {
       const name = copilot.mergeVoices(from, into); await voices.merge(from, into, name); await callFile.flush()
       const stored = await storedCallSession(callId)
       // If history was turned off mid-call, flushing updates only the recovery file.
-      if (!stored.transcript.some(line => line.voiceId === from)) return stored
+      if (!stored.transcript.some(line => line.voiceId === from)) merged = stored
     }
-    return callSessions.update(callId, saved => ({ ...saved, transcript: mergeSpeakers(saved.transcript, from, into) }))
+    merged ??= await callSessions.update(callId, saved => ({ ...saved, transcript: mergeSpeakers(saved.transcript, from, into) }))
+    // A voice merged into another is no longer asked about after the call, and when none is left its sound is deleted.
+    if (!merged.confirm || merged.confirm.closed) return merged
+    const asked = await callSessions.update(callId, saved => saved.confirm ? { ...saved, confirm: pruneConfirm(saved.confirm, saved.transcript, Date.now()) } : saved)
+    if (asked.confirm?.closed) await confirmSound.remove(callId)
+    return asked
   })
   ipcMain.on('call:brief', (_e, text: string) => copilot.setBrief(String(text ?? '')))
   ipcMain.on('call:group', (_e, group: boolean) => copilot.setGroup(!!group))
@@ -1625,7 +1646,11 @@ function registerIpc(): void {
       const notes = (call.endedAt ?? call.startedAt) >= midnight && call.minutes?.state === 'ready' && !!call.summary
       if (!toConfirm && !notes) continue
       calls.push({ id: call.id, title: call.title, startedAt: call.startedAt, notes, toConfirm })
-      if (notes) for (const text of myTodoItems(call.summary, names)) items.push({ callId: call.id, title: call.title, text })
+      // The list holds only the start of the notes: the to-dos are read from the whole.
+      if (notes) {
+        const whole = await callSessions.get(call.id).catch(() => null)
+        for (const text of myTodoItems(whole?.summary ?? call.summary, names)) items.push({ callId: call.id, title: call.title, startedAt: call.startedAt, text })
+      }
     }
     return { calls: calls.slice(0, 6), items: items.slice(0, 12) }
   })
@@ -1638,7 +1663,8 @@ function registerIpc(): void {
     const folder = path.join(app.getPath('userData'), SHARED_CALLS)
     await fs.mkdir(folder, { recursive: true })
     const file = path.join(folder, record.id + '.md')
-    await fs.writeFile(file, callForAgent(record), 'utf8')
+    // Only the person can read it: it holds what other people said.
+    await fs.writeFile(file, callForAgent(record), { encoding: 'utf8', mode: 0o600 })
     const title = Array.from(record.title).filter(letter => letter.charCodeAt(0) >= 32).join('').trim().slice(0, 140)
     taskBox.show({ title: title || 'A call', path: file })
   })
@@ -2216,7 +2242,7 @@ if (hookAt !== -1) {
     // The sound kept to confirm names is deleted once answered or expired; checked now and every hour.
     void sweepConfirmSound()
     void sweepSharedCalls()
-    setInterval(() => void sweepConfirmSound(), 3600_000).unref()
+    setInterval(() => { void sweepConfirmSound(); void sweepSharedCalls() }, 3600_000).unref()
     callDetector.start()
     setInterval(refreshCallStrip, 1000).unref()
     setupMediaAccess()
@@ -2318,6 +2344,8 @@ if (hookAt !== -1) {
     callDetector.stop()
     callNotice.close()
     callStrip.close()
+    // The sound kept to confirm names of a call a day old goes now, whether or not Togle runs again soon.
+    confirmSound.sweepOld(CONFIRM_KEEP_MS)
     todo?.dispose()
     void hookChannel?.close()
     microphoneLink.stop()

@@ -114,6 +114,16 @@ export function confirmVoices(transcript: TranscriptEntry[], known: ReadonlySet<
   return voices.slice(0, MAX_VOICES)
 }
 
+/**
+ * What is still to ask once the call's voices changed: one merged into another is no longer a voice of its own, and
+ * when no voice is left to answer, it is closed (and its sound is no longer needed).
+ */
+export function pruneConfirm(confirm: CallConfirm, transcript: TranscriptEntry[], now: number): CallConfirm {
+  const present = new Set(transcript.map(line => line.voiceId))
+  const voices = confirm.voices.filter(voice => present.has(voice.id))
+  return { ...confirm, voices, closed: confirm.closed ?? (voices.every(voice => voice.answered !== undefined) ? now : undefined) }
+}
+
 /** How many voices the person still has to answer, while the sound is kept. */
 export function namesToConfirm(confirm: CallConfirm | undefined, now: number): number {
   if (!confirm || confirm.closed || confirm.until <= now) return 0

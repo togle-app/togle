@@ -38,6 +38,16 @@ test('only items under a to-do heading count, and the next heading ends them', (
   assert.deepEqual(myTodoItems('', []), [])
 })
 
+test('a name with the colon inside the bold, and items grouped under a name, are read too', () => {
+  assert.deepEqual(myTodoItems('## To do\n- **You:** send the API timeline\n- **Ivan:** check the logs\n', []), ['send the API timeline'])
+  const grouped = '## To do\n\n### You\n- send the API timeline: v2 by Friday\n- call Dario\n\n### Ivan\n- check the logs\n\n## Decided\n- You: not a to-do\n'
+  assert.deepEqual(myTodoItems(grouped, []), ['send the API timeline: v2 by Friday', 'call Dario'], 'under a sub-heading with their name, the whole line is the task')
+  const bold = '## To do\n**Ivan**\n- check the logs\n**You**\n- book the review\n- Marta: not mine, said by name\n'
+  assert.deepEqual(myTodoItems(bold, []), ['book the review'], 'under their name in bold, a line for another name is not theirs')
+  assert.deepEqual(myTodoItems('## To do\n**Ivan:**\n- check the logs\n', []), [], 'someone else\'s name in bold')
+  assert.deepEqual(myTodoItems('## Notes\n### You\n- not under a to-do heading\n', []), [])
+})
+
 test('an item said twice is offered once, a long one is cut, and there are never many', () => {
   assert.deepEqual(myTodoItems('## To do\n- You: Call Dario\n- You: call dario [3:00]\n', []), ['Call Dario'])
   const long = 'x'.repeat(300)

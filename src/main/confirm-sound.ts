@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { promises as fs } from 'node:fs'
+import { promises as fs, readdirSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { readSecret, writeSecret } from './storage'
 
@@ -48,9 +48,30 @@ export class ConfirmSound {
     await writeSecret(`${FOLDER}/${callId}`, null)
   }
 
-  /** Deletes the clips of every call `keep` does not say to keep: ones that were answered, expired, or deleted. */
-  async sweep(keep: (callId: string) => boolean): Promise<void> {
-    const kept = await fs.readdir(path.join(app.getPath('userData'), FOLDER)).catch(() => [] as string[])
-    for (const id of kept) if (!safeId(id) || !keep(id)) await writeSecret(`${FOLDER}/${id}`, null).catch(() => undefined)
+  /**
+   * Deletes the clips of every call `keep` does not say to keep: ones that were answered, expired, or deleted. Clips
+   * written within `grace` are left: the call's record may not say it keeps them yet.
+   */
+  async sweep(keep: (callId: string) => boolean, grace = 10 * 60_000): Promise<void> {
+    const root = path.join(app.getPath('userData'), FOLDER)
+    for (const id of await fs.readdir(root).catch(() => [] as string[])) {
+      if (safeId(id) && keep(id)) continue
+      const stat = await fs.stat(path.join(root, id)).catch(() => null)
+      if (safeId(id) && stat && Date.now() - stat.mtimeMs < grace) continue
+      await writeSecret(`${FOLDER}/${id}`, null).catch(() => undefined)
+    }
+  }
+
+  /** Deletes at once, without waiting, the clips older than this: Togle is closing, and a day-old call's must not stay. */
+  sweepOld(maxAgeMs: number): void {
+    const root = path.join(app.getPath('userData'), FOLDER)
+    try {
+      for (const id of readdirSync(root)) {
+        const folder = path.join(root, id)
+        if (Date.now() - statSync(folder).mtimeMs > maxAgeMs) rmSync(folder, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+      }
+    } catch {
+      // Nothing kept, or a folder another program holds: the hourly sweep tries again.
+    }
   }
 }

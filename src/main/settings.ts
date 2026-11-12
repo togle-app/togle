@@ -129,6 +129,10 @@ export async function loadSettings(): Promise<Settings> {
   kept = Object.fromEntries(KEPT_FOR_OTHERS.filter(key => raw[key] !== undefined).map(key => [key, raw[key]]))
   if (stored.ai) try { stored.ai = validateAIProfile(stored.ai) } catch { stored.ai = null }
   current = merge(DEFAULT_SETTINGS, stored)
+  // Other people's voices were remembered by default, and are not any more. Settings saved before that (they have no
+  // `meetings` part) say yes because it was the default, not because the person chose it: it starts off, and the
+  // person can turn it on in Settings → Speakers. Voices already remembered stay until they are forgotten there.
+  if (Object.keys(stored).length > 0 && stored.meetings === undefined && current.assist.rememberVoices) current.assist = { ...current.assist, rememberVoices: false }
   // Voice typing's account was two settings: a speech account it shared with calls (which never used it), and its own
   // over it. One now, voice typing's: the account it used.
   const speechAccount = (stored.transcription as { accountId?: unknown } | undefined)?.accountId

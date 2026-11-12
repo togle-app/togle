@@ -184,11 +184,16 @@ test('settings take only what they have, each of its kind, and hubs survive a re
   assert.deepEqual((await loadSettings()).hubs, ['acme/agents'])
 })
 
-test('a new Togle remembers no one’s voice until the person turns it on, and a choice already made is kept', async () => {
+test('a new Togle remembers no one’s voice until the person turns it on; settings saved when it was on by default start off', async () => {
   const file = path.join(work, 'settings.json')
   rmSync(file, { force: true })
   assert.equal((await loadSettings()).assist.rememberVoices, false)
-  writeFileSync(file, JSON.stringify({ assist: { rememberVoices: true } }))
+  // Saved before the default changed: they say yes because it was the default (they have no meetings part).
+  writeFileSync(file, JSON.stringify({ activeAgentId: 'work', assist: { auto: true, rememberVoices: true } }))
+  assert.equal((await loadSettings()).assist.rememberVoices, false, 'the old default is not a choice')
+  assert.equal((await loadSettings()).assist.auto, true, 'nothing else changes')
+  // Saved since: a yes is the person's.
+  writeFileSync(file, JSON.stringify({ activeAgentId: 'work', assist: { rememberVoices: true }, meetings: { introSeen: true, confirmNames: true } }))
   assert.equal((await loadSettings()).assist.rememberVoices, true, 'someone who turned it on keeps it')
   rmSync(file, { force: true })
   await loadSettings()

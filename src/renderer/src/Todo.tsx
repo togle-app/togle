@@ -315,7 +315,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
               <div key={offer.callId + offer.text} className="todo-row" role="listitem">
                 <span className="todo-grow">
                   <b>{offer.text}</b>
-                  <small>From {meetingTitle({ title: offer.title, startedAt: 0 })}</small>
+                  <small>From {meetingTitle({ title: offer.title, startedAt: offer.startedAt })}</small>
                 </span>
                 <button className="small" onClick={() => void change(() => api.addTodo(offer.text)).then(() => refreshOffers())}>
                   Add

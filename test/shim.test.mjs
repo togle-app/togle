@@ -18,6 +18,7 @@ test('the togle command ships beside the app and runs the program inside it as p
   assert.match(unix, /app\.asar\/out\/main\/cli\.js/)
   assert.match(read('electron-builder.yml'), /from: resources\/bin\r?\n\s+to: bin/, 'copied into the app, beside its resources')
   assert.match(read('.gitattributes'), /resources\/bin\/togle text eol=lf/, 'and kept with Unix line endings on every system')
+  assert.match(read('scripts/after-pack.cjs'), /chmodSync\(command, 0o755\)/, 'and made executable on Mac and Linux')
 })
 
 test('from a copy of the source the command is the package\'s bin', () => {

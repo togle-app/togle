@@ -894,6 +894,16 @@ export class Copilot {
     this.onChange?.()
   }
 
+  /** Not them: a guessed or recognized name is taken off the voice's lines. A name the person gave stays. */
+  dropVoiceName(id: string): void {
+    id = this.canonicalVoice(id)
+    if (this.voiceNames.get(id)?.by === 'user') return
+    this.voiceNames.delete(id)
+    const changed = this.transcript.filter(line => line.voiceId === id && line.voiceNamedBy !== 'user')
+    for (const line of changed) { line.voiceName = undefined; line.voiceNamedBy = undefined; line.voiceIdentityId = undefined }
+    if (changed.length) { this.send('transcript:updated', changed); this.onChange?.() }
+  }
+
   rememberVoice(id: string, person: RememberedVoice): void {
     id = this.canonicalVoice(id)
     const known = this.voiceNames.get(id)

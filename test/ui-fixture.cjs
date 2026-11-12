@@ -474,7 +474,7 @@ module.exports = function install(fixture) {
   api.meetingOffers = async () => fixture.scenario === 'tasks'
     ? clone({
       calls: [{ id: 'sprint', title: 'Sprint review', startedAt: Date.now() - 3600_000, notes: true, toConfirm: 2 }, { id: 'planning', title: 'Planning sync', startedAt: Date.now() - 7200_000, notes: true, toConfirm: 0 }],
-      items: [{ callId: 'planning', title: 'Planning sync', text: 'Send the API timeline to Dario.' }, { callId: 'planning', title: 'Planning sync', text: 'Book the staging review.' }]
+      items: [{ callId: 'planning', title: 'Planning sync', startedAt: Date.now() - 7200_000, text: 'Send the API timeline to Dario.' }, { callId: 'planning', title: 'Planning sync', startedAt: Date.now() - 7200_000, text: 'Book the staging review.' }]
     })
     : { calls: [], items: [] }
   api.linkTodo = async (ref, task) => { record('linkTodo', [ref, task]); const item = todoAt(ref); if (task) item.task = task; else delete item.task; return clone(todoView()) }

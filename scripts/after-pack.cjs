@@ -8,6 +8,9 @@ exports.default = async context => {
   const resources = target.platform === 'darwin'
     ? path.join(context.appOutDir, context.packager.appInfo.productFilename + '.app/Contents/Resources')
     : path.join(context.appOutDir, 'resources')
+  // The togle command is a shell script on Mac and Linux: it must be able to run.
+  const command = path.join(resources, 'bin', 'togle')
+  if (target.platform !== 'win32' && fs.existsSync(command)) fs.chmodSync(command, 0o755)
   T.verifyPackage(resources, context.packager.projectDir, target)
   if (target.platform === 'darwin') require('./verify-macos.cjs').verifyMacPackage(path.dirname(path.dirname(resources)), target.arch)
   fs.writeFileSync(path.join(resources, 'build-target.json'), JSON.stringify(target, null, 2) + '\n')

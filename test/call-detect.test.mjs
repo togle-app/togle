@@ -79,13 +79,45 @@ test('nothing is said while a call is being written down or when the person turn
   await off.subject.poll(); await off.subject.poll(); await off.subject.poll()
   assert.deepEqual(off.calls.started, [], 'not active')
   active = true
+  await off.subject.poll(); await off.subject.poll(); await off.subject.poll()
+  assert.deepEqual(off.calls.started, [], 'a call that was already going when it looks again is not a new call')
+  off.state.listing = header + stopped('C:#Program Files#Zoom#bin#Zoom.exe')
   await off.subject.poll()
-  assert.deepEqual(off.calls.started, [], 'the looks start again when it is active again')
-  await off.subject.poll()
-  assert.deepEqual(off.calls.started, ['zoom'])
+  off.state.listing = zoom
+  await off.subject.poll(); await off.subject.poll()
+  assert.deepEqual(off.calls.started, ['zoom'], 'the next call is')
   const gone = detector(zoom, () => false)
   await gone.subject.poll(); await gone.subject.poll(); await gone.subject.poll()
   assert.deepEqual(gone.calls.started, [], 'a leftover of a program that crashed is not a call')
+})
+
+test('a call written down is not announced again when it ends, and the next call in the same app is', async () => {
+  const zoom = header + using('C:#Program Files#Zoom#bin#Zoom.exe')
+  let writing = false
+  const { subject, calls, state } = detector(zoom, () => true, () => !writing)
+  await subject.poll(); await subject.poll()
+  assert.deepEqual(calls.started, ['zoom'])
+  // The call is written down; the person hangs up in Zoom first, and then presses Stop.
+  writing = true
+  await subject.poll()
+  state.listing = header + stopped('C:#Program Files#Zoom#bin#Zoom.exe')
+  await subject.poll()
+  writing = false
+  await subject.poll()
+  assert.deepEqual(calls.ended, ['zoom'], 'the end of the call is seen')
+  state.listing = zoom
+  await subject.poll(); await subject.poll()
+  assert.deepEqual(calls.started, ['zoom', 'zoom'], 'the second call is noticed')
+  // Stop pressed while the app still holds the microphone: that call is not announced as a new one.
+  const held = detector(zoom, () => true, () => !held.writing)
+  held.writing = false
+  await held.subject.poll(); await held.subject.poll()
+  assert.deepEqual(held.calls.started, ['zoom'])
+  held.writing = true
+  await held.subject.poll()
+  held.writing = false
+  await held.subject.poll(); await held.subject.poll(); await held.subject.poll()
+  assert.deepEqual(held.calls.started, ['zoom'], 'pressing Stop does not start another call while the app is still in the call')
 })
 
 test('a program that has used the microphone for hours before Togle looked is a leftover, one that began just now is a call', async () => {
