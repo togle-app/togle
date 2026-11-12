@@ -15,6 +15,8 @@ interface DictationOptions {
   microphone?(): string
   now?: () => number
   completed?(receipt: DictationReceipt, speech: DictationEngine): void
+  /** Puts words on the clipboard, for a box Togle cannot type into. */
+  copy?(text: string): void
 }
 interface Job {
   id: string; target: DictationTarget; controller: AbortController; queue: Promise<void>; parts: string[]
@@ -151,6 +153,17 @@ export class Dictation {
     if (this.job !== job || job.controller.signal.aborted) return
     job.speech.dispose?.()
     this.set({ text, lastText: text })
+    // A window Togle cannot type into (one that runs as administrator): the words are copied, to paste there.
+    if (!job.target.token && job.target.copy && this.options.copy) {
+      try {
+        this.options.copy(text)
+        this.set({ phase: 'done', outcome: 'copied', message: `Copied: that window runs as administrator, so Togle can't type there. Press ${process.platform === 'darwin' ? '⌘V' : 'Ctrl+V'} to paste.` })
+        this.receipt(job, raw, text, 'ready')
+        return
+      } catch {
+        // The clipboard would not take it: the words wait on the bar to be copied by hand.
+      }
+    }
     if (!job.target.token) { this.set({ phase: 'ready', message: job.target.reason || 'Text is ready. Copy it into your text box.' }); this.receipt(job, raw, text, 'ready'); return }
     this.set({ phase: 'inserting', message: 'Entering text…' })
     // Once insertion begins it is a single commit, never retried by a late callback or another shortcut.

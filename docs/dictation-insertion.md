@@ -6,7 +6,9 @@ Hold F9, speak, and release to enter text into the focused editable field. Recog
 
 Editable fields receive one native paste, so the editor's own paste/input handlers process Unicode, paragraphs and tabs. Togle eagerly snapshots the existing clipboard's payload formats before publishing temporary text, then restores them after delivery. A clipboard sequence and an ownership marker prevent restoration from overwriting a newer copy. Temporary text opts out of Windows clipboard history and cloud clipboard upload. If the existing clipboard cannot be preserved, ordinary single-line text can use Unicode keyboard delivery without modifying it.
 
-Terminal destinations retain Unicode keyboard delivery. Line breaks, tabs and other control characters are rejected before sending any terminal input. Togle never presses Enter to submit a message or execute a command.
+Terminal destinations retain Unicode keyboard delivery. Everything goes in as one line: each line break or tab becomes a space before any terminal input is sent, and other control characters are rejected. Togle never presses Enter to submit a message or execute a command.
+
+A window that runs as administrator, while Togle does not, takes no typing or paste from Togle: Windows drops that input without saying so. Togle checks the process behind the front window first (its token, or whether its token can be read at all), and for such a window it puts the words on the clipboard and the bar says to press Ctrl+V. The check was tried against Togle's own process, Explorer and two SYSTEM processes, not yet against an administrator window of the person's own.
 
 Before delivery, Togle checks the original window, focused control and the exposed content/selection. It checks again after clipboard preparation. Changed destinations retain the recognized text for recovery. Delivery is a single attempt: an uncertain or rejected paste never triggers another paste or a second typing attempt.
 
@@ -20,4 +22,4 @@ The 18 insertion cases cover empty and existing notes, selection replacement, mi
 
 `npm run test:dictation:native` additionally checks standard inputs, passwords/read-only fields, focus changes, the production bar, physical F9 release, and an isolated console input fixture that cannot execute commands.
 
-These tests verify the insertion path and editor behavior, not every application or extension. The current Obsidian installation still needs a user check because desktop inspection is unavailable in this session. Elevated applications and controls that deliberately reject paste or expose no reliable editable surface can still require recovery.
+These tests verify the insertion path and editor behavior, not every application or extension. The current Obsidian installation still needs a user check because desktop inspection is unavailable in this session. Controls that deliberately reject paste or expose no reliable editable surface can still require recovery.

@@ -50,7 +50,8 @@ export interface DictationState {
   outcome?: 'inserted' | 'copied'
 }
 /** The box dictation noted: its token for typing into it, its name, and (on Windows) its window, to put it in front again. */
-export interface DictationTarget { token?: string; label: string; reason?: string; windowHandle?: string }
+/** The box a dictation goes into. `copy`: Togle cannot type into it (a window that runs as administrator), so the words are copied. */
+export interface DictationTarget { token?: string; label: string; reason?: string; windowHandle?: string; copy?: boolean }
 export interface DictationInsertion { inserted: boolean; message?: string }
 
 export interface DictationWord { id: string; word: string; heardAs: string }

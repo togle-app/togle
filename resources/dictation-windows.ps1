@@ -21,6 +21,27 @@ public static class TogleTextInput {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint process);
   public static string WindowClass(IntPtr hwnd) { var text=new StringBuilder(256); GetClassName(hwnd,text,256); return text.ToString(); }
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint id);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+  [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+  [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetTokenInformation(IntPtr token, int kind, out int value, int size, out int written);
+  // 1 when the process runs as administrator, 0 when it does not, -1 when its token cannot be read.
+  static int Elevation(IntPtr process) {
+    IntPtr token;
+    if(!OpenProcessToken(process,0x0008,out token)) return -1;
+    try { int value,written; return GetTokenInformation(token,20,out value,4,out written) ? (value!=0 ? 1 : 0) : -1; }
+    finally { CloseHandle(token); }
+  }
+  // Whether a window's process runs above this one: as administrator while this one does not, or one whose token this
+  // one may not even read. Windows drops the keys and the pastes sent to such a window, and says nothing.
+  public static bool AboveThis(uint processId) {
+    if(Elevation(GetCurrentProcess())==1) return false;
+    IntPtr process=OpenProcess(0x1000,false,processId);
+    if(process==IntPtr.Zero) return Marshal.GetLastWin32Error()==5;
+    try { return Elevation(process)!=0; }
+    finally { CloseHandle(process); }
+  }
   [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
   [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, int message, ref int start, ref int end);
   [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] input, int size);
@@ -106,6 +127,13 @@ function Read-FocusedText {
   if ($front -eq '0') { throw 'Choose a text box on your desktop first.' }
   $frontHandle = [TogleTextInput]::GetForegroundWindow()
   $frontClass = [TogleTextInput]::WindowClass($frontHandle)
+  # Windows drops what Togle types into a window that runs as administrator: the words are copied for it instead.
+  [uint32]$frontProcess = 0
+  [void][TogleTextInput]::GetWindowThreadProcessId($frontHandle, [ref]$frontProcess)
+  if ([TogleTextInput]::AboveThis($frontProcess)) {
+    $name = try { (Get-Process -Id $frontProcess -ErrorAction Stop).ProcessName } catch { 'That window' }
+    return @{ front=$front; identity="admin:$front"; kind='admin'; label=$name }
+  }
   $terminal = $frontClass -match '^(ConsoleWindowClass|CASCADIA_HOSTING_WINDOW_CLASS)$'
   $element = [System.Windows.Automation.AutomationElement]::FocusedElement
   if ($null -eq $element -and $terminal) {
@@ -182,9 +210,13 @@ while ($null -ne ($line = [Console]::ReadLine())) {
       $targets.Clear()
       try {
         $target = Read-FocusedText
-        $token = [guid]::NewGuid().ToString()
-        $targets[$token] = $target
-        $result = @{ token=$token; label=$target.label; windowHandle=$target.front }
+        if ($target.kind -eq 'admin') {
+          $result = @{ label=$target.label; reason='That window runs as administrator, so Togle can''t type into it. Your words will be copied for you to paste.'; copy=$true }
+        } else {
+          $token = [guid]::NewGuid().ToString()
+          $targets[$token] = $target
+          $result = @{ token=$token; label=$target.label; windowHandle=$target.front }
+        }
       } catch { $result = @{ label='Your text box'; reason=$_.Exception.Message } }
     } elseif ($request.command -eq 'insert') {
       $token = [string]$request.token; $text = [string]$request.text
@@ -192,7 +224,9 @@ while ($null -ne ($line = [Console]::ReadLine())) {
       if (!$target -or $text.Length -eq 0 -or $text.Length -gt 16000) { throw 'This dictation is no longer ready to insert.' }
       # Line breaks and tabs travel as text in a paste, never as shortcut/Enter keys.
       if ($text -match '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]') { throw 'This text contains unsupported control characters.' }
-      if ($target.terminal -and $text -match '[\x00-\x1f\x7f]') { throw 'Line breaks cannot be entered automatically into a terminal.' }
+      # In a terminal a line break would press Enter: everything goes in as one line, a space where each break was.
+      if ($target.terminal) { $text = (($text -replace '\s*[\r\n]+\s*', ' ') -replace "`t", ' ').Trim() }
+      if ($target.terminal -and ($text.Length -eq 0 -or $text -match '[\x00-\x1f\x7f]')) { throw 'This text cannot be typed into a terminal.' }
       # A shortcut can still be held while recognition finishes. Never type with Ctrl/Alt/Win down.
       for ($attempt=0; $attempt -lt 40 -and [TogleTextInput]::ModifiersDown(); $attempt++) { Start-Sleep -Milliseconds 20 }
       if ([TogleTextInput]::ModifiersDown()) { throw 'Release the shortcut keys. Your text is ready to copy.' }

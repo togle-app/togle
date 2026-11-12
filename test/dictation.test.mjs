@@ -46,6 +46,32 @@ test('F8 Show: with nothing said the picture still goes in; a picture that canno
     job.dispose()
   }
 })
+test('a window that runs as administrator takes no typing: the words are copied, and the bar says to paste', async () => {
+  const admin = { label: 'powershell', reason: 'That window runs as administrator, so Togle can\'t type into it. Your words will be copied for you to paste.', copy: true }
+  const run = async (copy) => {
+    const inserted = []
+    const job = new Dictation({
+      target: { capture: async () => admin, insert: async (token, text) => { inserted.push(text); return { inserted: true } } },
+      speech: () => ({ ready: async () => {}, transcribe: async () => 'restart the print service', polish: async text => text + '.' }),
+      changed: () => {}, inCall: () => false, ...(copy ? { copy } : {})
+    })
+    await job.start(false); const id = job.status().id
+    job.push(id, audio(1)); job.stop(); await job.finish(id)
+    const status = job.status()
+    job.dispose()
+    return { status, inserted }
+  }
+  const copied = []
+  const { status, inserted } = await run(text => copied.push(text))
+  assert.deepEqual(copied, ['restart the print service.'])
+  assert.deepEqual(inserted, [], 'nothing is typed')
+  assert.deepEqual([status.phase, status.outcome], ['done', 'copied'])
+  assert.match(status.message, /^Copied: that window runs as administrator, so Togle can't type there\. Press (Ctrl\+V|⌘V) to paste\.$/)
+  // The clipboard would not take it: the words wait on the bar, to copy by hand.
+  const refused = await run(() => { throw new Error('The clipboard is busy.') })
+  assert.deepEqual([refused.status.phase, refused.status.text, refused.status.message], ['ready', 'restart the print service.', admin.reason])
+})
+
 test('with no AI to clean them up, the words go in as heard and the bar says why', async () => {
   const inserted = [], job = new Dictation({
     target: { capture: async () => ({ token: 'box', label: 'Fixture chat' }), insert: async (token, text) => { inserted.push(text); return { inserted: true } } },

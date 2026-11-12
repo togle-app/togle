@@ -158,6 +158,8 @@ app.whenReady().then(async () => {
   bar.close(); bar = undefined; dictation.dispose(); dictation = undefined
   }
   const consolePrefix = path.resolve(__dirname, '.work', 'dictation-console-' + process.pid)
+  // Windows reuses process ids: what an earlier console of the same id wrote would pass for this one's.
+  for (const end of ['.window', '.text']) fs.rmSync(consolePrefix + end, { force: true })
   execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(__dirname, 'compile-dictation-console.ps1'), '-Source', path.join(__dirname, 'dictation-console.cs'), '-Destination', consolePrefix + '.exe'], { windowsHide: true })
   // A real console is necessary to exercise console keyboard delivery. It has no command interpreter.
   const consoleTitle = 'Togle isolated console ' + process.pid
@@ -192,13 +194,16 @@ app.whenReady().then(async () => {
   assert.equal((await target.insert(terminal.token, consoleText)).inserted, true)
   for (let n = 0; n < 100 && (!fs.existsSync(consolePrefix + '.text') || fs.readFileSync(consolePrefix + '.text', 'utf8') !== consoleBefore + consoleText); n++) await sleep(30)
   assert.equal(fs.readFileSync(consolePrefix + '.text', 'utf8'), consoleBefore + consoleText, 'Console receives Unicode text, with no Enter or control characters')
-  const blockedTerminal = await target.capture()
-  assert.ok(blockedTerminal.token)
-  assert.equal((await target.insert(blockedTerminal.token, 'Do not execute\nanything')).inserted, false)
-  assert.equal(fs.readFileSync(consolePrefix + '.text', 'utf8'), consoleBefore + consoleText, 'Multiline dictation must send no input to a terminal')
+  // In a terminal everything goes in as one line: a space where each break was, and never an Enter.
+  const twoLines = await target.capture()
+  assert.ok(twoLines.token)
+  assert.equal((await target.insert(twoLines.token, 'Two lines\r\n  become one')).inserted, true)
+  const oneLine = consoleBefore + consoleText + 'Two lines become one'
+  for (let n = 0; n < 100 && fs.readFileSync(consolePrefix + '.text', 'utf8') !== oneLine; n++) await sleep(30)
+  assert.equal(fs.readFileSync(consolePrefix + '.text', 'utf8'), oneLine, 'Dictation in two lines reaches a terminal as one line, with no Enter')
   closeWindow(consoleHandle, 16, 0, 0); consoleHandle = undefined
   consoleProcess.kill(); consoleProcess = undefined
-  console.log('PASS actual console input: text delivered, no Enter, no command execution')
+  console.log('PASS actual console input: text delivered, two lines as one, no Enter, no command execution')
   console.log('DICTATION NATIVE PASS')
 }).then(() => { if (consoleHandle) closeWindow(consoleHandle, 16, 0, 0); consoleProcess?.kill(); target?.stop(); bar?.close(); dictation?.dispose(); press?.reset(); globalShortcut.unregisterAll(); win?.destroy(); app.exit(0) }, error => { console.error(error); if (consoleHandle) closeWindow(consoleHandle, 16, 0, 0); consoleProcess?.kill(); target?.stop(); bar?.close(); dictation?.dispose(); press?.reset(); globalShortcut.unregisterAll(); win?.destroy(); app.exit(1) })
 app.on('will-quit', () => target?.stop())

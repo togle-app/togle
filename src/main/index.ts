@@ -441,6 +441,8 @@ const dictation = new Dictation({
   inCall: () => ongoing.isListening,
   microphone: () => voiceSettings().dictation.microphoneId,
   completed: (receipt, speech) => { void dictationHistoryRuns.get(speech)?.then(ticket => dictationHistory.record(ticket, receipt)).catch(error => console.warn('[dictation history]', (error as Error).message)) },
+  // A window that runs as administrator takes no typing from Togle: the words go on the clipboard for the person to paste.
+  copy: text => { if (!app.isPackaged && process.env.TOGLE_TEST_CLIPBOARD) testClipboard = text; else clipboard.writeText(text) },
   changed: state => { send('dictation:state', state); dictationWindow.update(state); dictationEscape(); refreshTray() }
 })
 function openWindow(): void {

@@ -18,7 +18,7 @@ Hold **F9** and talk. Togle types the words where your cursor is: a chat, an edi
 
 - Your AI plan cleans the words up: punctuation, filler words, and a correction you make halfway ("send it to Dario, no wait, to Marta"). Without a plan, or with cleanup off, Togle types the words as heard. Cleanup has eight seconds; if it fails, you get the words as heard.
 - Speech is heard on this computer. Your plan gets words, never sound.
-- Togle never presses Enter or sends anything. In a terminal it types everything as one line. When it can't type into the box (a password field, a window that changed, an app run as administrator), the voice bar keeps your words for **Copy text**, and the tray menu lists your last ten dictations under **Copy a recent dictation**, in memory only.
+- Togle never presses Enter or sends anything. In a terminal it types everything as one line. Windows lets no app type into a window that runs as administrator, so there Togle copies your words for you to paste. When it can't type into the box for another reason (a password field, a window that changed), the voice bar keeps your words for **Copy text**, and the tray menu lists your last ten dictations under **Copy a recent dictation**, in memory only.
 - **Names and terms** (Settings): tell Togle once how a name or a word is spelled, or a phrase that stands for a longer text ("my work email"), and it writes it that way from then on.
 - The voice bar is a small strip that shows when the microphone listens. While idle, the microphone is off. You can hide the idle bar from the tray menu.
 

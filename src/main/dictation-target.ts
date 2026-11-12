@@ -59,7 +59,7 @@ export class DictationTargetBridge {
   }
   async insert(token: string, text: string): Promise<DictationInsertion> {
     // Paragraphs/tabs are literal paste text in editors, never synthesized keys.
-    // The native bridge separately rejects them in terminals.
+    // In a terminal the native bridge types them as spaces: everything goes in as one line, and nothing presses Enter.
     if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text)) return { inserted: false, message: 'This text contains unsupported control characters.' }
     try { return await this.request('insert', { token, text }) }
     catch (error) { return { inserted: false, message: (error as Error).message || 'The text box did not respond. Your words are still available.' } }
