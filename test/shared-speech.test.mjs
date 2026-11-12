@@ -6,14 +6,8 @@ import electron from './electron.mjs'
 import { workDir } from './helpers.mjs'
 
 const work = workDir('shared-speech')
-const { cleanTranscript, mergedVoiceAccount, migrateVoicePreferences, automaticVoiceAccount, voiceAccountId, effectiveSettings, validatePreferences, voiceAccountsToMigrate, voiceAccountsMigrated, needsReply, getSettings, updateSettings, loadSettings } = await import('./.build/togle.mjs')
+const { cleanTranscript, mergedVoiceAccount, migrateVoicePreferences, automaticVoiceAccount, voiceAccountId, effectiveSettings, validatePreferences, voiceAccountsToMigrate, voiceAccountsMigrated, getSettings, updateSettings, loadSettings } = await import('./.build/togle.mjs')
 const second = new Float32Array(16000)
-
-test('live assistance recognizes Chinese and Arabic question marks', () => {
-  assert.equal(needsReply('这个功能什么时候发布？'), true)
-  assert.equal(needsReply('متى يبدأ الاجتماع؟'), true)
-  assert.equal(needsReply('Kada počinje sastanak?'), true)
-})
 
 test('mixed-language transcripts keep Chinese, Arabic, Japanese, Cyrillic and accented words even with an English hint', () => {
   for (const language of ['en', 'auto', 'de']) for (const dictation of [false, true]) {

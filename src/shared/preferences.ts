@@ -26,7 +26,7 @@ export function effectiveAI(settings: Settings, agent?: Agent, providerForSource
   const provider = providerForSource?.(sourceId) || (sourceId.startsWith('claude') || sourceId === 'api:claude' ? 'claude' : sourceId.startsWith('api:') ? 'compat' : settings.provider)
   const lanes = provider === 'chatgpt' ? settings.chatgpt.lanes : provider === 'claude' ? sourceId === 'api:claude' ? settings.claude.lanes : settings.claude.subscriptionLanes : undefined
   const fallback: LaneModel = { model: settings.compat.model, effort: 'low' }
-  return { tasks: Object.fromEntries(AI_TASKS.map(({ lane }) => [lane, { ...(lanes?.[lane] || fallback), sourceId, ...(lane === 'deep' && agent?.model ? { model: agent.model } : {}) }])) as AIProfile['tasks'] }
+  return { tasks: Object.fromEntries(AI_TASKS.map(({ lane }) => [lane, { ...(lanes?.[lane] || fallback), sourceId }])) as AIProfile['tasks'] }
 }
 
 export function effectiveSettings(settings: Settings, agent?: Agent): Settings {

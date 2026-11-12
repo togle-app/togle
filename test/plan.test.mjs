@@ -11,7 +11,7 @@ const { AgentStore, ChatGPTProvider, Copilot, PlanWatch, getSettings, readRefusa
 // Suggestions that come by themselves are off in Togle (the product design); the old call assistant's tests turn them on until its code goes.
 await (await import('./.build/togle.mjs')).updateSettings({ assist: { auto: true } })
 
-const store = new AgentStore(async () => 'digest')
+const store = new AgentStore()
 await store.load()
 
 // What the backend sent with a real answer (a plan with only a weekly limit; the second window comes as zeros).

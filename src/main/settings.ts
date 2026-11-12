@@ -182,11 +182,6 @@ export function savedBeforeSpeechChoice(): boolean {
   return fromBeforeSpeechChoice
 }
 
-/** The model and effort of each job for the provider in use (an API model of the other kind has one model for all). */
-export function activeLanes(provider = current.provider): Settings['chatgpt']['lanes'] {
-  return provider === 'claude' ? current.provider !== 'claude' || current.claude.auth === 'subscription' ? current.claude.subscriptionLanes : current.claude.lanes : current.chatgpt.lanes
-}
-
 /** Applies at once (the caller can act on getSettings() right away) and saves in the background. */
 export function updateSettings(patch: SettingsPatch): Promise<Settings> {
   current = merge(current, patch)

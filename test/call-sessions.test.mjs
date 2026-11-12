@@ -5,8 +5,8 @@ import { test } from 'node:test'
 import { workDir } from './helpers.mjs'
 
 const work = workDir('call-sessions')
-const { CallSessions, CallFile, AgentStore, legacySession, exportCall } = await import('./.build/togle.mjs')
-const agents = new AgentStore(async () => '')
+const { CallSessions, CallFile, AgentStore, exportCall } = await import('./.build/togle.mjs')
+const agents = new AgentStore()
 await agents.load()
 let order = 0
 const state = text => ({ transcript: text ? [{ id: 'line-' + ++order, speaker: 'them', text, at: 1000, end: 2000 }] : [], frames: [], notes: '', notesUntil: 0, answeredUntil: 0, callAnswers: [], brief: '', group: false })
@@ -117,14 +117,6 @@ test('a review interrupted by shutdown becomes retryable on the next start', asy
   const back = await new CallSessions().get('interrupted-review')
   assert.equal(back.learning.state, 'error')
   assert.match(back.learning.error, /interrupted/)
-})
-
-test('older summary-only calls remain inspectable without inventing transcript lines', () => {
-  const legacy = legacySession({ id: 'old', agentId: 'agent', at: 1000, endedAt: 2000, brief: 'Acme', with: ['Acme'], summary: 'Send the report.', about: [], asked: [{ question: 'When?', answer: 'Tuesday.' }] }, 'General')
-  assert.equal(legacy.transcript.length, 0)
-  assert.equal(legacy.summary, 'Send the report.')
-  assert.equal(legacy.suggestions[0].text, 'Tuesday.')
-  assert.equal(legacy.legacy.id, 'old')
 })
 
 test('active call recovery forwards a committed snapshot into the history repository', async () => {

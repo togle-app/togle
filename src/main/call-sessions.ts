@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { EventEmitter } from 'node:events'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { CallSearchHit, CallSession, CallSessionInfo, CallSessionSummary, PastCall } from '@shared/types'
+import type { CallSearchHit, CallSession, CallSessionInfo, CallSessionSummary } from '@shared/types'
 import { emptyLessons, lessonCount, lessonItems } from '@shared/learning'
 import { speakerLabel } from '@shared/meeting'
 import { speechTurns } from '@shared/speakers'
@@ -26,15 +26,6 @@ const fileFor = (id: string): string => {
 export function sessionSummary(session: CallSession): CallSessionSummary {
   const { transcript, suggestions, notes: _notes, personalNotes: _personal, callAnswers: _answers, learning, ...info } = session
   return { ...info, summary: info.summary.slice(0, 2000), lines: transcript.length, replies: suggestions.length, learningState: learning.state, pendingLessons: lessonCount(learning.pending), learned: learning.changes.length }
-}
-
-export function legacySession(call: PastCall, agentName: string): CallSession {
-  return {
-    version: 1, id: `legacy-${call.id}`, agentId: call.agentId, agentName, startedAt: call.at, endedAt: call.endedAt, status: 'ended', updatedAt: call.endedAt,
-    title: call.title || call.brief || call.with.join(', ') || 'Untitled call', titleSource: call.title ? 'generated' : undefined, frameSession: call.callId || '', brief: call.brief, group: false,
-    transcript: [], suggestions: call.asked.map((answer, index) => ({ id: `legacy-${index}`, kind: 'suggest', question: answer.question, text: answer.answer, at: call.at })),
-    summary: call.summary, notes: '', callAnswers: [], learning: { state: 'not-reviewed', pending: emptyLessons(), changes: [] }, legacy: { agentId: call.agentId, id: call.id }
-  }
 }
 
 /** Durable call records, independent of whether the learning model produced a summary. All writes serialize. */
@@ -263,6 +254,21 @@ export function callForAgent(session: CallSession): string {
     part('My notes', session.personalNotes),
     part('Transcript', said)
   ].filter(Boolean).join('\n\n') + '\n'
+}
+
+const DIACRITICS: Record<string, string> = { đ: 'd', ł: 'l', ø: 'o', ß: 'ss', æ: 'ae', œ: 'oe', þ: 'th' }
+/** The name of an exported call's file, from its title: lowercase letters, digits and single hyphens ("sprint-review"). */
+export function exportName(title: string): string {
+  const name = title
+    .toLowerCase()
+    .replace(/[đłøßæœþ]/g, (c) => DIACRITICS[c])
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/, '')
+  return name || 'call'
 }
 
 export function exportCall(session: CallSession): string {

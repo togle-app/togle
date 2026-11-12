@@ -134,7 +134,7 @@ test('explicit transcript merge keeps confirmed names, original timing and unrel
 })
 
 test('live merge corrects past words and queued and late labels without resurrecting a duplicate', async () => {
-  const store = new AgentStore(async () => ''); await store.load()
+  const store = new AgentStore(); await store.load()
   const { ongoing, events } = ongoingCall(OngoingCall)
   const now = Date.now()
   ongoing.add('them', 'My name is Dana.', now, now + 2000, 'a'); ongoing.identifyVoice('a', 'v:1')

@@ -5,17 +5,14 @@ import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 process.env.TOGLE_TEST_USER_DATA = path.join(import.meta.dirname, '.work', 'call-flags-' + process.pid)
 mkdirSync(process.env.TOGLE_TEST_USER_DATA, { recursive: true })
-const { AgentStore, CallSessions, OngoingCall, MeetingNotes, exportCall, intoCall, markedLineIds, meetingNoteChunks, tellOthersLine, toldOthersLine } = await import('./.build/togle.mjs')
+const { CallSessions, OngoingCall, MeetingNotes, exportCall, intoCall, markedLineIds, meetingNoteChunks, tellOthersLine, toldOthersLine } = await import('./.build/togle.mjs')
 const { ongoingCall } = await import('./helpers.mjs')
 
-const store = new AgentStore(async () => 'digest')
-await store.load()
 const line = (id, speaker, text, at, end = at + 2000) => ({ id, speaker, text, at, end })
 const state = (extra = {}) => ({ transcript: [], frames: [], notes: '', notesUntil: 0, answeredUntil: 0, callAnswers: [], ...extra })
 const flagsSent = events => events.filter(event => event.channel === 'call:flags').map(event => event.payload)
 
 test('telling the others and marking only count in a call, and the call keeps them', async () => {
-  const agent = await store.create('sales')
   const { ongoing, events } = ongoingCall(OngoingCall)
   ongoing.setToldOthers(true)
   assert.deepEqual(ongoing.mark(), [], 'nothing to mark before a call')
@@ -43,7 +40,6 @@ test('telling the others and marking only count in a call, and the call keeps th
 })
 
 test('a call picked up again keeps them, and a new call starts without them', async () => {
-  const agent = await store.create('sales')
   const { ongoing } = ongoingCall(OngoingCall)
   ongoing.restore(state({ toldOthers: 5000, marks: [6000, 'x', 7000, null] }))
   assert.equal(ongoing.callState().toldOthers, 5000)
@@ -58,7 +54,6 @@ test('a call picked up again keeps them, and a new call starts without them', as
 })
 
 test('there are never more marks than a person makes on purpose', async () => {
-  const agent = await store.create('sales')
   const { ongoing } = ongoingCall(OngoingCall)
   ongoing.setListening(true)
   for (let n = 0; n < 260; n++) ongoing.mark()

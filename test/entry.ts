@@ -1,59 +1,24 @@
 // The main-process modules the tests use, bundled into test/.build/togle.mjs.
-export { asksOnly, chunkText, extractText, factsFor, listFolder, matchApproved, SearchIndex, setCodePage, setReaderScript, skillsInPlay } from '../src/main/agents/knowledge'
-export { AgentStore } from '../src/main/agents/store'
-export { memoryForContext, memoryChars } from '../src/shared/memory'
+export { AgentStore } from '../src/main/agent-store'
 export { speechWords, withSpeechWord, correctSpeech, speechLesson, vocabularyTerms } from '../src/shared/speech-words'
 export { splitVoiceTurns, refineVoiceRegions } from '../src/main/stt/voice-audio'
-export { isWorkUpdate } from '../src/main/prompts'
 export { connectionSelection, connectionToolName, mayReadConnection, readTools, waitForConnections } from '../src/main/providers/claude-connections'
-export { findSessions, readSession, sessionForStudy, sessionHomes, sessionInfo, withoutSecrets } from '../src/main/agents/sessions'
-export { addExport, currentExports, exportAt, readChat, setChatExports } from '../src/main/agents/chat-exports'
-export { entryStream, zipEntries } from '../src/main/agents/zipfile'
-export { readFrontMatter, writeFrontMatter } from '../src/main/agents/frontmatter'
-export { scanTexts } from '../src/main/agents/guard'
-export { packAgent, packageTexts, readPackage, slug, unzipPackage, zipPackage } from '../src/main/agents/package'
-export { memoryAfter, skillAfter } from '../src/shared/memory'
-export { skillPurpose, sourceLabel } from '../src/shared/agent-learning'
 export { hotkeyProblem, keysPressed, sameKeys } from '../src/shared/hotkeys'
 export { ChatGPTAuth, forgetSigningKeys, verifyIdToken } from '../src/main/auth/chatgpt'
 export { CallFile } from '../src/main/call-file'
 export { OngoingCall, isEcho } from '../src/main/ongoing-call'
 export { hearing, switchedLanguage } from '../src/main/hearing'
 export { PlanWatch, readRefusal, readStatus, windowsFromHeaders } from '../src/main/plan'
-export {
-  addressedTo,
-  buildCallNotesPrompt,
-  buildDraftPrompt,
-  buildLearnPrompt,
-  buildLessonPrompt,
-  buildPrompt,
-  buildTidyPrompt,
-  buildTrainSystem,
-  isSmallTalk,
-  looksDeep,
-  needsReply,
-  parseCallRecord,
-  parseDraft,
-  parseLesson,
-  parseLessons,
-  parseTidy,
-  plainAnswer,
-  readFrameNote,
-  suggestionsOnCall,
-  talkFor,
-  talkText
-} from '../src/main/prompts'
 export { ChatGPTProvider } from '../src/main/providers/chatgpt'
 export { ClaudeProvider } from '../src/main/providers/claude'
 export { ClaudeCodeAuth, claudeSubscriptionEnv, claudeCodeExecutable } from '../src/main/auth/claude-code'
 export { ClaudeSubscriptionProvider } from '../src/main/providers/claude-subscription'
 export { CompatProvider } from '../src/main/providers/compat'
 export { getSettings, loadSettings, savedBeforeSpeechChoice, updateSettings, voiceAccountsMigrated, voiceAccountsToMigrate } from '../src/main/settings'
-export { reviewAfterCall, talkOf, trainHistory } from '../src/shared/chat'
-export { CallSessions, callForAgent, exportCall, intoCall, legacySession, sessionSummary, toldOthersLine } from '../src/main/call-sessions'
+export { CallSessions, callForAgent, exportCall, intoCall, sessionSummary, toldOthersLine } from '../src/main/call-sessions'
 export { CallTitles } from '../src/main/call-titles'
-export { cleanCallTitle, resolveCallTitle, titleFromNotes, titleFromReview, withGeneratedTitle } from '../src/shared/call-title'
-export { groupCue, introducedName, calendarMeetings, dueMeeting, meetingForCall, tellOthersLine } from '../src/shared/meeting'
+export { cleanCallTitle, resolveCallTitle, titleFromNotes, withGeneratedTitle } from '../src/shared/call-title'
+export { groupCue, introducedName, tellOthersLine } from '../src/shared/meeting'
 export { VoiceClusters, voiceSimilarity } from '../src/main/stt/voice-clusters'
 export { VoiceTracker, VOICE_MODEL, VOICE_SEGMENTATION_MODEL } from '../src/main/stt/voices'
 export { cleanVoiceAudio, normalizeVoice } from '../src/main/stt/voice-audio'
@@ -78,8 +43,7 @@ export { DictationTargetBridge } from '../src/main/dictation-target'
 export { externalUrl } from '../src/shared/links'
 export { richDocument, richPreview, richText } from '../src/shared/rich-text'
 export { cleanTranscript } from '../src/main/stt/whisper'
-export { emptyLessons, lessonItems, lessonCount, selectLessons } from '../src/shared/learning'
-export { AGENT_TEMPLATES } from '../src/main/agents/templates'
+export { emptyLessons, lessonItems, lessonCount } from '../src/shared/learning'
 export { LocalParakeet, PARAKEET_MODEL } from '../src/main/stt/parakeet'
 export { hearingStatus, keywordsOf, SpeechApi } from '../src/main/stt/speech-api'
 export { download, SpeechInstaller } from '../src/main/stt/install'
@@ -93,6 +57,7 @@ export { CodexBackend, findCodex } from '../src/main/runners/codex'
 export { JsonRpcPeer, RpcError } from '../src/main/runners/jsonrpc'
 export { descendantsOf, endCommandsMatching, endTree, listProcesses, matching, unwrapShell } from '../src/main/runners/process-tree'
 export { ClaudeBackend, findClaude } from '../src/main/runners/claude'
+export { claudeHomes, claudeSessions, withoutSecrets } from '../src/main/runners/claude-sessions'
 export { HookServer } from '../src/main/runners/claude-hooks'
 export { RunnerHub, RUNNER_NAMES } from '../src/main/runners/hub'
 export { registerRunners } from '../src/main/runners/register'

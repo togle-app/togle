@@ -1,62 +1,18 @@
-// Weird cases: replies a model dresses up in ways the prompts didn't ask for, an agent's file damaged on disk, and
-// the like. Each is something that happens, rarely, and mustn't break Togle or mislead.
+// Weird cases: an agent's file damaged on disk, settings edited by hand, and the like. Each is something that happens,
+// rarely, and mustn't break Togle or mislead.
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { test } from 'node:test'
 import { workDir } from './helpers.mjs'
 
 const work = workDir('weird')
-const { AgentStore, getSettings, loadSettings, parseDraft, parseLesson, savedBeforeSpeechChoice, updateSettings } =
+const { AgentStore, getSettings, loadSettings, savedBeforeSpeechChoice, updateSettings } =
   await import('./.build/togle.mjs')
-
-// ---- A draft, however the model writes it ----
-
-test('a draft reads through Markdown headings, numbered skills, code fences and a value on the next line', () => {
-  const draft = parseDraft(`Here's a setup for these calls:
-
-\`\`\`
-## NAME:
-Clinic front desk
-
-## FOR: Patient calls
-### INSTRUCTIONS:
-1. Book, move and cancel appointments.
-2. Read back the date and time.
-
-SKILL 1: Booking | They want an appointment
-- Ask what it's for first: treatments take longer.
-SKILL 2: Cancelling | They cancel
-- Offer the next free slot.
-WORDS:
-Invisalign
-\`\`\``)
-  assert.equal(draft.name, 'Clinic front desk')
-  assert.equal(draft.description, 'Patient calls')
-  assert.equal(draft.instructions, '1. Book, move and cancel appointments.\n2. Read back the date and time.')
-  assert.deepEqual(
-    draft.skills.map((s) => s.name),
-    ['Booking', 'Cancelling']
-  )
-  assert.equal(draft.vocabulary, 'Invisalign')
-  // The fence's closing line isn't a rule of the last skill.
-  assert.equal(draft.skills[1].how, '- Offer the next free slot.')
-})
-
-// ---- Whether a call was a lesson ----
-
-test('"LESSON: none", however it is said, is no lesson; a title that only starts like "no" is one', () => {
-  for (const said of ['LESSON: none', 'LESSON: None.', 'LESSON: none — this was a customer call', 'LESSON: none (a sales call)', 'LESSON: n/a', 'LESSON: no', '**LESSON:** _none_'])
-    assert.equal(parseLesson(said), undefined, said)
-  assert.equal(parseLesson('LESSON: No-code onboarding for partners'), 'No-code onboarding for partners')
-  assert.equal(parseLesson('LESSON: Nonprofit pricing, explained'), 'Nonprofit pricing, explained')
-})
-
-// ---- A picture of the screen that can't be read ----
 
 // ---- An agent's file, damaged ----
 
-test("an agent's file with fields missing loads with them empty; one that isn't an agent is skipped, not fatal", async () => {
+test("an agent's file with fields missing loads with them empty; one that isn't an agent is skipped, not fatal; what an earlier version kept in it stays", async () => {
   const dir = path.join(work, 'agents')
   mkdirSync(dir, { recursive: true })
   // Hand-edited: only a name and some memory.
@@ -68,7 +24,7 @@ test("an agent's file with fields missing loads with them empty; one that isn't 
   writeFileSync(path.join(dir, 'a4.json'), '{"id": "a4", "name": "Cut o')
   // No id: it takes its file's name.
   writeFileSync(path.join(dir, 'a5.json'), JSON.stringify({ name: 'No id', instructions: 'Help.' }))
-  const store = new AgentStore(async () => '')
+  const store = new AgentStore()
   await store.load()
   // (General is the agent an earlier test's store made in this folder.)
   const names = store
@@ -78,37 +34,20 @@ test("an agent's file with fields missing loads with them empty; one that isn't 
     .sort()
   assert.deepEqual(names, ['Edited by hand', 'No id'])
   const edited = store.list().find((a) => a.id === 'a1')
-  assert.deepEqual([edited.knowledge, edited.skills, edited.answers, edited.description, edited.instructions], [[], [], [], '', ''])
+  assert.equal(edited.vocabulary, '')
   assert.ok(edited.createdAt > 0 && edited.updatedAt > 0)
   assert.equal(store.list().find((a) => a.name === 'No id').id, 'a5')
-  // And it can be changed and saved as any agent.
-  const saved = await store.update('a1', { instructions: 'Be brief.' }, 'manual')
-  assert.equal(saved.instructions, 'Be brief.')
+  // And it can be changed and saved as any agent; what an earlier version kept in its file (its memory) stays there.
+  const saved = await store.update('a1', { vocabulary: 'Flatbooks, SAP' })
+  assert.equal(saved.vocabulary, 'Flatbooks, SAP')
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, 'a1.json'), 'utf8')).memory, ['A fact.'])
+  assert.equal(store.vocabularyFor(saved), 'Flatbooks, SAP.')
 })
 
-// ---- What the window sends, if it ever sent anything ----
-
-test("ids that are paths delete nothing: an agent, a document", async () => {
-  // Things outside Togle's folders that a path-like id would reach.
-  const outside = path.join(work, 'outside')
-  mkdirSync(path.join(outside, 'precious', 'sub'), { recursive: true })
-  writeFileSync(path.join(outside, 'precious', 'sub', 'keep.txt'), 'keep')
-  writeFileSync(path.join(outside, 'secret.txt'), 'keep')
-  writeFileSync(path.join(outside, 'model.bin'), 'keep')
-  const store = new AgentStore(async () => '')
-  await store.load()
-  const agent = await store.create('sales')
-  await store.remove('../../outside/precious')
-  await store.remove('..')
-  await store.removeDocument(agent.id, '../../../outside/secret')
-  assert.ok(existsSync(path.join(outside, 'precious', 'sub', 'keep.txt')), 'the folder is still there')
-  assert.ok(existsSync(path.join(outside, 'secret.txt')), 'the text file is still there')
-  assert.ok(existsSync(path.join(outside, 'model.bin')), 'the .bin file is still there')
-  assert.ok(store.list().some((a) => a.id === agent.id), 'and the agent too')
-  // An agent's file whose id is a path is left out, rather than written elsewhere.
+test("an agent's file whose id is a path takes its file's name, and one whose name can't be an id is left out", async () => {
   writeFileSync(path.join(work, 'agents', 'hostile.json'), JSON.stringify({ id: '../../outside/x', name: 'Hostile' }))
   writeFileSync(path.join(work, 'agents', 'bad name.json'), JSON.stringify({ name: 'Spaced' }))
-  const again = new AgentStore(async () => '')
+  const again = new AgentStore()
   await again.load()
   const names = again.list().map((a) => a.name)
   assert.ok(names.includes('Hostile') && !again.list().some((a) => a.id.includes('/')), 'the id came from its file name instead')

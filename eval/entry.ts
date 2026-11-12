@@ -1,10 +1,8 @@
 // The main-process modules the evaluations run, bundled into eval/.build/togle.cjs for Electron.
-export { AgentStore } from '../src/main/agents/store'
+export { AgentStore } from '../src/main/agent-store'
 export { MeetingNotes } from '../src/main/meeting-notes'
 export { CallTitles } from '../src/main/call-titles'
 export { CallSessions } from '../src/main/call-sessions'
-export { reviewText, talkOf, trainHistory, triedTurns } from '../src/shared/chat'
-export { buildPrompt, talkText } from '../src/main/prompts'
 export { OngoingCall, isEcho } from '../src/main/ongoing-call'
 export { hearing, signalToNoise } from '../src/main/hearing'
 export { PerfLog } from '../src/main/perf'

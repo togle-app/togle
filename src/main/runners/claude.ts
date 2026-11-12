@@ -14,7 +14,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import type { AgentQuestion, PendingRequest, TaskInfo, TaskState } from '@shared/runner'
-import { findSessions } from '../agents/sessions'
+import { claudeSessions } from './claude-sessions'
 import { HookServer, type HookTarget, type HookVerdict } from './claude-hooks'
 import { list, rec, text } from './jsonrpc'
 import { TaskBase } from './task-base'
@@ -106,9 +106,7 @@ async function liveSessions(command: string[]): Promise<LiveSession[]> {
 }
 
 async function storedSessions(): Promise<StoredSession[]> {
-  return (await findSessions('', 100))
-    .filter((session) => session.tool === 'claude-code')
-    .map((session) => ({ id: session.id, title: session.title, cwd: session.cwd ?? '', updatedAt: session.updatedAt }))
+  return (await claudeSessions(100)).map((session) => ({ id: session.id, title: session.title, cwd: session.cwd ?? '', updatedAt: session.updatedAt }))
 }
 
 // What a tool is, for the person reading a request.

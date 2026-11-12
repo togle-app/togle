@@ -98,16 +98,13 @@ test('a Claude account pinned before its sign-in is read (Togle reads it in the 
   assert.equal(requests.length, 2)
 })
 
-test('agent account overrides survive restart and are excluded from shared packages; study uses the owner', async () => {
-  const requests = [], store = new AgentStore(async (...args) => { requests.push(args); return 'Useful document summary.' }); await store.load()
-  const agent = await store.create('blank', { subscriptionAccountId: 'work-account-id' })
-  await store.addText(agent.id, 'Meeting plan.txt', 'This meeting discusses the rollout and its launch checklist. '.repeat(1200))
-  for (let n = 0; n < 100 && !requests.length; n++) await new Promise(resolve => setTimeout(resolve, 20))
-  assert.equal(requests.at(-1)?.[2], agent.id)
-  const packageFiles = await store.pack(agent.id, { memory: [], docs: [] })
-  assert.ok(!JSON.stringify(packageFiles).includes('work-account-id'))
-  const restored = new AgentStore(async () => ''); await restored.load()
+test("an agent's account choice survives a restart, and an empty one goes back to the general account", async () => {
+  const store = new AgentStore(); await store.load()
+  const agent = store.list()[0]
+  await store.update(agent.id, { subscriptionAccountId: 'work-account-id' })
+  const restored = new AgentStore(); await restored.load()
   assert.equal(restored.get(agent.id).subscriptionAccountId, 'work-account-id')
+  assert.equal((await restored.update(agent.id, { subscriptionAccountId: '' })).subscriptionAccountId, undefined)
 })
 
 test('prepared dictation rechecks the pinned account before delivering any text', async () => {

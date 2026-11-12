@@ -4,7 +4,7 @@ import electron from './electron.mjs'
 import { workDir } from './helpers.mjs'
 
 workDir('call-performance')
-const { CallSessions, emptyLessons, reviewAfterCall } = await import('./.build/togle.mjs')
+const { CallSessions } = await import('./.build/togle.mjs')
 const info = id => ({ id, agentId: 'agent', agentName: 'General', startedAt: 1000, endedAt: 2000, status: 'ended' })
 const state = () => ({ transcript: [{ id: 'line', speaker: 'them', text: 'Send the report Tuesday.', at: 1000, end: 2000 }], frames: [], notes: '', notesUntil: 0, answeredUntil: 0, callAnswers: [], brief: '', group: false })
 
@@ -73,20 +73,4 @@ test('a failed index write cannot leave stale cached call content or poison late
   assert.equal((await repo.get('failed-index')).title, 'A committed record')
   await repo.rename('failed-index', 'Recovered save')
   assert.equal((await new CallSessions().get('failed-index')).title, 'Recovered save')
-})
-
-test('archive refreshes preserve unchanged reviews and update only a new approval revision', () => {
-  const review = { state: 'learned', sessionId: 'call', reviewId: 'revision-one', changes: [], left: [], held: { ...emptyLessons(), facts: ['Ask for the operating system.'] } }
-  const record = { id: 'call', learning: { reviewId: 'revision-one', pending: review.held, changes: [] } }
-  assert.equal(reviewAfterCall(review, record), review, 'unchanged review must not trigger conversation persistence')
-  record.learning = { reviewId: 'revision-two', pending: emptyLessons(), changes: [{ id: 'kept', text: 'Remembered a fact' }] }
-  const approved = reviewAfterCall(review, record)
-  assert.equal(approved.decided, true)
-  assert.equal(approved.held, undefined)
-  assert.deepEqual(approved.changes, ['kept'])
-  assert.equal(reviewAfterCall(approved, record), approved)
-  const removed = reviewAfterCall(review, null)
-  assert.equal(removed.decided, true)
-  assert.equal(removed.held, undefined)
-  assert.equal(reviewAfterCall(removed, null), removed, 'a deleted record must settle only once')
 })

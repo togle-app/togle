@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { workDir } from './helpers.mjs'
 const directory = workDir('call-titles')
-const { CallSessions, CallTitles, sessionSummary, meetingForCall, cleanCallTitle, resolveCallTitle } = await import('./.build/togle.mjs')
+const { CallSessions, CallTitles, sessionSummary, cleanCallTitle, resolveCallTitle } = await import('./.build/togle.mjs')
 let sequence = 0
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes }); return { promise, resolve } }
 const state = (text = 'Yesterday we fixed checkout. Today we will finish QA. Any blockers?') => ({ transcript: [{ id: 'greeting', speaker: 'them', text: 'Hi guys', at: 1000, end: 2000 }, { id: 'topic', speaker: 'me', text, at: 3000, end: 6000 }], frames: [], notes: '', notesUntil: 0, answeredUntil: 0, callAnswers: [], brief: '', group: true })
@@ -28,20 +28,6 @@ test('calendar names win over opening speech, notes, preparation and resumed mee
   await f.sessions.rename(f.id, 'Release discussion')
   await f.sessions.capture(f.info, 'frames', state())
   assert.equal((await f.sessions.get(f.id)).title, 'Release discussion', 'manual names remain authoritative')
-})
-
-test('manual calendar matching is scoped to the agent, time and unambiguous event', () => {
-  const now = 1000000, daily = { agentId: 'work', id: 'daily', title: 'Daily stand-up', start: now - 1000, end: now + 60000 }
-  const find = (events, agent, id) => meetingForCall({ state: 'ready', checkedAt: now, events }, agent, now, id)
-  assert.equal(find([daily, { ...daily, agentId: 'personal', id: 'other' }], 'work')?.id, 'daily')
-  assert.equal(find([{ ...daily, end: now - 1 }, { ...daily, start: now + 360000 }], 'work'), undefined)
-  const overlapping = [daily, { ...daily, id: 'planning', title: 'Planning' }]
-  assert.equal(find(overlapping, 'work'), undefined)
-  assert.equal(find(overlapping, 'work', 'planning')?.title, 'Planning')
-  assert.equal(find(overlapping, 'work', 'unknown'), undefined)
-  assert.equal(find([daily], 'personal', 'daily'), undefined)
-  assert.equal(meetingForCall({ state: 'ready', checkedAt: now - 31 * 60000, events: [daily] }, 'work', now), undefined, 'stale cached events cannot name an unrelated manual call')
-  assert.equal(meetingForCall({ state: 'error', checkedAt: now, events: [daily] }, 'work', now), undefined)
 })
 
 test('a useful legacy title remains stable across repeated reads and later note headings', () => {

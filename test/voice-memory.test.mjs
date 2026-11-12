@@ -111,7 +111,7 @@ test('learning a familiar name reuses the call identity and backfills earlier un
 })
 
 test('remembered names appear before or after transcription, persist in history and yield to user corrections', async () => {
-  folder('ongoing'); const store = new AgentStore(async () => ''); await store.load()
+  folder('ongoing'); const store = new AgentStore(); await store.load()
   const { ongoing } = ongoingCall(OngoingCall)
   const person = { id: 'person-a', name: 'Diana', createdAt: 1, updatedAt: 1 }, now = Date.now()
   ongoing.identifyVoice('a', 'v:1', person)

@@ -58,15 +58,12 @@ import {
 } from '@shared/types'
 import { hotkeyProblem, sameKeys } from '@shared/hotkeys'
 import { mergeSpeakers } from '@shared/speakers'
-import { setCodePage, setReaderScript } from './agents/knowledge'
-import { setChatExports } from './agents/chat-exports'
-import { slug } from './agents/package'
-import { AgentStore } from './agents/store'
+import { AgentStore } from './agent-store'
 import { ChatGPTAuth } from './auth/chatgpt'
 import { ClaudeCodeAuth } from './auth/claude-code'
 import { SubscriptionAccounts, accountChoice, defaultAccountId } from './auth/accounts'
 import { CallFile } from './call-file'
-import { CallSessions, callForAgent, exportCall } from './call-sessions'
+import { CallSessions, callForAgent, exportCall, exportName } from './call-sessions'
 import { ConfirmSound } from './confirm-sound'
 import { withRecent } from './recent-dictations'
 import { confirmVoices, namesToConfirm, pruneConfirm, type CallConfirm } from '@shared/confirm-names'
@@ -306,37 +303,8 @@ function selectedChatGPT() {
   return entry
 }
 
-/** Plain completion with the active model, for background work like studying documents. */
-async function complete(system: string, user: string, agentId?: string): Promise<string> {
-  let out = ''
-  await activeProvider(agentId).stream({ system, user, lane: 'background' }, { signal: AbortSignal.timeout(180_000), onDelta: (t) => (out += t) })
-  return out.trim()
-}
-// Files a user teaches agents with are read in a worker with its own memory and time limits. Text that isn't
-// Unicode is read in the code page this PC's programs save it in, unless its words say another.
-setReaderScript(path.join(__dirname, 'reader-worker.js'))
-// Their chats on claude.ai and ChatGPT come from the export of them they download (a check of the window gives its
-// own Downloads folder, with TOGLE_DOWNLOADS: never the real one).
-setChatExports({
-  list: path.join(app.getPath('userData'), 'chat-exports.json'),
-  downloads: !app.isPackaged && process.env.TOGLE_DOWNLOADS !== undefined ? process.env.TOGLE_DOWNLOADS || undefined : app.getPath('downloads')
-})
-try {
-  setCodePage(koffi.load('kernel32.dll').func('uint32_t __stdcall GetACP()')() as number)
-} catch {
-  // Not Windows: the PC's language tells.
-}
-const agents = new AgentStore(complete)
-/**
- * Documents whose studying failed for a reason that passes (not signed in yet, no connection, the plan's limit), tried
- * again: at startup and after signing in, as nothing else asks for it.
- */
-function studyAgain(): void {
-  for (const agent of agents.list()) {
-    if (!agent.knowledge.some((d) => d.error && /sign|auth|401|403|5\d\d|overload|unavailable|respond|network|fetch|timed? ?out|limit|ECONN|ENOTFOUND/i.test(d.error))) continue
-    void agents.restudy(agent.id).catch((err: Error) => console.warn('[agents] could not study again:', err.message))
-  }
-}
+// What calls belong to: one agent, with the words calls are heard with (agent-store.ts).
+const agents = new AgentStore()
 agents.on('changed', (agent) => {
   if ((ongoing.isListening ? currentSession?.agentId : dictationAgentId) === agent.id) refreshVoiceSettings()
 })
@@ -349,7 +317,7 @@ let callAccountId: string | undefined
 let callUserName: string | undefined
 const ongoing = new OngoingCall(send, () => callUserName, async (wording) => {
   const current = agents.list().find(item => item.id === getSettings().activeAgentId)
-  if (current) await agents.update(current.id, { vocabulary: withSpeechWord(current.vocabulary, wording.heardAs, wording.word) }, 'train')
+  if (current) await agents.update(current.id, { vocabulary: withSpeechWord(current.vocabulary, wording.heardAs, wording.word) })
 })
 const callSessions = new CallSessions()
 const confirmSound = new ConfirmSound()
@@ -1079,14 +1047,12 @@ function registerIpc(): void {
     send('stt:status', sttStatus())
     if (status.signedIn) {
       void chatgpt.refreshUsage()
-      studyAgain()
     } else chatgpt.plan.clear()
   })
 
   accounts.onChange = (status) => {
     if (quitting) return
     send('accounts:changed', undefined)
-    if (status.signedIn) studyAgain()
     if (status.provider === 'chatgpt' && status.id === selectedAccount('chatgpt').metadata.id) { send('auth:changed', status); send('stt:status', sttStatus()) }
   }
   ipcMain.handle('models:list', (_event, sourceId?: string) => {
@@ -1131,7 +1097,7 @@ function registerIpc(): void {
     // Togle tells a question is theirs.
     vocabulary: async () => {
       const agent = agents.get(currentSession?.agentId || getSettings().activeAgentId)
-      const words = await agents.vocabularyFor(agent, [])
+      const words = agents.vocabularyFor(agent)
       const names = getSettings().assist.names?.trim()
       return names ? `${words ? `${words.replace(/\.$/, '')}, ` : ''}${names}.` : words
     },
@@ -1414,7 +1380,7 @@ function registerIpc(): void {
   ipcMain.handle('calls:export', async (_e, id: string) => {
     const record = await getCallSession(id)
     if (!record) throw new Error('This call is no longer available.')
-    const chosen = await dialog.showSaveDialog(win!, { title: 'Export call', defaultPath: path.join(app.getPath('documents'), `${slug(record.title, 'call')}.md`), filters: [{ name: 'Markdown', extensions: ['md'] }] })
+    const chosen = await dialog.showSaveDialog(win!, { title: 'Export call', defaultPath: path.join(app.getPath('documents'), `${exportName(record.title)}.md`), filters: [{ name: 'Markdown', extensions: ['md'] }] })
     if (chosen.canceled || !chosen.filePath) return null
     await fs.writeFile(chosen.filePath, exportCall(record), 'utf8')
     return chosen.filePath
@@ -1544,7 +1510,7 @@ if (hookAt !== -1) {
     started.settings = Date.now()
     // Apply text retention on startup, including accounts whose history screen is not opened.
     void accountsRead.then(list => Promise.all(list.map(account => dictationHistory.get(account.id)))).catch(error => console.warn('[dictation history] retention:', (error as Error).message))
-    await agents.load(getSettings().assist.context)
+    await agents.load()
     started.agents = Date.now()
     if (!agents.list().some((a) => a.id === getSettings().activeAgentId)) {
       await updateSettings({ activeAgentId: agents.list()[0].id })
@@ -1558,7 +1524,6 @@ if (hookAt !== -1) {
       }
       await voiceAccountsMigrated()
     }
-    studyAgain()
     // The call that was open when Togle last closed goes on.
     const saved = await callFile.load()
     if (saved) {

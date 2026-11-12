@@ -28,7 +28,7 @@ test('voice matching separates dissimilar voices and leaves ambiguous or invalid
 })
 
 test('speaker names can arrive after transcription, be corrected, and survive restoration', async () => {
-  const store = new AgentStore(async () => '')
+  const store = new AgentStore()
   await store.load()
   const { ongoing } = ongoingCall(OngoingCall)
   const now = Date.now()

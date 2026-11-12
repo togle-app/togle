@@ -3,8 +3,6 @@ import type { PlanWindow } from './types'
 /** ChatGPT's settings → Usage: what each app uses of the plan, and its limits there. */
 export const MANAGE_USAGE_URL = 'https://chatgpt.com/settings/usage'
 
-/** Past this share of a limit, the window says so once. */
-export const WARN_AT = 75
 /**
  * Past this share of a limit, every job uses the quick answers' model to make the rest last: Codex offers to
  * switch to Luna at the same point.

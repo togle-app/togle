@@ -112,13 +112,15 @@ src/main/              Electron main process
   dictation*.ts        voice typing: the shortcut, the voice bar window, cleanup, inserting the words, history
   stt/                 speech recognition on this computer: Parakeet (main), Whisper (unclear speech), downloads
   hearing.ts           a call's audio to live captions and transcript lines
-  copilot.ts           the call as it goes: transcript, voices and names, marks (it still holds the old call
-                       assistant's answering code, which the window no longer uses and which is being removed)
+  ongoing-call.ts      the call as it goes: what was said, in order, voices and names, marks, "I told them"
+  call-file.ts         the call so far saved as it goes, so a crash or a restart doesn't lose it
   call-sessions.ts     calls saved encrypted; meeting-notes.ts and call-titles.ts write their notes and titles
   confirm-sound.ts     the one short clip of each voice that Who spoke? plays, deleted within a day
   call-detect.ts       which call app uses the microphone (Windows); call-notice-window.ts, call-strip-window.ts
   runners/             Claude Code, Codex, Hermes and added agents (acp.ts speaks ACP for Hermes and any agent added):
-                       their tasks, requests and stops; hub.ts holds them together
+                       their tasks, requests and stops; hub.ts holds them together; claude-sessions.ts lists
+                       Claude Code's own sessions
+  agent-store.ts       what a call belongs to, with the words calls are heard with
   channel/, cli/       Claude Code in a terminal asking Togle, and the togle command
   todo.ts              the to-do list as a plain text file
   task-box-window.ts   the F10 box; notice-window.ts the corner notice; tray.ts the tray
@@ -129,7 +131,7 @@ src/renderer/src/      React: Shell.tsx (the window), Todo.tsx, Tasks.tsx (Agent
                        LiveCall.tsx and useCall.ts (a call), ConfirmNames.tsx, SettingsPage.tsx, TaskBox.tsx,
                        DictationBar.tsx; audio/capture.ts opens the microphone and the call's sound
 test/                  automated tests
-eval/                  evaluations with real models and real speech
+eval/                  the speech evaluation, with real speech on this computer
 electron-builder.yml   what a build holds, for Windows, macOS and Linux
 ```
 

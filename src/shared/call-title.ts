@@ -15,10 +15,6 @@ export function titleFromNotes(notes: string): string | undefined {
   return cleanCallTitle(/^#\s+([^\r\n]+)$/mu.exec((notes || '').trim())?.[1])
 }
 
-export function titleFromReview(review: string): string | undefined {
-  return cleanCallTitle(/^\s*(?:[-*•]|\d+[.)])?\s*TITLE:\s*([^\r\n]+)$/miu.exec(review.replace(/\*\*/g, ''))?.[1])
-}
-
 type Titled = Pick<CallSession, 'title' | 'customTitle' | 'titleSource' | 'meeting' | 'brief' | 'summary' | 'transcript'>
 export function resolveCallTitle(record: Titled): Pick<CallSession, 'title' | 'titleSource'> {
   if (record.customTitle) return { title: record.title, titleSource: record.titleSource }

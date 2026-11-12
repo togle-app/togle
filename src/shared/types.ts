@@ -65,166 +65,7 @@ export interface Frame {
   content?: boolean
 }
 
-/** Something the recorder can follow: a whole screen or one window (e.g. the Zoom window). */
-export interface CaptureSource {
-  id: string
-  name: string
-  kind: 'screen' | 'window'
-  thumbUrl?: string
-}
-
-/** Screen access is granted for one selected source during one call; it is never restored automatically. */
-export interface ScreenTimeRequest {
-  mode: 'frame' | 'range' | 'live'
-  /** Epoch milliseconds on the same call clock as TranscriptEntry.at/end. A frame uses from === to. */
-  from: number
-  to: number
-}
-
-export interface ScreenReference {
-  id: string
-  speaker: Speaker
-  text: string
-  from: number
-  to: number
-}
-
-export interface ScreenLookEvidence {
-  requested: ScreenTimeRequest
-  /** Actual sample times, retained even when identical image bytes are sent just once. */
-  capturedAt: number[]
-  availableSamples?: number
-  gaps: { from: number; to: number }[]
-  unavailable?: string
-}
-
-export interface ScreenMonitorStatus {
-  state: 'off' | 'watching' | 'reading' | 'paused'
-  id?: string
-  source?: CaptureSource
-  ready: boolean
-  reads: number
-  imagesSent: number
-  lastReadAt?: number
-  lastQuestion?: string
-  availableFrom?: number
-  availableTo?: number
-  sampleIntervalMs?: number
-  lastReference?: ScreenReference
-  lastLook?: ScreenLookEvidence
-  error?: string
-}
-
-/** A screen to take a picture of, for picking one when there are several. */
-export interface ScreenOption {
-  /** Electron's display id. */
-  id: number
-  /** As the recorder's list names it: "Screen 1", "Screen 2"… */
-  name: string
-  /** The main display in Windows' settings. */
-  primary: boolean
-  /** Togle's window is on it. */
-  togle: boolean
-  /** A small picture of what's on it now (data: URL). */
-  thumbUrl?: string
-}
-
-/** Where a document came from: a file, text they pasted, a web page, or a work session with an AI agent (Claude Code, Codex). */
-export type KnowledgeKind = 'file' | 'text' | 'web' | 'session'
-
-export interface KnowledgeDoc {
-  id: string
-  name: string
-  kind: KnowledgeKind
-  /** File path or URL it was learned from. */
-  source?: string
-  chars: number
-  addedAt: number
-  /** "studying" while the agent distills it; it can already be searched meanwhile. */
-  status: 'studying' | 'ready'
-  /** Key facts the agent distilled from it (large knowledge bases, and every work session: where the work stands). */
-  digest?: string
-  /** Why studying failed; the document still works through search. */
-  error?: string
-  /** A work session's file as it was read (its size and time): read again before a call once it changed. */
-  stamp?: string
-  /** A work session read again since it was studied: `digest` is of what it said then, kept until it's studied again. */
-  restudy?: boolean
-  /**
-   * The name a work session went in under, its tool's title, before it was named by what it's about once studied: the
-   * lines that said it went in still find it by that.
-   */
-  addedAs?: string
-}
-
-/**
- * A work session with an AI agent on this PC, or a chat of theirs on claude.ai or ChatGPT (from their export of it),
- * to add to an agent's documents (see sessions.ts, chat-exports.ts).
- */
-export interface WorkSessionInfo {
-  id: string
-  tool: 'claude-code' | 'codex' | 'claude-ai' | 'chatgpt'
-  title: string
-  /** They named it themselves (Claude Code's /rename): that name stays, where others give way to what it's about. */
-  named?: boolean
-  /** The folder it worked in. */
-  cwd?: string
-  branch?: string
-  startedAt: number
-  updatedAt: number
-  bytes: number
-  /** Its file; a chat on claude.ai or ChatGPT is known by its address there (https://chatgpt.com/c/…). */
-  file: string
-  /** What was asked first, and last. */
-  first?: string
-  last?: string
-  /** Which of their Claude Code and Codex it's from, by name (SessionHome.name), when known. */
-  home?: string
-}
-
-/**
- * Where Claude Code or Codex keeps its sessions on this PC: its folder, one for each account it's used with
- * (~/.claude, ~/.claude-work by CLAUDE_CONFIG_DIR; ~/.codex by CODEX_HOME). An account on claude.ai or ChatGPT is
- * one too, by its id ("chatgpt://user-…"), with its chats read from their export. An agent's own ones are where its
- * work sessions come from.
- */
-export interface SessionHome {
-  tool: WorkSessionInfo['tool']
-  dir: string
-  /** As it's shown and said: "Claude Code (work)", or just "Claude Code" when it's the only one. */
-  name: string
-  /** For an account on claude.ai or ChatGPT: the export its chats are read from. */
-  from?: string
-}
-
-/** An export of their chats on claude.ai or ChatGPT they gave Togle (dropped in, picked): what it holds. */
-export interface GivenExport {
-  /** The account it's of, as it's shown: "ChatGPT", or "ChatGPT (me@acme.com)" beside another one's. */
-  home: string
-  chats: number
-  /** When its newest chat was last written in. */
-  newest: number
-  /** A newer export of that account is read instead (one in Downloads): when it was made. */
-  newer?: number
-}
-
-/** "When asked X, answer Y": the strongest way to train an agent. */
-export interface ApprovedAnswer {
-  id: string
-  question: string
-  answer: string
-  origin: 'manual' | 'test' | 'call' | 'train'
-  addedAt: number
-  /** How often a call has shown it, and when it last did (as Hermes Agent counts its skills' use). */
-  uses?: number
-  usedAt?: number
-}
-
-/**
- * How the agent handles one kind of situation in a call (an objection, a type of question, a phase of the
- * call): its procedural memory. Approved answers hold exact answers and memory holds facts; a skill holds
- * the approach.
- */
+/** Where something an agent learned came from (kept in calls an earlier version reviewed). */
 export interface LearningSource {
   kind: 'call' | 'user'
   at: number
@@ -233,12 +74,10 @@ export interface LearningSource {
   feedbackIds?: string[]
 }
 
-export interface AssistanceContext {
-  facts: { text: string; source?: LearningSource }[]
-  skills: { id: string; name: string; revision: number }[]
-  references: { id: string; name: string; revision: number }[]
-}
-
+/**
+ * What an earlier version learned from a call, kept in the calls it reviewed: how the agent handles one kind of
+ * situation in a call (an objection, a type of question, a phase of the call).
+ */
 export interface Skill {
   id: string
   /** Short name, e.g. "Pricing objections". */
@@ -263,17 +102,6 @@ export interface Skill {
 /** A skill's content before it's saved. */
 export type SkillDraft = Pick<Skill, 'name' | 'when' | 'how' | 'purpose' | 'source'>
 
-/** Skills are read mid-call, so they stay short enough to glance at. */
-export const SKILL_LIMITS = { name: 80, when: 300, how: 3000 } as const
-
-/**
- * Live answers include this many characters of relevant facts. This limits prompt size, not saved memory;
- * approving a lesson must never require deleting another fact to make room.
- */
-export const MEMORY_LIMIT = 4000
-/** The longest a fact in memory may be: one short fact (under 25 words), not a passage. */
-export const FACT_LIMIT = 300
-
 /** Where a cited fact in an answer came from. `n` matches the [n] marker in the text. */
 export interface Source {
   n: number
@@ -282,46 +110,19 @@ export interface Source {
   url?: string
 }
 
-/** A specialist the user picks per call: its role, what it knows, and what it has learned. */
+/**
+ * What a call belongs to (agent-store.ts): Togle keeps one. An agent saved by an earlier version has more in its file
+ * (the call assistant's documents, skills, training), which is not read.
+ */
 export interface Agent {
   id: string
   name: string
-  description: string
-  /** Role, goals and style for this kind of call. */
-  instructions: string
-  /** Facts about the user that matter for this kind of call. */
-  aboutMe: string
-  /** Facts learned from past calls (approved by the user) or added by hand. */
-  memory: string[]
-  /** Provenance of each exact fact. Missing entries are legacy context with an unrecorded source. */
-  factSources?: Record<string, LearningSource>
-  knowledge: KnowledgeDoc[]
-  answers: ApprovedAnswer[]
-  skills: Skill[]
-  /** Model for this agent's chat and detailed answers; empty inherits its provider's deep task model. */
-  model: string
-  /** Names and jargon speech recognition should spell right (comma-separated); terms from knowledge are added automatically. */
+  /** Names and jargon speech recognition should spell right: comma-separated, or one rule a line (speech-words.ts). */
   vocabulary: string
-  /** Project folders on this PC that deep answers can search and read (read-only). */
-  codeFolders: string[]
-  /** Its own Claude Code and Codex, where its work sessions are looked for; none: all of them on this PC. */
-  workHomes: SessionHome[]
-  /** Connected Claude apps this agent may read, bound to the account that selected them. */
-  claudeConnections?: ClaudeConnectionSelection
-  /** Empty inherits the global account. A local account id; never included in shared agent packages. */
+  /** Empty inherits the global account. */
   subscriptionAccountId?: string
-  /** Device-local overrides. Omitted sections inherit general settings. Never shared in agent packages. */
+  /** Overrides of the general settings an earlier version saved for this agent. Omitted sections inherit them. */
   preferences?: AgentPreferences
-  /** Reminders belong to this agent and an explicitly selected Claude account. */
-  calendar?: { enabled: boolean; accountId: string; accountEmail?: string }
-  /** What the review at the end of a call does with what it finds (see CallLearning). */
-  learning: CallLearning
-  /** Every change to its training, oldest first, with what it was before: what it learned, and how to undo it. */
-  history: TrainingChange[]
-  /** When it last tidied up its training (merged overlapping skills, duplicate answers, related facts). */
-  tidiedAt?: number
-  /** Installed from someone else's package (a file or a hub), not made here. */
-  source?: AgentSource
   createdAt: number
   updatedAt: number
 }
@@ -336,111 +137,7 @@ export interface ClaudeConnections {
   apps: { name: string; label: string; status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'; readTools: number }[]
 }
 
-/** Where an agent installed from someone else came from (agents/package.ts), to show and to check for updates. */
-export interface AgentSource {
-  /** A .togle file, or a hub (a GitHub repository of agents). */
-  from: 'file' | 'hub'
-  /** The file's name, or "owner/repo/agents/slug". */
-  ref: string
-  author?: string
-  version?: string
-  /** Of the package's files as installed. */
-  hash: string
-  installedAt: number
-}
-
-/** Something an agent to install says that blocks it (danger) or is worth a look first (caution). */
-export interface GuardFinding {
-  level: 'danger' | 'caution'
-  /** Where it says it: "Instructions", "Skill “Pricing”", "Document “FAQ”". */
-  where: string
-  /** In words: "asks for passwords, codes or payment details". */
-  what: string
-  excerpt: string
-}
-
-/** An agent package read for installing, shown before it is: everything it adds, and what the check found. */
-export interface AgentPreview {
-  /** To install it with (agents:install); the package itself stays in the main process. */
-  id: string
-  name: string
-  description: string
-  author?: string
-  version?: string
-  instructions: string
-  vocabulary: string
-  skills: SkillDraft[]
-  answers: { question: string; answer: string }[]
-  memory: string[]
-  /** Its documents, each with how long it is and how it starts. */
-  docs: { name: string; chars: number; excerpt: string }[]
-  /** Requests of my plan studying its documents takes once it's installed (none when they fit into each request). */
-  studies: number
-  findings: GuardFinding[]
-  /** An agent of mine installed from this same version already: to talk to it, rather than install a second. */
-  installedAs?: { id: string; name: string }
-  /** Where it comes from, as shown: a file's name, or a hub and the agent's folder in it. */
-  from: string
-  /** Official: from the hub Togle ships with; community: anyone's. */
-  trust: 'official' | 'community'
-  /** What wasn't installed as it was (cut to Togle's limits, a file it couldn't read). */
-  notes: string[]
-}
-
-/** A hub's agents, as browsing shows them (or why they couldn't be read). */
-export interface HubListing {
-  /** "owner/repo", or "togle": the agents that come with Togle. */
-  hub: string
-  /** Togle's own hub. */
-  official: boolean
-  entries: { slug: string; name: string; description: string; author?: string; version?: string; tags: string[]; skills: number; answers: number }[]
-  error?: string
-}
-
-/** What sharing an agent carries besides its setup, skills, approved answers and words to recognize. */
-export interface ShareChoice {
-  /** Memory facts to include, as written; none unless ticked. */
-  memory: string[]
-  /** Documents to include, by id; none unless ticked. */
-  docs: string[]
-  /** Shown with it as its author. */
-  author?: string
-}
-
-/**
- * What the review at the end of a call does: keeps its finds on its own and lists them with Undo (the default, the way
- * Hermes Agent learns), asks which of them to keep, or doesn't run (Learn from call still reviews on demand).
- */
-export type CallLearning = 'ask' | 'auto' | 'off'
-
-/** The setup fields a change to the training can be in. */
-export type SetupField = 'name' | 'description' | 'instructions' | 'aboutMe' | 'vocabulary'
-
-/** One change to an agent's training: what, where it came from, and the item before and after it. */
-export interface TrainingChange {
-  id: string
-  at: number
-  /** The Train chat, a call review you approved, one kept on its own, an edit by hand, or tidying up. */
-  origin: 'train' | 'call' | 'auto' | 'manual' | 'tidy'
-  /** In a line, as Train says it: "Added skill: Pricing objections", "Forgot: …". */
-  text: string
-  /** The item as it was and as the change left it: no `before` when it was added, no `after` when removed. */
-  change:
-    | { kind: 'skill'; before?: Skill; after?: Skill }
-    | { kind: 'answer'; before?: ApprovedAnswer; after?: ApprovedAnswer }
-    | { kind: 'fact'; before?: string; after?: string; beforeSource?: LearningSource; afterSource?: LearningSource }
-    | { kind: 'field'; field: SetupField; before: string; after: string }
-    | { kind: 'homes'; before: SessionHome[]; after: SessionHome[] }
-  /** Undone since: it stays in the history, marked. */
-  undone?: boolean
-}
-
-export type AgentPatch = Partial<
-  Pick<
-    Agent,
-    'name' | 'description' | 'instructions' | 'aboutMe' | 'memory' | 'answers' | 'skills' | 'model' | 'vocabulary' | 'codeFolders' | 'workHomes' | 'learning' | 'claudeConnections' | 'subscriptionAccountId' | 'preferences' | 'calendar'
-  >
->
+export type AgentPatch = Partial<Pick<Agent, 'name' | 'vocabulary' | 'subscriptionAccountId' | 'preferences'>>
 
 /** What a call taught the agent, for the user to approve in the call review. */
 export interface Lessons {
@@ -453,51 +150,6 @@ export interface Lessons {
   /** Facts in memory the call showed are wrong or no longer true. */
   forget: string[]
 }
-
-/**
- * What the call review proposes, for the agent it reviewed the call for: kept, it goes to that one. When the agent
- * learns on its own, these lessons are kept at once; `check` waits for a yes either way.
- */
-export interface CallReview extends Lessons {
-  /** A concise topic label, produced with the existing call review. */
-  title?: string
-  /** A durable review was already applied or staged by the main process. */
-  session?: CallSession
-  agent?: Agent
-  agentId: string
-  /** What changes what it knows, or says an amount or a deal heard on the call (agents/trust.ts): kept only when I say. */
-  check?: Lessons
-  /** The call itself, to recall on later calls (Hermes Agent's searchable past sessions), when it found one to keep. */
-  record?: PastCallDraft
-  /** The call taught me about my product or work (a training, a walkthrough): its notes can be kept as a document. */
-  lesson?: { id: string; title: string }
-}
-
-/**
- * A call as Togle keeps it once it's over (when summaries of past calls are on): enough to pick up where it left off
- * on the next call with the same people, without keeping what was said word for word. Encrypted on this PC.
- */
-export interface PastCall {
-  id: string
-  agentId: string
-  title?: string
-  /** The call it's of (its pictures' session): reviewing the same call again updates it. */
-  callId?: string
-  /** Its first and last line. */
-  at: number
-  endedAt: number
-  brief: string
-  /** Who it was with, as the review named them: their company, the people by full name. What finds it again. */
-  with: string[]
-  /** Who it was with, what they wanted, what was decided and promised. */
-  summary: string
-  /** Facts about them (their company, people, plans), kept with the call rather than in the memory every call reads. */
-  about: string[]
-  /** What they asked, and what I answered. */
-  asked: { question: string; answer: string }[]
-}
-
-export type PastCallDraft = Omit<PastCall, 'id' | 'agentId'>
 
 /**
  * An answer approved, or corrected, on a card during a call. It shapes the rest of the call right away; the
@@ -618,11 +270,6 @@ export type CallSessionSummary = Omit<CallSession, 'transcript' | 'suggestions' 
   learned: number
 }
 
-export interface CallLearningResult {
-  session: CallSession
-  agent: Agent
-}
-
 /** The call so far, for a window that opens (or reopens) on it. */
 export interface CurrentCall {
   session?: CallSessionInfo
@@ -635,29 +282,6 @@ export interface CurrentCall {
   marks?: number[]
   /** Set when the call was picked up from disk as Togle started: when it was last saved. */
   restoredFrom?: number
-}
-
-/** One message of a Train conversation. */
-export interface TrainTurn {
-  role: 'user' | 'assistant'
-  text: string
-}
-
-export interface CallChatContext { id: string; title: string }
-
-/** A Train reply as it streams (`id` names the turn): its text, and each change it made to the agent. */
-export type TrainEvent =
-  | { type: 'delta'; id: string; text: string }
-  /** A change the agent made to itself, in a line ("Added skill: Pricing objections"). */
-  | { type: 'change'; id: string; text: string }
-  | { type: 'done'; id: string }
-  | { type: 'error'; id: string; message: string }
-
-export interface AgentTemplate {
-  id: string
-  name: string
-  description: string
-  instructions: string
 }
 
 export type ProviderId = 'chatgpt' | 'claude' | 'compat'
@@ -932,69 +556,6 @@ export interface SttStatus {
 }
 
 export type AssistKind = 'suggest' | 'ask' | 'summary'
-
-export interface AssistRequest {
-  kind: AssistKind
-  question?: string
-  withScreen?: boolean
-  /** The screen `withScreen` looks at (a ScreenOption id); the one under the mouse when not given. */
-  screen?: number
-  /** Fired by auto-suggest: answer fast (at most one knowledge lookup). */
-  auto?: boolean
-  /** Think it through right away too, not only when the quick answer finds the question hard. */
-  deep?: boolean
-}
-
-/**
- * An answer card has up to two parts: the main answer (words to say now, fast) and, for questions that
- * need real thinking, a deep answer from the stronger model that streams in below it.
- */
-export type AnswerPart = 'main' | 'deep'
-
-/** A line of a document that answers what was asked, and the document it's from; or of what I told the agent, and when. */
-export interface InstantFact {
-  text: string
-  doc: string
-  /** It's what I told the agent in its conversation (`doc` says when), not a document's. */
-  mine?: boolean
-}
-
-export type AssistEvent =
-  | {
-      type: 'start'
-      id: string
-      kind: AssistKind
-      title: string
-      withScreen: boolean
-      at: number
-      /** What was asked (the caller's question or mine), for saving a corrected answer. */
-      question: string
-      agentId: string
-      /** A question of the call asked again (Ask them again): the tag that tells its answer apart from the ones tried in an agent's chat. */
-      again?: string
-    }
-  /** An approved answer whose question matches, shown at once while the model answers. */
-  | { type: 'match'; id: string; question: string; answer: string }
-  /** Lines of the agent's documents that answer the question, found on this PC and shown at once. */
-  | { type: 'facts'; id: string; facts: InstantFact[] }
-  | { type: 'context'; id: string; context: AssistanceContext }
-  | { type: 'delta'; id: string; part: AnswerPart; text: string }
-  /** Progress while the agent works, e.g. "Looking up: scale plan price". */
-  | { type: 'status'; id: string; part: AnswerPart; text: string }
-  | { type: 'sources'; id: string; sources: Source[] }
-  /** The deep answer started thinking, or was dropped because the question turned out to be simple. */
-  | { type: 'deep'; id: string; state: 'start' | 'drop'; at: number }
-  /** `cut`: stopped for a newer question's deep answer, before it was through. */
-  | { type: 'done'; id: string; part: AnswerPart; cut?: boolean }
-  | { type: 'error'; id: string; part: AnswerPart; message: string }
-
-/** A question of the current call asked again after its review (Ask them again): when its card started, and as what. */
-export interface AskedAgain {
-  asked: number
-  tag: string
-  kind: 'suggest' | 'ask'
-  withScreen?: boolean
-}
 
 /** 'start-call-unseen': the call shortcut while Togle's window is hidden or minimized (no picker it couldn't show). */
 export type HotkeyAction = 'toggle-listening' | 'start-call-unseen' | 'toggle-recording' | 'snapshot' | 'ask' | 'copy' | 'dictation-settings'
