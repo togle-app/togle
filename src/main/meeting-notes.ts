@@ -92,7 +92,7 @@ export class MeetingNotes {
       return await this.sessions.update(id, latest => {
         if (latest.minutes?.revision !== jobRevision) return latest
         if (latest.status === 'live' || sourceKey(latest, template) !== key) return { ...latest, minutes: { ...latest.minutes, state: 'idle', sourceKey: undefined } }
-        return { ...withGeneratedTitle(latest, titleFromNotes(text)), summary: text, minutes: { state: 'ready', template, revision: randomUUID(), sourceKey: key, edited: false, generatedAt: Date.now() } }
+        return { ...withGeneratedTitle(latest, titleFromNotes(text)), summary: text, minutes: { state: 'ready', template, revision: randomUUID(), sourceKey: key, edited: false, generatedAt: Date.now(), by: provider.id } }
       })
     } catch (error) {
       const updated = await this.sessions.update(id, latest => latest.minutes?.revision !== jobRevision ? latest : { ...latest, minutes: { ...latest.minutes, state: cancellation.aborted ? 'idle' : 'error', sourceKey: cancellation.aborted ? undefined : key, error: cancellation.aborted ? undefined : (error as Error).message } }).catch(() => null)

@@ -280,6 +280,14 @@ async function checkMeetings(T, agent) {
   await ui.wait("!document.querySelector('.confirm-names')")
   assert.equal((await ui.calls('confirmFinish')).length, 1)
 
+  // The notes say what wrote them.
+  await ui.click('.meeting-detail button', 'Back to Meetings')
+  await ui.click('.meeting-row', 'Open call: Acme renewal')
+  await ui.wait("!!document.querySelector('.meeting-notes-generate button')")
+  assert.equal(await ui.evaluate("!!document.querySelector('.notes-by')"), false, 'notes from before it was kept say nothing about it')
+  await ui.click('.meeting-notes-generate button', 'Regenerate notes')
+  await ui.wait("document.querySelector('.notes-by')?.textContent==='Written with your ChatGPT plan'")
+
   // While a call is written down, Meetings is the call, and its list waits behind it.
   await ui.click('.meeting-detail button', 'Back to Meetings')
   await ui.click('.meetings .page-head button', 'Write down now')

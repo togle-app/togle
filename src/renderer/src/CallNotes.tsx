@@ -3,6 +3,8 @@ import type { CallSession, MeetingNoteTemplate } from '@shared/types'
 import { Markdown } from './Markdown'
 
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+/** What wrote the notes, as the design says it above them. Nothing for notes from before it was kept. */
+const writtenBy = (by?: string): string => (by === 'chatgpt' ? 'Written with your ChatGPT plan' : by === 'compat' ? 'Written with your key' : by === 'claude' ? 'Written with Claude' : '')
 export function CallNotes({ record, onRecord, canGenerate }: { record: CallSession; onRecord: (record: CallSession) => void; canGenerate: boolean }) {
   const [template, setTemplate] = useState<MeetingNoteTemplate>(record.minutes?.template ?? 'concise')
   const [draft, setDraft] = useState<{ text: string; revision?: string }>()
@@ -37,7 +39,7 @@ export function CallNotes({ record, onRecord, canGenerate }: { record: CallSessi
       <label>Meeting notes<textarea aria-label="Edit meeting notes" value={draft.text} maxLength={60000} rows={10} autoFocus disabled={busy} onChange={event => setDraft({ ...draft, text: event.target.value })} /></label>
       {staleDraft && <div className="notice"><p>Newer notes are available. Your edits are still here.</p><div className="row"><button type="button" disabled={busy} onClick={() => void run(async () => { const next = await window.togle.saveCallNotes(record.id, record.minutes?.revision, draft.text); if (alive.current) { onRecord(next); setDraft(undefined); setStatus('Your edits are saved.') } })}>Save my version</button><button type="button" disabled={busy} onClick={() => { setDraft({ text: record.summary, revision: record.minutes?.revision }); setError('') }}>Use updated notes</button></div></div>}
       <div className="row"><button className="primary" disabled={busy || staleDraft}>Save notes</button><button type="button" disabled={busy} onClick={() => { setDraft(undefined); setError('') }}>Cancel</button></div>
-    </form> : record.summary ? <Markdown text={record.summary} /> : <p className="hint">{record.status === 'live' ? 'Notes are generated after the call ends. You can write your own notes below.' : 'Generate notes from the saved transcript, or write your own.'}</p>}
+    </form> : record.summary ? <>{record.minutes?.state === 'ready' && (record.minutes.edited || writtenBy(record.minutes.by)) && <p className="hint notes-by">{record.minutes.edited ? 'Edited by you' : writtenBy(record.minutes.by)}</p>}<Markdown text={record.summary} /></> : <p className="hint">{record.status === 'live' ? 'Notes are generated after the call ends. You can write your own notes below.' : 'Generate notes from the saved transcript, or write your own.'}</p>}
     {record.minutes?.edited && !draft && <p className="hint">Edited by you. Automatic generation keeps your version.</p>}
     {record.status !== 'live' && canGenerate && record.transcript.length > 0 && !draft && <div className="meeting-notes-generate">
       <label>Format<select aria-label="Meeting note format" disabled={busy || generating} value={template} onChange={event => { setTemplate(event.target.value as MeetingNoteTemplate); setReplacing(false) }}><option value="concise">Concise</option><option value="detailed">Detailed</option><option value="action-items">Action items</option></select></label>

@@ -110,12 +110,13 @@ test('the notes are asked to list the marked lines first, and are written again 
   assert.match(chunks[0], /\[1:00\] \[MARKED\] Call: The API timeline/)
   assert.doesNotMatch(chunks[0], /\[MARKED\] Call: Fine/)
   const requests = []
-  const provider = { stream: async (request, handlers) => { requests.push(request); handlers.onFinal('# Pricing sync\n\n## Marked\n- Them: the API timeline has to move. [1:00]') } }
+  const provider = { id: 'chatgpt', stream: async (request, handlers) => { requests.push(request); handlers.onFinal('# Pricing sync\n\n## Marked\n- Them: the API timeline has to move. [1:00]') } }
   const notes = new MeetingNotes(sessions, () => provider)
   const written = await notes.generate('flags-notes')
   assert.match(requests[0].system, /Lines flagged \[MARKED\]/)
   assert.match(requests[0].system, /Marked, Decided, To do, Open questions/)
   assert.equal(written.minutes.state, 'ready')
+  assert.equal(written.minutes.by, 'chatgpt', 'the notes say what wrote them')
   // The same transcript with other marks is another source: the notes of a call that gained a mark are written again.
   const key = written.minutes.sourceKey
   await sessions.update('flags-notes', latest => ({ ...latest, marks: [66000, 90500] }))

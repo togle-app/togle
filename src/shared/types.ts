@@ -596,6 +596,8 @@ export interface CallMinutes {
   sourceKey?: string
   edited?: boolean
   generatedAt?: number
+  /** What wrote them: the ChatGPT plan (`chatgpt`), a key (`compat`) or Claude (`claude`). */
+  by?: string
   error?: string
 }
 

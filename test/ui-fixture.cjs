@@ -267,7 +267,7 @@ module.exports = function install(fixture) {
     if (session.minutes?.revision !== revision) throw new Error('These notes changed')
     if (rejectNotes) { rejectNotes = false; throw new Error('Notes could not be generated') }
     session.summary = '## Decisions\nThe report is due Tuesday. [0:03]\n\n## Action items\nSend the report. Owner not assigned. [0:03]'
-    session.minutes = { state: 'ready', template, revision: 'minutes-' + ++sequence, edited: false }
+    session.minutes = { state: 'ready', template, revision: 'minutes-' + ++sequence, edited: false, by: 'chatgpt' }
     emit('onCallSessions', { id }); return clone(session)
   }
   api.saveCallNotes = async (id, revision, text) => {
