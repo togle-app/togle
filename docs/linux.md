@@ -33,5 +33,9 @@ artifacts. Require every check to pass, `complete: true` and `sourceUnchanged: t
 from installers and retained for 14 days. Installers are uploaded only after every check passes.
 
 The desktop fixtures use synthetic audio and silent output. Physical USB/Bluetooth devices, hotplug, permissions and
-Wayland desktop capture still need native hardware checks. Linux dictation uses press-to-start/stop and copy/paste;
-Windows hold-to-speak insertion is a separate platform path.
+Wayland desktop capture still need native hardware checks.
+
+Dictation on X11: hold F9, talk and let go. Togle pastes the words through the XTest extension (Ctrl+V, or Ctrl+Shift+V in
+a terminal, where they go in as one line) and puts back what was on the clipboard. On Wayland an app can't hold a key or
+type into another app, so there F9 starts and stops and Togle copies the words for you to paste. Neither was tried on a
+Linux desktop yet.

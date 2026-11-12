@@ -82,6 +82,10 @@ export class Dictation {
         this.set({ destination: target.label, ...(this.current.phase === 'recording' ? { message: target.reason } : {}) })
       })
   }
+  /** A hold that let go at once, where a key's state may not be readable: dictation stays on until the next press. */
+  keepOn(id: string): void {
+    if (this.current.phase === 'recording' && this.current.id === id && this.current.hold) this.set({ hold: false })
+  }
   private endInterval(): void { const interval = this.intervals.at(-1); if (interval && interval.end === undefined) interval.end = this.now() }
   /** Keep private dictation out of meeting prompts, including a late final segment containing that interval. */
   overlaps(start: number, end: number): boolean { return this.intervals.some(interval => start <= (interval.end ?? this.now()) && end >= interval.start) }
@@ -154,15 +158,19 @@ export class Dictation {
     if (this.job !== job || job.controller.signal.aborted) return
     job.speech.dispose?.()
     this.set({ text, lastText: text })
-    // A window Togle cannot type into (one that runs as administrator): the words are copied, to paste there. Into a
-    // terminal as one line, as Togle types into one: pasted, each line would run as a command.
+    // A window Togle cannot type into (one that runs as administrator, or any on a Wayland desktop or a Mac that has not
+    // allowed it yet): the words are copied, to paste there. Into a terminal as one line, as Togle types into one:
+    // pasted, each line would run as a command.
     if (!job.target.token && job.target.copy && this.options.copy) {
       const words = job.target.terminal ? text.replace(/\s*[\r\n]+\s*/g, ' ').replace(/\t/g, ' ').trim() : text
+      const why = job.target.copyReason ?? "that window runs as administrator, so Togle can't type there."
       try {
         this.options.copy(words)
-        this.set({ phase: 'done', outcome: 'copied', text: words, lastText: words, message: `Copied: that window runs as administrator, so Togle can't type there. Press ${process.platform === 'darwin' ? '⌘V' : 'Ctrl+V'} to paste.` })
+        this.set({ phase: 'done', outcome: 'copied', text: words, lastText: words, message: `Copied: ${why} Press ${process.platform === 'darwin' ? '⌘V' : 'Ctrl+V'} to paste.` })
       } catch {
-        this.set({ phase: 'ready', text: words, lastText: words, message: "That window runs as administrator, so Togle can't type there, and the clipboard didn't take the words. Copy them from here." })
+        this.set({ phase: 'ready', text: words, lastText: words, message: job.target.copyReason
+          ? "The clipboard didn't take the words. Copy them from here."
+          : "That window runs as administrator, so Togle can't type there, and the clipboard didn't take the words. Copy them from here." })
       }
       this.receipt(job, raw, words, 'ready')
       return

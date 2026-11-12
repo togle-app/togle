@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { CALL_APPS, callSitesIn, type CallApp } from '@shared/call-apps'
+import { readMacMicrophoneUse } from './mac-audio-processes'
 
 const MICROPHONE_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone'
 // Windows counts time from 1601, in tenths of a microsecond.
@@ -9,9 +10,12 @@ const POLL_MS = 5_000
 const STALE_MS = 6 * 3600_000
 
 export interface MicrophoneUse {
-  /** The program: on Windows its path with # for \ or its package name, as Windows keeps it; on Linux its file name. */
+  /**
+   * The program: on Windows its path with # for \ or its package name, as Windows keeps it; on Linux its file name; on a
+   * Mac its bundle id.
+   */
   name: string
-  /** When it began using the microphone (epoch ms); on Linux, when it was seen, as nothing says when it began. */
+  /** When it began using the microphone (epoch ms); on Linux and a Mac, when it was seen, as nothing says when it began. */
   since: number
 }
 
@@ -57,8 +61,9 @@ export function parseSourceOutputs(text: string, now: number): MicrophoneUse[] {
 export function callAppsIn(using: MicrophoneUse[]): { app: CallApp; since: number }[] {
   const found = new Map<CallApp, number>()
   for (const entry of using) {
-    // Windows names end in .exe or are packages, Linux names are bare file names: one never matches the other's pattern.
-    const app = CALL_APPS.find(candidate => candidate.match.test(entry.name) || !!candidate.linux?.test(entry.name))
+    // Windows names end in .exe or are packages, Linux names are bare file names, a Mac's are bundle ids: one never
+    // matches another's pattern.
+    const app = CALL_APPS.find(candidate => candidate.match.test(entry.name) || !!candidate.linux?.test(entry.name) || !!candidate.mac?.test(entry.name))
     if (app) found.set(app.id, Math.min(found.get(app.id) ?? Infinity, entry.since))
   }
   return [...found].map(([app, since]) => ({ app, since }))
@@ -78,21 +83,32 @@ function readSourceOutputs(): Promise<MicrophoneUse[]> {
   })
 }
 
-/** The programs using the microphone now, as this system tells it: Windows and Linux; none elsewhere. */
+/** The programs using the microphone now, as this system tells it. */
 export function readMicrophoneUse(): Promise<MicrophoneUse[]> {
-  return process.platform === 'win32' ? readRegistry() : process.platform === 'linux' ? readSourceOutputs() : Promise.resolve([])
+  if (process.platform === 'win32') return readRegistry()
+  if (process.platform === 'linux') return readSourceOutputs()
+  if (process.platform === 'darwin') return Promise.resolve(readMacMicrophoneUse())
+  return Promise.resolve([])
 }
 
 // The browsers a call can be in: Meet, and the web versions of the other apps. On Windows by the name of their program,
-// on Linux by their file name.
+// on Linux by their file name, on a Mac by the bundle id of the browser or of its helper that records (Safari's is
+// WebKit's).
 const BROWSER = /(?:^|[#\\])((?:chrome|msedge|firefox|brave|opera|vivaldi)\.exe)$/i
 const LINUX_BROWSER = /^(?:chrome|google-chrome(?:-stable|-beta|-unstable)?|chromium(?:-browser)?|brave(?:-browser)?|msedge|microsoft-edge(?:-stable|-beta|-dev)?|opera|vivaldi(?:-bin|-stable)?|firefox(?:-bin|-esr)?)$/i
+const MAC_BROWSERS: [RegExp, string][] = [
+  [/^com\.google\.chrome/i, 'chrome'], [/^org\.chromium\.chromium/i, 'chromium'], [/^com\.microsoft\.edgemac/i, 'edge'],
+  [/^org\.mozilla\.(?:firefox|plugincontainer)/i, 'firefox'], [/^com\.brave\.browser/i, 'brave'], [/^com\.operasoftware\.opera/i, 'opera'],
+  [/^com\.vivaldi\.vivaldi/i, 'vivaldi'], [/^company\.thebrowser\.browser/i, 'arc'], [/^com\.apple\.(?:safari|webkit)/i, 'safari']
+]
+/** The browser a Mac bundle id belongs to, by a short name, or undefined. */
+export const macBrowserOf = (bundle: string): string | undefined => MAC_BROWSERS.find(([pattern]) => pattern.test(bundle))?.[1]
 
 /** The browsers among the programs using the microphone, by their file name, with the earliest start. */
 export function browsersIn(using: MicrophoneUse[]): { program: string; since: number }[] {
   const found = new Map<string, number>()
   for (const entry of using) {
-    const program = (BROWSER.exec(entry.name)?.[1] ?? (LINUX_BROWSER.test(entry.name) ? entry.name : undefined))?.toLowerCase()
+    const program = (BROWSER.exec(entry.name)?.[1] ?? (LINUX_BROWSER.test(entry.name) ? entry.name : undefined) ?? macBrowserOf(entry.name))?.toLowerCase()
     if (program) found.set(program, Math.min(found.get(program) ?? Infinity, entry.since))
   }
   return [...found].map(([program, since]) => ({ program, since }))

@@ -21,11 +21,13 @@ const fake = (globalThis.__togleTestElectron ??= {
     }
   },
   nativeImage: {},
+  clipboard: {},
+  ClipboardItem: class {},
   protocol: {},
   screen: {},
   desktopCapturer: {},
   BrowserWindow: class {}
 })
 
-export const { app, safeStorage, net, shell, utilityProcess, nativeImage, protocol, screen, desktopCapturer, BrowserWindow, MessageChannelMain } = fake
+export const { app, safeStorage, net, shell, utilityProcess, nativeImage, clipboard, ClipboardItem, protocol, screen, desktopCapturer, BrowserWindow, MessageChannelMain } = fake
 export default fake

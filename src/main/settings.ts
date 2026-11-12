@@ -5,6 +5,7 @@ import { validateAIProfile } from '@shared/preferences'
 import { MICROPHONE_DEFAULTS } from '@shared/microphone'
 import { mergedVoiceAccount, type OldVoiceAccounts } from '@shared/speech'
 import { addedAgentsFrom } from '@shared/runner'
+import { holdsByDefault } from './typing-way'
 
 const FILE = 'settings.json'
 
@@ -50,7 +51,7 @@ export const DEFAULT_SETTINGS: Settings = {
   window: { alwaysOnTop: true, opacity: 1, hideFromCapture: true },
   microphone: { ...MICROPHONE_DEFAULTS },
   // Voice typing is heard by this PC too; its account ('' : the AI's own, automatically) cleans up the words.
-  dictation: { speech: 'auto', accountId: '', mode: process.platform === 'win32' ? 'hold' : 'toggle', polish: true, showBar: true, microphoneId: '' },
+  dictation: { speech: 'auto', accountId: '', mode: holdsByDefault() ? 'hold' : 'toggle', polish: true, showBar: true, microphoneId: '' },
   // Hubs of agents added by hand (Togle's own comes first anyway). Here so that loading keeps them.
   hubs: [],
   // Shortcuts given other keys (or turned off): here so that loading keeps them.

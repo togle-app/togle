@@ -179,8 +179,9 @@ function NamesAndTerms({ accountId }: { accountId: string }) {
 function Meetings({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
   const apps = settings.meetings.apps
   const modeOf = (id: CallApp): CallAppMode => (isCallAppMode(apps[id]) ? apps[id]! : 'ask')
-  const notices = platform === 'win32' || platform === 'linux'
+  const notices = platform === 'win32' || platform === 'linux' || platform === 'darwin'
   const note = platform === 'win32' ? 'Togle sees which app uses the microphone, and for a browser the title of its window. It never listens before a call is written down.'
+    : platform === 'darwin' ? 'Togle sees which app uses the microphone, and for a browser the title of its window once screen recording is allowed. It never listens before a call is written down.'
     : platform === 'linux' ? 'Togle sees which app uses the microphone. It never listens before a call is written down.' : undefined
   return (
     <Section id="settings-meetings" title="Meetings" note={note}>
@@ -194,7 +195,7 @@ function Meetings({ settings, save }: { settings: Settings; save: (patch: Settin
             </select>
           </Row>
         ))
-        : <Row label={false} name="Call apps" note="Togle notices calls by itself on Windows and Linux. Here, start one with Write down now in Meetings." />}
+        : <Row label={false} name="Call apps" note="Togle notices calls by itself on Windows, a Mac and Linux. Here, start one with Write down now in Meetings." />}
       <RememberedVoices settings={settings} save={save} />
     </Section>
   )

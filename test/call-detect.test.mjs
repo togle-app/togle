@@ -226,3 +226,20 @@ test("on Linux, a browser's windows are read from wmctrl: their titles tell a ca
   await subject.poll(); await subject.poll()
   assert.deepEqual(started, ['meet'])
 })
+
+test('a Mac: call apps and browsers are told by the bundle id Core Audio gives the process that records', async () => {
+  const { macBrowserOf, fourCharCode } = await import('./.build/togle.mjs')
+  // The codes Core Audio's process list is asked by.
+  assert.equal(fourCharCode('prs#'), 0x70727323)
+  assert.equal(fourCharCode('piri'), 0x70697269)
+  assert.equal(fourCharCode('glob'), 0x676c6f62)
+  const seen = (name) => ({ name, since: now })
+  assert.deepEqual(callAppsIn([seen('us.zoom.xos'), seen('com.microsoft.teams2'), seen('Cisco-Systems.Spark'), seen('com.tinyspeck.slackmacgap.helper')]).map(found => found.app),
+    ['zoom', 'teams', 'webex', 'slack'])
+  assert.deepEqual(callAppsIn([seen('com.apple.Music'), seen('com.google.Chrome.helper')]), [], 'neither is a call app')
+  assert.equal(macBrowserOf('com.google.Chrome.helper'), 'chrome')
+  assert.equal(macBrowserOf('com.apple.WebKit.GPU'), 'safari', "Safari records through WebKit's helper")
+  assert.equal(macBrowserOf('company.thebrowser.Browser'), 'arc')
+  assert.equal(macBrowserOf('com.microsoft.teams2'), undefined)
+  assert.deepEqual(browsersIn([seen('com.google.Chrome.helper'), seen('us.zoom.xos')]), [{ program: 'chrome', since: now }])
+})

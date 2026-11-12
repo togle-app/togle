@@ -38,7 +38,8 @@ These are development builds. Distribution with Developer ID signing and Apple n
 - **Microphone:** write down a call or dictate, and allow the macOS prompt. If denied, use System Settings → Privacy & Security → Microphone, then quit and reopen Togle.
 - **The computer's sound:** allow the prompt the first time Togle writes down a call. Check System Settings → Privacy & Security → Screen & System Audio Recording if capture is unavailable. Development runs can appear as Electron; the packaged app appears as Togle. Test the packaged app's permissions separately.
 - **Screen sharing:** modern apps using ScreenCaptureKit can capture Togle even when Hide from screen sharing is enabled. Share a specific call or document window rather than relying on that setting. The title bar only claims verified capture hiding on Windows.
-- **Dictation:** the Mac uses press-to-start/stop and offers **Copy text** for pasting into the destination app. Automatic insertion and hold-to-speak remain Windows-only. No Accessibility permission is required for this copy workflow. F9 may require Fn; choose another shortcut in Settings if macOS uses it.
+- **Dictation:** hold F9 (with Fn on most Mac keyboards), talk and let go: Togle pastes the words where the cursor is and puts back what was on the clipboard. In a terminal they go in as one line. The first time, macOS asks whether Togle may control the computer (Privacy & Security → Accessibility). Until that is allowed, the words are copied and the bar says to press ⌘V. If macOS reads the key as let go at once (it can without Input Monitoring), one press starts dictation and the next stops it. Choose another shortcut in Settings if macOS uses F9. Not tried on a Mac yet.
+- **Call notice:** when Zoom, Teams, Webex, Skype or Slack starts recording from the microphone, Togle offers to write the call down. It reads Core Audio's list of the processes that record (macOS 14.2 and later), which asks for nothing. A call in a browser (Meet, or another app on the web) is told by the window's title once screen recording is allowed. Not tried on a Mac yet.
 - **Shortcuts:** F9 (Talk) and F10 (Task) need Fn held on most Mac keyboards; Settings can give them other keys. The native Edit menu provides Command + C/V/X/A and undo/redo. Command + W follows the window's normal close-to-menu-bar behavior; Command + Q uses Togle's existing confirmation and save flow.
 - **Local speech:** choose On this computer under Settings → Speech → Advanced speech settings → Call transcription, then install it there. `npm run setup:whisper` is a Windows-only development helper.
 
@@ -74,7 +75,7 @@ Before treating a build as ready for daily calls, complete these checks on the p
 
 1. Open the app, edit text with Command shortcuts, close and reopen it from the menu bar and Dock, and quit during an active call to check confirmation and recovery.
 2. Grant microphone and system-audio access. With headphones, confirm that You and Call are both heard and written down. Deny a permission, verify the explanation, then grant it and retry after restarting.
-3. Connect the AI you intend to use. Verify the notes after a call, and press-to-start/stop dictation followed by Copy text and paste into another app.
+3. Connect the AI you intend to use. Verify the notes after a call. Hold F9 in another app before and after allowing Accessibility: first the words are copied, then they go in where the cursor is. Start a call in Zoom or Meet and check the notice.
 4. If using local speech, install and exercise the Metal Whisper framework and Parakeet on a real recording.
 
 Live audio, provider sign-in, model downloads, permissions and Intel execution require these additional checks; passing scripted tests alone does not verify them.

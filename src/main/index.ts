@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, Notification, screen, session, shell } from 'electron'
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, Notification, screen, session, shell, systemPreferences } from 'electron'
 import { ApiConnections } from './auth/api-connections'
 import { effectiveAI, effectiveSettings, validateAIProfile } from '@shared/preferences'
 import { routedProvider } from './providers/routed'
@@ -11,6 +11,7 @@ import { DictationVocabularyStore } from './dictation-vocabulary'
 import { correctSpeech, speechLesson, speechWords, withSpeechWord } from '@shared/speech-words'
 import type { DictationVocabularyEdit } from '@shared/dictation'
 import { DictationTargetBridge } from './dictation-target'
+import type { HeldKeys } from './desktop-typing'
 import { ShowWindow } from './show-window'
 import { DictationWindow } from './dictation-window'
 import { MicrophoneLink } from './microphone-link'
@@ -38,7 +39,7 @@ import { StoredRecords, StoredTitles } from './runners/titles'
 import { MICROPHONE_PRODUCT, microphonePage } from '@shared/microphone-link'
 import { readNoiseReport, shouldSuggest } from '@shared/microphone'
 import { TogleTray } from './tray'
-import { HotkeyPress } from './hotkey-press'
+import { HotkeyPress, virtualKey } from './hotkey-press'
 import { voiceAccountId } from '@shared/dictation'
 import { modelSourceId } from '@shared/model-selection'
 import { randomUUID } from 'node:crypto'
@@ -251,13 +252,24 @@ function callAppStarted(appId: CallApp): void {
   if (mode === 'always') send('hotkey', 'start-call-unseen')
   else callNotice.show({ app: appId, name: callAppName(appId) }, 60_000)
 }
-// Looked for every few seconds while no call is being written down: which program uses the microphone, as Windows or
-// Linux (PulseAudio, PipeWire) tells it. macOS has no list of that for other apps to read.
+// A Mac tells the titles of other apps' windows only once screen recording is allowed, which the computer's sound for
+// writing down a call asks for; before that, a call in a browser is not noticed there, and Write down now starts it.
+async function macWindowTitles(): Promise<string[]> {
+  if (systemPreferences.getMediaAccessStatus('screen') !== 'granted') return []
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false })
+    return sources.map((source) => source.name).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+// Looked for every few seconds while no call is being written down: which program uses the microphone, as Windows,
+// Linux (PulseAudio, PipeWire) or a Mac (Core Audio, from macOS 14.2) tells it.
 const callDetector = new CallDetector({
   read: readMicrophoneUse,
   running: appRunning,
-  titles: readWindowTitles,
-  active: () => (process.platform === 'win32' || process.platform === 'linux') && !quitting && !ongoing.isListening && getSettings().meetings.notice && (app.isPackaged || process.env.TOGLE_CALL_DETECT !== '0'),
+  titles: process.platform === 'darwin' ? () => macWindowTitles() : readWindowTitles,
+  active: () => (process.platform === 'win32' || process.platform === 'linux' || process.platform === 'darwin') && !quitting && !ongoing.isListening && getSettings().meetings.notice && (app.isPackaged || process.env.TOGLE_CALL_DETECT !== '0'),
   onStart: callAppStarted,
   onEnd: (appId) => { if (callNotice.shown?.app === appId) callNotice.show(null) }
 })
@@ -915,17 +927,33 @@ async function showPartNow(): Promise<void> {
   dictation.attachPicture(file)
   dictation.stop()
 }
-const dictationPress = new HotkeyPress(key => !!keyDown && !!((keyDown(key) as number) & 0x8000))
+// Whether the hold key is down: Windows reads it through user32, a Mac and Linux on X11 through DesktopTyping.
+const heldKeys: HeldKeys | undefined = keyDown
+  ? { down: (key) => !!((keyDown(key) as number) & 0x8000), codeOf: virtualKey }
+  : dictationTarget.heldKeys()
+const dictationPress = new HotkeyPress(heldKeys?.down ?? (() => false), heldKeys?.codeOf)
 let heldDictation: string | undefined
+let heldSince = 0
+let tapped: string | undefined
+// Off Windows a key's state may not be readable (a Mac may read every key as up without Input Monitoring): a press that
+// lets go at once leaves dictation on, and the next press stops it.
+const TAP_MS = 300
 function dictateShortcut(keys: string): void {
-  if (voiceSettings().dictation.mode !== 'hold' || !keyDown) { dictationPress.run(keys, () => void dictation.toggle()); return }
+  if (voiceSettings().dictation.mode !== 'hold' || !heldKeys) { dictationPress.run(keys, () => void dictation.toggle()); return }
   dictationPress.run(keys, () => {
-    if (dictation.active) return
+    if (dictation.active) {
+      if (tapped && dictation.status().id === tapped) { tapped = undefined; dictation.stop() }
+      return
+    }
+    tapped = undefined
     void dictation.start(true)
     heldDictation = dictation.status().id
+    heldSince = Date.now()
   }, () => {
     const id = heldDictation; heldDictation = undefined
-    if (id && dictation.status().id === id) dictation.stop()
+    if (!id || dictation.status().id !== id) return
+    if (process.platform !== 'win32' && Date.now() - heldSince < TAP_MS) { tapped = id; dictation.keepOn(id); return }
+    dictation.stop()
   })
 }
 // What a test run copied (dev only): there, it's kept here rather than put on the PC's clipboard.

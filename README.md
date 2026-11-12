@@ -14,7 +14,7 @@ The window has three places, **To-do**, **Agents** and **Meetings**, and **Setti
 
 ### Voice
 
-Hold **F9** and talk. Togle types the words where your cursor is: a chat, an editor, a terminal. On a Mac and on Linux, F9 starts and stops instead of being held. **Esc** cancels.
+Hold **F9** and talk. Togle types the words where your cursor is: a chat, an editor, a terminal. On a Mac the system asks once before Togle may type into other apps, and until then Togle copies the words. On the newer Linux desktops (Wayland) an app can't hold a key or type into another, so there F9 starts and stops and Togle copies the words for you to paste. **Esc** cancels.
 
 - Your AI plan cleans the words up: punctuation, filler words, and a correction you make halfway ("send it to Dario, no wait, to Marta"). Without a plan, or with cleanup off, Togle types the words as heard. Cleanup has eight seconds; if it fails, you get the words as heard, and the voice bar says why (no internet, the plan at its limit, too slow).
 - Speech is heard on this computer. Your plan gets words, never sound.
@@ -30,7 +30,7 @@ Hold **F9** and talk. Togle types the words where your cursor is: a chat, an edi
 
 Togle writes down both sides of a call on this computer: your microphone is **You**, and what the computer plays is **Call**. The sound never leaves the computer.
 
-- **Starting.** **Write down now** in Meetings starts at once. On Windows, Togle also notices when Zoom, Teams, Webex, Skype or Slack starts using the microphone, or a browser does with Meet, Teams, Zoom or Webex open in it, and a notice offers **Write it down**, **Not now** or **Always in Zoom**. Settings decides, for each app, whether it asks, always writes calls down, or never.
+- **Starting.** **Write down now** in Meetings starts at once. Togle also notices when Zoom, Teams, Webex, Skype or Slack starts using the microphone, or a browser does with Meet, Teams, Zoom or Webex open in it (on Windows; on a Mac and Linux too, where it was not tried yet), and a notice offers **Write it down**, **Not now** or **Always in Zoom**. Settings decides, for each app, whether it asks, always writes calls down, or never.
 - **The first call** says two things once: the rules for writing down a call differ by place, and the words go to your AI plan.
 - **During the call** the words appear as people speak. Voices are told apart on this computer. A name with a question mark is a guess from what was said ("Dario said Marta just before"): click it to confirm or change it, or leave it. **Mark** flags a moment, and the notes list marked moments first. A line to tell the others ("I'm writing this call down with Togle. The sound stays on my computer, and an AI writes the notes from the words.") stays until you tick **I told them**, and the call records whether you did. Nothing is suggested during a call: Togle gives no answers or advice that you did not ask for, and notices from your agents wait until the call ends.
 - **With the window closed**, a small strip shows the time, **Mark**, **Stop** and the reminder to tell the others.
@@ -119,7 +119,7 @@ src/main/              Electron main process
   call-file.ts         the call so far saved as it goes, so a crash or a restart doesn't lose it
   call-sessions.ts     calls saved encrypted; meeting-notes.ts and call-titles.ts write their notes and titles
   confirm-sound.ts     the one short clip of each voice that Who spoke? plays, deleted within a day
-  call-detect.ts       which call app uses the microphone (Windows, Linux); call-notice-window.ts, call-strip-window.ts
+  call-detect.ts       which call app uses the microphone (Windows, Linux; a Mac in mac-audio-processes.ts); call-notice-window.ts, call-strip-window.ts
   runners/             Claude Code, Codex, Hermes and added agents (acp.ts speaks ACP for Hermes and any agent added):
                        their tasks, requests and stops; hub.ts holds them together; claude-sessions.ts lists
                        Claude Code's own sessions

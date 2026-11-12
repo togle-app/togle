@@ -1,11 +1,14 @@
-/** One action per physical press, with an optional release action and no polling while idle. */
+/**
+ * One action per physical press, with an optional release action and no polling while idle. `codeOf` names a key the
+ * way `down` reads it: Windows' virtual keys by default, a Mac's key codes or X11's keysyms elsewhere.
+ */
 export class HotkeyPress {
   private held = false
   private timer?: ReturnType<typeof setInterval>
-  constructor(private down: (key: number) => boolean) {}
+  constructor(private down: (key: number) => boolean, private codeOf: (keys: string) => number | undefined = virtualKey) {}
   run(keys: string, action: () => void, released?: () => void): void {
     if (this.held) return
-    const key = virtualKey(keys)
+    const key = this.codeOf(keys)
     if (key !== undefined && this.down(key)) {
       this.held = true
       // Only while this shortcut is down; no idle polling or global keyboard hook.

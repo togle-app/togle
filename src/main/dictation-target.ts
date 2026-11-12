@@ -1,14 +1,23 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import type { DictationInsertion, DictationTarget } from '@shared/dictation'
+import { DesktopTyping, type HeldKeys } from './desktop-typing'
 
-/** UI Automation runs outside Electron so a slow application cannot block a call or the UI. */
+/**
+ * Where dictated words go. On Windows, UI Automation runs outside Electron so a slow application cannot block a call or
+ * the UI. On a Mac and on Linux, DesktopTyping pastes them (X11), or copies them (Wayland, or a Mac not allowed yet).
+ */
 export class DictationTargetBridge {
   private child?: ChildProcessWithoutNullStreams
   private ready?: Promise<void>
   private pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>()
   private sequence = 0
-  constructor(private script: string) {}
+  private desktop?: DesktopTyping
+  constructor(private script: string) {
+    if (process.platform !== 'win32') this.desktop = new DesktopTyping()
+  }
+  /** Reading the hold key on a Mac or X11, where that works; Windows reads it in the main process. */
+  heldKeys(): HeldKeys | undefined { return this.desktop?.keys() }
   start(): Promise<void> {
     if (process.platform !== 'win32') return Promise.resolve()
     if (this.ready) return this.ready
@@ -54,18 +63,23 @@ export class DictationTargetBridge {
     })
   }
   async capture(): Promise<DictationTarget> {
-    if (process.platform !== 'win32') return { label: 'Your text box', reason: 'Copy your text when ready. Automatic insertion is currently available on Windows.' }
+    if (this.desktop) {
+      try { return await this.desktop.capture() } catch { return { label: 'Your text box', reason: 'Automatic insertion is unavailable. Your text will be ready to copy.' } }
+    }
+    if (process.platform !== 'win32') return { label: 'Your text box', reason: 'Copy your text when ready.' }
     try { return await this.request('capture') } catch { return { label: 'Your text box', reason: 'Automatic insertion is unavailable. Your text will be ready to copy.' } }
   }
   async insert(token: string, text: string): Promise<DictationInsertion> {
     // Paragraphs/tabs are literal paste text in editors, never synthesized keys.
     // In a terminal the native bridge types them as spaces: everything goes in as one line, and nothing presses Enter.
     if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text)) return { inserted: false, message: 'This text contains unsupported control characters.' }
+    if (this.desktop) return this.desktop.insert(token, text)
     try { return await this.request('insert', { token, text }) }
     catch (error) { return { inserted: false, message: (error as Error).message || 'The text box did not respond. Your words are still available.' } }
   }
   /** F8 Show: the picture into the noted box (pasted, keeping the clipboard), or its path typed into a terminal. */
   async insertPicture(token: string, file: string): Promise<DictationInsertion> {
+    if (this.desktop) return this.desktop.insertPicture(token, file)
     if (process.platform !== 'win32') return { inserted: false, message: `The picture is saved at ${file}.` }
     try { return await this.request('insertPicture', { token, file }) }
     catch (error) { return { inserted: false, message: (error as Error).message || `The picture is saved at ${file}.` } }
