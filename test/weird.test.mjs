@@ -184,6 +184,18 @@ test('settings take only what they have, each of its kind, and hubs survive a re
   assert.deepEqual((await loadSettings()).hubs, ['acme/agents'])
 })
 
+test('the first minute is for a Togle that has never run', async () => {
+  const file = path.join(work, 'settings.json')
+  rmSync(file, { force: true })
+  assert.equal((await loadSettings()).firstMinute.done, false, 'a new Togle starts with it')
+  writeFileSync(file, JSON.stringify({ activeAgentId: 'work' }))
+  assert.equal((await loadSettings()).firstMinute.done, true, 'settings saved before it existed belong to a Togle already set up')
+  writeFileSync(file, JSON.stringify({ activeAgentId: 'work', firstMinute: { done: false } }))
+  assert.equal((await loadSettings()).firstMinute.done, false, 'settings saved since keep their answer')
+  rmSync(file, { force: true })
+  await loadSettings()
+})
+
 test('a new Togle remembers no one’s voice until the person turns it on; settings saved when it was on by default start off', async () => {
   const file = path.join(work, 'settings.json')
   rmSync(file, { force: true })

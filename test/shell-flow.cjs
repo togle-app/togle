@@ -31,9 +31,11 @@ async function open(T, agent, scenario, width = 1024, height = 850) {
   // Voices are remembered only when turned on; the first-call notice is said once, in its own scenario.
   settings.assist.rememberVoices = scenario === 'ready'
   settings.meetings.introSeen = scenario !== 'first-call'
+  // The first minute is gone through once; only its own scenarios have not.
+  settings.firstMinute = { done: !scenario.startsWith('first-minute') }
   const names = [...fs.readFileSync(path.join(project, 'src/shared/api.ts'), 'utf8').matchAll(/^  (\w+)\(/gm)].map(m => m[1])
   const richText = scenario === 'rich-text' ? require('./rich-text-fixtures.cjs').reply : undefined
-  const fixture = JSON.stringify({ settings, names, agents: [agent], scenario, readyAudio: scenario !== 'speech', templates: T.AGENT_TEMPLATES, richText })
+  const fixture = JSON.stringify({ settings, names, agents: [agent], scenario, readyAudio: !['speech', 'first-minute-new'].includes(scenario), templates: T.AGENT_TEMPLATES, richText })
   const preload = path.join(artifacts, 'preload-' + scenario + '-' + width + '.cjs')
   fs.writeFileSync(preload, 'const fixture=' + fixture + '\nrequire(' + JSON.stringify(path.join(__dirname, 'ui-fixture.cjs')) + ')(fixture)')
   const errors = []
@@ -386,6 +388,54 @@ async function checkNoisyCall(T, agent) {
   console.log('Noisy room: offered after the call only, with the page and a way to stop it, passed.')
 }
 
+/** The first minute, once: talk, sign in with the plan or skip it, what Togle found; what was skipped goes on To-do. */
+async function checkFirstMinute(T, agent) {
+  // Speech recognition is not on this computer yet: one click gets it, then F9 works.
+  const fresh = await open(T, agent, 'first-minute-new', 640)
+  await fresh.wait("!!document.querySelector('.first-minute')")
+  assert.deepEqual(await fresh.evaluate("[...document.querySelectorAll('.first-step')].map(step=>step.getAttribute('aria-label'))"), ['Talk', 'Sign in with your plan', 'Togle finds the rest'])
+  assert.equal(await fresh.evaluate("!!document.querySelector('.todo')"), false, 'the first minute comes before the list')
+  await fresh.wait("[...document.querySelectorAll('.first-step button')].some(b=>b.textContent.startsWith('Get speech recognition'))")
+  assert.equal(await fresh.evaluate('window.togleUITest.calls().filter(call=>call.name===\'installLocalSpeech\').length'), 0, 'nothing is downloaded unasked')
+  await fresh.capture('first-minute-download')
+  await fresh.evaluate("[...document.querySelectorAll('.first-step button')].find(b=>b.textContent.startsWith('Get speech recognition')).click()")
+  await fresh.wait("document.querySelector('.first-step[aria-label=Talk]').textContent.includes('This works offline')")
+  assert.deepEqual(await fresh.calls('installLocalSpeech'), [['parakeet']], 'what English needs on this computer')
+  // Skipped: both steps wait on the list.
+  await fresh.click('.first-step button', 'Skip')
+  await fresh.click('.first-done button', 'Done')
+  await fresh.wait("!!document.querySelector('.todo')")
+  assert.equal(await fresh.evaluate('window.togleUITest.settings().firstMinute.done'), true)
+  assert.deepEqual((await fresh.calls('addTodo')).map(args => args[0]), [
+    'Hold F9 and say something: Togle types it where your cursor is',
+    'Sign in with your AI plan in Settings, so Togle cleans up what you say and writes your meeting notes'
+  ])
+  await fresh.wait("document.querySelectorAll('.todo-item').length===2")
+  assert.deepEqual(fresh.errors, [])
+  fresh.window.destroy()
+
+  // Done in full: nothing is left for the list.
+  const ui = await open(T, agent, 'first-minute', 1024)
+  await ui.wait("!!document.querySelector('.first-minute')")
+  assert.ok((await ui.evaluate("document.querySelector('.first-step[aria-label=Talk]').textContent")).includes('Hold F9 and say something.'))
+  await ui.emit('onDictation', { phase: 'done', outcome: 'inserted', lastText: 'Hello from the first minute.' })
+  await ui.wait("document.querySelector('.first-step[aria-label=Talk] .first-ok')?.textContent==='It works. Heard: “Hello from the first minute.”'")
+  assert.ok((await ui.evaluate("document.querySelector('.first-step[aria-label=\"Sign in with your plan\"]').textContent")).includes('Send it to Marta by Friday.'))
+  await ui.click('.first-step button', 'Sign in with ChatGPT')
+  await ui.wait("document.querySelector('.first-step[aria-label=\"Sign in with your plan\"] .first-ok')?.textContent.startsWith('Signed in.')")
+  assert.deepEqual(await ui.calls('signInAccount'), [['chatgpt-default']])
+  assert.ok((await ui.evaluate("document.querySelector('.first-step[aria-label=\"Togle finds the rest\"]').textContent")).includes('No coding agent on this computer yet'))
+  assert.equal(await ui.evaluate("document.querySelectorAll('.first-step.done').length"), 2)
+  await ui.fitsWidth()
+  await ui.capture('first-minute')
+  await ui.click('.first-done button', 'Done')
+  await ui.wait("!!document.querySelector('.todo')")
+  assert.deepEqual(await ui.calls('addTodo'), [], 'nothing left to do from the first minute')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+  console.log('First minute: speech recognition on one click, F9 heard, the plan signed in or skipped, what Togle found, and the steps left on To-do passed.')
+}
+
 /** Settings on one screen: Keys, Voice, Meetings, Agents, Accounts; the plan or a key instead; Togle Studio. */
 async function checkSettings(T, agent) {
   const ui = await open(T, agent, 'settings', 1024)
@@ -512,6 +562,7 @@ app.whenReady().then(async () => {
     await checkNoisyCall(T, agent)
     await checkRichText(T, agent)
     await checkSettings(T, agent)
+    await checkFirstMinute(T, agent)
     clearTimeout(timeout)
     app.exit(0)
   } catch (error) {

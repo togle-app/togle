@@ -818,6 +818,8 @@ export interface Settings {
     /** What to do when a call starts in each of those apps: ask (the default), write it down at once, or leave it. */
     apps: Partial<Record<import('./call-apps').CallApp, import('./call-apps').CallAppMode>>
   }
+  /** The first minute (talk, sign in with the plan, what Togle found) was gone through, once. */
+  firstMinute: { done: boolean }
 }
 
 export interface AuthStatus {

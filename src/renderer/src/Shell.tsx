@@ -7,6 +7,7 @@ import { quitQuestion, type CloseWarning } from '@shared/close-warning'
 import type { TogleMicrophoneStatus } from '@shared/microphone'
 import togleIcon from '../../../build/icon.svg'
 import { Icon } from './Icon'
+import { FirstMinute } from './FirstMinute'
 import { Elapsed, LiveCall } from './LiveCall'
 import { MeetingsPage } from './MeetingsPage'
 import { MicrophoneSuggestion } from './MicrophoneSuggestion'
@@ -169,7 +170,9 @@ export function Shell() {
             <div className="notice" role="alert"><span>{call.warning}</span><button className="dismiss" aria-label="Dismiss" title="Dismiss" onClick={call.clearWarning}><Icon name="close" size={12} /></button></div>
           )}
           {call.noise && !call.listening && <MicrophoneSuggestion finding={call.noise} microphone={microphone} dismissals={settings?.microphone?.dismissals ?? 0} onClose={call.clearNoise} />}
-          {view === 'todo' && <Todo onOpenTask={openTask} onOpenCall={openMeeting} />}
+          {/* Once, on a Togle that has never run: the first minute, then the to-do list. */}
+          {view === 'todo' && settings && !settings.firstMinute?.done && <FirstMinute settings={settings} stt={stt} onDone={() => void changeSettings({ firstMinute: { done: true } })} />}
+          {view === 'todo' && settings?.firstMinute?.done && <Todo onOpenTask={openTask} onOpenCall={openMeeting} />}
           {view === 'agents' && <Tasks focus={taskFocus} />}
           {view === 'meetings' && settings && (live && call.listening
             ? <LiveCall settings={settings} title={call.title} since={call.since} transcript={call.transcript} flags={call.flags} inputs={call.inputs}

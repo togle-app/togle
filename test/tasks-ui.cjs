@@ -26,6 +26,7 @@ async function open(T, agent, width, surface) {
   settings.transcription.language = 'en'
   settings.activeAgentId = agent.id
   settings.transcription.me = settings.transcription.them = 'local'
+  settings.firstMinute = { done: true }
   const names = [...fs.readFileSync(path.join(project, 'src/shared/api.ts'), 'utf8').matchAll(/^  (\w+)\(/gm)].map(m => m[1])
   const fixture = JSON.stringify({ settings, names, agents: [agent], scenario: 'tasks', readyAudio: true, templates: T.AGENT_TEMPLATES })
   const preload = path.join(artifacts, 'preload-' + width + '.cjs')

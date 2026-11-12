@@ -3356,3 +3356,29 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .settings .setting-detail > .hint { margin: 0 0 6px; }
 .settings .ai-plan-other { font-size: 12px; }
 .settings-foot { margin: 6px 2px 0; color: var(--faint); font-size: 11px; }
+
+/* The first minute: three steps, once, on a Togle that has never run. */
+.first-minute { width: 100%; max-width: 620px; margin-inline: auto; display: flex; flex-direction: column; gap: 14px; padding-block: 8px; }
+.first-minute header h2 { margin: 0 0 4px; font-size: 18px; }
+.first-minute header .hint { margin: 0; }
+.first-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; counter-reset: step; }
+.first-step { counter-increment: step; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.first-step h3 { margin: 0; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.first-step h3::before { content: counter(step); display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--panel-2); color: var(--muted); font-size: 11px; }
+.first-step.done h3::before { content: '✓'; background: var(--ok); color: #0c1a12; }
+.first-step p { margin: 0; font-size: 13px; line-height: 1.45; }
+.first-step textarea { width: 100%; resize: vertical; font: inherit; font-size: 13px; padding: 7px 9px; }
+.first-step .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.first-ok { color: var(--ok); }
+.first-example { margin: 0; display: grid; gap: 4px; font-size: 12px; }
+.first-example > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; }
+.first-example dt { color: var(--muted); }
+.first-example dd { margin: 0; overflow-wrap: anywhere; }
+.first-download { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; font-size: 12px; }
+.first-download progress { grid-column: 1; width: 100%; }
+.first-download button { grid-row: 1 / span 2; grid-column: 2; }
+.first-found { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.first-found li { display: inline-flex; gap: 8px; align-items: baseline; padding: 5px 11px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; }
+.first-found span { color: var(--muted); }
+.first-done { justify-content: flex-end; }
+@media (max-width: 560px) { .first-example > div { grid-template-columns: minmax(0, 1fr); gap: 0; } }

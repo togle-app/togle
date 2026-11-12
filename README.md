@@ -10,6 +10,8 @@ Togle is free and open source, under the [MIT license](LICENSE). It runs on your
 
 The window has three places, **To-do**, **Agents** and **Meetings**, and **Settings**. It opens on To-do.
 
+**The first minute.** On a Togle that has never run, To-do opens on three steps instead: get speech recognition (one download, the size on the button; then F9 works offline), sign in with your ChatGPT plan or skip it, and what Togle found on this computer. What you skip goes on your to-do list.
+
 ### Voice
 
 Hold **F9** and talk. Togle types the words where your cursor is: a chat, an editor, a terminal. On a Mac and on Linux, F9 starts and stops instead of being held. **Esc** cancels.

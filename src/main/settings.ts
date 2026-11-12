@@ -57,7 +57,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // A task that waits is told in a notice, and one that finished too, until turned off in Settings → Coding agents.
   tasks: { notices: true, finished: true },
   // Said once, before the first call is written down.
-  meetings: { introSeen: false, confirmNames: true, notice: true, apps: {} }
+  meetings: { introSeen: false, confirmNames: true, notice: true, apps: {} },
+  // The first minute: once, on a Togle that has never run.
+  firstMinute: { done: false }
 }
 
 let current: Settings = DEFAULT_SETTINGS
@@ -136,6 +138,8 @@ export async function loadSettings(): Promise<Settings> {
   // Togle gives no answer or advice during a call that the person did not ask for: suggestions that came by themselves
   // are gone, whatever an older version saved.
   current.assist = { ...current.assist, auto: false }
+  // The first minute is for a Togle that has never run: settings saved before it existed have been through setup.
+  if (Object.keys(stored).length > 0 && stored.firstMinute === undefined) current.firstMinute = { done: true }
   // Voice typing's account was two settings: a speech account it shared with calls (which never used it), and its own
   // over it. One now, voice typing's: the account it used.
   const speechAccount = (stored.transcription as { accountId?: unknown } | undefined)?.accountId
