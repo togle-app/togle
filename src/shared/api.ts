@@ -34,6 +34,10 @@ export type Unsubscribe = () => void
 export interface TogleApi {
   /** Togle Studio, the separate app that cleans the microphone for every call app: found again, then its status. */
   microphoneStatus(): Promise<TogleMicrophoneStatus>
+  /** Togle's own updates: checked against the release key before anything installs. */
+  updateStatus(): Promise<import('./updates').UpdateState>
+  onUpdate(cb: (state: import('./updates').UpdateState) => void): Unsubscribe
+  installUpdate(): Promise<'quitting' | 'shown'>
   onMicrophone(cb: (status: TogleMicrophoneStatus) => void): Unsubscribe
   /** Before a call starts: turns Togle Studio on for it when it's installed and Settings say so. */
   prepareCallMicrophone(): Promise<TogleMicrophoneStatus>

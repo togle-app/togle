@@ -9,6 +9,9 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
 
 const api: TogleApi = {
   microphoneStatus: () => ipcRenderer.invoke('microphone:status'),
+  updateStatus: () => ipcRenderer.invoke('updates:status'),
+  onUpdate: cb => subscribe('updates:changed', cb),
+  installUpdate: () => ipcRenderer.invoke('updates:install'),
   onMicrophone: cb => subscribe('microphone:changed', cb),
   prepareCallMicrophone: () => ipcRenderer.invoke('microphone:prepare-call'),
   turnOnMicrophone: () => ipcRenderer.invoke('microphone:turn-on'),

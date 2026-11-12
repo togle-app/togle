@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, Notification, screen, session, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, net, Notification, screen, session, shell, systemPreferences } from 'electron'
 import { ApiConnections } from './auth/api-connections'
 import { effectiveAI, effectiveSettings, validateAIProfile } from '@shared/preferences'
 import { routedProvider } from './providers/routed'
@@ -11,6 +11,8 @@ import { DictationVocabularyStore } from './dictation-vocabulary'
 import { correctSpeech, speechLesson, speechWords, withSpeechWord } from '@shared/speech-words'
 import type { DictationVocabularyEdit } from '@shared/dictation'
 import { DictationTargetBridge } from './dictation-target'
+import { Updates } from './updates'
+import { RELEASE_KEY } from './release-key'
 import type { HeldKeys } from './desktop-typing'
 import { ShowWindow } from './show-window'
 import { DictationWindow } from './dictation-window'
@@ -45,6 +47,7 @@ import { modelSourceId } from '@shared/model-selection'
 import { randomUUID } from 'node:crypto'
 import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import koffi from 'koffi'
 import type { SettingsPatch } from '@shared/api'
 import {
@@ -535,6 +538,27 @@ function showTask(key: string): void {
 function closeWarning(): CloseWarning {
   return { call: ongoing.isListening || dictation.active, tasks: runners?.busy().map(task => task.title) ?? [] }
 }
+// Updates: the latest release, checked against the release key before anything is installed (updates.ts). A test run
+// can give a key and a release list of its own.
+const updates = new Updates({
+  current: app.getVersion(),
+  key: !app.isPackaged && process.env.TOGLE_TEST_RELEASE_KEY ? process.env.TOGLE_TEST_RELEASE_KEY : app.isPackaged ? RELEASE_KEY : '',
+  folder: path.join(app.getPath('userData'), 'updates'),
+  releases: (!app.isPackaged && process.env.TOGLE_TEST_RELEASES) || 'https://api.github.com/repos/togle-app/togle/releases/latest',
+  fetch: (url, init) => net.fetch(url, init),
+  changed: (state) => send('updates:changed', state)
+})
+/** A checked installer to run once Togle has quit (Windows). */
+let installAfterQuit: { file: string; args: string[] } | undefined
+async function installUpdate(): Promise<'quitting' | 'shown'> {
+  const next = await updates.install()
+  if (next.after === 'show') { shell.showItemInFolder(next.file); return 'shown' }
+  if (next.after === 'quit-and-run') installAfterQuit = { file: next.file, args: next.args }
+  else app.relaunch()
+  void requestQuit()
+  return 'quitting'
+}
+
 async function requestQuit(confirmed = false): Promise<void> {
   if (quitting) return
   if (!confirmed && !pageDown && !pageFailed) {
@@ -1041,6 +1065,8 @@ async function setHotkey(id: HotkeyId, keys: string): Promise<HotkeyInfo[]> {
 }
 
 function registerIpc(): void {
+  ipcMain.handle('updates:status', () => updates.status())
+  ipcMain.handle('updates:install', () => installUpdate())
   ipcMain.handle('microphone:status', () => microphoneLinkOn() ? microphoneLink.refresh() : microphoneLink.status())
   ipcMain.handle('microphone:prepare-call', () => microphoneLinkOn() ? microphoneLink.prepareCall(getSettings().microphone) : microphoneLink.status())
   ipcMain.handle('microphone:turn-on', () => microphoneLink.turnOn('user'))
@@ -1667,6 +1693,9 @@ if (hookAt !== -1) {
     void sweepSharedCalls()
     setInterval(() => { void sweepConfirmSound(); void sweepSharedCalls() }, 3600_000).unref()
     callDetector.start()
+    // Togle's own updates: a minute after starting, then once a day (only with a release key; see updates.ts).
+    setTimeout(() => void updates.check(), app.isPackaged ? 60_000 : 2_000).unref()
+    setInterval(() => void updates.check(), 24 * 3600_000).unref()
     setInterval(refreshCallStrip, 1000).unref()
     setupMediaAccess()
     registerIpc()
@@ -1762,6 +1791,10 @@ if (hookAt !== -1) {
 
   app.on('before-quit', event => { if (!quitting) { event.preventDefault(); void requestQuit() } })
   app.on('window-all-closed', () => { if (!tray?.available) void requestQuit(true) })
+  // A checked update's installer, started once Togle is gone, so it can replace Togle's files.
+  app.on('quit', () => {
+    if (installAfterQuit) spawn(installAfterQuit.file, installAfterQuit.args, { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+  })
   app.on('will-quit', () => {
     quitting = true
     dictationWindow.close()

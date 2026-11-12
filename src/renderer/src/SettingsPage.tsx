@@ -5,6 +5,7 @@ import type { RunnerStatus } from '@shared/runner'
 import { CALL_APPS, isCallAppMode, type CallApp, type CallAppMode } from '@shared/call-apps'
 import { localModelsFor, PARAKEET_LANGUAGES, SPEECH_LANGUAGES, speechLanguageCode, speechLanguageName } from '@shared/speech'
 import { voiceAccountId } from '@shared/dictation'
+import type { UpdateState } from '@shared/updates'
 import { modelSourceId } from '@shared/model-selection'
 import { AI_TASKS } from '@shared/preferences'
 import { MANAGE_USAGE_URL } from '@shared/plan'
@@ -57,9 +58,41 @@ export function SettingsPage({ settings, stt, at, onChange }: Props) {
         <Meetings settings={settings} save={save} />
         <Agents />
         <Accounts settings={settings} save={save} />
+        <Update />
         <p className="settings-foot">Togle is free and open source, under the MIT license. <button className="link" onClick={() => api.openExternal('https://github.com/togle-app/togle')}>Source code</button></p>
       </div>
     </div>
+  )
+}
+
+/**
+ * Togle's own update, once there is one to tell of: ready (checked against the release key), refused (it wasn't signed
+ * by it, so it was deleted) or failed. Until a release key is set, Togle doesn't look, and this stays away.
+ */
+function Update() {
+  const [state, setState] = useState<UpdateState>({ phase: 'off' })
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState('')
+  useEffect(() => {
+    let live = true
+    void api.updateStatus().then((value) => { if (live && value?.phase) setState(value) }).catch(() => {})
+    const off = api.onUpdate((value) => { if (live && value?.phase) setState(value) })
+    return () => { live = false; off() }
+  }, [])
+  if (!['ready', 'refused', 'failed'].includes(state.phase)) return null
+  const install = (): void => {
+    setBusy(true); setFailure('')
+    void api.installUpdate().catch((error) => setFailure(errorText(error))).finally(() => setBusy(false))
+  }
+  return (
+    <Section id="settings-update" title="Update">
+      {state.phase === 'ready'
+        ? <Row label={false} name={`Togle ${state.version} is ready`} note="Checked against Togle's release key. Togle closes and opens again.">
+          <button className="primary" disabled={busy} onClick={install}>Restart to update</button>
+        </Row>
+        : <Row label={false} name={state.phase === 'refused' ? 'An update was refused' : 'Togle couldn’t check for an update'} note={state.message} />}
+      {failure && <p className="error" role="alert">{failure}</p>}
+    </Section>
   )
 }
 
