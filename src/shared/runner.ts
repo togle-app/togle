@@ -14,6 +14,27 @@ export const asksEveryTime = (runner: RunnerKind): boolean => runner === 'claude
 export const KNOWN_AGENTS: Readonly<Record<string, string>> = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
 /**
+ * How to get each agent Togle knows: the one line its maker gives to install it, for PowerShell on Windows and for a
+ * terminal on a Mac or Linux, and the maker's page. Checked against each maker's instructions on Nov 12, 2026.
+ */
+export const AGENT_INSTALLS: readonly { runner: string; name: string; maker: string; windows: string; unix: string; page: string }[] = [
+  { runner: 'claude', name: 'Claude Code', maker: 'Anthropic', windows: 'irm https://claude.ai/install.ps1 | iex', unix: 'curl -fsSL https://claude.ai/install.sh | bash', page: 'https://code.claude.com/docs/en/setup' },
+  { runner: 'codex', name: 'Codex', maker: 'OpenAI', windows: 'powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"', unix: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh', page: 'https://github.com/openai/codex' },
+  { runner: 'hermes', name: 'Hermes', maker: 'Nous Research', windows: 'iex (irm https://hermes-agent.nousresearch.com/install.ps1)', unix: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash', page: 'https://github.com/NousResearch/hermes-agent' }
+]
+
+/** The command that signs each agent Togle knows in again, as the agent's own help gives it. */
+export const SIGN_IN_COMMANDS: Readonly<Record<string, string>> = { claude: 'claude auth login', codex: 'codex login', hermes: 'hermes model' }
+
+/**
+ * Whether the error a turn ended with means the agent is signed out: never signed in, a sign-in that expired, or one its
+ * service turned away. Read only from errors, never from what an agent wrote in a task (a task can be about a login page).
+ */
+export function isSignedOut(error: string): boolean {
+  return /\bnot logged in\b|please run \/login|\b401\b|\bunauthori[sz]ed\b|authentication (?:is )?(?:required|failed)|missing bearer|invalid (?:api key|x-api-key|bearer token)|(?:token|session|credentials?) (?:has |have )?expired|expired (?:token|session|credentials?)|(?:log|sign) ?in again|re-?authenticate/i.test(error)
+}
+
+/**
  * An agent the person added in Settings: any agent that speaks ACP, started by the command its docs give for that.
  * `id` is its id in task keys ("acp-gemini").
  */
@@ -51,7 +72,7 @@ export function addedAgentsFrom(value: unknown): AddedAgent[] {
 /**
  * What a task is doing. `working`: a turn is running. `waiting`: the agent needs the person (a command to allow, a
  * question). `idle`: the turn ended, and a reply starts the next. `stopped`: the person pressed Stop. `failed`: the
- * agent or its program broke.
+ * agent or its program broke, or a turn ended with an error (the task says why, and a reply goes on).
  */
 export type TaskState = 'working' | 'waiting' | 'idle' | 'stopped' | 'failed'
 
@@ -158,6 +179,10 @@ export interface TaskView extends TaskInfo {
   commandsRunning: boolean
   /** Its agent's name, as the person reads it ("Codex", or the name given to an added agent). */
   agent?: string
+  /** It stopped because its agent is signed out. */
+  signedOut?: boolean
+  /** The command that signs the agent in again, for an agent Togle knows. */
+  fix?: string
 }
 
 /**
@@ -240,6 +265,9 @@ export interface TaskAttention {
   pending: ViewRequest[]
   /** What the task is doing or said last, in a line. */
   line: string
+  /** As in TaskView: it stopped because its agent is signed out, and what signs it in again. */
+  signedOut?: boolean
+  fix?: string
 }
 
 /** A small notice: a task waits for the person, or it finished. */
@@ -252,7 +280,7 @@ export interface TaskNotice {
   title: string
   /** The agent and the folder: "Codex · api-server". */
   where: string
-  /** Follows `where`: "wants to run", "wants to change", "asks", "finished", "stopped with an error". */
+  /** Follows `where`: "wants to run", "wants to change", "asks", "finished", "stopped with an error", "is signed out". */
   says: string
   /** The command in full, the files, the question, or what the finished task said last. */
   detail: string

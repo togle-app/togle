@@ -10,6 +10,8 @@ app.disableHardwareAcceleration()
 const project = path.resolve(__dirname, '..')
 const artifacts = path.join(__dirname, '.work', 'tasks-ui')
 const data = path.join(artifacts, 'data-' + process.pid)
+// Empty: Windows reuses process ids, and an earlier run's profile would still hold what its windows kept (the task box's folder).
+fs.rmSync(data, { recursive: true, force: true })
 fs.mkdirSync(data, { recursive: true })
 app.setPath('userData', data)
 process.env.TOGLE_TEST_USER_DATA = data
@@ -718,6 +720,41 @@ async function checkStoppedTasks(T, agent) {
   ui.window.destroy()
 }
 
+// An agent signed out: its task's row is amber and says what signs it in again, here, in the task and on To-do.
+async function checkSignedOut(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===6")
+  await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','Claude Code is signed out.',{signedOut:true,fix:'claude auth login'})")
+  const taskRow = "[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page'))"
+  await ui.wait(taskRow + "?.textContent.includes('signed out')")
+  assert.equal(await ui.evaluate(taskRow + ".querySelector('.task-copy > span').textContent"), 'Claude Code · website · signed out · sign in with claude auth login')
+  assert.equal(await ui.evaluate(taskRow + ".dataset.needs"), 'you', 'amber: it waits for the person')
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("!!document.querySelector('.task-banner.signed-out')")
+  assert.equal(await ui.evaluate("document.querySelector('.task-banner.signed-out span').textContent"), 'Claude Code is signed out. Run claude auth login in a terminal, then reply here to go on.')
+  assert.equal(await ui.evaluate("document.querySelector('.task-banner.signed-out code').textContent"), 'claude auth login')
+  assert.equal(await ui.evaluate("document.querySelector('.task-title .task-state').textContent"), 'Signed out')
+  // The computer's own clipboard is left alone: the page's is a stand-in here.
+  await ui.evaluate("Object.defineProperty(navigator.clipboard,'writeText',{value:async text=>{window.__copied=text}})")
+  await ui.click('.task-banner.signed-out button', 'Copy')
+  await ui.wait("document.querySelector('.task-banner.signed-out button').textContent==='Copied'")
+  assert.equal(await ui.evaluate('window.__copied'), 'claude auth login')
+  await ui.capture('tasks-signed-out')
+  await ui.click('.workspace-nav button', 'To-do')
+  const row = "[...document.querySelectorAll('.todo-row.need')].find(r=>r.querySelector('b').textContent==='Rebuild the pricing page')"
+  await ui.wait("!!" + row)
+  assert.equal(await ui.evaluate(row + ".querySelector('small').textContent"), 'Claude Code · website · is signed out · sign in with')
+  assert.equal(await ui.evaluate(row + ".querySelector('.todo-command').textContent"), 'claude auth login')
+  assert.deepEqual(await ui.evaluate("[..." + row + ".querySelectorAll('button')].map(b=>b.textContent)"), ['Reply'])
+  assert.ok((await texts(ui, '.todo-chip')).includes('Claude Code · signed out'), 'the item given to it says so too')
+  // An agent Togle does not know the command for: it says how without one.
+  await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','Gemini is signed out.',{signedOut:true,fix:undefined})")
+  await ui.wait(row + "?.querySelector('.todo-command')?.textContent==='Sign it in, then reply.'")
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 async function checkNarrow(T, agent) {
   const ui = await open(T, agent, 600)
   await ui.click('.workspace-nav button', 'Agents')
@@ -754,8 +791,9 @@ app.whenReady().then(async () => {
     await checkCallNotice(T, agent)
     await checkCallStrip(T, agent)
     await checkStoppedTasks(T, agent)
+    await checkSignedOut(T, agent)
     await checkAgentSettings(T, agent)
-    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box and the agents in Settings passed')
+    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box, a signed-out agent and the agents in Settings passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

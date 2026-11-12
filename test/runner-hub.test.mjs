@@ -263,6 +263,98 @@ test('every task started here is told with what it was started from, so it goes 
   }
 })
 
+// An agent whose first turn ends with an error at once, as a signed-out one does, before Togle has started listening.
+class FailingBackend extends FakeBackend {
+  constructor(runner, error) {
+    super(runner)
+    this.error = error
+  }
+  async start(options) {
+    const task = await super.start(options)
+    task.say(this.error)
+    task.emit({ type: 'turn-ended', outcome: 'failed', error: this.error })
+    task.emit({ type: 'error', message: this.error })
+    task.setBase('idle')
+    return task
+  }
+}
+
+test('a turn that ends with an error stops the task and says why, and signed out, names what signs the agent in', async () => {
+  // The words are what each agent said when it was signed out on this computer (Claude Code 2.1.322, Codex 0.166.0).
+  const claude = new FailingBackend('claude', 'Not logged in · Please run /login')
+  const codex = new FailingBackend('codex', 'unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses')
+  const added = new FailingBackend('acp-gemini', 'Error: 401 Unauthorized')
+  const hermes = new FailingBackend('hermes', 'The model was overloaded. Try again in a minute.')
+  const { hub } = hubOf([claude, codex, added, hermes])
+  const folder = scratch()
+  try {
+    const one = await hub.start({ runner: 'claude', folder, prompt: 'Say hi' })
+    assert.deepEqual([one.state, one.signedOut, one.fix, one.line], ['failed', true, 'claude auth login', 'Claude Code is signed out.'])
+    assert.equal(T.needsYou(one), true, 'it waits for the person')
+    assert.deepEqual((await hub.detail(one.key)).log.map((e) => e.kind), ['you', 'agent', 'note'], 'what the person asked comes first')
+    const two = await hub.start({ runner: 'codex', folder, prompt: 'Say hi' })
+    assert.deepEqual([two.state, two.fix, two.line], ['failed', 'codex login', 'Codex is signed out.'])
+    const three = await hub.start({ runner: 'acp-gemini', folder, prompt: 'Say hi' })
+    assert.deepEqual([three.state, three.signedOut, three.fix], ['failed', true, undefined], 'an added agent: Togle does not know its command')
+    const four = await hub.start({ runner: 'hermes', folder, prompt: 'Say hi' })
+    assert.deepEqual([four.state, four.signedOut, four.line], ['failed', undefined, 'The model was overloaded. Try again in a minute.'], 'any other error is said as it came')
+    const told = hub.attention().find((task) => task.key === two.key)
+    assert.deepEqual([told.state, told.signedOut, told.fix], ['failed', true, 'codex login'], 'the notices and the tray know it too')
+    // Signed in again, the person replies: the task goes on, and what went wrong is past.
+    await hub.send(one.key, 'Try again')
+    const after = (await hub.list()).find((task) => task.key === one.key)
+    assert.deepEqual([after.state, after.signedOut, after.fix, after.line], ['working', undefined, undefined, 'Working…'])
+    claude.started[0].done()
+    assert.equal((await hub.list()).find((task) => task.key === one.key).state, 'idle', 'a turn that ends well is done')
+  } finally {
+    await hub.dispose()
+  }
+})
+
+test('an agent not found is looked for again once what a terminal would see is added, and only then', async () => {
+  const codex = new FakeBackend('codex', { installed: false })
+  let widened = 0
+  const one = hubOf([new FakeBackend('claude'), codex], { widenPath: async () => { widened++; codex.installed = true; return true } })
+  try {
+    assert.deepEqual((await one.hub.status()).map((s) => [s.runner, s.installed]), [['claude', true], ['codex', true]], 'installed after Togle started, it is found')
+    assert.equal(widened, 1)
+  } finally {
+    await one.hub.dispose()
+  }
+  let asked = 0
+  const all = hubOf([new FakeBackend('claude')], { widenPath: async () => { asked++; return true } })
+  try {
+    assert.deepEqual((await all.hub.status()).map((s) => s.installed), [true])
+    assert.equal(asked, 0, 'every agent found: nothing more is looked at')
+  } finally {
+    await all.hub.dispose()
+  }
+  const hermes = new FakeBackend('hermes', { installed: false })
+  let detected = 0
+  const detect = hermes.detect.bind(hermes)
+  hermes.detect = async () => { detected++; return detect() }
+  const none = hubOf([hermes], { widenPath: async () => false })
+  try {
+    assert.deepEqual((await none.hub.status()).map((s) => s.installed), [false])
+    assert.equal(detected, 1, 'nothing was added, so it is not looked for twice')
+  } finally {
+    await none.hub.dispose()
+  }
+})
+
+test('what an agent ending with an error means it is signed out is told from its words, and nothing else is', () => {
+  for (const words of [
+    'Not logged in · Please run /login',
+    'Invalid API key · Please run /login',
+    'OAuth token has expired. Please obtain a new token or refresh your existing token.',
+    'unexpected status 401 Unauthorized: Missing bearer or basic authentication in header',
+    'Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.',
+    'Authentication required'
+  ]) assert.equal(T.isSignedOut(words), true, words)
+  for (const words of ['The model was overloaded.', 'Rate limit reached for requests', 'unexpected status 500 Internal Server Error', 'ENOENT: no such file or directory', 'Fix the login redirect', 'Hermes stopped the turn (refusal).', 'Request failed: 403 Forbidden']) assert.equal(T.isSignedOut(words), false, words)
+  assert.deepEqual(T.SIGN_IN_COMMANDS, { claude: 'claude auth login', codex: 'codex login', hermes: 'hermes model' })
+})
+
 test('a waiting command shows with its mark, and answering it is logged', async () => {
   const claude = new FakeBackend('claude')
   const { hub } = hubOf([claude])

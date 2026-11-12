@@ -117,6 +117,27 @@ test('a task that finished or broke is told once, and only if it was seen workin
   assert.equal(attention.look([task('codex:a', 'idle')]).finished.length, 1, 'a second turn that ends is news again')
 })
 
+test('a task that stopped because its agent is signed out says so, with the command that signs it in', () => {
+  const attention = new T.Attention(clock())
+  attention.look([task('codex:a', 'working'), task('acp-gemini:b', 'working')])
+  const look = attention.look([
+    task('codex:a', 'failed', [], { line: 'Codex is signed out.', signedOut: true, fix: 'codex login' }),
+    task('acp-gemini:b', 'failed', [], { line: 'Gemini is signed out.', signedOut: true })
+  ])
+  assert.deepEqual(look.finished.map((n) => [n.key, n.kind, n.says, n.detail, n.detailKind]), [
+    ['codex:a', 'failed', 'is signed out', 'codex login', 'command'],
+    ['acp-gemini:b', 'failed', 'is signed out', 'Gemini is signed out.', 'words']
+  ], 'an added agent has no command Togle knows')
+  assert.equal(look.waiting, 2, 'both wait for a reply')
+  // Signed out, the first turn ends before any look sees it working: it is told all the same, once. Another error is not.
+  const quick = attention.look([
+    task('claude:c', 'failed', [], { line: 'Claude Code is signed out.', signedOut: true, fix: 'claude auth login' }),
+    task('codex:d', 'failed', [], { line: 'The model was overloaded.' })
+  ])
+  assert.deepEqual(quick.finished.map((n) => [n.key, n.says, n.detail]), [['claude:c', 'is signed out', 'claude auth login']])
+  assert.deepEqual(attention.look([task('claude:c', 'failed', [], { signedOut: true, fix: 'claude auth login' })]).finished, [], 'told once')
+})
+
 // ---- the tray's dot ----
 
 const pixel = (bitmap, width, x, y) => [...bitmap.subarray((y * width + x) * 4, (y * width + x) * 4 + 4)]

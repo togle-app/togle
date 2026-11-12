@@ -62,9 +62,10 @@ export class Attention {
       present.add(task.key)
       const before = this.last.get(task.key)
       this.last.set(task.key, task.state)
-      // A turn can end between two looks, so a task seen waiting that is idle now has finished as well.
+      // A turn can end between two looks, so a task seen waiting that is idle now has finished as well. A signed-out agent
+      // ends its first turn at once, before a look sees it working: that is news too, as the tasks here started in this run.
       if ((before === 'working' || before === 'waiting') && task.state === 'idle') finished.push(this.ending(task, 'done'))
-      else if ((before === 'working' || before === 'waiting') && task.state === 'failed') finished.push(this.ending(task, 'failed'))
+      else if ((before === 'working' || before === 'waiting' || (before === undefined && task.signedOut)) && task.state === 'failed') finished.push(this.ending(task, 'failed'))
     }
     for (const key of [...this.last.keys()]) if (!present.has(key)) this.last.delete(key)
     return { waiting: waitingTasks.size, notices, finished }
@@ -76,15 +77,17 @@ export class Attention {
   }
 
   private ending(task: TaskAttention, kind: 'done' | 'failed'): TaskNotice {
+    // Signed out, it says what signs the agent in again.
+    const signedOut = kind === 'failed' && task.signedOut
     return {
       id: `${task.key}#end${++this.endings}`,
       kind,
       key: task.key,
       title: task.title,
       where: `${task.agent ?? RUNNER_NAMES[task.runner] ?? task.runner} · ${baseName(task.folder)}`,
-      says: kind === 'done' ? 'finished' : 'stopped with an error',
-      detail: shown(task.line),
-      detailKind: 'words',
+      says: kind === 'done' ? 'finished' : signedOut ? 'is signed out' : 'stopped with an error',
+      detail: signedOut && task.fix ? task.fix : shown(task.line),
+      detailKind: signedOut && task.fix ? 'command' : 'words',
       canRefuse: false,
       canAllow: false,
       others: 0

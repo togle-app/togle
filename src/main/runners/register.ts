@@ -7,6 +7,7 @@ import { ClaudeBackend } from './claude'
 import { CodexBackend } from './codex'
 import { HermesBackend } from './hermes'
 import { RunnerHub, type RecordStore, type TitleStore } from './hub'
+import { widenSearchPath } from './search-path'
 import type { Backend } from './types'
 
 /** An agent the person added: started by their command, its program found the way a terminal would find it. */
@@ -70,7 +71,9 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     },
     titles: deps.titles,
     records: deps.records,
-    started: deps.started
+    started: deps.started,
+    // The agents on this computer, looked for as the person's terminal would; stand-ins are not looked for.
+    ...(deps.backends ? {} : { widenPath: widenSearchPath })
   })
   const { handle } = deps
   handle('runners:status', () => hub.status())

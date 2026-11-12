@@ -28,7 +28,7 @@ function chipOf(task: TaskView | undefined): { text: string; tone: 'work' | 'wai
     case 'idle':
       return { text: `${who} · done`, tone: 'done' }
     case 'failed':
-      return { text: `${who} · stopped by an error`, tone: 'fail' }
+      return { text: `${who} · ${task.signedOut ? 'signed out' : 'stopped by an error'}`, tone: 'fail' }
     default:
       return { text: `${who} · stopped`, tone: 'gone' }
   }
@@ -36,7 +36,8 @@ function chipOf(task: TaskView | undefined): { text: string; tone: 'work' | 'wai
 
 /** What a waiting task asks, in a few words for a row. */
 function asking(request: ViewRequest | undefined, task: TaskView): { says: string; detail: string } {
-  // Stopped and waiting for a reply to go on: it says why.
+  // Stopped and waiting for a reply to go on: it says why, and signed out, what signs the agent in again.
+  if (!request && task.signedOut) return task.fix ? { says: 'is signed out · sign in with', detail: task.fix } : { says: 'is signed out', detail: 'Sign it in, then reply.' }
   if (!request && task.state === 'failed') return { says: 'stopped by an error', detail: task.line }
   if (!request && task.state === 'stopped') return { says: 'was stopped', detail: 'Reply to go on.' }
   if (!request) return { says: task.line || 'is waiting', detail: '' }

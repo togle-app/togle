@@ -12,6 +12,8 @@ app.disableHardwareAcceleration()
 const project = path.resolve(__dirname, '..')
 const artifacts = path.join(__dirname, '.work', 'shell')
 const data = path.join(artifacts, 'data-' + process.pid)
+// Empty: Windows reuses process ids, and an earlier run's profile would still hold what its windows kept.
+fs.rmSync(data, { recursive: true, force: true })
 fs.mkdirSync(data, { recursive: true })
 app.setPath('userData', data)
 process.env.TOGLE_TEST_USER_DATA = data
@@ -305,6 +307,36 @@ async function checkMeetings(T, agent) {
   assert.deepEqual(ui.errors, [])
   ui.window.destroy()
   console.log('Meetings: rows with what is left, search, who spoke with a guess, a name and a skip, the call page and giving it to an agent, and a call written down from there passed.')
+}
+
+/** No coding agent on this computer: Agents names the ones Togle knows, with the line that installs each, to copy. */
+async function checkNoAgents(T, agent) {
+  const ui = await open(T, agent, 'settings', 1024)
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.no-agents-row').length===3")
+  assert.deepEqual(await texts(ui, '.no-agents-name strong'), ['Claude Code', 'Codex', 'Hermes'])
+  const windows = process.platform === 'win32'
+  assert.deepEqual(await texts(ui, '.no-agents-line code'), windows
+    ? ['irm https://claude.ai/install.ps1 | iex', 'powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"', 'iex (irm https://hermes-agent.nousresearch.com/install.ps1)']
+    : ['curl -fsSL https://claude.ai/install.sh | bash', 'curl -fsSL https://chatgpt.com/codex/install.sh | sh', 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash'], 'the line for this system')
+  assert.ok((await ui.evaluate("document.querySelector('.no-agents p').textContent")).includes(windows ? 'Paste one line into PowerShell' : 'Paste one line into a terminal'))
+  assert.equal(await ui.evaluate("document.querySelector('.tasks-head .primary').disabled"), true, 'no task can start without an agent')
+  // The computer's own clipboard is left alone: the page's is a stand-in here.
+  await ui.evaluate("Object.defineProperty(navigator.clipboard,'writeText',{value:async text=>{window.__copied=text}})")
+  await ui.evaluate("[...document.querySelectorAll('.no-agents-row')][1].querySelector('button.small').click()")
+  await ui.wait("[...document.querySelectorAll('.no-agents-row')][1].querySelector('button.small').textContent==='Copied'")
+  assert.equal(await ui.evaluate('window.__copied'), windows ? 'powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"' : 'curl -fsSL https://chatgpt.com/codex/install.sh | sh')
+  await ui.evaluate("[...document.querySelectorAll('.no-agents-row')][2].querySelector('button.link').click()")
+  assert.deepEqual(await ui.calls('openExternal'), [['https://github.com/NousResearch/hermes-agent']])
+  for (const width of [1024, 420]) {
+    ui.window.setSize(width, 800)
+    await ui.paint()
+    await ui.fitsWidth()
+  }
+  await ui.capture('agents-none')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+  console.log('Agents with none installed: the three Togle knows, the line that installs each on this system, Copy and their pages passed.')
 }
 
 /** What can go wrong at the start of a call: no speech recognition yet, a microphone not allowed, a start that fails. */
@@ -637,6 +669,7 @@ app.whenReady().then(async () => {
     await checkNoisyCall(T, agent)
     await checkRichText(T, agent)
     await checkSettings(T, agent)
+    await checkNoAgents(T, agent)
     await checkFirstMinute(T, agent)
     await checkShow(T, agent)
     clearTimeout(timeout)

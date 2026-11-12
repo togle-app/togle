@@ -2,6 +2,8 @@
 const { app } = require('electron')
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict')
 const directory = path.join(__dirname, '.work', 'call-titles-live-' + process.pid)
+// Empty: Windows reuses process ids, and an earlier run's profile would still hold its settings.
+fs.rmSync(directory, { recursive: true, force: true })
 fs.mkdirSync(directory, { recursive: true }); app.setPath('userData', directory); app.getAppPath = () => path.resolve(__dirname, '..')
 const timeout = setTimeout(() => { console.error('Meeting naming check timed out'); app.exit(1) }, 100000)
 let titles

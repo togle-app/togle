@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { changedFiles, KNOWN_AGENTS, needsYou, stepsLine, type ClaudeHookStatus, type LogEntry, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
+import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, stepsLine, type ClaudeHookStatus, type LogEntry, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
 import { Changes } from './Changes'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
@@ -129,7 +129,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
             New task
           </button>
         </div>
-        {loaded && !installed.length && <p className="empty">No coding agent found. Install Claude Code, Codex or Hermes, and Togle finds it.</p>}
+        {loaded && !installed.length && <NoAgents />}
         {!!waiting.length && <TaskGroup label="Waiting for you">{waiting.map(row)}</TaskGroup>}
         {!!working.length && <TaskGroup label="Working">{working.map(row)}</TaskGroup>}
         {!!earlier.length && (
@@ -270,6 +270,36 @@ export function TerminalAnswers({ compact = false }: { compact?: boolean }) {
   )
 }
 
+/** No agent on this computer: the ones Togle knows, each with the one line its maker gives to install it. */
+function NoAgents() {
+  const windows = api.platform === 'win32'
+  const [copied, setCopied] = useState('')
+  const copy = (runner: string, line: string): void => {
+    void navigator.clipboard.writeText(line).then(() => setCopied(runner), () => undefined)
+  }
+  return (
+    <div className="no-agents">
+      <p>No coding agent on this computer yet. Togle works with these. Paste one line into {windows ? 'PowerShell' : 'a terminal'}, then sign in as the agent asks. Togle finds it within a minute.</p>
+      {AGENT_INSTALLS.map((agent) => (
+        <div key={agent.runner} className="no-agents-row">
+          <span className="no-agents-name">
+            <strong>{agent.name}</strong> by {agent.maker} ·{' '}
+            <button className="link" onClick={() => api.openExternal(agent.page)}>
+              Its page
+            </button>
+          </span>
+          <span className="no-agents-line">
+            <code>{windows ? agent.windows : agent.unix}</code>
+            <button className="small" onClick={() => copy(agent.runner, windows ? agent.windows : agent.unix)}>
+              {copied === agent.runner ? 'Copied' : 'Copy'}
+            </button>
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function TaskGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="task-group">
@@ -283,7 +313,7 @@ function TaskRow({ task, now, selected, onSelect }: { task: TaskView; now: numbe
   const stoppedHere = needsYou(task) && task.state !== 'waiting'
   // One line, as the design has it: the agent, where it works, and how it stands. Stopped and waiting for a reply, it
   // says why; done, it says when.
-  const detail = stoppedHere ? (task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : 'stopped · reply to go on') : task.state === 'waiting' ? 'waiting' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : `done · ${ago(task.updatedAt, now)}`
+  const detail = stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : 'stopped · reply to go on') : task.state === 'waiting' ? 'waiting' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : `done · ${ago(task.updatedAt, now)}`
   const where = !task.mine && task.pid ? 'terminal' : baseName(task.folder)
   const dangerous = task.pending.some((request) => request.danger)
   return (
@@ -297,6 +327,33 @@ function TaskRow({ task, now, selected, onSelect }: { task: TaskView; now: numbe
       </span>
       {dangerous && <span className="task-danger">Dangerous</span>}
     </button>
+  )
+}
+
+/** A task whose agent is signed out: the command that signs it in, to run in a terminal. A reply then goes on. */
+function SignedOut({ task }: { task: TaskView }) {
+  const [copied, setCopied] = useState(false)
+  const copy = (): void => {
+    if (task.fix) void navigator.clipboard.writeText(task.fix).then(() => setCopied(true), () => undefined)
+  }
+  return (
+    <div className="task-banner signed-out" role="note">
+      <span>
+        {agentOf(task)} is signed out.{' '}
+        {task.fix ? (
+          <>
+            Run <code>{task.fix}</code> in a terminal, then reply here to go on.
+          </>
+        ) : (
+          'Sign it in as its own instructions say, then reply here to go on.'
+        )}
+      </span>
+      {task.fix && (
+        <button className="small" onClick={copy}>
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -344,7 +401,7 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
         <div className="task-title">
           <h2 title={task.title}>{task.title}</h2>
           <p>
-            {agentOf(task)} · <span title={task.folder}>{task.folder ? baseName(task.folder) : 'No folder'}</span> · <span className="task-state" data-state={task.state}>{STATE_WORDS[task.state]}</span>
+            {agentOf(task)} · <span title={task.folder}>{task.folder ? baseName(task.folder) : 'No folder'}</span> · <span className="task-state" data-state={task.state}>{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
             {task.updatedAt && !running ? ` · ${ago(task.updatedAt, now)}` : ''}
             {changed > 0 && ` · ${changed} ${changed === 1 ? 'file' : 'files'} changed`}
             {task.folder && (
@@ -375,6 +432,8 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
           )}
         </div>
       </header>
+
+      {task.mine && task.signedOut && <SignedOut task={task} />}
 
       {!task.mine && (
         <div className="task-banner" role="note">

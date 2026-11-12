@@ -3,6 +3,8 @@
 const { app, ipcMain, globalShortcut } = require('electron')
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path')
 const directory = path.join(__dirname, '.work', 'meeting-notes-live-' + process.pid)
+// Empty: Windows reuses process ids, and an earlier run's profile would still hold its settings and calls.
+fs.rmSync(directory, { recursive: true, force: true })
 fs.mkdirSync(directory, { recursive: true }); app.setPath('userData', directory)
 process.env.TOGLE_HEADLESS = '1'; process.env.TOGLE_SILENT_AUDIO = '1'; process.env.TOGLE_DEBUG_PORT = '0'
 process.env.TOGLE_SPEECH_HOME = path.join(directory, 'speech'); process.env.TOGLE_SPEECH_SEEDS = ''

@@ -2,7 +2,7 @@
 // backends (codex.ts, claude.ts) know how to talk to their agent; this joins them: the tasks they keep on this computer,
 // the ones Togle runs (with what happened in each, so the window can show it), and the actions on a task by its key.
 import { promises as fs } from 'node:fs'
-import { KNOWN_AGENTS, type Changes, type Decision, type LogEntry, type RunnerKind, type RunnerStatus, type StartRequest, type TaskAttention, type TaskDetail, type TaskEvent, type TaskInfo, type TaskView, type ViewRequest } from '@shared/runner'
+import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Changes, type Decision, type LogEntry, type RunnerKind, type RunnerStatus, type StartRequest, type TaskAttention, type TaskDetail, type TaskEvent, type TaskInfo, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
 import { changesIn } from './changes'
 import { ExternalRequests, type Held, type Look, type OutsideAsk } from './external'
@@ -48,6 +48,8 @@ export interface HubOptions {
   outsideGraceMs?: number
   /** A task was started here, from whichever place: told with what it was started from. */
   started?: (task: TaskView, request: StartRequest) => void
+  /** Adds to where agents are looked for what the person's terminal would see; true when that added anything. */
+  widenPath?: () => Promise<boolean>
 }
 
 interface Owned {
@@ -58,6 +60,10 @@ interface Owned {
   running: number
   updatedAt: number
   off: () => void
+  /** The error the last turn ended with, until the person replies: the task stopped by itself. */
+  problem?: string
+  /** What the agent last said went wrong, for a program that stopped. */
+  lastError?: string
 }
 
 const LOG_LIMIT = 400
@@ -113,12 +119,16 @@ export class RunnerHub {
   /** Which agents are on this computer. */
   async status(): Promise<RunnerStatus[]> {
     if (this.found && Date.now() - this.found.at < 20_000) return this.found.status
-    const status = await Promise.all(
-      this.options.backends.map(async (backend): Promise<RunnerStatus> => {
-        const detected: Detected = await backend.detect().catch(() => ({ installed: false }))
-        return { runner: backend.runner, name: this.nameOf(backend.runner), installed: detected.installed, ...(detected.version ? { version: detected.version } : {}), ...(backend.runner in KNOWN_AGENTS ? {} : { added: true }) }
-      })
-    )
+    const detect = (): Promise<RunnerStatus[]> =>
+      Promise.all(
+        this.options.backends.map(async (backend): Promise<RunnerStatus> => {
+          const detected: Detected = await backend.detect().catch(() => ({ installed: false }))
+          return { runner: backend.runner, name: this.nameOf(backend.runner), installed: detected.installed, ...(detected.version ? { version: detected.version } : {}), ...(backend.runner in KNOWN_AGENTS ? {} : { added: true }) }
+        })
+      )
+    let status = await detect()
+    // One not found may have been installed after Togle started, or where only a terminal looks: look again once more is known.
+    if (status.some((item) => !item.installed) && (await this.options.widenPath?.().catch(() => false))) status = await detect()
     this.found = { at: Date.now(), status }
     return status
   }
@@ -173,8 +183,7 @@ export class RunnerHub {
     if (!folder?.isDirectory()) throw new Error('That folder is not there.')
     // A task started here always asks before a command or an edit.
     const handle = await backend.start({ folder: request.folder, prompt, title: request.title?.trim() || undefined, asks: true })
-    const owned = await this.adopt(handle)
-    this.log(owned, 'you', prompt)
+    const owned = await this.adopt(handle, prompt)
     this.options.titles?.set(owned.key, owned.handle.title)
     this.fresh()
     const view = this.viewOfOwned(owned, undefined)
@@ -221,6 +230,8 @@ export class RunnerHub {
     if (!message) return
     this.log(owned, 'you', message)
     this.touch(owned)
+    // A reply goes on from where it stopped: what went wrong is past.
+    owned.problem = undefined
     await owned.handle.send(message)
     this.fresh()
   }
@@ -278,7 +289,7 @@ export class RunnerHub {
   attention(): TaskAttention[] {
     const mine = [...this.owned.values()].map((owned) => {
       const view = this.viewOfOwned(owned, undefined)
-      return { key: owned.key, runner: view.runner, agent: this.nameOf(view.runner), title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line }
+      return { key: owned.key, runner: view.runner, agent: this.nameOf(view.runner), title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line, ...(view.signedOut ? { signedOut: true } : {}), ...(view.fix ? { fix: view.fix } : {}) }
     })
     // Sessions that run elsewhere and ask about a command: answered here as well.
     const elsewhere = this.outside.keys().filter((key) => !this.owned.has(key)).map((key) => {
@@ -376,7 +387,8 @@ export class RunnerHub {
     owned.updatedAt = Date.now()
   }
 
-  private async adopt(handle: TaskHandle): Promise<Owned> {
+  /** Togle runs the task from now on. `first` is what the person asked it, logged before anything the agent says to it. */
+  private async adopt(handle: TaskHandle, first?: string): Promise<Owned> {
     // Claude Code tells a task's id with its first answer: wait for it, as the key is built from it.
     for (let waited = 0; !handle.id; waited += 50) {
       if (handle.state === 'failed' || waited > 20_000) throw new Error(`${this.nameOf(handle.runner)} did not start the task.`)
@@ -388,6 +400,8 @@ export class RunnerHub {
     const owned: Owned = { key, handle, log: [], running: 0, updatedAt: Date.now(), off: () => undefined }
     this.owned.set(key, owned)
     this.options.records?.add({ runner: handle.runner, id: handle.id, title: this.titleOf(key, handle.title), folder: handle.folder, at: Date.now() })
+    // What the agent said while it started comes after the words it was given, though it is heard all at once below.
+    if (first) this.log(owned, 'you', first)
     owned.off = handle.on((event) => {
       this.record(owned, event)
       this.changedSoon()
@@ -432,9 +446,12 @@ export class RunnerHub {
         break
       case 'turn-ended':
         if (event.outcome === 'interrupted') this.log(owned, 'note', 'Stopped.')
+        // A turn that ended with an error stops the task until the person replies; a turn that ended well clears it.
+        owned.problem = event.outcome === 'failed' ? event.error || 'The turn ended with an error.' : undefined
         break
       case 'error':
         this.log(owned, 'note', event.message)
+        owned.lastError = event.message
         break
       case 'ended':
         owned.running = 0
@@ -502,27 +519,38 @@ export class RunnerHub {
     const lastCommand = [...owned.log].reverse().find((e) => e.kind === 'command' && e.status === 'running')
     const lastWords = [...owned.log].reverse().find((e) => e.kind === 'agent')
     const first = pending[0]
+    // Stopped by itself (a turn that ended with an error, or a program that stopped), it waits for a reply and says why.
+    const why = handle.state === 'failed' ? (owned.lastError ?? owned.problem) : handle.state === 'idle' ? owned.problem : undefined
+    const state: TaskState = why ? 'failed' : handle.state
+    const signedOut = !!why && isSignedOut(why)
+    const fix = signedOut ? SIGN_IN_COMMANDS[handle.runner] : undefined
     const line = first
       ? requestLine(first)
-      : lastCommand
-        ? `Running ${short(lastCommand.text, 70)}`
-        : handle.state === 'working'
-          ? 'Working…'
-          : lastWords
-            ? firstSentence(lastWords.text)
-            : ''
+      : signedOut
+        ? `${this.nameOf(handle.runner)} is signed out.`
+        : why
+          ? short(why, 160)
+          : lastCommand
+            ? `Running ${short(lastCommand.text, 70)}`
+            : handle.state === 'working'
+              ? 'Working…'
+              : lastWords
+                ? firstSentence(lastWords.text)
+                : ''
     return {
       key: owned.key,
       runner: handle.runner,
       id: handle.id ?? '',
       title: this.titleOf(owned.key, handle.title, info?.title),
       folder: handle.folder || info?.folder || '',
-      state: handle.state,
+      state,
       updatedAt: owned.updatedAt,
       mine: true,
       line,
       pending,
-      commandsRunning: owned.running > 0
+      commandsRunning: owned.running > 0,
+      ...(signedOut ? { signedOut: true } : {}),
+      ...(fix ? { fix } : {})
     }
   }
 }

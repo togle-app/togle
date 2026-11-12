@@ -3095,6 +3095,14 @@ ul.pending-lessons > li > span:first-child { flex: 1 1 260px; min-width: 0; over
 .task-actions button svg { vertical-align: -1px; }
 .task-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--muted); font-size: 12px; }
 .task-banner .row { display: flex; gap: 8px; }
+.task-banner.signed-out { background: #2a2418; border-color: #5a4a22; color: var(--text); }
+.no-agents { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.no-agents p { margin: 0; }
+.no-agents-row { display: flex; flex-direction: column; gap: 5px; }
+.no-agents-name strong { color: var(--text); }
+.no-agents-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.no-agents-line code { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 11.5px/1.45 ui-monospace, 'Cascadia Mono', Consolas, monospace; overflow-wrap: anywhere; }
+.task-banner code { padding: 1px 5px; border-radius: 4px; background: var(--bg); color: var(--text); font: 12px ui-monospace, 'Cascadia Mono', Consolas, monospace; }
 .task-log { flex: 1; min-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 2px; }
 .task-you { align-self: flex-end; max-width: 82%; padding: 7px 10px; border-radius: 10px 10px 2px 10px; background: var(--accent-strong); color: #fff; white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-agent { max-width: 92%; padding: 7px 10px; border-radius: 10px 10px 10px 2px; background: var(--panel-2); overflow-wrap: anywhere; }
