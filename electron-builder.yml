@@ -24,6 +24,9 @@ extraResources:
     to: licenses
   - from: resources/dictation-windows.ps1
     to: dictation-windows.ps1
+  # The togle command, beside the app: resources/bin/togle (and togle.cmd on Windows).
+  - from: resources/bin
+    to: bin
   - from: build/icon.png
     to: icon.png
   - from: build/icon.ico

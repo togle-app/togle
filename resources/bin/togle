@@ -1,0 +1,12 @@
+#!/bin/sh
+# The togle command of an installed Togle: starts a task in the running Togle, and lists the tasks.
+# It runs the app's program as plain Node (no window), on the command inside the app.
+here="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "$here/../../MacOS/Togle" ]; then
+  program="$here/../../MacOS/Togle"
+elif [ -x "$here/../../togle" ]; then
+  program="$here/../../togle"
+else
+  program="$here/../../Togle"
+fi
+ELECTRON_RUN_AS_NODE=1 exec "$program" "$here/../app.asar/out/main/cli.js" "$@"

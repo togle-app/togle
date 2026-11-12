@@ -14,6 +14,9 @@
     "url": "https://github.com/togle-app/togle/issues"
   },
   "main": "./out/main/index.js",
+  "bin": {
+    "togle": "bin/togle.cjs"
+  },
   "engines": {
     "node": ">=22.12.0"
   },
