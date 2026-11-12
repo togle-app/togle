@@ -627,6 +627,32 @@ async function checkNotice(T, agent) {
   ui.window.destroy()
 }
 
+// The corner notice that a call started in another app: three answers, held a moment so a stray click does not give one.
+async function checkCallNotice(T, agent) {
+  const ui = await open(T, agent, 372, 'callnotice')
+  const emit = value => ui.evaluate("window.togleUITest.emit('onCallNotice', " + JSON.stringify(value) + ")")
+  const answers = async () => (await ui.calls('answerCallNotice')).map(call => call.args[0])
+  assert.equal(await ui.evaluate("document.querySelector('.call-notice')"), null, 'nothing shows until a call starts')
+  await emit({ app: 'zoom', name: 'Zoom' })
+  await ui.wait("!!document.querySelector('.call-notice')")
+  assert.equal(await ui.evaluate("document.querySelector('.call-notice strong').textContent"), 'A call started in Zoom')
+  assert.deepEqual(await texts(ui, '.call-notice button'), ['Write it down', 'Not now', 'Always in Zoom'])
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('.call-notice button')].every(button=>button.disabled)"), true, 'held at first, so a click meant for the call does not answer it')
+  await ui.wait("[...document.querySelectorAll('.call-notice button')].every(button=>!button.disabled)")
+  await ui.capture('call-notice')
+  await ui.click('.call-notice button', 'Write it down')
+  await emit({ app: 'teams', name: 'Teams' })
+  await ui.wait("document.querySelector('.call-notice strong').textContent==='A call started in Teams'")
+  await ui.wait("[...document.querySelectorAll('.call-notice button')].every(button=>!button.disabled)")
+  await ui.click('.call-notice button', 'Not now')
+  await ui.click('.call-notice button', 'Always in Teams')
+  assert.deepEqual(await answers(), ['write', 'later', 'always'])
+  await emit(null)
+  await ui.wait("!document.querySelector('.call-notice')")
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 async function checkNarrow(T, agent) {
   const ui = await open(T, agent, 600)
   await ui.click('.workspace-nav button', 'Tasks')
@@ -660,6 +686,7 @@ app.whenReady().then(async () => {
     await checkOutside(T, agent)
     await checkOutsideAsk(T, agent)
     await checkTaskBox(T, agent)
+    await checkCallNotice(T, agent)
     await checkAgentSettings(T, agent)
     console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box and the settings for coding agents passed')
     clearTimeout(timeout)

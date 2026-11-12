@@ -975,6 +975,26 @@ app.whenReady().then(async () => {
   assert.equal(await ready.evaluate("window.togle.rememberedVoices().then(people=>people.length)"), 1, 'turning recognition memory off preserves saved people until explicitly forgotten')
   await ready.evaluate("[...document.querySelectorAll('#settings-speakers label.setting')].find(row=>row.querySelector('.name')?.textContent==='Remember confirmed people').querySelector('input').click()")
   await ready.wait("window.togleUITest.settings().assist.rememberVoices===true")
+  // The short clip of each voice that Confirm names plays is kept for a day unless this is turned off.
+  const clipSwitch = "[...document.querySelectorAll('#settings-speakers label.setting')].find(row=>row.querySelector('.name')?.textContent==='Keep a short clip of each voice for a day').querySelector('input')"
+  assert.equal(await ready.evaluate(clipSwitch + '.checked'), true, 'on unless turned off')
+  await ready.evaluate(clipSwitch + '.click()')
+  await ready.wait("window.togleUITest.settings().meetings.confirmNames===false")
+  await ready.evaluate(clipSwitch + '.click()')
+  await ready.wait("window.togleUITest.settings().meetings.confirmNames===true")
+  // What happens when a call starts in a call app (only Windows can tell which program uses the microphone).
+  if (process.platform === 'win32') {
+    await ready.evaluate("document.querySelector('#settings-meetings').scrollIntoView({block:'center'})")
+    assert.deepEqual(await ready.evaluate("[...document.querySelectorAll('#settings-meetings label.setting .name')].map(name=>name.textContent)"), ['Tell me when a call starts', 'Zoom', 'Teams', 'Webex', 'Skype', 'Slack'])
+    assert.equal(await ready.evaluate("document.querySelector('[aria-label=\"When a call starts in Zoom\"]').value"), 'ask', 'asks unless told otherwise')
+    await ready.evaluate("(()=>{const select=document.querySelector('[aria-label=\"When a call starts in Zoom\"]');select.value='always';select.dispatchEvent(new Event('change',{bubbles:true}))})()")
+    await ready.wait("window.togleUITest.settings().meetings.apps.zoom==='always'")
+    await ready.evaluate("[...document.querySelectorAll('#settings-meetings label.setting')].find(row=>row.querySelector('.name')?.textContent==='Tell me when a call starts').querySelector('input').click()")
+    await ready.wait("window.togleUITest.settings().meetings.notice===false&&document.querySelector('[aria-label=\"When a call starts in Teams\"]').disabled")
+    await ready.capture('call-apps')
+    await ready.evaluate("[...document.querySelectorAll('#settings-meetings label.setting')].find(row=>row.querySelector('.name')?.textContent==='Tell me when a call starts').querySelector('input').click()")
+    await ready.wait("window.togleUITest.settings().meetings.notice===true")
+  }
   await ready.click('.remembered-people button', "Forget Diana's voice")
   await ready.wait("document.querySelector('.remembered-people summary').textContent==='Remembered people'")
   assert.ok(await ready.evaluate("window.togle.currentCall().then(call=>call.transcript.some(line=>line.voiceName==='Diana'))"), 'forgetting the acoustic profile preserves names already in the transcript')

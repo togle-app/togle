@@ -16,6 +16,7 @@ import type { SettingsPart } from './open-settings'
 import { Icon } from './Icon'
 import { Row, Section, Toggle } from './Rows'
 import { VoiceMemorySettings } from './VoiceMemory'
+import { CallAppSettings } from './CallAppSettings'
 import { OpacitySlider } from './WindowControls'
 import { DictationSettings } from './DictationSettings'
 import { TogleMicrophoneSettings } from './TogleMicrophoneSettings'
@@ -385,6 +386,7 @@ const PARTS: [id: string, label: string][] = [
   ['settings-dictation', 'Voice typing'],
   ['settings-privacy', 'Privacy'],
   ['settings-speakers', 'Speakers'],
+  ['settings-meetings', 'Call apps'],
   ['settings-microphone', 'Togle Studio'],
   ['settings-agents', 'Coding agents'],
   ['settings-window', 'Window & shortcuts']
@@ -520,6 +522,7 @@ export function Settings({ settings, auth, claudeAuth, stt, at, onChange, onDone
       </Section>
 
       <VoiceMemorySettings settings={settings} save={save} />
+      <CallAppSettings settings={settings} save={save} />
       <TogleMicrophoneSettings settings={settings} save={save} />
 
       <Section id="settings-agents" title="Coding agents" note="Claude Code, Codex and Hermes on this computer. Tasks and To-do are in the sidebar.">

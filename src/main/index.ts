@@ -20,6 +20,9 @@ import { registerConnection, startChannel } from './channel/register'
 import type { ChannelServer } from './channel/server'
 import { NoticeWindow } from './notice-window'
 import { TaskBoxWindow } from './task-box-window'
+import { CallNoticeWindow } from './call-notice-window'
+import { appRunning, CallDetector, readMicrophoneUse } from './call-detect'
+import { callAppName, isCallApp, isCallAppMode, type CallApp } from '@shared/call-apps'
 import { Attention } from './runners/attention'
 import type { RunnerHub } from './runners/hub'
 import type { Backend } from './runners/types'
@@ -261,6 +264,23 @@ let todo: TodoFile | null = null
 let hookChannel: ChannelServer | null = null
 // The box to start a task in, opened by its key from any app.
 const taskBox = new TaskBoxWindow()
+const callNotice = new CallNoticeWindow()
+/** A call started in another app: written down at once, offered in the corner, or left, as the person chose for that app. */
+function callAppStarted(appId: CallApp): void {
+  const choice = getSettings().meetings.apps[appId]
+  const mode = isCallAppMode(choice) ? choice : 'ask'
+  if (mode === 'never' || copilot.isListening) return
+  if (mode === 'always') send('hotkey', 'start-call-unseen')
+  else callNotice.show({ app: appId, name: callAppName(appId) }, 60_000)
+}
+// Looked for every few seconds while no call is being written down; Windows only (it reads which program uses the microphone).
+const callDetector = new CallDetector({
+  read: readMicrophoneUse,
+  running: appRunning,
+  active: () => process.platform === 'win32' && !quitting && !copilot.isListening && getSettings().meetings.notice && (app.isPackaged || process.env.TOGLE_CALL_DETECT !== '0'),
+  onStart: callAppStarted,
+  onEnd: (appId) => { if (callNotice.shown?.app === appId) callNotice.show(null) }
+})
 // The small notice in a corner of the screen, and what it tells: a task waits for the person, or one finished.
 const noticeWindow = new NoticeWindow()
 const attention = new Attention()
@@ -1559,6 +1579,15 @@ function registerIpc(): void {
   ipcMain.on('call:brief', (_e, text: string) => copilot.setBrief(String(text ?? '')))
   ipcMain.on('call:group', (_e, group: boolean) => copilot.setGroup(!!group))
   ipcMain.on('call:told-others', (_e, told: boolean) => copilot.setToldOthers(!!told))
+  // The answer to the notice that a call started in another app.
+  ipcMain.on('callnotice:answer', (event, choice: unknown) => {
+    if (!callNotice.owns(event.sender)) return
+    const shown = callNotice.shown
+    callNotice.show(null)
+    if (!shown || !isCallApp(shown.app) || copilot.isListening) return
+    if (choice === 'always') void updateSettings({ meetings: { ...getSettings().meetings, apps: { ...getSettings().meetings.apps, [shown.app]: 'always' } } }).then(() => send('settings:changed', getSettings()))
+    if (choice === 'write' || choice === 'always') send('hotkey', 'start-call-unseen')
+  })
   ipcMain.handle('call:mark', () => copilot.mark())
 
   ipcMain.handle('calls:list', listCallSessions)
@@ -2166,6 +2195,7 @@ if (hookAt !== -1) {
     void sweepConfirmSound()
     void sweepSharedCalls()
     setInterval(() => void sweepConfirmSound(), 3600_000).unref()
+    callDetector.start()
     setupMediaAccess()
     registerIpc()
     const runnerTitles = new StoredTitles()
@@ -2262,6 +2292,8 @@ if (hookAt !== -1) {
     dictationWindow.close()
     noticeWindow.close()
     taskBox.close()
+    callDetector.stop()
+    callNotice.close()
     todo?.dispose()
     void hookChannel?.close()
     microphoneLink.stop()

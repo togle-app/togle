@@ -813,6 +813,10 @@ export interface Settings {
     introSeen: boolean
     /** Keep one short clip of each voice for a day, so the person can hear who spoke when they confirm the names. */
     confirmNames: boolean
+    /** Say when a call starts in Zoom, Teams, Webex, Skype or Slack (Windows). */
+    notice: boolean
+    /** What to do when a call starts in each of those apps: ask (the default), write it down at once, or leave it. */
+    apps: Partial<Record<import('./call-apps').CallApp, import('./call-apps').CallAppMode>>
   }
 }
 

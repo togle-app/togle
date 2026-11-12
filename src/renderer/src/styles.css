@@ -3274,3 +3274,11 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .taskbox-attach { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); font-size: 12px; color: var(--muted); }
 .taskbox-attach span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .taskbox-attach button { padding: 0 6px; border: none; background: none; color: inherit; font-size: 15px; line-height: 1; }
+
+/* The corner notice that a call started in another app. */
+.call-notice { display: grid; gap: 6px; box-sizing: border-box; height: 100vh; padding: 12px 14px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; background: var(--panel); color: var(--text); font-size: 12px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
+.call-notice strong { font-size: 13px; }
+.call-notice > span { color: var(--muted); }
+.call-notice-buttons { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.call-notice-buttons button { padding: 5px 11px; font-size: 12px; }
+.call-notice-buttons .link { padding-left: 2px; padding-right: 2px; }
