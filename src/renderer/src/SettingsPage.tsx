@@ -16,6 +16,7 @@ import { Row, Section, Toggle } from './Rows'
 import { useAccounts } from './Accounts'
 import { Menu } from './Menu'
 import { VocabularyEditor } from './DictationVocabulary'
+import { Devices } from './Devices'
 import { useRememberedVoices } from './VoiceMemory'
 import type { SettingsPart } from './open-settings'
 
@@ -57,6 +58,7 @@ export function SettingsPage({ settings, stt, at, onChange }: Props) {
         <Voice settings={settings} stt={stt} save={save} />
         <Meetings settings={settings} save={save} />
         <Agents />
+        <Devices />
         <Accounts settings={settings} save={save} />
         <Update />
         <p className="settings-foot">Togle is free and open source, under the MIT license. <button className="link" onClick={() => api.openExternal('https://github.com/togle-app/togle')}>Source code</button></p>

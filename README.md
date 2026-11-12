@@ -128,6 +128,8 @@ src/main/              Electron main process
   todo.ts              the to-do list as a plain text file
   task-box-window.ts   the F10 box; notice-window.ts the corner notice; tray.ts the tray
   microphone-link.ts   Togle Studio, when it's on this computer: found, watched, turned on and off around calls
+  reach/               Togle on your other devices (part of Togle Studio, not in releases until reviewed): keys,
+                       the list of your devices, adding one by its code, what passes between them
 src/shared/            what the main process and the window share (types, the IPC api, hotkeys, call apps)
 src/preload/           the window.togle bridge
 src/renderer/src/      React: Shell.tsx (the window), Todo.tsx, Tasks.tsx (Agents), MeetingsPage.tsx,
@@ -172,6 +174,8 @@ Tokens and API keys are encrypted with the system's keystore (Electron `safeStor
 - **On for calls.** With **Turn on during calls** (Settings), a call that starts turns it on first, so the call hears the clean microphone, and turns it off again when the call ends, unless it was already on.
 - **Signed in to it.** Togle Studio is used with its own account. While you're signed out of it, a call leaves it alone, and Settings offers **Sign in**, which opens its window. Togle only learns whether someone is signed in, never who.
 - **What your microphone picks up.** Without it, Togle measures your microphone during calls while nobody speaks: how often the background is loud enough to hear, and short sounds such as typing. Only levels are kept, in memory. After a noisy call (at most every few days, never during one), the call's page says for how many minutes the microphone picked up room noise, with one link: **Clean my microphone**. **Mention Togle Studio** in Settings turns that off.
+
+**Reach**, the part of Togle Studio that connects Togle across your computers, a server and your phone, is being built. Togle's side is in this repository and makes every decision; Studio only carries what your devices lock for each other. It stays out of every release until an outside review has tried to break it. See [Reach](docs/reach.md).
 
 The link to Togle Studio's site uses `STUDIO_SITE` in [`src/shared/microphone-link.ts`](src/shared/microphone-link.ts): studio.togle.app. Togle's own site is togle.app (`TOGLE_SITE`); the domain has to be registered before a release.
 

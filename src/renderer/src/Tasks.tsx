@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, stepsLine, type ClaudeHookStatus, type LogEntry, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
+import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
 import { Changes } from './Changes'
+import { useReach } from './Devices'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { Markdown } from './Markdown'
@@ -36,6 +38,26 @@ function ago(at: number, now: number): string {
 
 const isDetail = (value: unknown): value is TaskDetail => typeof value === 'object' && value !== null && 'task' in value && 'log' in value
 
+// A task on another of the person's devices is picked by its device and its key there.
+const REMOTE = 'remote:'
+const remoteKey = (device: string, key: string): string => `${REMOTE}${device}:${key}`
+
+/** The tasks the person's other devices share (Reach, part of Togle Studio), kept current. */
+function useRemoteTasks(): DeviceTasks[] {
+  const reach = useReach()
+  const [remote, setRemote] = useState<DeviceTasks[]>([])
+  const member = !!reach?.available && reach.standing === 'member'
+  useEffect(() => {
+    if (!member) { setRemote([]); return }
+    let live = true
+    const read = (): void => { void api.reachRemoteTasks().then((list) => { if (live) setRemote(Array.isArray(list) ? list : []) }, () => undefined) }
+    read()
+    const off = api.onReachChanged(read)
+    return () => { live = false; off() }
+  }, [member])
+  return remote
+}
+
 /** `focus`: a task to show, asked for from outside (a notice, the to-do list), on what it changed if `changes`; a new `seq` asks again. */
 export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?: boolean } }) {
   const [tasks, setTasks] = useState<TaskView[]>([])
@@ -48,6 +70,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   const [loaded, setLoaded] = useState(false)
   const [now, setNow] = useState(Date.now())
   const [showAll, setShowAll] = useState(false)
+  const remote = useRemoteTasks()
   const selectedNow = useRef(selected)
   selectedNow.current = selected
 
@@ -57,7 +80,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
       setTasks(Array.isArray(list) ? list : [])
       setStatus(Array.isArray(found) ? found : [])
       const key = selectedNow.current
-      if (key) {
+      if (key && !key.startsWith(REMOTE)) {
         const next: unknown = await api.runnerDetail(key).catch(() => null)
         setDetail(isDetail(next) && next.task.key === key ? next : null)
       } else setDetail(null)
@@ -120,10 +143,13 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
       onSelect={() => setSelected(task.key)}
     />
   )
+  const remoteSelected = selected?.startsWith(REMOTE)
+    ? remote.flatMap((device) => device.tasks.map((task) => ({ device, task }))).find(({ device, task }) => remoteKey(device.device, task.key) === selected)
+    : undefined
 
   return (
     <div className={`tasks ${selected ? 'has-detail' : ''}`} aria-label="Tasks">
-      <aside className="tasks-list" aria-label="Agent tasks on this computer">
+      <aside className="tasks-list" aria-label={remote.length ? 'Agent tasks on your devices' : 'Agent tasks on this computer'}>
         <div className="tasks-head">
           <span className="tasks-label">This computer</span>
           <button className="primary small" disabled={!installed.length} onClick={() => void api.openTaskBox({}).catch((caught) => setError(errorText(caught)))}>
@@ -144,6 +170,20 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
           </TaskGroup>
         )}
         {loaded && !!installed.length && !tasks.length && <p className="empty">No tasks yet. Start one, or let an agent run in a terminal and it shows here.</p>}
+        {remote.map((device) => (
+          <div key={device.device} className="task-device" aria-label={`Agent tasks on ${device.name}`}>
+            <div className="tasks-head">
+              <span className="tasks-label">{device.name}{device.role === 'server' ? ' · server' : ''}{device.online ? '' : ' · offline'}</span>
+            </div>
+            {device.tasks.length ? (
+              <div role="list">
+                {device.tasks.map((task) => (
+                  <RemoteRow key={task.key} task={task} now={now} selected={remoteKey(device.device, task.key) === selected} onSelect={() => setSelected(remoteKey(device.device, task.key))} />
+                ))}
+              </div>
+            ) : <p className="empty">No tasks there in the last week.</p>}
+          </div>
+        ))}
         <TerminalAnswers />
       </aside>
       <section className="tasks-detail">
@@ -152,7 +192,20 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
             {error}
           </p>
         )}
-        {detail && seeing === detail.task.key ? (
+        {remoteSelected ? (
+          <RemotePanel
+            key={selected}
+            device={remoteSelected.device}
+            task={remoteSelected.task}
+            now={now}
+            onBack={() => setSelected(undefined)}
+            act={(remoteAct) => act(() => api.reachAct(remoteSelected.device.device, remoteAct))}
+          />
+        ) : selected?.startsWith(REMOTE) ? (
+          <div className="tasks-empty">
+            <p>That task is no longer shared by its device.</p>
+          </div>
+        ) : detail && seeing === detail.task.key ? (
           <Changes taskKey={detail.task.key} title={detail.task.title} folder={detail.task.folder} onBack={() => setSeeing(null)} />
         ) : detail ? (
           <TaskPanel
@@ -636,5 +689,89 @@ function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { reques
       {/* What always reaches, in the agent's terms; never for a command that looks dangerous. */}
       {request.always && !request.danger && (<button className="link task-always" onClick={onAlways}>{request.always}</button>)}
     </section>
+  )
+}
+
+/** A task on another of the person's devices, in the same one line as a task here. */
+function RemoteRow({ task, now, selected, onSelect }: { task: RemoteTask; now: number; selected: boolean; onSelect: () => void }) {
+  const detail = task.state === 'waiting' ? 'waiting for you' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : `done · ${ago(task.updatedAt, now)}`
+  return (
+    <button className={`task-row ${selected ? 'selected' : ''}`} role="listitem" data-state={task.state} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
+      <span className="task-dot" aria-hidden="true" />
+      <span className="task-copy">
+        <strong>{task.title}</strong>
+        <span>{task.agent} · {task.terminal ? 'terminal' : task.folder} · {detail}</span>
+      </span>
+      {task.pending.some((request) => request.danger) && <span className="task-danger">Dangerous</span>}
+    </button>
+  )
+}
+
+/**
+ * A task on another device: what it waits for, with the command whole, and what can be done about it from here. Refuse
+ * and Stop need no proof that you are there; Allow does (your fingerprint, face or PIN), and that comes later, so for now
+ * a command is allowed on its own computer.
+ */
+function RemotePanel({ device, task, now, onBack, act }: { device: DeviceTasks; task: RemoteTask; now: number; onBack: () => void; act: (remote: RemoteAct) => void }) {
+  const running = task.state === 'working' || task.state === 'waiting'
+  const here = task.mine && !task.terminal
+  return (
+    <div className="task-panel">
+      <header className="task-header">
+        <button className="ghost small tasks-back" onClick={onBack} aria-label="Back to the list">
+          <Icon name="back" size={14} />
+        </button>
+        <div className="task-title">
+          <h2 title={task.title}>{task.title} <span className="task-device-chip">{device.name}</span></h2>
+          <p>
+            {task.agent} · {task.folder} · <span className="task-state" data-state={task.state}>{STATE_WORDS[task.state]}</span>
+            {!running ? ` · ${ago(task.updatedAt, now)}` : ''}
+          </p>
+        </div>
+        <div className="task-actions">
+          {here && running && (
+            <button className="small primary stop" disabled={!device.online} onClick={() => act({ what: 'stop', task: task.key })}>
+              <Icon name="stop" size={12} /> Stop
+            </button>
+          )}
+          {here && task.commandsRunning && task.state === 'stopped' && (
+            <button className="small" disabled={!device.online} onClick={() => act({ what: 'end-commands', task: task.key })} title="Stop ended the agent's turn. The command it started is still running.">
+              End the running command
+            </button>
+          )}
+        </div>
+      </header>
+
+      {!device.online && <div className="task-banner" role="note"><span>{device.name} is offline. It can be answered once it is back.</span></div>}
+      {task.terminal && <div className="task-banner" role="note"><span>This task runs in a terminal on {device.name}. It is watched from here and answered only there.</span></div>}
+      {!task.mine && !task.terminal && <div className="task-banner" role="note"><span>Togle doesn’t run this task on {device.name}, so it is answered there.</span></div>}
+
+      <div className="task-log" role="log" aria-label="Where it stands">
+        <div className="task-agent task-latest"><p>{task.line || 'Nothing yet.'}</p></div>
+      </div>
+
+      {task.pending.map((request) => (
+        <section key={request.id} className={`task-request ${request.danger ? 'danger' : ''}`} aria-label={request.kind === 'question' ? 'The agent asks' : request.kind === 'edit' ? 'The agent wants to change files' : 'The agent wants to run a command'}>
+          <h3>
+            {request.kind === 'question' ? 'Asks' : request.kind === 'edit' ? 'Wants to change' : 'Wants to run'}
+            {request.danger && <span className="task-danger">Dangerous</span>}
+          </h3>
+          {request.kind === 'command' && <pre className="task-command">{request.command}</pre>}
+          {request.kind === 'edit' && <ul className="task-files">{(request.files ?? []).map((file) => <li key={file}>{file}</li>)}</ul>}
+          {request.kind === 'question' && <p>{request.question}</p>}
+          {request.danger && <p className="task-why">{request.danger}</p>}
+          {here && request.kind !== 'question' && (
+            <div className="row">
+              <button className="small" disabled={!device.online} onClick={() => act({ what: 'refuse', task: task.key, request: request.id })}>Refuse</button>
+            </div>
+          )}
+          <p className="hint">
+            {request.kind === 'question'
+              ? `Answer it on ${device.name}.`
+              : `Allowing it from another device needs your fingerprint, face or PIN, and this Togle can’t ask for that yet. Allow it on ${device.name}.`}
+          </p>
+        </section>
+      ))}
+    </div>
   )
 }

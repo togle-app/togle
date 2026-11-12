@@ -1,0 +1,210 @@
+import { useEffect, useState, type FormEvent } from 'react'
+import type { ReachDevice, ReachState } from '@shared/reach'
+import { Row, Section, Toggle } from './Rows'
+
+// Settings → Devices: this computer among the person's devices (Reach, part of Togle Studio). The list of devices, adding
+// one by its code and Remove live here, in Togle, which is open: never in the Studio app. Only in development runs with a
+// courier set, until an outside review has tried to break Reach.
+
+const api = window.togle
+const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+
+const ROLE_WORDS: Record<ReachDevice['role'], string> = {
+  computer: 'A computer you sit at',
+  server: 'A server · runs agents only',
+  phone: 'A phone'
+}
+const JOINS_AS: Record<ReachDevice['role'], string> = {
+  computer: 'joins as a computer you sit at. It can see and answer the agents on your other computers.',
+  server: 'joins as a server. It runs agents only, and can’t see or answer your other devices.',
+  phone: 'joins as a phone. It sees your lists and can refuse and stop. Typing to agents stays off.'
+}
+
+/** Reach's state, kept current. */
+export function useReach(): ReachState | null {
+  const [state, setState] = useState<ReachState | null>(null)
+  useEffect(() => {
+    let live = true
+    const read = (): void => { void api.reachState().then((value) => { if (live) setState(value) }, () => undefined) }
+    read()
+    const off = api.onReachChanged(read)
+    // A code's time left, and devices coming and going, without a message for each second.
+    const timer = setInterval(read, 5_000)
+    return () => { live = false; off(); clearInterval(timer) }
+  }, [])
+  return state
+}
+
+export function Devices() {
+  const reach = useReach()
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  if (!reach?.available) return null
+  const run = async (what: string, work: () => Promise<unknown>): Promise<void> => {
+    setBusy(what); setError('')
+    try { await work() } catch (failure) { setError(errorText(failure)) } finally { setBusy('') }
+  }
+  const member = reach.standing === 'member'
+  return (
+    <Section id="settings-devices" title="Devices" note={member ? 'Togle Studio carries what your devices send each other, locked so that only they can open it. Each device checks the others itself.' : 'Part of Togle Studio. Your agents and your lists stay on your devices.'}>
+      {member ? <Member reach={reach} busy={busy} run={run} /> : <NotYet reach={reach} busy={busy} run={run} />}
+      {reach.problem && <p className="error" role="alert">{reach.problem}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+    </Section>
+  )
+}
+
+interface PartProps { reach: ReachState; busy: string; run: (what: string, work: () => Promise<unknown>) => Promise<void> }
+
+/** Not one of the person's devices yet: sign in (the first computer), or show a code to add it from one they use. */
+function NotYet({ reach, busy, run }: PartProps) {
+  if (reach.code) return <ShowingCode reach={reach} busy={busy} run={run} />
+  const showCode = <button className="ghost small" disabled={!!busy} onClick={() => void run('code', () => api.reachShowCode())}>{busy === 'code' ? 'Getting a code…' : 'Show a code'}</button>
+  if (reach.standing === 'removed') {
+    return <Row label={false} name="This computer was removed from your devices" note="Or your devices started again from another computer. To add it again, show its code and type it into a computer you use.">{showCode}</Row>
+  }
+  if (reach.addFromAnother) {
+    return (
+      <>
+        <Row label={false} name="Your account has devices already" note="Add this computer from one of them: show its code here, then type it there in Settings → Devices → Add a device.">{showCode}</Row>
+        <Row label={false} name="Lost your only computer?" note="Start your devices again from this one. Your other devices are let go, and you add them again from here. Nothing on them is lost.">
+          <button className="ghost small" disabled={!!busy} onClick={() => void run('again', () => api.reachStartAgain())}>{busy === 'again' ? 'Starting…' : 'Start again'}</button>
+        </Row>
+      </>
+    )
+  }
+  return (
+    <>
+      {reach.account
+        ? <Row label={false} name={`Signed in as ${reach.account.email}`} note={reach.link === 'connecting' ? 'Connecting to Togle Studio…' : 'This computer starts your devices.'} />
+        : <SignIn busy={busy} run={run} />}
+      <Row label={false} name="Add this computer from one you use" note="Show a code here, and type it into Togle on a computer that is one of your devices.">{showCode}</Row>
+    </>
+  )
+}
+
+/** Signing in with a code sent by email: the first computer you sign in on starts your devices. */
+function SignIn({ busy, run }: Pick<PartProps, 'busy' | 'run'>) {
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [sent, setSent] = useState(false)
+  const submit = (event: FormEvent): void => {
+    event.preventDefault()
+    if (!sent) void run('send', async () => { await api.reachSendCode(email); setSent(true) })
+    else void run('verify', () => api.reachSignIn(email, code))
+  }
+  return (
+    <form className="setting-detail" aria-label="Sign in to Togle Studio" onSubmit={submit}>
+      <Row stacked name="Sign in to Togle Studio" note={sent ? `A code is on its way to ${email}. Type its six digits.` : 'The first computer you sign in on starts your devices. A server and a phone never sign in: you add them from here.'}>
+        {sent
+          ? <input aria-label="Code from the email" inputMode="numeric" autoComplete="one-time-code" maxLength={10} autoFocus value={code} disabled={!!busy} onChange={(event) => setCode(event.target.value)} />
+          : <input aria-label="Email address" type="email" autoComplete="email" maxLength={200} value={email} disabled={!!busy} onChange={(event) => setEmail(event.target.value)} />}
+      </Row>
+      <div className="row">
+        <button className="primary" disabled={!!busy || (sent ? code.replace(/\s/g, '').length < 6 : !email.includes('@'))}>
+          {busy === 'send' ? 'Sending…' : busy === 'verify' ? 'Signing in…' : sent ? 'Sign in' : 'Email me a code'}
+        </button>
+        {sent && <button type="button" className="ghost" disabled={!!busy} onClick={() => { setSent(false); setCode('') }}>Use another address</button>}
+      </div>
+    </form>
+  )
+}
+
+/** This device's code, to type into a computer of the group: it works once, for a few minutes. */
+function ShowingCode({ reach, busy, run }: PartProps) {
+  const code = reach.code!
+  const left = Math.max(0, Math.round((code.expiresAt - Date.now()) / 60_000))
+  return (
+    <div className="setting stacked reach-code" role="group" aria-label="This computer's code">
+      <span className="name">This computer’s code</span>
+      <strong className="reach-code-value" aria-live="polite">{code.code}</strong>
+      <span className="note">
+        {code.joined ? 'A computer is adding this one. Answer there.' : `Type it into Togle on a computer you use: Settings → Devices → Add a device. It works once${left ? `, for ${left} more minute${left === 1 ? '' : 's'}` : ''}.`}
+      </span>
+      {code.problem && <span className="note">{code.problem}</span>}
+      <span className="control"><button className="ghost small" disabled={!!busy} onClick={() => void run('cancel', () => api.reachCancelCode())}>Cancel</button></span>
+    </div>
+  )
+}
+
+/** One of the person's devices: the connection, the list with Remove, what others may do here, and adding a device. */
+function Member({ reach, busy, run }: PartProps) {
+  const isComputer = reach.me?.role === 'computer'
+  return (
+    <>
+      <Row label={false} name="Connection" note={connectionWords(reach)} />
+      {reach.devices.map((device) => (
+        <Row key={device.device} label={false} name={<span className="reach-device"><span className={`reach-dot ${device.online ? 'on' : ''}`} aria-hidden="true" />{device.name}</span>} note={device.me ? 'This computer' : `${ROLE_WORDS[device.role]}${device.online ? '' : ' · offline'}`}>
+          {!device.me && isComputer && (
+            <button className="ghost small" aria-label={`Remove ${device.name}`} disabled={!!busy} onClick={() => void run(`remove-${device.device}`, () => api.reachRemove(device.device))}>
+              {busy === `remove-${device.device}` ? 'Removing…' : 'Remove'}
+            </button>
+          )}
+        </Row>
+      ))}
+      <Toggle name="Other devices may act on this computer" note="Refuse a request or stop a task here from your other devices. Off, they can only look." checked={reach.actOnThis} disabled={!!busy} onChange={(on) => void run('act', () => api.reachActOnThis(on))} />
+      {isComputer && <AddDevice reach={reach} busy={busy} run={run} />}
+      {!!reach.acted.length && (
+        <Row label={false} name="Done here from other devices" note={
+          <span className="reach-acted">{reach.acted.slice(0, 5).map((item) => <span key={`${item.at}-${item.device}`}>{new Date(item.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · {item.name}: {item.what}</span>)}</span>
+        } />
+      )}
+      {reach.account && (
+        <Row label={false} name={`Signed in to Togle Studio as ${reach.account.email}`} note="Signing out leaves this computer one of your devices.">
+          <button className="ghost small" disabled={!!busy} onClick={() => void run('out', () => api.reachSignOut())}>Sign out</button>
+        </Row>
+      )}
+    </>
+  )
+}
+
+function connectionWords(reach: ReachState): string {
+  if (reach.link === 'member') {
+    if (reach.connection === 'needs-pro') return 'The connection between your devices is part of Togle Studio Pro. Your agents keep running on their own computers.'
+    if (reach.connection === 'off') return 'The connection is switched off in your Togle Studio account.'
+    return 'Connected through Togle Studio.'
+  }
+  if (reach.link === 'refused') return 'Togle Studio turned this computer away. Your agents keep running here.'
+  return 'Not connected right now. Togle keeps working on this computer, and shows the others as offline.'
+}
+
+/** Add a device: type the code it shows, read what joins and as what, then say yes. */
+function AddDevice({ reach, busy, run }: PartProps) {
+  const [code, setCode] = useState('')
+  const [open, setOpen] = useState(false)
+  const adding = reach.adding
+  if (adding?.stage === 'confirm' || adding?.stage === 'adding') {
+    return (
+      <div className="setting stacked" role="group" aria-label="Add this device?">
+        <span className="name">Add {adding.name}?</span>
+        <span className="note">{adding.name} {JOINS_AS[adding.role ?? 'computer']}</span>
+        <span className="control row">
+          <button className="primary" disabled={!!busy || adding.stage === 'adding'} onClick={() => void run('confirm', () => api.reachConfirmAdd())}>{adding.stage === 'adding' ? 'Adding…' : 'Add'}</button>
+          <button className="ghost" disabled={!!busy || adding.stage === 'adding'} onClick={() => void run('cancel-add', () => api.reachCancelAdd())}>Cancel</button>
+        </span>
+      </div>
+    )
+  }
+  if (!open && adding?.stage !== 'joining') {
+    return (
+      <Row label={false} name="Add a device" note={adding?.stage === 'added' ? `${adding.name} was added.` : adding?.stage === 'failed' ? adding.message : 'Install Togle there. It shows a code: type it here.'}>
+        <button className="ghost small" disabled={!!busy || reach.connection !== 'on' || reach.link !== 'member'} onClick={() => { setCode(''); setOpen(true) }}>Add a device</button>
+      </Row>
+    )
+  }
+  const submit = (event: FormEvent): void => {
+    event.preventDefault()
+    void run('add', async () => { await api.reachAdd(code); setOpen(false) })
+  }
+  return (
+    <form className="setting-detail" aria-label="Add a device" onSubmit={submit}>
+      <Row stacked name="The code the other device shows" note={adding?.stage === 'joining' ? 'Checking the code with the other device…' : 'Eight letters and digits, like 7F3K-92QD.'}>
+        <input aria-label="Code" autoFocus maxLength={12} spellCheck={false} autoComplete="off" value={code} disabled={!!busy || adding?.stage === 'joining'} onChange={(event) => setCode(event.target.value.toUpperCase())} />
+      </Row>
+      <div className="row">
+        <button className="primary" disabled={!!busy || code.replace(/[\s-]/g, '').length !== 8}>{busy === 'add' ? 'Checking…' : 'Next'}</button>
+        <button type="button" className="ghost" disabled={!!busy} onClick={() => { setOpen(false); if (adding) void run('cancel-add', () => api.reachCancelAdd()) }}>Cancel</button>
+      </div>
+    </form>
+  )
+}

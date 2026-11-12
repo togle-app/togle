@@ -19,7 +19,7 @@ app.on('window-all-closed', () => {})
 let checkpoint = 'startup'
 const timeout = setTimeout(() => { console.error('Tasks UI checks timed out at ' + checkpoint); app.exit(1) }, 120000)
 
-async function open(T, agent, width, surface) {
+async function open(T, agent, width, surface, extra = {}) {
   checkpoint = 'opening at ' + width + 'px'
   const settings = structuredClone(T.getSettings())
   settings.provider = 'claude'
@@ -30,7 +30,7 @@ async function open(T, agent, width, surface) {
   settings.transcription.me = settings.transcription.them = 'local'
   settings.firstMinute = { done: true }
   const names = [...fs.readFileSync(path.join(project, 'src/shared/api.ts'), 'utf8').matchAll(/^  (\w+)\(/gm)].map(m => m[1])
-  const fixture = JSON.stringify({ settings, names, agents: [agent], scenario: 'tasks', readyAudio: true })
+  const fixture = JSON.stringify({ settings, names, agents: [agent], scenario: 'tasks', readyAudio: true, ...extra })
   const preload = path.join(artifacts, 'preload-' + width + '.cjs')
   fs.writeFileSync(preload, 'const fixture=' + fixture + '\nrequire(' + JSON.stringify(path.join(__dirname, 'ui-fixture.cjs')) + ')(fixture)')
   const errors = []
@@ -531,6 +531,47 @@ async function checkAgentSettings(T, agent) {
   ui.window.destroy()
 }
 
+/** Reach: another device's tasks under its name, Refuse and Stop from here, and the devices in Settings. */
+async function checkReach(T, agent) {
+  const ui = await open(T, agent, 1024, undefined, { reach: true })
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("[...document.querySelectorAll('.task-device .tasks-label')].some(e=>e.textContent==='build-server · server')")
+  assert.deepEqual(await texts(ui, '.task-device .task-copy strong'), ['Apply the staging plan', 'Write the nightly report'])
+  assert.deepEqual(await texts(ui, '.task-device .task-copy > span'), ['Codex · infra · waiting for you', 'Hermes · reports · working'])
+  assert.equal(await ui.evaluate("document.querySelector('.tasks-list').getAttribute('aria-label')"), 'Agent tasks on your devices')
+  await ui.task('Apply the staging plan')
+  await ui.wait("document.querySelector('.task-command')?.textContent==='terraform apply -var-file=staging.tfvars'")
+  const panel = await ui.evaluate("document.querySelector('.task-panel').innerText")
+  assert.match(panel, /build-server/)
+  assert.match(panel, /Allow it on build-server/, 'Allow stays on its own computer until the proof that you are there is built')
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('.task-request button')].some(b=>b.textContent.trim()==='Allow once')"), false)
+  await ui.capture('reach-agents')
+  await ui.click('.task-request button', 'Refuse')
+  await ui.click('.task-actions button', 'Stop')
+  assert.deepEqual((await ui.calls('reachAct')).map(call => call.args), [['srv', { what: 'refuse', task: 'codex:apply', request: 'r1' }], ['srv', { what: 'stop', task: 'codex:apply' }]])
+  await ui.wait("!document.querySelector('.task-command')")
+
+  await ui.click('.shell-settings', 'Settings')
+  await ui.wait("!!document.querySelector('#settings-devices .reach-device')")
+  assert.deepEqual(await texts(ui, '#settings-devices .reach-device'), ['Windows PC', 'MacBook', 'build-server'])
+  assert.match(await ui.evaluate("document.querySelector('#settings-devices').innerText"), /MacBook: Stopped Write the release notes/, 'what other devices did here is listed')
+  await ui.click('#settings-devices button', 'Add a device')
+  await ui.fill('#settings-devices input[aria-label="Code"]', '7f3k-92qd')
+  await ui.click('#settings-devices button', 'Next')
+  await ui.wait("document.querySelector('#settings-devices').innerText.includes('gpu-box joins as a server')")
+  await ui.evaluate("document.querySelector('#settings-devices').scrollIntoView({ block: 'start' })")
+  await ui.capture('reach-add')
+  await ui.click('#settings-devices button', 'Add')
+  await ui.wait("document.querySelector('#settings-devices').innerText.includes('gpu-box was added')")
+  await ui.click('#settings-devices button', 'Remove MacBook')
+  await ui.wait("![...document.querySelectorAll('#settings-devices .reach-device')].some(e=>e.textContent==='MacBook')")
+  assert.deepEqual((await ui.calls('reachAdd')).map(call => call.args), [['7F3K-92QD']])
+  assert.deepEqual((await ui.calls('reachRemove')).map(call => call.args), [['mac']])
+  await ui.capture('reach-devices')
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 async function checkQuit(T, agent) {
   const ui = await open(T, agent, 1024)
   const notice = () => ui.evaluate("document.querySelector('[aria-label=\"Confirm quit Togle\"] span')?.textContent ?? null")
@@ -870,7 +911,8 @@ app.whenReady().then(async () => {
     await checkSignedOut(T, agent)
     await checkTerminalTask(T, agent)
     await checkAgentSettings(T, agent)
-    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box, a signed-out agent, a task in a terminal of its own, the offer to change keys and the agents in Settings passed')
+    await checkReach(T, agent)
+    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box, a signed-out agent, a task in a terminal of its own, the offer to change keys, the agents in Settings and other devices’ tasks with Settings → Devices passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

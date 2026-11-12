@@ -204,6 +204,30 @@ export interface TogleApi {
   pickRunnerFolder(): Promise<string | null>
   /** Something in the tasks changed: ask again for what is shown. */
   onRunnersChanged(cb: () => void): Unsubscribe
+  /** Reach, part of Togle Studio: this device among the person's devices. Only in development runs until reviewed. */
+  reachState(): Promise<import('./reach').ReachState>
+  onReachChanged(cb: () => void): Unsubscribe
+  /** The tasks the person's other devices share, by device. */
+  reachRemoteTasks(): Promise<import('./reach').DeviceTasks[]>
+  /** Emails a code to sign in to Togle Studio with. */
+  reachSendCode(email: string): Promise<void>
+  /** Signs in with the emailed code: this computer starts the person's devices, or is added from one of them. */
+  reachSignIn(email: string, code: string): Promise<import('./reach').ReachState>
+  /** The only computer was lost: this one starts the person's devices again, and the others are added again from it. */
+  reachStartAgain(): Promise<import('./reach').ReachState>
+  reachSignOut(): Promise<import('./reach').ReachState>
+  /** Shows a code to type into a computer that is one of the person's devices. */
+  reachShowCode(): Promise<import('./reach').ReachState>
+  reachCancelCode(): Promise<import('./reach').ReachState>
+  /** Adds a device by the code it shows: the exchange runs up to the person's yes. */
+  reachAdd(code: string): Promise<import('./reach').ReachState>
+  reachConfirmAdd(): Promise<import('./reach').ReachState>
+  reachCancelAdd(): Promise<import('./reach').ReachState>
+  reachRemove(device: string): Promise<import('./reach').ReachState>
+  /** Whether other devices may act on this computer. */
+  reachActOnThis(on: boolean): Promise<import('./reach').ReachState>
+  /** Refuses a request or stops a task on another device. */
+  reachAct(device: string, act: import('./reach').RemoteAct): Promise<void>
   /** The small notice window is told what to show: a task that waits or finished, or null for nothing. */
   onTaskNotice(cb: (notice: TaskNotice | null) => void): Unsubscribe
   /** The notice window is this tall, in pixels, so the window is no taller. */

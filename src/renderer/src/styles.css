@@ -3409,3 +3409,14 @@ body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: cross
 .show-bar { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 8px 10px 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); font-size: 13px; cursor: default; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
 .show-bar > span { min-width: 0; }
 .show-bar button { flex-shrink: 0; }
+
+/* Reach (Togle Studio): this computer among the person's devices, in Settings and in the Agents list. */
+.reach-code-value { font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace; font-size: 28px; font-weight: 600; letter-spacing: 0.12em; color: var(--text); }
+.reach-code .control { justify-self: start; }
+.reach-device { display: inline-flex; align-items: center; gap: 8px; }
+.reach-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex: none; }
+.reach-dot.on { background: var(--ok); }
+.reach-acted { display: flex; flex-direction: column; gap: 2px; }
+.task-device { margin-top: 18px; }
+.task-device .empty { margin: 6px 0 0; }
+.task-device-chip { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; vertical-align: middle; color: var(--muted); border: 1px solid var(--border); }

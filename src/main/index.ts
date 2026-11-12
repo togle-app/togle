@@ -37,6 +37,8 @@ import type { StartRequest, TaskBoxOpen, TaskView } from '@shared/runner'
 import type { TodoFile } from './todo'
 import { registerTodo } from './todo-register'
 import { registerRunners } from './runners/register'
+import { registerReach } from './reach/register'
+import type { Reach } from './reach/reach'
 import { StoredRecords, StoredTitles } from './runners/titles'
 import { MICROPHONE_PRODUCT, microphonePage } from '@shared/microphone-link'
 import { readNoiseReport, shouldSuggest } from '@shared/microphone'
@@ -228,6 +230,8 @@ let tray: TogleTray | undefined
 let quitting = false
 // The coding agents' tasks (Codex, Claude Code): the Tasks screen's side of the app.
 let runners: RunnerHub | null = null
+/** Reach, part of Togle Studio: only in development runs with a courier set, until an outside review. */
+let reach: Reach | undefined
 // The to-do list: a plain text file in Togle's folder.
 let todo: TodoFile | null = null
 // What Togle answers to the programs that talk to it: a hook of Claude Code asking about a command.
@@ -1717,7 +1721,7 @@ if (hookAt !== -1) {
       send,
       titles: runnerTitles,
       records: runnerRecords,
-      changed: refreshNotices,
+      changed: () => { refreshNotices(); reach?.tasksChanged() },
       pickFolder: async () => {
         const chosen = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] }) : await dialog.showOpenDialog({ properties: ['openDirectory'] })
         return chosen.canceled ? null : (chosen.filePaths[0] ?? null)
@@ -1728,6 +1732,19 @@ if (hookAt !== -1) {
       saveAdded: async (agents) => { await updateSettings({ addedAgents: agents }) },
       // A task in a terminal of Togle's own is seen and answered only there: Togle opens on it.
       started: (task, request) => { void putOnTodo(task, request); if (task.terminal) showTask(task.key) }
+    })
+    // Reach: this computer among the person's devices, its tasks shared with them, and Refuse and Stop from them.
+    const hubForReach = runners
+    reach = registerReach({
+      handle: (channel, listener) => ipcMain.handle(channel, (_event, ...args) => listener(...args)),
+      send,
+      tasks: {
+        list: () => hubForReach.list(),
+        answer: (key, request, decision) => hubForReach.answer(key, request, decision),
+        stop: (key) => hubForReach.stop(key),
+        endCommands: (key) => hubForReach.endCommands(key)
+      },
+      acted: (what, by) => { if (Notification.isSupported()) new Notification({ title: `${by} acted on this computer`, body: what }).show() }
     })
     // Connecting Claude Code in a terminal: one entry in its settings that starts Togle as `--togle-hook`.
     const hubForClaude = runners
@@ -1821,5 +1838,6 @@ if (hookAt !== -1) {
     speech.cancel()
     stopLocalSpeech()
     void runners?.dispose()
+    reach?.stop()
   })
 }
