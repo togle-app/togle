@@ -20,7 +20,8 @@ export function claudeCodeExecutable(): string {
     const file = path.join(sdk, '..', dir, process.platform === 'win32' ? 'claude.exe' : 'claude').replace(/([\\/])app\.asar([\\/])/, '$1app.asar.unpacked$2')
     if (existsSync(file)) return file
   }
-  throw new Error('The Claude subscription runtime is missing. Reinstall Togle with its optional dependencies.')
+  // Left out of Togle's packages until Anthropic approves the Claude sign-in (electron-builder.yml); a copy from source has it.
+  throw new Error('The Claude sign-in is not in this Togle yet: it waits for Anthropic\'s approval.')
 }
 
 /** Subscription requests never inherit an API key, a proxy provider, or an exported OAuth token from another app. */

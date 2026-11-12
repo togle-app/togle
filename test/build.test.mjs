@@ -103,7 +103,6 @@ test('package verification rejects development artifacts, stale files and an out
     fs.mkdirSync(path.dirname(path.join(resources, target)), { recursive: true }); fs.copyFileSync(path.join(root, source), path.join(resources, target))
   }
   const runtime = path.join('package/resources/app.asar.unpacked/node_modules')
-  write(path.join(runtime, '@anthropic-ai', `claude-agent-sdk-${process.platform}-${process.arch}`, process.platform === 'win32' ? 'claude.exe' : 'claude'), 'fixture only')
   write(path.join(runtime, `sherpa-onnx-${process.platform === 'win32' ? 'win' : process.platform}-${process.arch}`, 'sherpa-onnx.node'), 'fixture only')
   write(path.join(runtime, 'node-pty', process.platform === 'linux' ? 'build/Release' : `prebuilds/${process.platform}-${process.arch}`, 'pty.node'), 'fixture only')
   const archive = path.join(resources, 'app.asar')
@@ -123,4 +122,14 @@ test('package verification rejects development artifacts, stale files and an out
   await pack()
   write('package/resources/dictation-windows.ps1', 'old helper')
   assert.throws(() => T.verifyPackage(resources, root), /resource differs/)
+  fs.copyFileSync(path.join(root, 'resources/dictation-windows.ps1'), path.join(resources, 'dictation-windows.ps1'))
+  assert.equal(T.verifyPackage(resources, root).id, manifest.id)
+  // The Claude runtime waits for Anthropic's approval: a package that has it is refused, beside the archive or in it.
+  const claudeRuntime = path.join(runtime, '@anthropic-ai', `claude-agent-sdk-${process.platform}-${process.arch}`, process.platform === 'win32' ? 'claude.exe' : 'claude')
+  write(claudeRuntime, 'fixture only')
+  assert.throws(() => T.verifyPackage(resources, root), /Claude runtime is in the package/)
+  fs.rmSync(path.join(root, path.dirname(claudeRuntime)), { recursive: true, force: true })
+  write('package-input/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/package.json', '{}')
+  await pack()
+  assert.throws(() => T.verifyPackage(resources, root), /Claude runtime is in the package/)
 })

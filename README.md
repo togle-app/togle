@@ -109,7 +109,8 @@ src/main/              Electron main process
   auth/chatgpt.ts      Sign in with ChatGPT: browser PKCE, ID token checks, refresh, revocation
   providers/           the AI: chatgpt.ts (Responses API with ChatGPT plan usage), compat.ts (Chat Completions),
                        claude.ts (Anthropic's own API) and claude-subscription.ts (a Claude subscription through
-                       the Agent SDK): Settings offers neither for now; a Claude sign-in waits for Anthropic
+                       the Agent SDK): Settings offers neither for now; a Claude sign-in waits for Anthropic,
+                       and until then the packages leave out the Claude runtime the Agent SDK ships
   plan.ts              the ChatGPT plan's usage limit
   dictation*.ts        voice typing: the shortcut, the voice bar window, cleanup, inserting the words, history
   stt/                 speech recognition on this computer: Parakeet (main), Whisper (unclear speech), downloads

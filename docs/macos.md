@@ -1,6 +1,6 @@
 # Togle on macOS
 
-Use macOS 14.2 or later for native system-audio capture. Build on the architecture you want to ship: Apple silicon (`arm64`) or Intel (`x64`). The app uses Electron, the official Claude runtime, Sherpa ONNX and Koffi native binaries for that architecture. An Apple-silicon build must not be relabeled as an Intel build.
+Use macOS 14.2 or later for native system-audio capture. Build on the architecture you want to ship: Apple silicon (`arm64`) or Intel (`x64`). The app uses Electron, Sherpa ONNX, Koffi and node-pty native binaries for that architecture (the official Claude runtime is left out of packages until Anthropic approves the Claude sign-in). An Apple-silicon build must not be relabeled as an Intel build.
 
 ## Build and run
 
