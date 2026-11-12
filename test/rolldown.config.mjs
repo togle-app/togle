@@ -1,5 +1,5 @@
 // Bundles the code under test for Node: the main-process modules (with a fake Electron), and the renderer's
-// voice activity detection and screen change detection.
+// voice activity detection and dictation capture.
 import path from 'node:path'
 
 const here = import.meta.dirname
@@ -23,22 +23,6 @@ export default [
     input: path.resolve(here, '../src/renderer/src/audio/dictation.ts'),
     output: { file: path.join(here, '.build/dictation-capture.mjs'), format: 'esm' },
     platform: 'node',
-    resolve: { alias: { '@shared': shared } }
-  },
-  {
-    input: path.resolve(here, '../src/renderer/src/video/changes.ts'),
-    output: { file: path.join(here, '.build/changes.mjs'), format: 'esm' },
-    platform: 'node'
-  },
-  {
-    input: path.resolve(here, '../src/renderer/src/video/recorder.ts'),
-    output: { file: path.join(here, '.build/recorder.mjs'), format: 'esm' },
-    platform: 'node'
-  },
-  {
-    input: path.join(here, 'screen-capture-driver.ts'),
-    output: { file: path.join(here, '.build/screen-capture-driver.js'), format: 'iife' },
-    platform: 'browser',
     resolve: { alias: { '@shared': shared } }
   }
 ]

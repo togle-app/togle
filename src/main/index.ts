@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, Notification, screen, session, shell } from 'electron'
 import { AgentCalendars } from './calendar'
 import { ApiConnections } from './auth/api-connections'
-import { effectiveAI, effectiveSettings, validateAIProfile, validatePreferences } from '@shared/preferences'
+import { effectiveAI, effectiveSettings, validateAIProfile } from '@shared/preferences'
 import { routedProvider } from './providers/routed'
 import type { AIProfile } from '@shared/types'
 import { Dictation } from './dictation'
@@ -44,48 +44,27 @@ import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import koffi from 'koffi'
 import type { SettingsPatch } from '@shared/api'
-import type { SavedConversation } from '@shared/chat'
 import {
-  MEMORY_LIMIT,
-  type AgentPatch,
   type Agent,
-  type ApprovedAnswer,
-  type AskedAgain,
-  type AssistRequest,
-  type CallAnswer,
-  type CallView,
   type CallSession,
   type CallSessionInfo,
   type CallSessionSummary,
-  type GivenExport,
   type HotkeyId,
   type HotkeyInfo,
-  type Lessons,
   type LocalModelId,
   type PastCall,
   type SegmentKind,
-  type ShareChoice,
-  type SkillDraft,
   type Speaker,
-  type SpeechApiId,
-  type SttStatus,
-  type TrainEvent,
-  type TrainTurn
+  type SttStatus
 } from '@shared/types'
 import { hotkeyProblem, sameKeys } from '@shared/hotkeys'
-import { memoryChars } from '@shared/memory'
 import { mergeSpeakers } from '@shared/speakers'
-import { fetchHubAgent, hubName, hubSource, listHub, OFFICIAL_HUB, parseHub, publishUrl, TOGLE_HUB } from './agents/hub'
-import { Installs } from './agents/installs'
-import { setCodePage, setReaderScript, SUPPORTED_EXTENSIONS } from './agents/knowledge'
-import { addExport, isChatAddress, setChatExports } from './agents/chat-exports'
-import { findSessions, samePlace, sessionHomes } from './agents/sessions'
-import { slug, unzipPackage, zipPackage } from './agents/package'
+import { setCodePage, setReaderScript } from './agents/knowledge'
+import { setChatExports } from './agents/chat-exports'
+import { slug } from './agents/package'
 import { Conversations } from './agents/conversations'
 import { PastCalls } from './agents/past-calls'
 import { AgentStore } from './agents/store'
-import { AGENT_TEMPLATES } from './agents/templates'
-import { train, type TrainCall } from './agents/train'
 import { ChatGPTAuth } from './auth/chatgpt'
 import { ClaudeCodeAuth } from './auth/claude-code'
 import { SubscriptionAccounts, accountChoice, defaultAccountId } from './auth/accounts'
@@ -102,7 +81,6 @@ import { meetingForCall } from '@shared/meeting'
 import { externalUrl } from '@shared/links'
 import { MeetingNotes } from './meeting-notes'
 import type { MeetingNoteTemplate } from '@shared/types'
-import { SavedCallReader } from './saved-call-context'
 import { CaptureProtection } from './capture-protection'
 import { CodeBase } from './code'
 import { Copilot } from './copilot'
@@ -116,7 +94,7 @@ import { ClaudeProvider } from './providers/claude'
 import { ClaudeSubscriptionProvider } from './providers/claude-subscription'
 import { CompatProvider } from './providers/compat'
 import type { LLMProvider, Usage } from './providers/types'
-import { captureFrame, listCaptureSources, listScreens, resolveCaptureSource } from './screen'
+import { captureFrame, resolveCaptureSource } from './screen'
 import { ScreenMonitor } from './screen-monitor'
 import { VoiceTracker, VOICE_MODEL } from './stt/voices'
 import { VoiceMemory } from './stt/voice-memory'
@@ -209,8 +187,6 @@ const speechApis: Record<'openai' | 'server', SpeechApi> = {
     model: getSettings().transcription.serverModel
   })),
 }
-/** A speech API by the id the window names it with (anything else: none). */
-const speechApi = (id: unknown): SpeechApi | undefined => (id === 'openai' || id === 'server' ? speechApis[id] : undefined)
 const remoteSpeech = new Map<string, SpeechApi>()
 function speechSettings(agentId?: string) {
   const current = (!agentId || agentId === currentSession?.agentId) ? currentSession : undefined
@@ -379,21 +355,6 @@ try {
   // Not Windows: the PC's language tells.
 }
 const agents = new AgentStore(complete)
-// Agents others made, read and checked, waiting for Install.
-const installs = new Installs()
-
-/** The file a check of the window picks in place of the file dialogs: Togle run from source, with TOGLE_PICK_FILE set. */
-const pickedForTest = (): string | undefined => (app.isPackaged ? undefined : process.env.TOGLE_PICK_FILE) || undefined
-
-/** The hubs added in Settings (a hand-edited settings.json may hold anything there). */
-const addedHubs = (): string[] => {
-  const hubs: unknown = getSettings().hubs
-  return Array.isArray(hubs) ? hubs.filter((h): h is string => typeof h === 'string' && !!h.trim()) : []
-}
-/** The hubs to browse: the agents that come with Togle, its hub on GitHub (once there is one), then the ones added. */
-const hubsNow = (): string[] => [...new Set([TOGLE_HUB, OFFICIAL_HUB, ...addedHubs()].filter(Boolean))]
-/** Togle's own: what comes with it, and its hub on GitHub. */
-const officialHub = (name: string): boolean => name === TOGLE_HUB || name === OFFICIAL_HUB
 /**
  * Documents whose studying failed for a reason that passes (not signed in yet, no connection, the plan's limit), tried
  * again: at startup and after signing in, as nothing else asks for it.
@@ -403,20 +364,6 @@ function studyAgain(): void {
     if (!agent.knowledge.some((d) => d.error && /sign|auth|401|403|5\d\d|overload|unavailable|respond|network|fetch|timed? ?out|limit|ECONN|ENOTFOUND/i.test(d.error))) continue
     void agents.restudy(agent.id).catch((err: Error) => console.warn('[agents] could not study again:', err.message))
   }
-}
-/** A call the review found taught the agent, written up as notes and kept as one of its documents. */
-async function keepLesson(id: string): Promise<{ agentId: string; docId?: string; name: string }> {
-  const { agentId, name, text } = await copilot.keepLesson(id)
-  const had = agents.list().find((a) => a.id === agentId)
-  if (!had) throw new Error('That agent was deleted.')
-  const known = new Set(had.knowledge.map((d) => d.id))
-  const agent = await agents.addText(agentId, name, text)
-  return { agentId, docId: agent.knowledge.find((d) => !known.has(d.id))?.id, name }
-}
-/** The agent of mine installed from this same version of a package, if there is one. */
-const installedAs = (hash: string): { id: string; name: string } | undefined => {
-  const agent = agents.list().find((a) => a.source?.hash === hash)
-  return agent && { id: agent.id, name: agent.name }
 }
 // Summaries of each agent's past calls, to recall on later calls with the same people (Settings: on unless turned off).
 const pastCalls = new PastCalls()
@@ -444,28 +391,6 @@ agents.on('removed', async (id: string) => {
   await conversations.forget(id).catch((err: Error) => console.warn('[conversations] could not delete it:', err.message))
 })
 
-// Work sessions on this PC the window lists to add, newest first (a search looks through more).
-const SESSIONS_SHOWN = 40
-
-// An agent tidies up its training at most this often, after a call review, once it has learned enough to overlap.
-const TIDY_EVERY_MS = 7 * 24 * 3600_000
-const TIDY_AFTER_CHANGES = 5
-/**
- * Tidies up an agent's training in the background (as Hermes Agent's curator does, when idle): not during a call, at
- * most weekly, once it has grown (several skills learned from calls, many answers, or memory nearly full) and changed.
- */
-function tidyLater(agentId: string): void {
-  const agent = agents.list().find((a) => a.id === agentId)
-  if (!agent || copilot.isListening) return
-  if (agent.tidiedAt && Date.now() - agent.tidiedAt < TIDY_EVERY_MS) return
-  const grown = agent.skills.filter((s) => s.origin === 'call').length >= 4 || agent.answers.length >= 20 || memoryChars(agent.memory) > MEMORY_LIMIT * 0.8
-  const changed = agent.history.filter((h) => h.at > (agent.tidiedAt ?? 0) && h.origin !== 'tidy').length >= TIDY_AFTER_CHANGES
-  if (!grown || !changed) return
-  void agents.tidy(agentId).then(
-    ({ changes }) => console.info(`[tidy] ${agent.name}: ${changes} change${changes === 1 ? '' : 's'}`),
-    (err: Error) => console.warn('[tidy]', err.message)
-  )
-}
 // One CodeBase per set of project folders, so its file list is shared between answers.
 const codeBases = new Map<string, CodeBase>()
 /** Forgets code bases no agent uses any more. */
@@ -852,10 +777,6 @@ function listCallSessions(): Promise<CallSessionSummary[]> {
 async function getCallSession(id: string): Promise<CallSession | null> {
   return await callSessions.get(id) ?? legacyCalls.get(id) ?? null
 }
-const savedCalls = new SavedCallReader({ list: listCallSessions, get: async id => {
-  if (id.startsWith('legacy-')) await listCallSessions()
-  return getCallSession(id)
-} })
 async function storedCallSession(id: string): Promise<CallSession> {
   const stored = await callSessions.get(id)
   if (stored) return stored
@@ -1247,7 +1168,6 @@ function registerIpc(): void {
   ipcMain.handle('microphone:status', () => microphoneLinkOn() ? microphoneLink.refresh() : microphoneLink.status())
   ipcMain.handle('microphone:prepare-call', () => microphoneLinkOn() ? microphoneLink.prepareCall(getSettings().microphone) : microphoneLink.status())
   ipcMain.handle('microphone:turn-on', () => microphoneLink.turnOn('user'))
-  ipcMain.handle('microphone:turn-off', () => microphoneLink.turnOff())
   ipcMain.handle('microphone:show', (_e, page?: string) => microphoneLink.show(page === 'calibrate' ? 'calibrate' : 'settings'))
   ipcMain.handle('microphone:page', async (_e, from: string) => {
     const place = (['after-call', 'settings', 'call-strip', 'microphone-check'] as const).find(item => item === from) ?? 'settings'
@@ -1267,8 +1187,6 @@ function registerIpc(): void {
   ipcMain.handle('dictation:vocabulary-edit', (_event, accountId: string, edit: DictationVocabularyEdit) => { accounts.get(accountId); return dictationVocabulary.edit(accountId, edit) })
   ipcMain.handle('dictation:history', (_event, accountId: string) => { accounts.get(accountId); return dictationHistory.get(accountId) })
   ipcMain.handle('dictation:history-keep', (_event, accountId: string, enabled: boolean) => { accounts.get(accountId); return dictationHistory.configure(accountId, enabled) })
-  ipcMain.handle('dictation:history-correct', (_event, accountId: string, id: string, revision: string, text: string) => { accounts.get(accountId); return dictationHistory.correct(accountId, id, revision, text) })
-  ipcMain.handle('dictation:history-remove', (_event, accountId: string, id?: string) => { accounts.get(accountId); if (id !== undefined && typeof id !== 'string') throw new Error('Choose a recent dictation.'); return dictationHistory.remove(accountId, id) })
   ipcMain.on('dictation:expand', (event, expanded: boolean, explicit: boolean) => {
     if (dictationWindow.owns(event.sender) && typeof expanded === 'boolean') dictationWindow.setExpanded(expanded, explicit === true)
   })
@@ -1276,16 +1194,12 @@ function registerIpc(): void {
   ipcMain.on('dictation:pill', (event, width: number, height: number) => { if (dictationWindow.owns(event.sender) && typeof width === 'number' && typeof height === 'number') dictationWindow.setPill(width, height) })
   ipcMain.handle('dictation:toggle', () => dictation.toggle())
   ipcMain.handle('dictation:cancel', () => dictation.cancel())
-  ipcMain.handle('dictation:original', (_event, id: string) => { if (typeof id === 'string') dictation.useOriginal(id) })
   ipcMain.on('dictation:audio', (event, id: string, pcm: Float32Array) => { if (dictationWindow.owns(event.sender)) dictation.push(id, pcm) })
   ipcMain.handle('dictation:finish', (event, id: string) => { if (dictationWindow.owns(event.sender)) return dictation.finish(id) })
   ipcMain.on('dictation:failed', (event, id: string, message: string) => { if (dictationWindow.owns(event.sender)) dictation.failed(id, typeof message === 'string' ? message.slice(0, 500) : 'Microphone unavailable.') })
   ipcMain.handle('dictation:copy', copyLastDictation)
   ipcMain.handle('dictation:settings', openDictationSettings)
   ipcMain.handle('dictation:agent', (_e, id?: string) => { if (id) agents.get(id); dictationAgentId = id; refreshVoiceSettings() })
-  ipcMain.handle('calendar:status', (_e, id?: string) => calendar.status(id))
-  ipcMain.handle('calendar:refresh', (_e, id?: string) => calendar.refresh(id))
-  ipcMain.handle('calendar:dismiss', (_e, id: string) => { if (typeof id === 'string') calendar.dismiss(id) })
   ipcMain.handle('settings:get', event => event.sender && dictationWindow.owns(event.sender) ? voiceSettings() : getSettings())
   ipcMain.handle('settings:update', (_e, patch: SettingsPatch) => {
     if ((copilot.isListening || currentSession) && patch?.activeAgentId && patch.activeAgentId !== getSettings().activeAgentId) throw new Error('Start a new call before changing its agent.')
@@ -1326,21 +1240,15 @@ function registerIpc(): void {
   ipcMain.handle('accounts:list', (_e, refresh?: boolean) => accounts.list(refresh === true))
   ipcMain.handle('connections:list', () => apiConnections.list())
   ipcMain.handle('connections:add', (_e, input) => apiConnections.add(input))
-  ipcMain.handle('connections:update', (_e, id, input) => apiConnections.update(id, input))
   ipcMain.handle('connections:remove', (_e, id: string) => {
     const used = [getSettings().ai, currentSession?.ai, ...agents.list().map(agent => agent.preferences?.ai)].some(profile => profile && Object.values(profile.tasks).some(task => task.sourceId === id))
     if (used) throw new Error('This connection is used by AI settings or the current call. Choose another connection there first.')
     return apiConnections.remove(id)
   })
-  ipcMain.handle('accounts:add', (_e, provider, label) => accounts.add(provider, label))
   ipcMain.handle('accounts:sign-in', (_e, id: string, device?: boolean) => accounts.signIn(id, device === true))
   ipcMain.handle('accounts:cancel', (_e, id: string) => accounts.cancel(id))
   ipcMain.handle('accounts:sign-out', (_e, id: string) => accounts.signOut(id))
   ipcMain.handle('auth:status', () => selectedChatGPT().auth.status())
-  ipcMain.handle('auth:browser', async () => { await accounts.signIn(selectedChatGPT().metadata.id); return selectedChatGPT().auth.status() })
-  ipcMain.handle('auth:device', async () => { await accounts.signIn(selectedChatGPT().metadata.id, true); return selectedChatGPT().auth.status() })
-  ipcMain.handle('auth:cancel', () => accounts.cancel(selectedChatGPT().metadata.id))
-  ipcMain.handle('auth:sign-out', async () => { await accounts.signOut(selectedChatGPT().metadata.id); return selectedChatGPT().auth.status() })
   auth.on('changed', (status) => {
     send('auth:changed', status)
     send('stt:status', sttStatus())
@@ -1349,27 +1257,7 @@ function registerIpc(): void {
       studyAgain()
     } else chatgpt.plan.clear()
   })
-  // How much of the ChatGPT plan's limits is used; asking the backend costs nothing, and happens at most once a minute.
-  ipcMain.handle('plan:usage', () => (getSettings().provider === 'chatgpt' && selectedChatGPT().auth.status().signedIn ? selectedChatGPT().provider.refreshUsage() : null))
 
-  ipcMain.handle('compat:has-key', () => compat.hasApiKey())
-  ipcMain.handle('compat:set-key', (_e, key: string) => compat.setApiKey(key))
-  ipcMain.handle('claude:has-key', () => claude.hasApiKey())
-  ipcMain.handle('claude:set-key', (_e, key: string) => claude.setApiKey(key))
-  ipcMain.handle('claude:auth-status', () => selectedClaude().auth.status(true))
-  ipcMain.handle('claude:connections', (_e, refresh?: boolean, agentId?: string) => selectedClaude(agentId).provider.connections(refresh === true))
-  ipcMain.handle('agents:claude-connections', async (_e, id: string, servers: string[]) => {
-    if (!agents.list().some(agent => agent.id === id)) throw new Error('Agent not found')
-    if (!Array.isArray(servers) || servers.length > 30 || servers.some(name => typeof name !== 'string')) throw new Error('Choose apps from your Claude connections.')
-    if (!servers.length) return agents.update(id, { claudeConnections: undefined }, 'manual')
-    const catalog = await selectedClaude(id).provider.connections()
-    const names = [...new Set(servers)]
-    if (names.some(name => !catalog.apps.some(app => app.name === name && app.status === 'connected' && app.readTools > 0))) throw new Error('An app is no longer connected. Refresh the list and try again.')
-    return agents.update(id, { claudeConnections: { account: catalog.account, servers: names } }, 'manual')
-  })
-  ipcMain.handle('claude:sign-in', async () => { await accounts.signIn(selectedClaude().metadata.id); return selectedClaude().auth.status() })
-  ipcMain.handle('claude:cancel-sign-in', () => accounts.cancel(selectedClaude().metadata.id))
-  ipcMain.handle('claude:sign-out', async () => { await accounts.signOut(selectedClaude().metadata.id); return selectedClaude().auth.status() })
   let connectedClaudeAccount = ''
   const calendarIdentities = new Map<string, string | undefined>()
   accounts.onChange = (status) => {
@@ -1400,8 +1288,6 @@ function registerIpc(): void {
     if (!app.isPackaged) console.log(`[stt] ${status.state}: ${status.detail ?? ''}`)
     send('stt:status', sttStatus())
   })
-  ipcMain.handle('speech:has-key', (_e, id: SpeechApiId) => speechApi(id)?.hasKey() ?? false)
-  ipcMain.handle('speech:set-key', async (_e, id: SpeechApiId, key: string) => { await speechApi(id)?.setKey(String(key ?? '')); for (const cacheKey of remoteSpeech.keys()) if (!(JSON.parse(cacheKey) as unknown[])[2] || (JSON.parse(cacheKey) as unknown[])[2] === 'defaults') remoteSpeech.delete(cacheKey); send('stt:status', sttStatus()) })
   // A line an API didn't hear, or heard again after that: the window says so.
   for (const api of Object.values(speechApis)) api.onChange = () => send('stt:status', sttStatus())
 
@@ -1414,11 +1300,6 @@ function registerIpc(): void {
     startLocalSpeech()
   })
   ipcMain.handle('speech:cancel', () => speech.cancel())
-  ipcMain.handle('speech:remove', async () => {
-    stopLocalSpeech()
-    await speech.remove()
-    startLocalSpeech()
-  })
   let callAudioPaused = false
   const audioEpoch = { me: 0, them: 0 }
   const routedFinals: Record<Speaker, Promise<void>> = { me: Promise.resolve(), them: Promise.resolve() }
@@ -1584,7 +1465,6 @@ function registerIpc(): void {
       return { ...record, transcript: record.transcript.map(line => line.voiceId === voiceId ? { ...line, voiceName: value, voiceNamedBy: 'user' as const, voiceIdentityId: line.voiceName === value ? line.voiceIdentityId : undefined } : line) }
     })
   })
-  ipcMain.on('call:view', (_e, view: CallView) => { if (view?.key === currentCallKey) callFile.setView(view) })
   // Confirm names, after a call: hear a voice, answer who it is, or skip the rest (which deletes the sound).
   ipcMain.handle('confirm:sound', async (_e, callId: string, clip: string) => {
     const confirm = (await callSessions.get(callId))?.confirm
@@ -1649,8 +1529,6 @@ function registerIpc(): void {
     if (asked.confirm?.closed) await confirmSound.remove(callId)
     return asked
   })
-  ipcMain.on('call:brief', (_e, text: string) => copilot.setBrief(String(text ?? '')))
-  ipcMain.on('call:group', (_e, group: boolean) => copilot.setGroup(!!group))
   ipcMain.on('call:told-others', (_e, told: boolean) => copilot.setToldOthers(!!told))
   // The answer to the notice that a call started in another app.
   // The buttons of the strip that shows while a call is written down and Togle's window is closed.
@@ -1747,374 +1625,6 @@ function registerIpc(): void {
     await fs.writeFile(chosen.filePath, exportCall(record), 'utf8')
     return chosen.filePath
   })
-  ipcMain.handle('calls:review', async (_e, id: string) => { await storedCallSession(id); return callLearning.review(id) })
-  ipcMain.handle('calls:approve', (_e, id: string, reviewId: string, selected: string[]) => callLearning.approve(id, reviewId, Array.isArray(selected) ? selected : []))
-  ipcMain.handle('calls:drop', (_e, id: string, reviewId: string, selected: string[]) => callLearning.drop(id, reviewId, Array.isArray(selected) ? selected.filter(item => typeof item === 'string') : []))
-  ipcMain.handle('calls:dismiss', (_e, id: string, reviewId: string) => callLearning.dismiss(id, reviewId))
-
-  ipcMain.handle('record:sources', (_e, previews?: boolean) => listCaptureSources(previews === true))
-  ipcMain.handle('screen-monitor:status', () => screenMonitor.status())
-  ipcMain.handle('screen-monitor:start', async (_e, sourceId: string) => {
-    const call = currentCallKey
-    const selection = ++screenSelection
-    if (!copilot.isListening) throw new Error('Start the call before watching its screen.')
-    if (!liveProvider().supportsTools) throw new Error('This AI does not support automatic screen context. Choose an AI with tool support or use snapshots.')
-    if (typeof sourceId !== 'string' || sourceId === 'cursor') throw new Error('Choose a specific screen or call window.')
-    const source = await resolveCaptureSource(sourceId)
-    if (selection !== screenSelection) throw new Error('A newer screen selection replaced this request.')
-    if (!source) throw new Error('That screen or window is no longer available. Choose another source.')
-    if (!copilot.isListening || call !== currentCallKey) throw new Error('Start the call before watching its screen.')
-    return screenMonitor.start({ id: source.id, name: source.name, kind: source.id.startsWith('screen') ? 'screen' : 'window' })
-  })
-  ipcMain.handle('screen-monitor:stop', (_e, id?: string) => stopScreenMonitoring(false, id))
-  ipcMain.handle('screen-monitor:frame', async (_e, id: string, at: number, image: Uint8Array, change?: { thumb: Uint8Array; content: boolean }) => {
-    const now = Date.now()
-    // Reject delayed encodes before clock normalization: an old frame is not a system-clock correction.
-    if (!copilot.isListening || screenMonitor.status().id !== id || !Number.isFinite(at) || at < now - 5000 || at > now + 2000) return false
-    const timestamp = copilot.screenTimestamp(at)
-    const accepted = screenMonitor.add(id, timestamp, image)
-    if (accepted && change?.thumb instanceof Uint8Array && change.thumb.byteLength <= 200_000) {
-      const frame = await frameStore.add('recorded', timestamp, Buffer.from(image), Buffer.from(change.thumb))
-      if (copilot.isListening && screenMonitor.status().id === id) { frame.content = change.content === true; copilot.addFrame(frame, false) }
-    }
-    return accepted
-  })
-  ipcMain.handle('record:prepare', (_e, sourceId: string) => {
-    pendingRecordSource = sourceId
-  })
-  ipcMain.handle('record:state', (_e, value: boolean) => {
-    recording = value
-    applyWindowSettings()
-  })
-  ipcMain.handle('frames:add', async (_e, at: number, image: Uint8Array, thumb: Uint8Array, content?: boolean) => {
-    const frame = await frameStore.add('recorded', at, Buffer.from(image), Buffer.from(thumb))
-    if (content) frame.content = true
-    copilot.addFrame(frame)
-    return frame
-  })
-  ipcMain.handle('frames:screens', () => listScreens(win))
-  ipcMain.handle('frames:snapshot', (_e, display?: number) => copilot.snapshot(display))
-  ipcMain.on('assist:run', (_e, request: AssistRequest) => void copilot.assist(request))
-  ipcMain.on('assist:cancel', (_e, id?: string) => copilot.cancel(id))
-  ipcMain.handle('call:note-answer', (_e, entry: CallAnswer) => copilot.noteAnswer(entry))
-  ipcMain.on('assist:deeper', (_e, id?: string) => copilot.deeper(id))
-
-  ipcMain.handle('agents:list', () => agents.list())
-  ipcMain.handle('agents:templates', () => AGENT_TEMPLATES)
-  // Named apart from one I have already ("New agent 2").
-  ipcMain.handle('agents:create', (_e, templateId: string) => {
-    const template = AGENT_TEMPLATES.find((t) => t.id === templateId) ?? AGENT_TEMPLATES[0]
-    return agents.create(templateId, { name: agents.freeName(template.name) })
-  })
-  ipcMain.handle('agents:update', (_e, id: string, patch: AgentPatch) => {
-    if (patch.preferences) {
-      const preferences = validatePreferences(patch.preferences)
-      if (preferences.ai) validateProfile(preferences.ai)
-      if (preferences.dictation?.accountId) accounts.get(preferences.dictation.accountId)
-      patch = { ...patch, preferences }
-    }
-    if (patch.calendar) {
-      if (typeof patch.calendar.enabled !== 'boolean' || typeof patch.calendar.accountId !== 'string') throw new Error('Choose a Claude account for reminders.')
-      if (patch.calendar.enabled && accounts.get(patch.calendar.accountId).kind !== 'claude') throw new Error('Calendar reminders require a Claude subscription account.')
-      patch = { ...patch, calendar: { ...patch.calendar, accountEmail: patch.calendar.accountId ? accounts.identity(patch.calendar.accountId).email : undefined } }
-    }
-    if (patch.subscriptionAccountId) accounts.get(patch.subscriptionAccountId)
-    const saved = agents.update(id, patch, 'manual')
-    if (patch.calendar) void saved.then(() => calendar.refresh(id)).catch(error => console.warn('[calendar]', (error as Error).message))
-    return saved
-  })
-  ipcMain.handle('agents:remove', (_e, id: string) => {
-    if (id === currentSession?.agentId || (copilot.isListening && id === getSettings().activeAgentId)) throw new Error('Start a new call before deleting the current call’s agent.')
-    return agents.remove(id)
-  })
-  ipcMain.handle('agents:vocabulary', async (_e, id: string) => agents.vocabularyFor(agents.get(id), await conversations.talk(id).catch(() => [])))
-  ipcMain.handle('agents:add-text', (_e, id: string, name: string, text: string) => agents.addText(id, name, text))
-  ipcMain.handle('agents:draft', (_e, description: string) => agents.draft(description))
-  ipcMain.handle('agents:import-files', async (_e, id: string) => {
-    const picked = pickedForTest()
-    const { filePaths } = picked
-      ? { filePaths: [picked] }
-      : await dialog.showOpenDialog(win!, {
-          title: 'Teach this agent',
-          properties: ['openFile', 'multiSelections'],
-          filters: [{ name: 'Documents', extensions: SUPPORTED_EXTENSIONS }]
-        })
-    return agents.addFiles(id, filePaths)
-  })
-  // Attached in the conversation: what's picked (files, a folder, a project's code), then added.
-  ipcMain.handle('agents:pick', async (_e, kind: 'files' | 'folder' | 'code') => {
-    // A check of the window picks the file it set, or (for a folder) the folder it's in.
-    const picked = pickedForTest()
-    if (picked) return [kind === 'files' ? picked : path.dirname(picked)]
-    const { filePaths } = await dialog.showOpenDialog(
-      win!,
-      kind === 'files'
-        ? { title: 'Teach this agent', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Documents', extensions: SUPPORTED_EXTENSIONS }] }
-        : { title: kind === 'code' ? 'Project folder this agent can read' : 'Teach this agent a whole folder', properties: ['openDirectory'] }
-    )
-    return filePaths
-  })
-  ipcMain.handle('agents:add-paths', async (_e, id: string, paths: string[]) => {
-    const errors: string[] = []
-    const unchanged: string[] = []
-    const exports: GivenExport[] = []
-    const dropped = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string' && path.isAbsolute(p)) : []
-    // The files of an unpacked export dropped in, not its folder: its conversations first, and what's beside them goes
-    // in with them (chat.html holds every chat, with nothing taken out; user.json, their phone and email).
-    const conversations = (p: string): boolean => /(?:^|[\\/])conversations(?:-\d+)?\.json$/i.test(p)
-    const exportFolders = new Set<string>()
-    for (const at of [...dropped.filter(conversations), ...dropped.filter((p) => !conversations(p))]) {
-      if (exportFolders.has(path.dirname(at).toLowerCase())) continue
-      const stat = await fs.stat(at).catch(() => null)
-      if (!stat) {
-        errors.push(`${path.basename(at)}: not found`)
-        continue
-      }
-      // An export of their chats on claude.ai or ChatGPT: its chats are theirs to pick from, not a document.
-      const given = stat.isDirectory() || /\.(?:zip|json)$/i.test(at) ? await addExport(at).catch((err: Error) => err) : null
-      if (given instanceof Error) errors.push(`${path.basename(at)}: ${given.message}`)
-      else if (given) {
-        exports.push(given)
-        if (conversations(at)) exportFolders.add(path.dirname(at).toLowerCase())
-      } else {
-        const read = await (stat.isDirectory() ? agents.addFolder(id, at) : agents.addFiles(id, [at]))
-        errors.push(...read.errors)
-        unchanged.push(...read.unchanged)
-      }
-    }
-    return { agent: agents.get(id), errors, unchanged, exports }
-  })
-  ipcMain.handle('agents:import-folder', async (_e, id: string) => {
-    const { filePaths } = await dialog.showOpenDialog(win!, { title: 'Teach this agent a whole folder', properties: ['openDirectory'] })
-    return filePaths[0] ? agents.addFolder(id, filePaths[0]) : { agent: agents.get(id), errors: [], unchanged: [] }
-  })
-  ipcMain.handle('agents:add-code-folder', async (_e, id: string) => {
-    const { filePaths } = await dialog.showOpenDialog(win!, { title: 'Project folder this agent can read', properties: ['openDirectory'] })
-    const agent = agents.get(id)
-    if (!filePaths[0] || agent.codeFolders.includes(filePaths[0])) return agent
-    return agents.update(id, { codeFolders: [...agent.codeFolders, filePaths[0]] })
-  })
-  ipcMain.handle('agents:code-info', async (_e, folders: string[]) => (await codeBaseFor(folders)?.files())?.length ?? 0)
-  ipcMain.handle('agents:import-website', (_e, id: string, url: string, followLinks: boolean, maxPages: number) =>
-    agents.addWebsite(id, url, { followLinks, maxPages: Math.max(1, Math.min(100, maxPages)) }, (pages) =>
-      send('agents:progress', { agentId: id, text: `Read ${pages} page${pages === 1 ? '' : 's'}…` })
-    )
-  )
-  ipcMain.handle('sessions:find', (_e, query?: string, agentId?: string) => {
-    const own = typeof agentId === 'string' ? agents.list().find((a) => a.id === agentId)?.workHomes : undefined
-    return findSessions(typeof query === 'string' ? query : '', SESSIONS_SHOWN, own?.map((h) => h.dir))
-  })
-  ipcMain.handle('sessions:homes', () => sessionHomes())
-  // Only folders of theirs Togle found: what's searched for sessions is never just any folder.
-  ipcMain.handle('agents:set-session-homes', async (_e, id: string, dirs: string[]) => {
-    const homes = await sessionHomes()
-    const picked = Array.isArray(dirs) ? homes.filter((h) => dirs.some((dir) => typeof dir === 'string' && samePlace(dir, h.dir))) : []
-    return agents.update(id, { workHomes: picked }, 'manual')
-  })
-  // An export of their chats picked in the list of work sessions: its chats join the list.
-  ipcMain.handle('sessions:pick-export', async () => {
-    const picked =
-      pickedForTest() ??
-      (
-        await dialog.showOpenDialog(win!, {
-          title: 'Your export from claude.ai or ChatGPT',
-          properties: ['openFile'],
-          filters: [{ name: 'Export of your chats', extensions: ['zip', 'json'] }]
-        })
-      ).filePaths[0]
-    if (!picked) return null
-    const given = await addExport(picked)
-    if (!given) throw new Error("That isn't an export of your chats from claude.ai or ChatGPT.")
-    return given
-  })
-  ipcMain.handle('agents:add-session', (_e, id: string, file: string) => {
-    if (typeof file !== 'string' || !(path.isAbsolute(file) || isChatAddress(file))) throw new Error('No such session.')
-    return agents.addSession(id, file)
-  })
-  ipcMain.handle('agents:remove-doc', (_e, id: string, docId: string) => agents.removeDocument(id, docId))
-  ipcMain.handle('agents:restudy', (_e, id: string) => agents.restudy(id))
-  ipcMain.handle('agents:add-answer', (_e, id: string, question: string, answer: string, origin: ApprovedAnswer['origin']) =>
-    agents.addAnswer(id, question, answer, origin)
-  )
-  ipcMain.handle('agents:save-fact', (_e, id: string, text: string, before?: string) => agents.saveFact(id, text, before))
-  ipcMain.handle('agents:remove-fact', (_e, id: string, text: string) => agents.removeFact(id, text))
-  ipcMain.handle('agents:save-skill', async (_e, id: string, skill: SkillDraft, skillId?: string, before?: SkillDraft) => (await agents.saveSkill(id, skill, 'manual', skillId, before)).agent)
-  ipcMain.handle('agents:remove-skill', (_e, id: string, skillId: string, before: SkillDraft) => agents.removeSkill(id, skillId, before))
-  ipcMain.on('agents:test', (_e, id: string, question: string, again?: AskedAgain | { tag: string }) => void copilot.test(id, question, again))
-  ipcMain.handle('agents:learn', async () => {
-    await callFile.flush()
-    if (currentSession && getSettings().assist.rememberCalls !== false && await callSessions.get(currentCallKey)) return callLearning.review(currentCallKey)
-    // Set beside what I said: the cards as the window last saved them. The call is named before the review runs: a
-    // new call started meanwhile is another one.
-    const review = await copilot.learn((callFile.view?.cards ?? []) as CallCard[], frameStore.sessionId)
-    if (!review.record) return review
-    // The call itself, kept to recall later (unless that's off); the same call reviewed again updates what was kept.
-    if (getSettings().assist.rememberCalls === false || !agents.list().some((a) => a.id === review.agentId)) return { ...review, record: undefined }
-    try {
-      const kept = await pastCalls.add(review.agentId, review.record)
-      return kept ? review : { ...review, record: undefined }
-    } catch (err) {
-      console.warn('[past calls] not kept:', (err as Error).message)
-      return { ...review, record: undefined }
-    }
-  })
-  // A call that taught the agent, written up as notes into its documents (the review card's Keep as a document).
-  ipcMain.handle('agents:keep-lesson', (_e, id: string) => keepLesson(id))
-  // ---- Sharing agents, and installing others' (a .togle file, or a hub) ----
-  ipcMain.handle('agents:export', async (_e, id: string, choice: ShareChoice) => {
-    const agent = agents.list().find((a) => a.id === id)
-    if (!agent) throw new Error('That agent was deleted.')
-    const picked = pickedForTest()
-    const { canceled, filePath } = picked
-      ? { canceled: false, filePath: picked }
-      : await dialog.showSaveDialog(win!, {
-          title: `Share ${agent.name}`,
-          defaultPath: path.join(app.getPath('documents'), `${slug(agent.name, 'agent')}.togle`),
-          filters: [{ name: 'Togle agent', extensions: ['togle'] }]
-        })
-    if (canceled || !filePath) return null
-    await fs.writeFile(filePath, await zipPackage(await agents.pack(id, choice)))
-    return filePath
-  })
-  ipcMain.handle('agents:open-package', async () => {
-    const picked = pickedForTest()
-    const { filePaths } = picked
-      ? { filePaths: [picked] }
-      : await dialog.showOpenDialog(win!, {
-          title: 'Install an agent',
-          properties: ['openFile'],
-          filters: [{ name: 'Togle agent', extensions: ['togle', 'zip'] }]
-        })
-    if (!filePaths[0]) return null
-    const name = path.basename(filePaths[0])
-    return installs.preview(await unzipPackage(await fs.readFile(filePaths[0])), { kind: 'file', ref: name, label: name }, 'community', installedAs)
-  })
-  ipcMain.handle('agents:install', (_e, previewId: string) => {
-    const { pkg, source } = installs.take(previewId)
-    return agents.install(pkg, source)
-  })
-  // All hubs, or Togle's own ('own': on this PC, at once), or one added hub: the market shows each as it answers.
-  ipcMain.handle('hub:list', async (_e, which?: string) =>
-    Promise.all(
-      hubsNow()
-        .filter((name) => which === undefined || (which === 'own' ? officialHub(name) : name === which))
-        .map(async (name) => {
-          try {
-            return { hub: name, official: officialHub(name), entries: await listHub(hubSource(name)) }
-          } catch (err) {
-            return { hub: name, official: officialHub(name), entries: [], error: (err as Error).message }
-          }
-        })
-    )
-  )
-  ipcMain.handle('hub:preview', async (_e, name: string, slugName: string) => {
-    if (!hubsNow().includes(name)) throw new Error('That hub was removed.')
-    const hub = hubSource(name)
-    const entry = (await listHub(hub)).find((e) => e.slug === slugName)
-    if (!entry) throw new Error('That agent is no longer in the hub.')
-    const ref = `${name}/agents/${entry.slug}`
-    return installs.preview(await fetchHubAgent(hub, entry), { kind: 'hub', ref, label: name }, officialHub(name) ? 'official' : 'community', installedAs)
-  })
-  // The hubs an agent can be published to: GitHub's (what comes with Togle is read-only).
-  ipcMain.handle('hub:names', () => hubsNow().filter((name) => name !== TOGLE_HUB))
-  ipcMain.handle('hub:add', async (_e, text: string) => {
-    const name = hubName(parseHub(text))
-    await listHub(parseHub(name))
-    // The same hub in other letters (GitHub names ignore case) is the one already there.
-    const hubs = addedHubs().some((h) => h.toLowerCase() === name.toLowerCase()) ? addedHubs() : [...addedHubs(), name]
-    return (await updateSettings({ hubs })).hubs ?? []
-  })
-  ipcMain.handle('hub:remove', async (_e, name: string) => (await updateSettings({ hubs: addedHubs().filter((h) => h !== name) })).hubs ?? [])
-  // Publishing: the agent's folder, written out, and the hub's page for adding it (a pull request its keepers review).
-  ipcMain.handle('hub:publish', async (_e, id: string, choice: ShareChoice, name: string) => {
-    const agent = agents.list().find((a) => a.id === id)
-    if (!agent) throw new Error('That agent was deleted.')
-    const folder = path.join(app.getPath('documents'), 'Togle agents', slug(agent.name, 'agent'))
-    await fs.rm(folder, { recursive: true, force: true })
-    for (const [file, text] of Object.entries(await agents.pack(id, choice))) {
-      await fs.mkdir(path.dirname(path.join(folder, file)), { recursive: true })
-      await fs.writeFile(path.join(folder, file), text, 'utf8')
-    }
-    const url = publishUrl(parseHub(name), slug(agent.name, 'agent'))
-    void shell.openPath(folder)
-    void shell.openExternal(url)
-    return { folder, url }
-  })
-  ipcMain.handle('agents:remember', async (_e, id: string, lessons: Lessons, auto?: boolean) => {
-    const agent = await agents.applyLessons(id, lessons, !!auto)
-    tidyLater(id)
-    return agent
-  })
-  ipcMain.handle('agents:undo', (_e, id: string, changeId: string) => agents.undo(id, changeId))
-  ipcMain.handle('agents:tidy', (_e, id: string) => agents.tidy(id))
-  ipcMain.handle('conversation:load', (_e, agentId: string) => conversations.load(agentId))
-  ipcMain.on('conversation:save', (_e, agentId: string, conversation: SavedConversation) =>
-    void conversations.save(agentId, conversation).catch((err: Error) => console.warn('[conversations] not saved:', err.message))
-  )
-  ipcMain.handle('past-calls:list', (_e, agentId: string) => pastCalls.list(agentId))
-  ipcMain.handle('past-calls:remove', (_e, agentId: string, id: string) => pastCalls.remove(agentId, id))
-  ipcMain.handle('past-calls:clear', (_e, agentId: string) => pastCalls.clear(agentId))
-
-  // Train replies in progress, so Stop can end one.
-  const trainings = new Map<string, AbortController>()
-  ipcMain.on('agents:train', async (_e, id: string, turnId: string, history: TrainTurn[], message: string, callId?: string) => {
-    const reply = (event: TrainEvent): void => send('agent-train', event)
-    const controller = new AbortController()
-    trainings.set(turnId, controller)
-    try {
-      const selected = callId ? await savedCalls.owned(id, callId) : undefined
-      await train(agents, activeProvider(id), id, history, message, controller.signal, {
-        onDelta: (text) => reply({ type: 'delta', id: turnId, text }),
-        onChange: (text) => reply({ type: 'change', id: turnId, text }),
-        // The call as the window shows it: its cards as it last saved them.
-        call: () => {
-          if (id !== getSettings().activeAgentId) return { transcript: [], frames: [], brief: '', cards: [], corrections: [] }
-          return { ...copilot.callForTraining(), cards: (callFile.view?.cards ?? []) as TrainCall['cards'] }
-        },
-        // Off in Settings, earlier calls aren't looked through either.
-        selectedCall: selected ? { id: selected.id, title: selected.title } : undefined,
-        pastCalls: getSettings().assist.rememberCalls === false ? undefined : (query, offset) => savedCalls.search(id, query, offset, controller.signal),
-        savedCall: (callId, query, fromLine) => {
-          if (!selected && getSettings().assist.rememberCalls === false) throw new Error('Call history is off. Open a saved call explicitly to ask about it.')
-          if (getSettings().assist.rememberCalls === false && selected?.id !== callId) throw new Error('Only the selected saved call is available while call history is off.')
-          return savedCalls.read(id, callId, query, fromLine)
-        },
-        // What it was told about the call, for the call, and the earlier calls it brings back.
-        brief: async (text, group) => {
-          if (id !== getSettings().activeAgentId || copilot.isListening) throw new Error('Add notes in Calls. Agent setup cannot replace the context of a live call or another agent’s call.')
-          if (group !== undefined) copilot.setGroup(group)
-          const found = await copilot.setBrief(text)
-          const call = copilot.currentCall()
-          send('call:briefed', { brief: call.brief, group: call.group })
-          return found
-        },
-        keepNotes: async () => {
-          const offer = copilot.lessonFor(id)
-          if (!offer) throw new Error('No call that taught it is waiting to be written up (only the latest few are kept, until Togle closes).')
-          return (await keepLesson(offer.id)).name
-        },
-        // Who a call was with, as the review named them, or its brief: "Northwind" finds "Northwind Health".
-        forgetCalls: async (who) => {
-          const named = who.toLowerCase()
-          const matches = (name: string): boolean => name.length >= 3 && (name.toLowerCase().includes(named) || named.includes(name.toLowerCase()))
-          const calls = (await pastCalls.list(id)).filter((c) => c.with.some(matches) || c.brief.toLowerCase().includes(named))
-          for (const call of calls) await pastCalls.remove(id, call.id)
-          return calls.map((c) => `${new Date(c.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${c.brief ? `, ${c.brief}` : ''}`)
-        }
-      })
-      reply({ type: 'done', id: turnId })
-    } catch (err) {
-      // Stopped on purpose: what it said and changed so far stays.
-      if (controller.signal.aborted) reply({ type: 'done', id: turnId })
-      else {
-        const timedOut = (err as Error).name === 'TimeoutError'
-        reply({ type: 'error', id: turnId, message: timedOut ? 'That took too long. Try one change at a time.' : (err as Error).message })
-      }
-    } finally {
-      trainings.delete(turnId)
-    }
-  })
-  ipcMain.on('agents:train-stop', (_e, turnId: string) => trainings.get(turnId)?.abort())
 
   if (!app.isPackaged && process.env.TOGLE_DEBUG_PORT) {
     // A line said; with the id of the live caption it ends, as speech recognition gives it.
@@ -2150,13 +1660,6 @@ function registerIpc(): void {
     dictationPress.reset()
     clearTimeout(hotkeysOff)
     hotkeysOff = setTimeout(registerHotkeys, HOTKEYS_OFF_MS)
-  })
-  // What the window copies when it isn't the one in front (a shortcut pressed in the call's app).
-  ipcMain.on('clipboard:write', (_e, text: string) => {
-    if (typeof text !== 'string' || !text) return
-    // A test run's copy stays in Togle: what's on the PC's clipboard isn't the test's to replace.
-    if (testClipboard !== undefined) testClipboard = text
-    else clipboard.writeText(text)
   })
   ipcMain.on('shell:open', (_e, url: string) => {
     const target = externalUrl(url)

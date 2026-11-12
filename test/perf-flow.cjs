@@ -35,8 +35,7 @@ app.whenReady().then(async () => {
   checkpoint = 'seed encrypted calls'
   for (let index = 0; index < 60; index++) await repo.capture(info('call-' + index), 'frames-' + index, state(200))
   const longState = state(20000)
-  const cards = Array.from({ length: 200 }, (_, index) => ({ id: 'reply-' + index, kind: 'suggest', question: 'What should we confirm next? ' + index, text: 'Confirm the owner and due date before committing. ' + index, at: index * 1000 }))
-  await repo.capture(info('long-call'), 'frames-long', longState, { cards, reviewedLines: 0 })
+  await repo.capture(info('long-call'), 'frames-long', longState)
   const cold = new T.CallSessions()
   const coldStart = performance.now()
   assert.equal((await cold.list()).length, 61)
@@ -55,17 +54,16 @@ app.whenReady().then(async () => {
   checkpoint = 'save long call'
   for (let index = 0; index < 5; index++) {
     const start = performance.now()
-    await cold.capture(info('long-call'), 'frames-long', longState, { cards, reviewedLines: index })
+    await cold.capture(info('long-call'), 'frames-long', { ...longState, marks: [index] })
     captureTimes.push(elapsed(start))
   }
   const record = await cold.get('long-call')
   const names = [...fs.readFileSync(path.join(project, 'src/shared/api.ts'), 'utf8').matchAll(/^  (\w+)\(/gm)].map(match => match[1])
   const settings = structuredClone(T.getSettings())
   settings.activeAgentId = agent.id
-  settings.provider = 'claude'
-  settings.claude.auth = 'subscription'
+  settings.provider = 'chatgpt'
   settings.transcription.me = settings.transcription.them = 'local'
-  const fixture = { settings, names, agents: [agent], sessions: [record], transcript: longState.transcript, scenario: 'performance', readyAudio: true, templates: T.AGENT_TEMPLATES }
+  const fixture = { settings, names, agents: [agent], sessions: [record], transcript: longState.transcript, scenario: 'performance', readyAudio: true }
   const preload = path.join(profile, 'preload.cjs')
   fs.writeFileSync(preload, 'require(' + JSON.stringify(path.join(__dirname, 'ui-fixture.cjs')) + ')(' + JSON.stringify(fixture) + ')')
   const window = new BrowserWindow({ show: false, width: 640, height: 850, webPreferences: { preload, sandbox: false, offscreen: true, backgroundThrottling: false } })
@@ -80,17 +78,17 @@ app.whenReady().then(async () => {
   checkpoint = 'renderer startup'
   const rendererStart = performance.now()
   await window.loadFile(path.join(project, 'out/renderer/index.html'))
-  await wait("!!document.querySelector('.composer')&&!!document.querySelector('.agent-detail-tabs')")
+  await wait("!!document.querySelector('.workspace-nav')")
   await paint()
   const rendererReadyMs = elapsed(rendererStart)
-  await evaluate("document.querySelector('#agent-tab-calls').click()")
-  await wait("!!document.querySelector('.past-call-row')")
-  await evaluate("document.querySelector('.past-call-row:not(.current-call-row)').click()")
+  await evaluate("document.querySelector('.workspace-nav button[aria-label=\"Meetings\"]').click()")
+  await wait("!!document.querySelector('.meeting-row')")
+  await evaluate("document.querySelector('.meeting-row').click()")
   await wait("!!document.querySelector('.call-detail-tabs')")
   await paint()
   checkpoint = 'open 20,000-line transcript'
   const transcriptStart = performance.now()
-  await evaluate("document.querySelector('[role=tab][aria-label=Transcript]').click()")
+  await evaluate("document.querySelector('#meeting-tab-transcript').click()")
   await wait("!!document.querySelector('.history-transcript-line')")
   await paint()
   const transcriptOpenMs = elapsed(transcriptStart)
@@ -104,41 +102,30 @@ app.whenReady().then(async () => {
   if (!process.argv.includes('--baseline')) {
     assert.ok(repeatedReadDecryptions <= 1, 'reopening the same archive must reuse its decrypted content')
     assert.ok(transcriptDomRows <= 100, 'opening a long call must keep the initial transcript DOM bounded')
-    checkpoint = 'incremental transcript and suggestions'
+    checkpoint = 'more of the transcript'
     await evaluate("(()=>{const input=document.querySelector('[aria-label=\"Search transcript\"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'');input.dispatchEvent(new Event('input',{bubbles:true}))})()")
     await wait("document.querySelectorAll('.history-transcript-line').length===100")
     await evaluate("document.querySelector('.history-more').click()")
     await wait("document.querySelectorAll('.history-transcript-line').length===200")
     assert.match(T.exportCall(record), /Needle: final decision/)
-    await evaluate("document.querySelector('[role=tab][aria-label=Suggestions]').click()")
-    await wait("document.querySelectorAll('.history-suggestion').length===25")
-    await evaluate("document.querySelector('.history-more').click()")
-    await wait("document.querySelectorAll('.history-suggestion').length===50")
-    checkpoint = 'ignore changes to other calls while inspecting an archive'
+    checkpoint = 'ignore changes to other calls while a call is open'
     const beforeRefresh = await evaluate("window.togleUITest.calls().filter(call=>call.name==='callSession'||call.name==='callSessions').length")
     await evaluate("window.togleUITest.emit('onCallSessions',{id:'another-call'})")
     await paint()
     assert.equal(await evaluate("window.togleUITest.calls().filter(call=>call.name==='callSession'||call.name==='callSessions').length"), beforeRefresh)
   }
-  checkpoint = 'open current call transcript'
-  await evaluate("document.querySelector('.sidebar-agent').click()")
-  await evaluate("document.querySelector('#agent-tab-calls').click()")
-  await wait("!!document.querySelector('.current-call-row')")
-  await evaluate("document.querySelector('.current-call-row').click()")
-  await wait("!!document.querySelector('.call-links')")
+  checkpoint = 'a call written down that grows to 5,000 lines'
+  await evaluate("document.querySelector('[aria-label=\"Back to Meetings\"]').click()")
+  await wait("!!document.querySelector('.page-head .primary')")
+  await evaluate("[...document.querySelectorAll('.page-head .primary')].find(b=>b.textContent==='Write down now').click()")
+  await wait("!!document.querySelector('.live-lines')")
   const liveStart = performance.now()
-  await evaluate("[...document.querySelectorAll('.call-links button')].find(b=>/^(Transcript|What was said)$/.test(b.textContent.trim())).click()")
-  await wait("!!document.querySelector('.timeline-panel .line')")
+  await evaluate("for(let i=0;i<5000;i++)window.togleUITest.emit('onTranscript',{id:'live-'+i,speaker:i%2?'me':'them',text:(i===4999?'Needle: ':'')+'A realistic meeting turn about the rollout, open questions and who does what next. '+i,at:Date.now()+i,end:Date.now()+i})")
+  await wait("document.querySelectorAll('.live-lines .live-line').length>=5000")
   await paint()
-  const liveTranscriptOpenMs = elapsed(liveStart)
-  const liveTranscriptDomRows = await evaluate("document.querySelectorAll('.timeline-panel .line').length")
-  if (!process.argv.includes('--baseline')) {
-    assert.equal(liveTranscriptDomRows, 100)
-    assert.ok(await evaluate("document.querySelector('.timeline-panel').textContent.includes('Needle:')"))
-    await evaluate("document.querySelector('.timeline-earlier').click()")
-    await paint()
-    assert.equal(await evaluate("document.querySelectorAll('.timeline-panel .line').length"), 200)
-  }
+  const liveFillMs = elapsed(liveStart)
+  const liveTranscriptDomRows = await evaluate("document.querySelectorAll('.live-lines .live-line').length")
+  if (!process.argv.includes('--baseline')) assert.ok(await evaluate("document.querySelector('.live-lines').textContent.includes('Needle:')"))
   const captionTimes = []
   for (let index = 0; index < 12; index++) {
     const start = performance.now()
@@ -146,9 +133,9 @@ app.whenReady().then(async () => {
     await paint()
     captionTimes.push(elapsed(start))
   }
-  assert.ok(await evaluate("document.querySelector('.timeline-panel').textContent.includes('The latest live call words 11')"))
+  assert.ok(await evaluate("document.querySelector('.live-lines').textContent.includes('The latest live call words 11')"))
   assert.deepEqual(errors, [])
-  const results = { scenario: '61 encrypted calls; one 20,000-line call with 200 replies; 20,000-line current transcript', coldListMs, warmReadMedianMs: median(readTimes.slice(1)), repeatedReadDecryptions, saveMedianMs: median(captureTimes), rendererReadyMs, transcriptOpenMs, transcriptSearchMs, transcriptDomRows, liveTranscriptOpenMs, liveTranscriptDomRows, liveUpdateMedianMs: median(captionTimes) }
+  const results = { scenario: '61 encrypted calls; one 20,000-line call in Meetings; a call written down that grows to 5,000 lines', coldListMs, warmReadMedianMs: median(readTimes.slice(1)), repeatedReadDecryptions, saveMedianMs: median(captureTimes), rendererReadyMs, transcriptOpenMs, transcriptSearchMs, transcriptDomRows, liveFillMs, liveTranscriptDomRows, liveUpdateMedianMs: median(captionTimes), liveUpdateMaxMs: Math.max(...captionTimes) }
   const label = process.argv.includes('--baseline') ? 'baseline' : 'latest'
   fs.writeFileSync(path.join(artifacts, label + '.json'), JSON.stringify(results, null, 2) + '\n')
   console.log(JSON.stringify(results, null, 2))

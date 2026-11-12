@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { PartialTranscript, Settings, TranscriptEntry } from '@shared/types'
 import { markedLineIds, speakerLabel } from '@shared/meeting'
 import type { CaptureInputs } from './audio/capture'
@@ -103,13 +103,7 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, on
       </div>
       <div className="live-lines" ref={lines} onScroll={(event) => { const box = event.currentTarget; atEnd.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40 }}>
         {!transcript.length && !partials.length && <p className="hint">Listening… The words appear as people speak.</p>}
-        {transcript.map((line) => (
-          <div key={line.id} className={`live-line ${line.speaker}`}>
-            <span className="who">{speakerLabel(line)}</span>
-            <time dateTime={new Date(line.at).toISOString()}>{clock.format(line.at)}</time>
-            <p>{line.text}{marked.has(line.id) && <span className="marked-tag">Marked</span>}</p>
-          </div>
-        ))}
+        {transcript.map((line) => <LiveLine key={line.id} line={line} marked={marked.has(line.id)} />)}
         {partials.map((partial) => (
           <div key={partial.segmentId} className="live-line partial">
             <span className="who">{speakerLabel({ speaker: partial.speaker, voiceId: partial.voiceId, voiceName: partial.voiceName, voiceNamedBy: partial.voiceNamedBy })}</span>
@@ -121,6 +115,20 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, on
     </section>
   )
 }
+
+/**
+ * One line said: drawn when it comes, and again only when it changes (a name given, a mark), so a long call's new
+ * words and live captions don't redraw every line before them.
+ */
+const LiveLine = memo(function LiveLine({ line, marked }: { line: TranscriptEntry; marked: boolean }) {
+  return (
+    <div className={`live-line ${line.speaker}`}>
+      <span className="who">{speakerLabel(line)}</span>
+      <time dateTime={new Date(line.at).toISOString()}>{clock.format(line.at)}</time>
+      <p>{line.text}{marked && <span className="marked-tag">Marked</span>}</p>
+    </div>
+  )
+})
 
 /** One voice of the call: a click names it, or confirms the name guessed from what was said. */
 function PersonChip({ line }: { line: TranscriptEntry }) {

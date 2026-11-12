@@ -37,7 +37,7 @@ async function open(T, agent, scenario, width = 1024, height = 850, surface) {
   const richText = scenario === 'rich-text' ? require('./rich-text-fixtures.cjs').reply : undefined
   // F8 Show: a frozen screen at twice the window's size, as on a screen scaled to 200%.
   const showPicture = scenario === 'show' ? { dataUrl: nativeImage.createFromBitmap(Buffer.alloc(width * 2 * height * 2 * 4, 0x60), { width: width * 2, height: height * 2 }).toDataURL(), width: width * 2, height: height * 2 } : undefined
-  const fixture = JSON.stringify({ showPicture, settings, names, agents: [agent], scenario, readyAudio: !['speech', 'first-minute-new'].includes(scenario), templates: T.AGENT_TEMPLATES, richText })
+  const fixture = JSON.stringify({ showPicture, settings, names, agents: [agent], scenario, readyAudio: !['speech', 'first-minute-new'].includes(scenario), richText })
   const preload = path.join(artifacts, 'preload-' + scenario + '-' + width + '.cjs')
   fs.writeFileSync(preload, 'const fixture=' + fixture + '\nrequire(' + JSON.stringify(path.join(__dirname, 'ui-fixture.cjs')) + ')(fixture)')
   const errors = []

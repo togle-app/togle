@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Agent, CallSearchHit, CallSession, CallSessionSummary } from '@shared/types'
 import { namesToConfirm } from '@shared/confirm-names'
 import { CallNotes } from './CallNotes'
-import { callLength, HistoryTranscript } from './CallHistory'
+import { callLength, CallTranscript } from './CallTranscript'
 import { ConfirmNames } from './ConfirmNames'
 import { Icon } from './Icon'
 import { Menu } from './Menu'
@@ -64,13 +64,15 @@ export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus, n
   const [searching, setSearching] = useState(false)
   const [error, setError] = useState('')
   const open = openId
+  // The list, kept up to date while it shows. With a call open, other calls changing don't reload it: going back does.
   useEffect(() => {
+    if (open) return
     let current = true
     const load = (): void => { void api.callSessions().then(list => { if (current) setCalls(list) }).catch(failure => { if (current) setError(errorText(failure)) }) }
     load()
     const stop = api.onCallSessions(() => load())
     return () => { current = false; stop() }
-  }, [])
+  }, [open])
   useEffect(() => { if (focus?.id) { setOpenId(focus.id); setOpenTab('notes') } }, [focus?.id, focus?.seq])
   useEffect(() => {
     const text = query.trim()
@@ -171,7 +173,7 @@ function MeetingDetail({ id, noise, microphone, agents, tab, onTab, onBack, onDe
           {(['notes', 'transcript'] as const).map(name => <button key={name} role="tab" id={`meeting-tab-${name}`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => onTab(name)}>{name === 'notes' ? 'Notes' : 'Transcript'}</button>)}
         </div>
         <section className="call-detail-content" role="tabpanel" aria-labelledby={`meeting-tab-${tab}`}>
-          {tab === 'notes' ? <CallNotes key={`notes-${record.id}`} record={record} onRecord={setRecord} canGenerate /> : <HistoryTranscript key={record.id} record={record} onRecord={setRecord} />}
+          {tab === 'notes' ? <CallNotes key={`notes-${record.id}`} record={record} onRecord={setRecord} canGenerate /> : <CallTranscript key={record.id} record={record} onRecord={setRecord} />}
         </section>
       </>}
       {error && record && <p className="error" role="status">{error}</p>}

@@ -59,7 +59,6 @@
     "test:scenarios": "rolldown -c test/rolldown.config.mjs && node --test test/realistic.test.mjs test/scenario-checks.test.mjs",
     "test:scenarios:live": "rolldown -c eval/rolldown.config.mjs && node eval/scenario-launch.cjs",
     "test:screen:live": "rolldown -c eval/rolldown.config.mjs && node eval/screen-live-launch.cjs",
-    "test:screen:capture": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/screen-capture-launch.cjs",
     "eval": "rolldown -c eval/rolldown.config.mjs && node eval/launch.cjs eval/run.cjs",
     "e2e": "electron-vite build && rolldown -c eval/rolldown.config.mjs && node eval/launch.cjs eval/e2e.cjs",
     "speech": "electron-vite build && rolldown -c eval/rolldown.config.mjs && node eval/launch.cjs eval/speech.cjs --dry",

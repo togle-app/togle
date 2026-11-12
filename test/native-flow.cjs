@@ -1,6 +1,6 @@
 // Exercise the actual Electron main process, real IPC handlers, OS encryption, and production renderer.
 // The profile is empty; no real account, device, or model is used. Transcript input uses the existing dev hook.
-const { app, BrowserWindow, ipcMain, dialog, desktopCapturer, nativeImage, Menu } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron')
 app.disableHardwareAcceleration()
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -81,88 +81,21 @@ async function run() {
       assert.ok(edit?.items.some(item => item.role?.toLowerCase() === role), 'The macOS Edit menu must provide ' + role)
     }
   }
-  const templates = invoke('agents:templates')
-  assert.ok(templates.length >= 8)
-  const agent = await invoke('agents:create', 'support')
-  await invoke('agents:update', agent.id, { learning: 'off' })
-  const fact = 'The deployment owner is the release lead.'
-  await evaluate(`window.togle.saveAgentFact(${JSON.stringify(agent.id)},${JSON.stringify(fact)})`)
-  await evaluate(`window.togle.saveAgentFact(${JSON.stringify(agent.id)},'The deployment owner is the on-call lead.',${JSON.stringify(fact)})`)
-  await evaluate(`window.togle.removeAgentFact(${JSON.stringify(agent.id)},'The deployment owner is the on-call lead.')`)
-  const procedure = { name: 'Native incident checklist', when: 'A deployment fails', how: '- Establish the impact.\n- Identify the owner.' }
-  const withSkill = await evaluate(`window.togle.saveSkill(${JSON.stringify(agent.id)},${JSON.stringify(procedure)})`)
-  const skillId = withSkill.skills.find(skill => skill.name === procedure.name).id
-  const improved = { ...procedure, how: procedure.how + '\n- Save the timeline.' }
-  await evaluate(`window.togle.saveSkill(${JSON.stringify(agent.id)},${JSON.stringify(improved)},${JSON.stringify(skillId)},${JSON.stringify(procedure)})`)
-  await assert.rejects(evaluate(`window.togle.removeSkill(${JSON.stringify(agent.id)},${JSON.stringify(skillId)},${JSON.stringify(procedure)})`), /changed or was removed/)
-  const removedSkill = await evaluate(`window.togle.removeSkill(${JSON.stringify(agent.id)},${JSON.stringify(skillId)},${JSON.stringify(improved)})`)
-  assert.equal(removedSkill.skills.some(skill => skill.id === skillId), false)
-  const restoredSkill = await evaluate(`window.togle.undoChange(${JSON.stringify(agent.id)},${JSON.stringify(removedSkill.history.at(-1).id)})`)
-  assert.equal(restoredSkill.skills.find(skill => skill.id === skillId).how, improved.how)
-  console.log('Knowledge + skills IPC: fact add/edit/remove, skill add/edit, stale removal protection and history undo passed through the real preload.')
-  await invoke('settings:update', { activeAgentId: agent.id, assist: { auto: false, autoNotes: false } })
-  const scoped = await invoke('agents:update', agent.id, { preferences: { transcription: { accountId: 'claude-default', language: 'ja', me: 'claude', them: 'claude' }, dictation: { mode: 'toggle', microphoneId: 'private-headset', polish: false } } })
-  assert.equal(invoke('stt:status', agent.id).transcriptionLanguage, 'ja')
-  assert.deepEqual([scoped.preferences.transcription.me, scoped.preferences.transcription.them], ['local', 'local'], "an agent's old Claude speech choice is heard by this PC")
-  assert.equal(scoped.preferences.transcription.accountId, undefined, "an agent's voice typing account is in its voice typing preferences")
-  assert.equal(invoke('settings:get').transcription.language, 'auto', 'agent speech overrides cannot change General settings')
-  await invoke('agents:update', agent.id, { preferences: {} })
-  await assert.rejects(Promise.resolve().then(() => invoke('agents:update', agent.id, { calendar: { enabled: true, accountId: 'chatgpt-default' } })), /Claude/)
-  const privateClaude = await invoke('accounts:add', 'claude', 'Isolated fixture')
-  const generalAI = { tasks: Object.fromEntries(['quick', 'deep', 'vision', 'background'].map(lane => [lane, { sourceId: 'chatgpt-default', model: 'gpt-6-luna', effort: 'low' }])) }
-  const agentAI = structuredClone(generalAI); agentAI.tasks.deep = { sourceId: privateClaude.id, model: 'claude-opus-5-5', effort: 'high' }
-  await invoke('settings:update', { ai: generalAI })
-  await invoke('agents:update', agent.id, { preferences: { ai: agentAI } })
+  const agentId = invoke('settings:get').activeAgentId
+  assert.ok(agentId, 'calls belong to the agent Togle starts with')
+  await invoke('settings:update', { assist: { auto: false, autoNotes: false } })
   // The call's language is pinned for the whole call.
-  await invoke('settings:update', { transcription: { language: 'de' }, dictation: { accountId: 'claude-default' } })
+  await invoke('settings:update', { transcription: { language: 'de' } })
   const initial = invoke('call:current')
   const live = await invoke('session:listening', true)
   assert.equal(live.id, initial.view.key)
-  assert.equal(live.agentId, agent.id)
-  assert.equal(live.ai.tasks.deep.sourceId, privateClaude.id)
-  assert.equal(live.accountId, privateClaude.id, 'call ownership metadata uses the actual deep-answer account')
-  await invoke('agents:update', agent.id, { preferences: {} })
-  await invoke('settings:update', { ai: null })
-  assert.equal(invoke('call:current').session.ai.tasks.deep.sourceId, privateClaude.id, 'an ongoing call keeps its model and account routes after inheritance changes')
-  const otherSpeech = await invoke('accounts:add', 'claude', 'Other meeting account')
-  await invoke('settings:update', { transcription: { language: 'en' }, dictation: { accountId: otherSpeech.id } })
-  assert.equal(invoke('stt:status', agent.id).transcriptionLanguage, 'de', 'an ongoing call retains its original language configuration')
-  await invoke('settings:update', { transcription: { language: 'de' }, dictation: { accountId: 'claude-default' } })
+  assert.equal(live.agentId, agentId)
+  await invoke('settings:update', { transcription: { language: 'en' } })
+  assert.equal(invoke('stt:status').transcriptionLanguage, 'de', 'an ongoing call retains its original language configuration')
   await invoke('settings:update', { transcription: { me: 'local', them: 'local', language: 'auto' }, dictation: { accountId: '' } })
   assert.ok((await invoke('calls:list')).some(call => call.id === live.id && call.lines === 0), 'history exists before any summary or transcript')
   const simultaneous = await Promise.all(Array.from({ length: 8 }, () => invoke('calls:list')))
   assert.ok(simultaneous.every(list => list.some(call => call.id === live.id && call.lines === 0)), 'concurrent history consumers must receive a complete snapshot')
-  const getSources = desktopCapturer.getSources
-  desktopCapturer.getSources = async () => [{ id: 'window:fictional-call', name: 'Fictional call', thumbnail: nativeImage.createEmpty() }, { id: 'screen:fictional', name: 'Fictional screen', thumbnail: nativeImage.createEmpty() }]
-  let monitorScope
-  try {
-    await assert.rejects(invoke('screen-monitor:start', 'cursor'), /specific screen/)
-    await assert.rejects(invoke('screen-monitor:start', 'window:closed'), /no longer available/)
-    const watched = await invoke('screen-monitor:start', 'window:fictional-call')
-    monitorScope = watched.id
-    assert.equal(watched.source.name, 'Fictional call')
-    assert.equal(await invoke('screen-monitor:frame', watched.id, Date.now() - 90_000, Buffer.from('delayed-encode')), false, 'late frame arrival must not advance the call clock')
-    assert.equal(await invoke('screen-monitor:frame', watched.id, Date.now(), Buffer.from('fictional-frame')), true)
-    assert.ok(Math.abs(invoke('screen-monitor:status').availableTo - Date.now()) < 2000, 'a stale frame cannot shift subsequent capture timestamps')
-    assert.equal(invoke('screen-monitor:status').imagesSent, 0, 'local buffering must not invoke the AI provider')
-    await invoke('screen-monitor:stop', watched.id)
-    assert.equal(invoke('screen-monitor:status').state, 'paused')
-    assert.equal(await invoke('screen-monitor:frame', watched.id, Date.now(), Buffer.from('late-frame')), false)
-    monitorScope = (await invoke('screen-monitor:start', 'screen:fictional')).id
-    assert.equal(invoke('screen-monitor:status').ready, false, 'changing the source clears its prior buffer')
-    const sources = await desktopCapturer.getSources()
-    let releaseOld
-    let lookups = 0
-    desktopCapturer.getSources = () => ++lookups === 1 ? new Promise(resolve => { releaseOld = () => resolve(sources) }) : Promise.resolve(sources)
-    const older = invoke('screen-monitor:start', 'window:fictional-call').then(value => ({ value }), error => ({ error }))
-    const newer = await invoke('screen-monitor:start', 'screen:fictional')
-    releaseOld()
-    assert.match((await older).error.message, /newer screen selection/)
-    assert.equal(invoke('screen-monitor:status').id, newer.id, 'a slow old lookup cannot overwrite the selected source')
-    monitorScope = newer.id
-  } finally { desktopCapturer.getSources = getSources }
-  const other = await invoke('agents:create', 'support')
-  await assert.rejects(Promise.resolve().then(() => invoke('settings:update', { activeAgentId: other.id })), /new call/)
   await assert.rejects(invoke('calls:delete', live.id), /End the call/)
   invoke('dev:transcript', 'them', 'Can you send the SOC2 report?', 'native-first', 'native:1')
   invoke('dev:transcript', 'me', 'I will send it by Tuesday.')
@@ -176,13 +109,9 @@ async function run() {
   await assert.rejects(invoke('voices:merge', 'native:1', 'me'), /different speakers/)
   invoke('dev:transcript', 'them', 'Please include the date.', 'native-third', 'native:3', 3)
   invoke('dev:transcript', 'them', 'That is everything.', 'native-fourth', 'native:4', 3)
-  ipcMain.emit('call:view', {}, { key: live.id, reviewedLines: 0, cards: [{ id: 'native-reply', kind: 'suggest', question: 'Can you send the SOC2 report?', text: 'I will send the SOC2 report by Tuesday.', at: Date.now() }] })
   await invoke('session:listening', false)
-  assert.equal(invoke('screen-monitor:status').state, 'off')
-  assert.equal(await invoke('screen-monitor:frame', monitorScope, Date.now(), Buffer.from('after-call')), false)
   let record = await invoke('calls:get', live.id)
   assert.equal(record.transcript.length, 6)
-  assert.equal(record.suggestions[0].text, 'I will send the SOC2 report by Tuesday.')
   assert.equal(record.status, 'ended')
   record = await invoke('calls:speaker', live.id, 'me', 'Luka')
   assert.equal(record.transcript.find(line => line.speaker === 'me').voiceName, 'Luka')
@@ -217,9 +146,7 @@ async function run() {
   assert.ok(!invoke('call:current').transcript.some(line => line.voiceId === 'native:3'), 'history corrections also update the current call and survive flushing')
   await invoke('settings:update', { assist: { rememberCalls: true } })
   await assert.rejects(invoke('calls:merge-speakers', live.id, 'missing', 'native:1'), /different speakers/)
-  assert.equal(invoke('calendar:status').state, 'off')
   assert.equal(invoke('voices:status').state, 'off')
-  await assert.rejects(Promise.resolve().then(() => invoke('agents:remove', agent.id)), /current call/)
   record = await invoke('calls:rename', live.id, 'Native integration call')
   assert.equal(record.title, 'Native integration call')
   const exportPath = path.join(profile, 'call-export.md')
@@ -252,8 +179,7 @@ async function run() {
   assert.equal(await invoke('calls:get', live.id), null)
   assert.notEqual(invoke('call:current').view.key, live.id)
   assert.equal(invoke('call:current').session, undefined)
-  await invoke('settings:update', { activeAgentId: other.id, assist: { rememberCalls: false } })
-  await invoke('agents:update', other.id, { learning: 'off' })
+  await invoke('settings:update', { assist: { rememberCalls: false } })
   const privateCall = await invoke('session:listening', true)
   invoke('dev:transcript', 'them', 'This call should not go into history.')
   await invoke('session:listening', false)
@@ -264,15 +190,13 @@ async function run() {
   await invoke('session:listening', false)
   assert.equal((await invoke('calls:get', empty.id)).transcript.length, 0)
   await invoke('session:clear')
-  await invoke('agents:remove', other.id)
-  assert.equal((await invoke('calls:get', empty.id)).agentId, other.id, 'removing an agent retains its saved calls')
-  // Meetings lists every saved call, the one kept from the removed agent too.
+  // Meetings lists every saved call.
   await evaluate("document.querySelector('.workspace-nav button[aria-label=\"To-do\"]').click()")
   await evaluate("document.querySelector('.workspace-nav button[aria-label=\"Meetings\"]').click()")
   const saved = (await invoke('calls:list')).map(call => call.id)
   assert.ok(saved.includes(empty.id))
-  await wait(() => evaluate(`document.querySelectorAll('.meeting-row').length===${saved.length}`), 'retained call from removed agent')
-  console.log('Native main + renderer: templates, call ownership, encrypted history, transcript/replies, rename/export/delete, empty calls, privacy-off, and retained calls from deleted agents passed.')
+  await wait(() => evaluate(`document.querySelectorAll('.meeting-row').length===${saved.length}`), 'every saved call in Meetings')
+  console.log('Native main + renderer: a call pinned to its language, encrypted history, voices named and merged, names confirmed after the call, rename/export/give/search/delete, empty calls and Remember calls off passed.')
   clearTimeout(timeout)
   app.exit(0)
 }

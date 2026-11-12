@@ -79,17 +79,7 @@ async function run() {
   assert.equal(changed.find(key => key.id === 'dictate').keys, 'F18')
   await wait(() => bar.webContents.executeJavaScript("document.querySelector('.dictation-prompt kbd')?.textContent === 'F18'"))
   assert.ok(icon.tooltip.includes('F18'))
-  const voiceOwner = invoke('agents:list')[0]
-  const otherAgent = await invoke('agents:create', 'blank')
-  await invoke('agents:update', voiceOwner.id, { preferences: { dictation: { mode: 'toggle', polish: false, showBar: true, microphoneId: 'headset' } } })
-  await invoke('dictation:agent', voiceOwner.id)
-  await wait(() => bar.webContents.executeJavaScript("document.querySelector('.dictation-prompt')?.textContent.startsWith('Press')"))
-  assert.equal(invoke('settings:get').dictation.mode, defaultMode, 'selected-agent voice preferences never rewrite General settings')
-  assert.equal(await bar.webContents.executeJavaScript('window.togle.getSettings().then(settings=>settings.dictation.microphoneId)'), 'headset')
-  await invoke('dictation:agent', otherAgent.id)
-  await wait(() => bar.webContents.executeJavaScript(`document.querySelector('.dictation-prompt')?.textContent.startsWith(${JSON.stringify(defaultPrompt)})`))
   await invoke('session:listening', true)
-  await wait(() => bar.webContents.executeJavaScript("document.querySelector('.dictation-prompt')?.textContent.startsWith('Press')"))
   main.close(); assert.equal(main.isDestroyed(), false)
   assert.equal(invoke('call:current').session.status, 'live', 'Closing to the tray does not end a meeting')
   assert.ok(icon.tooltip.includes('Writing down a call'))
@@ -113,18 +103,21 @@ async function run() {
   for (let n = 0; n < 12; n++) await invoke('dev:dictated', 'Note ' + n)
   await wait(() => item('Copy a recent dictation').submenu.items[0].label === 'Note 11')
   assert.equal(item('Copy a recent dictation').submenu.items.length, 10, 'the last ten')
-  let lateView
+  // "I told them" ticked as Togle quits: the call saved on the way out has it.
+  invoke('dev:transcript', 'them', 'One more thing before you go.')
+  let toldAt
   app.once('before-quit', () => {
-    const view = invoke('call:current').view
-    lateView = { ...view, reviewedLines: view.reviewedLines + 1 }
-    ipcMain.emit('call:view', {}, lateView)
+    assert.equal(invoke('call:current').toldOthers, 0)
+    ipcMain.emit('call:told-others', {}, true)
+    toldAt = invoke('call:current').toldOthers
   })
   app.on('will-quit', () => {
     try {
       assert.equal(icon.destroyed, true)
       assert.equal(BrowserWindow.getAllWindows().length, 0, 'Quit removes both windows')
       const saved = JSON.parse(electron.safeStorage.decryptString(fs.readFileSync(path.join(profile, 'call.bin'))))
-      assert.deepEqual(saved.view, lateView, 'Quit preserves a call update arriving after the initial save')
+      assert.ok(toldAt > 0)
+      assert.equal(saved.state.toldOthers, toldAt, 'Quit preserves a call update arriving after the initial save')
       clearTimeout(timeout)
       console.log('TRAY PASS: open, close to tray, live call survives, bar preference stays in sync, F9 default and custom shortcut propagation, guarded quit, late-save shutdown, complete cleanup')
     } catch (error) { console.error(error); app.exit(1) }
