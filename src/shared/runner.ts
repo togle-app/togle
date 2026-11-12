@@ -202,10 +202,11 @@ export interface TaskView extends TaskInfo {
 
 /**
  * Whether a task needs the person: it asks, or it is one Togle runs that stopped (by their Stop, or by itself) and
- * waits for a reply to go on. A task stopped in its own window is not Togle's to continue.
+ * waits for a reply to go on. A task stopped in its own window is not Togle's to continue, and one in a terminal of
+ * Togle's own ended with its program: no reply goes on with it.
  */
-export function needsYou(task: Pick<TaskView, 'state' | 'mine'>): boolean {
-  return task.state === 'waiting' || (task.mine && (task.state === 'stopped' || task.state === 'failed'))
+export function needsYou(task: Pick<TaskView, 'state' | 'mine' | 'terminal'>): boolean {
+  return task.state === 'waiting' || (task.mine && !task.terminal && (task.state === 'stopped' || task.state === 'failed'))
 }
 
 /** How many files a task changed, by what its log says (each file once). */
@@ -283,6 +284,8 @@ export interface TaskAttention {
   /** As in TaskView: it stopped because its agent is signed out, and what signs it in again. */
   signedOut?: boolean
   fix?: string
+  /** As in TaskView: it runs in a terminal of Togle's own, and so does not wait for a reply once it ended. */
+  terminal?: boolean
 }
 
 /** A small notice: a task waits for the person, or it finished. */

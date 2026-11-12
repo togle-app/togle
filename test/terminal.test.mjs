@@ -104,6 +104,100 @@ test('Stop is Ctrl+C, and End it ends the agent: either way the task is stopped,
   }
 })
 
+test('the words are one argument whatever they hold, and lose what a terminal would take as keys', async () => {
+  const { hub } = hubWith('{task}')
+  const started = async (prompt) => {
+    const view = await hub.start({ runner: 'term-fake', folder: scratch(), prompt })
+    await until(() => plain(hub.terminalRead(view.key).text).includes('ready>'), 'the agent to start')
+    const line = plain(hub.terminalRead(view.key).text).split(/\r?\n/).find((text) => text.startsWith('started with'))
+    await hub.endCommands(view.key)
+    return JSON.parse(line.slice('started with '.length))
+  }
+  try {
+    assert.deepEqual(await started('"Fix the bug" --yolo "now"'), ['"Fix the bug" --yolo "now"'], 'quoted at both ends, it is still one argument: no flag slips in')
+    assert.deepEqual(await started('"a b"'), ['"a b"'])
+    assert.deepEqual(await started('keep C:\\temp\\ and C:\\my files\\'), ['keep C:\\temp\\ and C:\\my files\\'], 'backslashes, also at the end')
+    assert.deepEqual(await started('\x1b[31mred\x1b[0m words\x03 and\x07 more'), ['red words and more'], 'colors and control keys are not passed on')
+  } finally {
+    await hub.dispose()
+  }
+})
+
+test('a terminal task ended or let go leaves nothing behind, and does not wait for a reply it cannot take', async () => {
+  const saved = []
+  const records = { all: () => [...saved], add: (record) => saved.push(record) }
+  const backend = new T.TerminalBackend({ runner: 'term-fake', name: 'Fake', command: command() })
+  const hub = new T.RunnerHub({ backends: [backend], changed() {}, records })
+  try {
+    const view = await hub.start({ runner: 'term-fake', folder: scratch(), prompt: 'Short' })
+    await until(() => plain(hub.terminalRead(view.key).text).includes('ready>'), 'the agent to start')
+    assert.deepEqual(saved, [], 'no record to pick it up again: it ends with its program')
+    await hub.stop(view.key)
+    await until(async () => (await seen(hub, view.key))?.state === 'stopped', 'Ctrl+C to stop it')
+    assert.equal(backend.running, 0, 'the backend let go of it')
+    assert.equal(T.needsYou(await seen(hub, view.key)), false, 'not waiting for a reply')
+    assert.equal(new T.Attention().look(hub.attention()).waiting, 0, 'nor counted on the tray')
+    // The agent removed while a task of it runs: the task is stopped, not working for ever.
+    const running = await hub.start({ runner: 'term-fake', folder: scratch(), prompt: 'Long' })
+    await until(() => plain(hub.terminalRead(running.key).text).includes('ready>'), 'the second to start')
+    await hub.removeBackend('term-fake')
+    await until(async () => (await seen(hub, running.key))?.state === 'stopped', 'it to be stopped')
+    assert.deepEqual(hub.busy(), [], 'nothing busy is left to ask about at quit')
+  } finally {
+    await hub.dispose()
+  }
+})
+
+test('the words of a command started through cmd.exe are taken out with the flag that held them', () => {
+  assert.deepEqual(T.withoutTaskWords(['--message', '{task}']), [])
+  assert.deepEqual(T.withoutTaskWords(['-p', '{task}', '--verbose']), ['--verbose'])
+  assert.deepEqual(T.withoutTaskWords(['--message={task}', '--model', 'x']), ['--model', 'x'])
+  assert.deepEqual(T.withoutTaskWords(['--model=x', '{task}']), ['--model=x'], 'a flag with its own value stays')
+  assert.deepEqual(T.withoutTaskWords(['run', '{task}']), ['run'], 'a word that is not a flag stays')
+  assert.equal(T.windowsArg('plain'), 'plain')
+  assert.equal(T.windowsArg(''), '""')
+  assert.equal(T.windowsArg('"a b"'), '"\\"a b\\""')
+  assert.equal(T.windowsArg('C:\\my files\\'), '"C:\\my files\\\\"')
+  assert.equal(T.cleanWords('a\x1b]0;title\x07b\x1b[1;31mc\r\nd\te\x7f'), 'abc\r\nd\te')
+})
+
+test('an npm or pnpm shim starts what it names, without cmd.exe, so the words go in its command (Windows)', { skip: process.platform !== 'win32' }, async () => {
+  const dir = scratch()
+  const { cpSync, mkdirSync, writeFileSync } = await import('node:fs')
+  mkdirSync(path.join(dir, 'node_modules', 'fake', 'bin'), { recursive: true })
+  cpSync(agent, path.join(dir, 'node_modules', 'fake', 'bin', 'fake.mjs'))
+  const npm = path.join(dir, 'fake.cmd')
+  writeFileSync(npm, '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST "%dp0%\\node.exe" (\r\n  SET "_prog=%dp0%\\node.exe"\r\n) ELSE (\r\n  SET "_prog=node"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\fake\\bin\\fake.mjs" %*\r\n')
+  const pnpm = path.join(dir, 'fake-pnpm.cmd')
+  writeFileSync(pnpm, '@SETLOCAL\r\n@IF EXIST "%~dp0\\node.exe" (\r\n  "%~dp0\\node.exe"  "%~dp0\\node_modules\\fake\\bin\\fake.mjs" %*\r\n) ELSE (\r\n  @SET PATHEXT=%PATHEXT:;.JS;=;%\r\n  node  "%~dp0\\node_modules\\fake\\bin\\fake.mjs" %*\r\n)\r\n')
+  const other = path.join(dir, 'other.cmd')
+  writeFileSync(other, `@ECHO off\r\n"${process.execPath}" "${agent}" %*\r\n`)
+  assert.deepEqual((await T.shimTarget(npm)).at(-1), path.join(dir, 'node_modules', 'fake', 'bin', 'fake.mjs'))
+  assert.deepEqual((await T.shimTarget(pnpm)).at(-1), path.join(dir, 'node_modules', 'fake', 'bin', 'fake.mjs'))
+  assert.equal(await T.shimTarget(other), null, 'any other .cmd is not read for what it starts')
+  const startedWith = async (cmd, rest, prompt) => {
+    const backend = new T.TerminalBackend({ runner: 'term-fake', name: 'Fake', command: `"${cmd}" ${rest}` })
+    const hub = new T.RunnerHub({ backends: [backend], changed() {} })
+    try {
+      const view = await hub.start({ runner: 'term-fake', folder: scratch(), prompt })
+      await until(() => plain(hub.terminalRead(view.key).text).includes('ready>'), 'the agent to start')
+      const line = plain(hub.terminalRead(view.key).text).split(/\r?\n/).find((text) => text.startsWith('started with'))
+      return { args: JSON.parse(line.slice('started with '.length)), words: view.words }
+    } finally {
+      await hub.dispose()
+    }
+  }
+  assert.deepEqual(await startedWith(npm, '--message {task}', 'Fix "it" & more'), { args: ['--message', 'Fix "it" & more'], words: undefined }, 'npm: the words are in its command')
+  assert.deepEqual(await startedWith(pnpm, '-p {task}', 'Fix it'), { args: ['-p', 'Fix it'], words: undefined }, 'pnpm too')
+  assert.deepEqual(await startedWith(other, '-p {task} --verbose', 'Fix it'), { args: ['--verbose'], words: 'Fix it' }, 'any other .cmd: cmd.exe, the words wait, and the flag goes with them')
+})
+
+test('what Windows cannot start as a program is refused before a terminal is made for it', { skip: process.platform !== 'win32' }, async () => {
+  const backend = new T.TerminalBackend({ runner: 'term-script', name: 'Script', command: `"${agent}" {task}` })
+  await assert.rejects(backend.start({ folder: scratch(), prompt: 'x' }), /Script cannot be started: fake-terminal-agent\.mjs is not a program/)
+  assert.equal(backend.running, 0)
+})
+
 test('an agent whose program is not on this computer is not installed, and says so when started', async () => {
   const backend = new T.TerminalBackend({ runner: 'term-none', name: 'Nowhere', command: 'togle-agent-that-is-not-here {task}' })
   assert.deepEqual(await backend.detect(), { installed: false })

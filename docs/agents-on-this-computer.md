@@ -46,10 +46,11 @@ Every way of giving work to an agent opens this same box: **New task** in Agents
 
 **Add an agent → In a terminal** takes any other agent, by its name and the command that starts it in a terminal. Its tasks run in a terminal of Togle's own (a pseudo-terminal, through [node-pty](https://github.com/microsoft/node-pty)), in the task's folder, and the task's panel is that terminal: you read the agent there and type into it as in any terminal, and F9 types into it as one line. Togle opens on the task when it starts. Its id is `term-<name>` (`togle run term-aider …`).
 
-- Put `{task}` in the command where the task's words go: `cursor-agent {task}`, `aider --message {task}`. They go in as one argument, exactly as written.
-- Without `{task}`, the words wait above the terminal, and **Type them in** types them, as one line and without Enter: you press Enter once the agent is ready for them. On Windows an agent installed with npm (a `.cmd` or `.bat`) starts through cmd.exe, which would read the words as commands, so there they always wait to be typed in.
+- Put `{task}` in the command where the task's words go: `cursor-agent {task}`, `aider --message {task}`. They go in as one argument, as written, quotes and all; colors and control characters (a Ctrl+C, say) are taken out.
+- Without `{task}`, the words wait above the terminal, and **Type them in** types them, as one line and without Enter: you press Enter once the agent is ready for them.
+- On Windows an agent installed with npm or pnpm is a `.cmd` file: Togle reads what it starts (Node and the agent's script) and starts that, without cmd.exe, so `{task}` works as above. Any other `.cmd` or `.bat` starts through cmd.exe, which would read the words as commands: there they wait to be typed in, and the flag that held them (`--message` in `--message {task}`) is left out too. A file that is not a program is refused before anything starts.
 - Togle cannot read what such an agent asks. It shows no command before it runs, marks none dangerous, and sends no notice: the agent asks in its terminal, and you answer there.
-- The task is working while the program runs, done when it ends by itself, and stopped by an error, with the exit code, otherwise. **Stop** sends Ctrl+C; **End it** ends the agent and what it started. The tasks end with Togle and are not picked up again.
+- The task is working while the program runs, done when it ends by itself, and stopped by an error, with the exit code (or the signal, on a Mac and Linux), otherwise. **Stop** sends Ctrl+C; **End it** ends the agent and what it started. An ended task does not wait for a reply: it ended with its program. The tasks end with Togle, are not picked up again, and leave nothing behind.
 
 ## To-do
 

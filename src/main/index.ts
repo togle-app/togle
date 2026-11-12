@@ -232,7 +232,7 @@ let hookChannel: ChannelServer | null = null
 const taskBox = new TaskBoxWindow()
 const callNotice = new CallNoticeWindow()
 // Once, ever: one of Togle's keys was pressed in a code editor that uses it too. Change keys, or keep them.
-const keysNotice = new CornerNoticeWindow<KeysOffer>(__dirname, { surface: 'keysnotice', title: 'Togle keys' })
+const keysNotice = new CornerNoticeWindow<KeysOffer>(__dirname, { surface: 'keysnotice', title: 'Togle keys', slot: 1 })
 const callStrip = new CallStripWindow()
 /** While a call is written down and Togle's window is closed, a small strip keeps the call's controls in reach. */
 function refreshCallStrip(): void {
@@ -872,18 +872,28 @@ const showWindow = new ShowWindow()
  * hears what they say meanwhile. Enter: the picture is saved (Togle's pictures folder; an agent in a terminal reads it from
  * there), that box is put in front again, and the picture goes in, then the words. Esc: nothing goes in.
  */
+// The offer to change keys, when F8 was pressed in a code editor, waits until the picture is done: only the press that
+// took a picture gives it then. A press during one (a held F8 repeats) takes none, and gives nothing.
+let showing = false
 async function showPart(): Promise<void> {
+  if (showWindow.open || dictation.active) {
+    if (!showing) giveKeysOffer()
+    return
+  }
+  showing = true
   try {
     await showPartNow()
   } finally {
-    // The offer to change keys, when F8 was pressed in a code editor, waits until the picture is done.
-    const offer = afterShow
-    afterShow = undefined
-    offer?.()
+    showing = false
+    giveKeysOffer()
   }
 }
+function giveKeysOffer(): void {
+  const offer = afterShow
+  afterShow = undefined
+  offer?.()
+}
 async function showPartNow(): Promise<void> {
-  if (showWindow.open || dictation.active) return
   await dictation.start(false)
   if (dictation.status().phase !== 'recording') return
   let png: Buffer | null = null

@@ -3,9 +3,11 @@
 // task shows working while the program runs, and done or stopped when it ends; the agent's questions and commands are
 // answered in its terminal.
 import { randomUUID } from 'node:crypto'
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import type { IPty } from 'node-pty'
 import { TASK_WORDS, type RunnerKind, type TaskInfo } from '@shared/runner'
-import { commandWords, forCmd, whereIs } from './acp'
+import { commandWords, exists, forCmd, whereIs } from './acp'
 import { endTree } from './process-tree'
 import { TaskBase } from './task-base'
 import type { Backend, Detected, StartOptions, TaskHandle, TerminalSide } from './types'
@@ -46,18 +48,105 @@ function loadPty(): Promise<NodePty | null> {
   return nodePty
 }
 
+/**
+ * The words without what a terminal would take as keys of their own: escape sequences (colored text piped in) and
+ * control characters (Ctrl+C is one). Line breaks and tabs stay, for an argument.
+ */
+export const cleanWords = (text: string): string =>
+  text
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b[\]P^_][\s\S]*?(?:\x07|\x1b\\)/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+
 /** Text as one line, for a terminal: there, a line break would press Enter. */
-const oneLine = (text: string): string => text.replace(/\s*[\r\n]+\s*/g, ' ').replace(/\t/g, ' ').trim()
+const oneLine = (text: string): string => cleanWords(text).replace(/\s*[\r\n]+\s*/g, ' ').replace(/\t/g, ' ').trim()
+
+/**
+ * One argument for a Windows command line, quoted the way programs read their arguments back (the C runtime's rules),
+ * whatever it holds: quotes, spaces, backslashes. node-pty's own quoting leaves an argument that starts and ends with a
+ * quote unquoted, which splits words like `"Fix it" --yolo` into several arguments.
+ */
+export function windowsArg(arg: string): string {
+  if (arg && !/[\s"]/.test(arg)) return arg
+  let out = '"'
+  let slashes = 0
+  for (const char of arg) {
+    if (char === '\\') {
+      slashes++
+      continue
+    }
+    out += char === '"' ? `${'\\'.repeat(slashes * 2 + 1)}"` : `${'\\'.repeat(slashes)}${char}`
+    slashes = 0
+  }
+  return `${out}${'\\'.repeat(slashes * 2)}"`
+}
+
+/**
+ * What an npm or pnpm shim (a .cmd, on Windows) starts: Node and the agent's script, or the agent's own program. Started
+ * so, without cmd.exe, the task's words can go in its command. Null for any other .cmd.
+ */
+export async function shimTarget(file: string): Promise<string[] | null> {
+  const text = await fs.readFile(file, 'utf8').catch(() => '')
+  if (!text || text.length > 16_000) return null
+  const found = /"%~?dp0%?\\([^"%]+)"\s+%\*/i.exec(text)
+  if (!found) return null
+  const dir = path.dirname(file)
+  const target = path.resolve(dir, found[1])
+  if (!(await exists(target))) return null
+  if (/\.exe$/i.test(target)) return [target]
+  if (!/\.[cm]?js$/i.test(target)) return null
+  const bundled = path.join(dir, 'node.exe')
+  const node = (await exists(bundled)) ? bundled : await whereIs('node')
+  return node ? [node, target] : null
+}
+
+/**
+ * The words of a command started through cmd.exe, with the task's place taken out (the words wait to be typed in): the
+ * word with {task}, and the flag before it when {task} was that flag's value ("--message {task}"), or the program would
+ * start with a flag that has lost its value.
+ */
+export function withoutTaskWords(words: string[]): string[] {
+  const kept: string[] = []
+  for (const word of words) {
+    if (!word.includes(TASK_WORDS)) {
+      kept.push(word)
+      continue
+    }
+    const before = kept.at(-1)
+    if (word === TASK_WORDS && before && /^-/.test(before) && !before.includes('=')) kept.pop()
+  }
+  return kept
+}
+
+interface InnerSocket {
+  destroy(): void
+  on?(event: 'error', listener: (error: Error) => void): void
+}
 
 interface WindowsInside {
   _agent?: {
     _ptyNative?: { kill(pty: unknown, useConptyDll: unknown): void }
     _pty?: unknown
     _useConptyDll?: unknown
-    _conoutSocketWorker?: { dispose(): void }
-    _inSocket?: { destroy(): void }
-    _outSocket?: { destroy(): void }
+    _conoutSocketWorker?: { dispose(): void; _worker?: { on?(event: 'error', listener: (error: Error) => void): void } }
+    _inSocket?: InnerSocket
+    _outSocket?: InnerSocket
   }
+}
+
+// node-pty ends its output worker this long after it is told to (FLUSH_DATA_INTERVAL in node-pty 1.1.0), and a little more.
+const WORKER_ENDS_MS = 1_500
+
+/**
+ * On Windows, node-pty's two pipes to the console, and the worker that reads the console's output, can fail once the
+ * program is gone ("ended by the other party"), with nothing of node-pty's own listening: in Togle's main process that
+ * would be an error the person sees. They are listened to from the start; a terminal that ended has nothing left to say.
+ */
+function quietPipes(term: IPty): void {
+  if (process.platform !== 'win32') return
+  const inside = (term as unknown as WindowsInside)._agent
+  for (const pipe of [inside?._inSocket, inside?._outSocket]) pipe?.on?.('error', () => undefined)
+  inside?._conoutSocketWorker?._worker?.on?.('error', () => undefined)
 }
 
 /**
@@ -80,7 +169,9 @@ function release(term: IPty): void {
   step(() => inside._ptyNative?.kill(inside._pty, inside._useConptyDll))
   step(() => inside._conoutSocketWorker?.dispose())
   step(() => inside._inSocket?.destroy())
-  step(() => inside._outSocket?.destroy())
+  // The worker may still be writing the console's last output into this pipe: it goes once the worker has ended.
+  const later = setTimeout(() => step(() => inside._outSocket?.destroy()), WORKER_ENDS_MS)
+  later.unref?.()
 }
 
 class TerminalTask extends TaskBase implements TerminalSide {
@@ -92,6 +183,7 @@ class TerminalTask extends TaskBase implements TerminalSide {
   private unsentAt = 0
   private timer?: NodeJS.Timeout
   private ended = false
+  private ending = false
   private closing = false
   private stoppedAt = 0
   words?: string
@@ -104,7 +196,9 @@ class TerminalTask extends TaskBase implements TerminalSide {
     private readonly name: string,
     private readonly term: IPty,
     words: string | undefined,
-    private readonly told: (chunk: TerminalChunk) => void
+    private readonly told: (chunk: TerminalChunk) => void,
+    /** It ended: its backend lets go of it. */
+    private readonly gone: () => void
   ) {
     super()
     this.runner = runner
@@ -113,7 +207,7 @@ class TerminalTask extends TaskBase implements TerminalSide {
     this.folder = folder
     this.words = words
     term.onData((data) => this.printedMore(data))
-    term.onExit(({ exitCode }) => this.exited(exitCode))
+    term.onExit(({ exitCode, signal }) => this.exited(exitCode, signal))
     this.setBase('working')
   }
 
@@ -138,25 +232,29 @@ class TerminalTask extends TaskBase implements TerminalSide {
     this.told(chunk)
   }
 
-  private exited(code: number): void {
+  private exited(code: number, signal?: number): void {
     if (this.ended) return
     this.ended = true
     this.flush()
     release(this.term)
+    this.gone()
+    // Let go (or its agent removed): stopped.
     if (this.closing) {
+      this.setBase('stopped')
       this.emit({ type: 'ended', reason: 'closed' })
       return
     }
-    // Ended by Stop (Ctrl+C) or End it: stopped, as the person asked. Ended by itself: done, or why it stopped.
+    // Ended by Stop (Ctrl+C) or End it: stopped, as the person asked. Ended by itself: done, or why it stopped (on a Mac
+    // and Linux a program killed by a signal reports exit code 0, with the signal apart).
     if (Date.now() - this.stoppedAt < STOP_COUNTS_MS) {
       this.emit({ type: 'turn-ended', outcome: 'interrupted', error: null })
       this.setBase('stopped')
-    } else if (code === 0) {
+    } else if (code === 0 && !signal) {
       this.emit({ type: 'turn-ended', outcome: 'completed', error: null })
       this.setBase('idle')
     } else {
       this.setBase('failed')
-      this.emit({ type: 'error', message: `${this.name} stopped (exit code ${code}).` })
+      this.emit({ type: 'error', message: signal ? `${this.name} stopped (signal ${signal}).` : `${this.name} stopped (exit code ${code}).` })
       this.emit({ type: 'ended', reason: 'crashed' })
     }
   }
@@ -210,8 +308,10 @@ class TerminalTask extends TaskBase implements TerminalSide {
     await this.end()
   }
 
-  /** Ends the program and what it started; the terminal is let go when it has ended (exited). */
+  /** Ends the program and what it started, once; the terminal is let go when it has ended (exited). */
   private async end(): Promise<void> {
+    if (this.ending) return
+    this.ending = true
     const pid = this.term.pid
     if (process.platform !== 'win32') {
       try {
@@ -255,23 +355,40 @@ export class TerminalBackend implements Backend {
     const [program, ...rest] = commandWords(this.agent.command)
     const found = program ? await whereIs(program) : null
     if (!found) throw new Error(`${this.agent.name} is not on this computer: ${program ?? 'its command'} was not found.`)
-    // A .cmd or .bat (an agent installed with npm, on Windows) only starts through cmd.exe, which would read the task's
-    // words as commands: there they are not put in the command, and wait to be typed in.
-    const shim = process.platform === 'win32' && /\.(cmd|bat)$/i.test(found)
+    const windows = process.platform === 'win32'
+    // On Windows a .cmd or .bat (an agent installed with npm or pnpm) is read for what it starts, which then starts without
+    // cmd.exe. Any other .cmd only starts through cmd.exe, which would read the task's words as commands: there they are
+    // not put in its command, and wait to be typed in.
+    let file = found
+    let first: string[] = []
+    let shim = false
+    if (windows && /\.(cmd|bat)$/i.test(found)) {
+      const target = await shimTarget(found)
+      if (target) [file, ...first] = target
+      else shim = true
+    }
+    // Windows starts a program (.exe, .com) and nothing else: anything else is said here, before a console is made for it.
+    if (windows && !shim && !/\.(exe|com)$/i.test(file)) throw new Error(`${this.agent.name} cannot be started: ${path.basename(file)} is not a program. Give the command that starts it in a terminal.`)
+    const words = cleanWords(options.prompt)
     const placed = !shim && rest.some((word) => word.includes(TASK_WORDS))
-    const args = rest.flatMap((word) => (!word.includes(TASK_WORDS) ? [word] : placed ? [word.split(TASK_WORDS).join(options.prompt)] : []))
+    const args = shim ? withoutTaskWords(rest) : rest.map((word) => word.split(TASK_WORDS).join(words))
     const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>
     const size = { name: 'xterm-256color', cols: 120, rows: 32, cwd: options.folder, env }
-    const term = shim
-      ? pty.spawn(process.env.ComSpec || 'cmd.exe', `/d /s /c "${[found, ...args].map(forCmd).join(' ')}"`, size)
-      : pty.spawn(found, args, size)
+    let term: IPty
+    try {
+      term = shim
+        ? pty.spawn(process.env.ComSpec || 'cmd.exe', `/d /s /c "${[found, ...args].map(forCmd).join(' ')}"`, size)
+        : windows
+          ? pty.spawn(file, [...first, ...args].map(windowsArg).join(' '), size)
+          : pty.spawn(file, [...first, ...args], size)
+    } catch (error) {
+      throw new Error(`${this.agent.name} could not be started: ${(error as Error).message}`)
+    }
+    quietPipes(term)
     const id = randomUUID()
     const title = options.title?.trim() || oneLine(options.prompt).slice(0, 90)
-    const task = new TerminalTask(this.runner, id, title, options.folder, this.agent.name, term, placed ? undefined : options.prompt, this.told)
+    const task = new TerminalTask(this.runner, id, title, options.folder, this.agent.name, term, placed ? undefined : words, this.told, () => this.tasks.delete(id))
     this.tasks.set(id, task)
-    task.on((event) => {
-      if (event.type === 'ended') this.tasks.delete(id)
-    })
     return task
   }
 
@@ -282,5 +399,10 @@ export class TerminalBackend implements Backend {
   async close(): Promise<void> {
     await Promise.all([...this.tasks.values()].map((task) => task.close()))
     this.tasks.clear()
+  }
+
+  /** How many of its tasks still run: what it holds on to. */
+  get running(): number {
+    return this.tasks.size
   }
 }

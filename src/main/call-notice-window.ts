@@ -24,9 +24,13 @@ export class CornerNoticeWindow<T> {
   private stopped = false
   private hideTimer?: NodeJS.Timeout
 
+  /**
+   * `slot` is its place in the corner, counted from the top: the keys notice sits under the call notice's, so a call that
+   * starts while it shows does not cover it.
+   */
   constructor(
     private readonly builtMain = __dirname,
-    private readonly kind: { surface: string; title: string } = { surface: 'callnotice', title: 'Togle call' }
+    private readonly kind: { surface: string; title: string; slot?: number } = { surface: 'callnotice', title: 'Togle call' }
   ) {}
 
   owns(sender: Electron.WebContents): boolean {
@@ -78,7 +82,7 @@ export class CornerNoticeWindow<T> {
     const win = this.window
     if (!win || win.isDestroyed()) return
     const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
-    win.setBounds({ x: area.x + area.width - WIDTH - MARGIN, y: area.y + MARGIN, width: WIDTH, height: HEIGHT })
+    win.setBounds({ x: area.x + area.width - WIDTH - MARGIN, y: area.y + MARGIN + (this.kind.slot ?? 0) * (HEIGHT + 8), width: WIDTH, height: HEIGHT })
   }
 
   private render(): void {

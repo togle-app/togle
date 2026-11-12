@@ -5,6 +5,9 @@ import '@xterm/xterm/css/xterm.css'
 
 const api = window.togle
 
+// The tasks whose terminal was shown here before: what they printed then had its questions to the terminal answered.
+const shownBefore = new Set<string>()
+
 /**
  * The terminal a task runs in when its agent has no ACP, inside Togle: what the agent prints, and the person's keys sent
  * to it, as in any terminal. It starts from what was printed so far, then follows; a part it already has is not written
@@ -38,16 +41,27 @@ export function TerminalView({ taskKey }: { taskKey: string }) {
       else write(chunk.at, chunk.data)
     })
     let alive = true
+    // An agent asks the terminal things as it prints (where the cursor is, what kind of terminal it is), and the terminal
+    // answers as keys. Shown again, what it printed is not answered again: those answers would reach it as typed keys.
+    // Shown the first time, it is: the agent may still wait for them.
+    const again = shownBefore.has(taskKey)
+    shownBefore.add(taskKey)
+    let replaying = false
     void api.terminalRead(taskKey).then(
       (printed) => {
         if (!alive) return
-        term.write(printed.text)
+        replaying = again
+        term.write(printed.text, () => {
+          replaying = false
+        })
         end = printed.end
         for (const chunk of early.splice(0)) write(chunk.at, chunk.data)
       },
       () => undefined
     )
-    const typed = term.onData((data) => void api.terminalWrite(taskKey, data).catch(() => undefined))
+    const typed = term.onData((data) => {
+      if (!replaying) void api.terminalWrite(taskKey, data).catch(() => undefined)
+    })
     const size = (): void => {
       try {
         fit.fit()

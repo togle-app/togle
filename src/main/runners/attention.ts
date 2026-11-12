@@ -53,7 +53,8 @@ export class Attention {
     }
     requests.sort((a, b) => a.at - b.at)
     // A task that stopped (by the person's Stop, or by itself) waits for a reply to go on: it counts too.
-    const waitingTasks = new Set([...requests.map(({ task }) => task.key), ...tasks.filter((task) => task.state === 'stopped' || task.state === 'failed').map((task) => task.key)])
+    // Not one in a terminal of Togle's own: it ended with its program, and no reply goes on with it.
+    const waitingTasks = new Set([...requests.map(({ task }) => task.key), ...tasks.filter((task) => !task.terminal && (task.state === 'stopped' || task.state === 'failed')).map((task) => task.key)])
     const notices = requests.filter(({ task, request }) => !this.dismissed.has(`${task.key}#${request.id}`)).map(({ task, request }) => waitingNotice(task, request, waitingTasks.size - 1))
 
     const finished: TaskNotice[] = []

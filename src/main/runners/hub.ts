@@ -326,7 +326,7 @@ export class RunnerHub {
   attention(): TaskAttention[] {
     const mine = [...this.owned.values()].map((owned) => {
       const view = this.viewOfOwned(owned, undefined)
-      return { key: owned.key, runner: view.runner, agent: this.nameOf(view.runner), title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line, ...(view.signedOut ? { signedOut: true } : {}), ...(view.fix ? { fix: view.fix } : {}) }
+      return { key: owned.key, runner: view.runner, agent: this.nameOf(view.runner), title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line, ...(view.signedOut ? { signedOut: true } : {}), ...(view.fix ? { fix: view.fix } : {}), ...(view.terminal ? { terminal: true } : {}) }
     })
     // Sessions that run elsewhere and ask about a command: answered here as well.
     const elsewhere = this.outside.keys().filter((key) => !this.owned.has(key)).map((key) => {
@@ -436,7 +436,8 @@ export class RunnerHub {
     if (before) return before
     const owned: Owned = { key, handle, log: [], running: 0, updatedAt: Date.now(), off: () => undefined }
     this.owned.set(key, owned)
-    this.options.records?.add({ runner: handle.runner, id: handle.id, title: this.titleOf(key, handle.title), folder: handle.folder, at: Date.now() })
+    // Kept for an agent that cannot list its tasks, to pick them up again; a task in a terminal ends with its program.
+    if (!handle.terminal) this.options.records?.add({ runner: handle.runner, id: handle.id, title: this.titleOf(key, handle.title), folder: handle.folder, at: Date.now() })
     // What the agent said while it started comes after the words it was given, though it is heard all at once below.
     if (first) this.log(owned, 'you', first)
     owned.off = handle.on((event) => {
