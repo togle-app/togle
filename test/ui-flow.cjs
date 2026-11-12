@@ -985,7 +985,7 @@ app.whenReady().then(async () => {
   // What happens when a call starts in a call app (only Windows can tell which program uses the microphone).
   if (process.platform === 'win32') {
     await ready.evaluate("document.querySelector('#settings-meetings').scrollIntoView({block:'center'})")
-    assert.deepEqual(await ready.evaluate("[...document.querySelectorAll('#settings-meetings label.setting .name')].map(name=>name.textContent)"), ['Tell me when a call starts', 'Zoom', 'Teams', 'Webex', 'Skype', 'Slack'])
+    assert.deepEqual(await ready.evaluate("[...document.querySelectorAll('#settings-meetings label.setting .name')].map(name=>name.textContent)"), ['Tell me when a call starts', 'Zoom', 'Meet', 'Teams', 'Webex', 'Skype', 'Slack'])
     assert.equal(await ready.evaluate("document.querySelector('[aria-label=\"When a call starts in Zoom\"]').value"), 'ask', 'asks unless told otherwise')
     await ready.evaluate("(()=>{const select=document.querySelector('[aria-label=\"When a call starts in Zoom\"]');select.value='always';select.dispatchEvent(new Event('change',{bubbles:true}))})()")
     await ready.wait("window.togleUITest.settings().meetings.apps.zoom==='always'")

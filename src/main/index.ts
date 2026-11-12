@@ -24,7 +24,7 @@ import { CallNoticeWindow } from './call-notice-window'
 import { CallStripWindow } from './call-strip-window'
 import { isCallStripAction } from '@shared/call-strip'
 import { tellOthersLine } from '@shared/meeting'
-import { appRunning, CallDetector, readMicrophoneUse } from './call-detect'
+import { appRunning, CallDetector, readMicrophoneUse, readWindowTitles } from './call-detect'
 import { callAppName, isCallApp, isCallAppMode, type CallApp } from '@shared/call-apps'
 import { Attention } from './runners/attention'
 import type { RunnerHub } from './runners/hub'
@@ -290,6 +290,7 @@ function callAppStarted(appId: CallApp): void {
 const callDetector = new CallDetector({
   read: readMicrophoneUse,
   running: appRunning,
+  titles: readWindowTitles,
   active: () => process.platform === 'win32' && !quitting && !copilot.isListening && getSettings().meetings.notice && (app.isPackaged || process.env.TOGLE_CALL_DETECT !== '0'),
   onStart: callAppStarted,
   onEnd: (appId) => { if (callNotice.shown?.app === appId) callNotice.show(null) }

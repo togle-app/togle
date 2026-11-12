@@ -12,7 +12,8 @@ export function CallAppSettings({ settings, save }: { settings: Settings; save: 
   const apps = settings.meetings.apps
   const modeOf = (id: CallApp): CallAppMode => (isCallAppMode(apps[id]) ? apps[id]! : 'ask')
   return (
-    <Section id="settings-meetings" title="Call apps" note="Meet in a browser, and any other call, is started with Write down now in Meetings. Togle looks at which program is using the microphone; it never listens before you say to write a call down.">
+    <Section id="settings-meetings" title="Call apps" note="Togle looks at which program is using the microphone, and for a browser at the title of its window, to tell a call in Meet or in Teams, Zoom or Webex on the web. It never listens before you say to write a call down. Any other call is started with Write down now in Meetings.">
+
       <Toggle name="Tell me when a call starts" note="A small notice offers to write it down, when a call starts in one of these apps." checked={settings.meetings.notice} onChange={notice => void save({ meetings: { ...settings.meetings, notice } })} />
       {CALL_APPS.map(app => (
         <Row key={app.id} name={app.name}>

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { CALL_APPS, type CallApp } from '@shared/call-apps'
+import { CALL_APPS, callSitesIn, type CallApp } from '@shared/call-apps'
 
 const MICROPHONE_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone'
 // Windows counts time from 1601, in tenths of a microsecond.
@@ -55,6 +55,41 @@ export function readMicrophoneUse(): Promise<string> {
   })
 }
 
+// The browsers a call can be in: Meet, and the web versions of the other apps.
+const BROWSER = /(?:^|[#\\])((?:chrome|msedge|firefox|brave|opera|vivaldi)\.exe)$/i
+
+/** The browsers among the programs using the microphone, by their file name, with the earliest start. */
+export function browsersIn(using: MicrophoneUse[]): { program: string; since: number }[] {
+  const found = new Map<string, number>()
+  for (const entry of using) {
+    const program = BROWSER.exec(entry.name)?.[1]?.toLowerCase()
+    if (program) found.set(program, Math.min(found.get(program) ?? Infinity, entry.since))
+  }
+  return [...found].map(([program, since]) => ({ program, since }))
+}
+
+/** The window titles in `tasklist /v /fo csv /nh`: the last field of each line, when a window has one. */
+export function parseWindowTitles(csv: string): string[] {
+  const titles: string[] = []
+  for (const line of csv.split(/\r?\n/)) {
+    const fields = [...line.matchAll(/"((?:[^"]|"")*)"/g)].map(match => match[1].replace(/""/g, '"'))
+    const title = fields.at(-1)
+    if (fields.length >= 9 && title && title !== 'N/A') titles.push(title)
+  }
+  return titles
+}
+
+/**
+ * The titles of a browser's windows, to tell a call in it from anything else that uses the microphone (one title a
+ * process: the window in front of each). Read only while that browser uses the microphone; matched, never kept.
+ */
+export function readWindowTitles(program: string): Promise<string[]> {
+  if (!BROWSER.test(program)) return Promise.resolve([])
+  return new Promise(resolve => {
+    execFile('tasklist.exe', ['/V', '/FO', 'CSV', '/NH', '/FI', `IMAGENAME eq ${program}`], { windowsHide: true, timeout: 6000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => resolve(error ? [] : parseWindowTitles(stdout)))
+  })
+}
+
 /** Whether one of the app's programs is running, so a leftover from one that crashed does not count as a call. */
 export function appRunning(app: CallApp): Promise<boolean> {
   const programs = CALL_APPS.find(candidate => candidate.id === app)?.programs ?? []
@@ -70,6 +105,8 @@ export function appRunning(app: CallApp): Promise<boolean> {
 interface Options {
   read: () => Promise<string>
   running: (app: CallApp) => Promise<boolean>
+  /** The window titles of a browser using the microphone, to tell a call in it (Meet, or another app on the web). */
+  titles?: (program: string) => Promise<string[]>
   /** Whether to look now: not during a call being written down, and not when the person turned it off. */
   active: () => boolean
   onStart: (app: CallApp) => void
@@ -111,7 +148,12 @@ export class CallDetector {
     this.busy = true
     try {
       const now = (this.options.now ?? Date.now)()
-      const found = callAppsIn(parseMicrophoneUse(await this.options.read()))
+      const using = parseMicrophoneUse(await this.options.read())
+      const found: { app: CallApp; since: number; web?: boolean }[] = callAppsIn(using)
+      // A browser using the microphone: a call in it is told by its window's title.
+      for (const { program, since } of this.options.titles ? browsersIn(using) : []) {
+        for (const app of callSitesIn(await this.options.titles!(program))) if (!found.some(item => item.app === app)) found.push({ app, since, web: true })
+      }
       const here = new Set(found.map(item => item.app))
       for (const app of new Set([...this.seen.keys(), ...this.announced])) {
         if (here.has(app)) continue
@@ -124,7 +166,7 @@ export class CallDetector {
         this.first = false
         return
       }
-      for (const { app, since } of found) {
+      for (const { app, since, web } of found) {
         const looks = (this.seen.get(app) ?? 0) + 1
         this.seen.set(app, looks)
         if (this.announced.has(app)) continue
@@ -132,7 +174,8 @@ export class CallDetector {
         if (this.first && now - since > STALE_MS) { this.announced.add(app); continue }
         if (looks < 2) continue
         this.announced.add(app)
-        if (await this.options.running(app)) this.options.onStart(app)
+        // A call seen in a browser's window is in a running browser; a program's leftover entry needs checking.
+        if (web || await this.options.running(app)) this.options.onStart(app)
       }
       this.first = false
     } finally {

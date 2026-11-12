@@ -1,7 +1,7 @@
 // Noticing a call that starts in another app: which programs use the microphone, and when to say so.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-const { parseMicrophoneUse, callAppsIn, CallDetector } = await import('./.build/togle.mjs')
+const { parseMicrophoneUse, callAppsIn, CallDetector, browsersIn, parseWindowTitles, callSitesIn } = await import('./.build/togle.mjs')
 
 const EPOCH = 11_644_473_600_000
 const filetime = ms => '0x' + BigInt(Math.round((ms + EPOCH) * 10_000)).toString(16)
@@ -118,6 +118,40 @@ test('a call written down is not announced again when it ends, and the next call
   held.writing = false
   await held.subject.poll(); await held.subject.poll(); await held.subject.poll()
   assert.deepEqual(held.calls.started, ['zoom'], 'pressing Stop does not start another call while the app is still in the call')
+})
+
+test('a call in a browser is told by its window title: Meet, and the web versions of the other apps', async () => {
+  // tasklist /v /fo csv /nh: the last field is the title of the process's window, or N/A.
+  const csv = [
+    '"chrome.exe","4120","Console","1","312,000 K","Running","PC\\demo","0:02:10","Meet - abc-defg-hij - Google Chrome"',
+    '"chrome.exe","4188","Console","1","51,000 K","Unknown","PC\\demo","0:00:01","N/A"',
+    '"chrome.exe","5000","Console","1","90,000 K","Running","PC\\demo","0:00:03","Notes ""draft"" - Google Docs - Google Chrome"'
+  ].join('\r\n')
+  assert.deepEqual(parseWindowTitles(csv), ['Meet - abc-defg-hij - Google Chrome', 'Notes "draft" - Google Docs - Google Chrome'])
+  assert.deepEqual(parseWindowTitles(''), [])
+  assert.deepEqual(callSitesIn(['Meet – Weekly sync - Google Chrome']), ['meet'])
+  assert.deepEqual(callSitesIn(['Google Meet - Microsoft Edge']), ['meet'])
+  assert.deepEqual(callSitesIn(['Calendar | Microsoft Teams - Google Chrome']), ['teams'])
+  assert.deepEqual(callSitesIn(['Zoom Meeting - Google Chrome']), ['zoom'])
+  assert.deepEqual(callSitesIn(['Meeting notes - Google Docs', 'How to zoom in on a photo', 'Inbox - Gmail', 'Meetup events']), [], 'words that only look alike are not calls')
+  assert.deepEqual(browsersIn(parseMicrophoneUse(header + using('C:#Program Files#Google#Chrome#Application#chrome.exe') + using('C:#Program Files#Zoom#bin#Zoom.exe'))).map(item => item.program), ['chrome.exe'])
+
+  // The detector reads a browser's titles only while it uses the microphone.
+  const asked = [], started = []
+  const state = { listing: header + using('C:#Program Files#Google#Chrome#Application#chrome.exe'), titles: ['Meet - abc-defg-hij - Google Chrome'] }
+  const subject = new CallDetector({ read: async () => state.listing, running: async () => false, titles: async program => { asked.push(program); return state.titles }, active: () => true, onStart: app => started.push(app), now: () => now })
+  await subject.poll(); await subject.poll()
+  assert.deepEqual(started, ['meet'], 'a browser window with a call in it is a call: there is no program of its own to check')
+  assert.deepEqual(asked, ['chrome.exe', 'chrome.exe'])
+  state.titles = ['Inbox - Gmail - Google Chrome']
+  await subject.poll()
+  state.titles = ['Meet - abc-defg-hij - Google Chrome']
+  await subject.poll(); await subject.poll()
+  assert.deepEqual(started, ['meet', 'meet'], 'leaving the call and joining another is a new call')
+  state.listing = header + stopped('C:#Program Files#Google#Chrome#Application#chrome.exe')
+  asked.length = 0
+  await subject.poll()
+  assert.deepEqual(asked, [], 'a browser that does not use the microphone is not looked at')
 })
 
 test('a program that has used the microphone for hours before Togle looked is a leftover, one that began just now is a call', async () => {
