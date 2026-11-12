@@ -288,6 +288,13 @@ module.exports = function install(fixture) {
     if (session.confirm.voices.every(voice => voice.answered !== undefined)) session.confirm.closed = Date.now()
     emit('onCallSessions', { id }); return clone(session)
   }
+  api.searchCalls = async query => {
+    record('searchCalls', [query])
+    const words = String(query).toLowerCase().split(/\s+/).filter(Boolean)
+    const has = text => words.every(word => text.toLowerCase().includes(word))
+    return clone(sessions.filter(session => session.transcript.some(line => has(line.text))).map(session => ({ id: session.id, title: session.title, startedAt: session.startedAt, lines: session.transcript.filter(line => has(line.text)).slice(0, 3).map(line => ({ at: line.at, who: line.voiceName || 'Them', text: line.text })) })))
+  }
+  api.giveCallToAgent = async id => { record('giveCallToAgent', [id]) }
   api.confirmFinish = async id => { record('confirmFinish', [id]); const session = needSession(id); session.confirm.closed = Date.now(); emit('onCallSessions', { id }); return clone(session) }
   api.mergeCallSpeakers = async (id, from, into) => {
     record('mergeCallSpeakers', [id, from, into]); const session = needSession(id); combine(session.transcript, from, into)

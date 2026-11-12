@@ -3232,7 +3232,7 @@ body.notice-surface { background: transparent; color: var(--text); overflow: hid
 /* The box over whatever is on screen, to start a coding agent's task. */
 body.taskbox-surface { background: var(--panel); color: var(--text); overflow: hidden; }
 .taskbox-surface #root { padding: 0; }
-.taskbox { display: grid; gap: 10px; padding: 14px 16px; height: 100vh; border: 1px solid var(--border); background: var(--panel); grid-template-rows: auto 1fr auto auto; }
+.taskbox { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; height: 100vh; border: 1px solid var(--border); background: var(--panel); }
 .taskbox-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .taskbox-agents { display: flex; gap: 6px; flex-wrap: wrap; }
 .taskbox-agents button { padding: 5px 11px; border-radius: 999px; font-size: 12px; }
@@ -3240,7 +3240,7 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .taskbox-folder { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .taskbox-folder select { max-width: 190px; padding: 5px 8px; font-size: 12px; }
 .taskbox-folder button { padding: 5px 10px; font-size: 12px; }
-.taskbox textarea { width: 100%; min-height: 0; resize: none; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font: inherit; font-size: 14px; }
+.taskbox textarea { width: 100%; flex: 1 1 auto; min-height: 0; resize: none; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font: inherit; font-size: 14px; }
 .taskbox textarea:focus { outline: none; border-color: var(--accent); }
 .taskbox-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--faint); }
 .taskbox-error { margin: 0; font-size: 12px; color: var(--danger); }
@@ -3271,3 +3271,6 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .confirm-reason { margin: 0; }
 .confirm-name { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .confirm-name input { flex: 1 1 140px; min-width: 0; padding: 5px 8px; font-size: 12px; }
+.taskbox-attach { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); font-size: 12px; color: var(--muted); }
+.taskbox-attach span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.taskbox-attach button { padding: 0 6px; border: none; background: none; color: inherit; font-size: 15px; line-height: 1; }

@@ -22,7 +22,7 @@ export function intoCall(ms: number): string {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
 }
 /** How long a call ran, in words ("23 min", "1 h 5 min", "under a minute"). */
-function callLength(ms: number): string {
+export function callLength(ms: number): string {
   const minutes = Math.round(ms / 60000)
   if (minutes < 1) return 'under a minute'
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ''}`
@@ -202,7 +202,7 @@ function CallQuestions({ record, onAsk, busy }: { record: CallSession; onAsk: (c
   </div>
 }
 
-const HistoryTranscript = memo(function HistoryTranscript({ record, onRecord }: { record: CallSession; onRecord: (record: CallSession) => void }) {
+export const HistoryTranscript = memo(function HistoryTranscript({ record, onRecord }: { record: CallSession; onRecord: (record: CallSession) => void }) {
   const lines = useMemo(() => speechTurns(record.transcript), [record.transcript])
   const people = useMemo(() => [...new Map(lines.filter(line => line.voiceId).map(line => [line.voiceId!, line])).values()], [lines])
   const [query, setQuery] = useState('')

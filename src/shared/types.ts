@@ -599,6 +599,15 @@ export interface CallMinutes {
   error?: string
 }
 
+/** A call that has the words searched for, with the first few lines that do. */
+export interface CallSearchHit {
+  id: string
+  title: string
+  startedAt: number
+  /** Lines of the transcript that have the words, in the order said. Empty when only the notes or title do. */
+  lines: { at: number; who: string; text: string }[]
+}
+
 export type CallSessionSummary = Omit<CallSession, 'transcript' | 'suggestions' | 'notes' | 'personalNotes' | 'callAnswers' | 'learning'> & {
   lines: number
   replies: number

@@ -83,7 +83,7 @@ import { ChatGPTAuth } from './auth/chatgpt'
 import { ClaudeCodeAuth } from './auth/claude-code'
 import { SubscriptionAccounts, accountChoice, defaultAccountId } from './auth/accounts'
 import { CallFile } from './call-file'
-import { CallSessions, exportCall, legacySession, sessionSummary } from './call-sessions'
+import { CallSessions, callForAgent, exportCall, legacySession, sessionSummary } from './call-sessions'
 import { ConfirmSound } from './confirm-sound'
 import { confirmVoices, type CallConfirm } from '@shared/confirm-names'
 import { FIRST_NAMES } from './names'
@@ -501,6 +501,9 @@ const copilot = new Copilot(
 // approved, or a card (a question typed before anyone spoke).
 const callSessions = new CallSessions()
 const confirmSound = new ConfirmSound()
+// Calls given to a coding agent are written here as plain text: removed with the call, or after two weeks.
+const SHARED_CALLS = 'shared-calls'
+const SHARED_CALLS_KEEP_MS = 14 * 24 * 3600_000
 // The sound kept to confirm names is gone by then at the latest: the next day.
 const CONFIRM_KEEP_MS = 24 * 3600_000
 let currentSession: CallSessionInfo | undefined
@@ -828,6 +831,17 @@ async function prepareConfirm(id: string | undefined): Promise<void> {
     const confirm: CallConfirm = { until: Date.now() + CONFIRM_KEEP_MS, voices: asked }
     await callSessions.update(id, saved => ({ ...saved, confirm }))
   } catch (error) { console.warn('[confirm names]', (error as Error).message) }
+}
+/** Removes the plain text copies of calls given to an agent, once they are two weeks old. */
+async function sweepSharedCalls(): Promise<void> {
+  try {
+    const folder = path.join(app.getPath('userData'), SHARED_CALLS)
+    for (const name of await fs.readdir(folder).catch(() => [] as string[])) {
+      const file = path.join(folder, name)
+      const stat = await fs.stat(file).catch(() => null)
+      if (stat && Date.now() - stat.mtimeMs > SHARED_CALLS_KEEP_MS) await fs.rm(file, { force: true })
+    }
+  } catch (error) { console.warn('[shared calls]', (error as Error).message) }
 }
 /** Deletes the clips of calls whose names were confirmed, skipped or expired, or that are gone. */
 async function sweepConfirmSound(): Promise<void> {
@@ -1547,6 +1561,19 @@ function registerIpc(): void {
   ipcMain.handle('call:mark', () => copilot.mark())
 
   ipcMain.handle('calls:list', listCallSessions)
+  ipcMain.handle('calls:search', (_e, query: unknown) => callSessions.search(typeof query === 'string' ? query.slice(0, 200) : ''))
+  // A finished call given to a coding agent: written as a plain text file, and the task box opens with it attached.
+  ipcMain.handle('calls:give', async (_e, id: string) => {
+    const record = await getCallSession(id)
+    if (!record) throw new Error('This call is no longer available.')
+    if (record.status === 'live') throw new Error('End the call first.')
+    const folder = path.join(app.getPath('userData'), SHARED_CALLS)
+    await fs.mkdir(folder, { recursive: true })
+    const file = path.join(folder, record.id + '.md')
+    await fs.writeFile(file, callForAgent(record), 'utf8')
+    const title = Array.from(record.title).filter(letter => letter.charCodeAt(0) >= 32).join('').trim().slice(0, 140)
+    taskBox.show({ title: title || 'A call', path: file })
+  })
   ipcMain.handle('calls:get', (_e, id: string) => getCallSession(id))
   ipcMain.handle('calls:notes-generate', async (_e, id: string, template: MeetingNoteTemplate, revision?: string) => {
     await storedCallSession(id)
@@ -1574,6 +1601,7 @@ function registerIpc(): void {
     if (id === currentCallKey) await clearCurrentCall(true)
     await callSessions.remove(id)
     await confirmSound.remove(id)
+    await fs.rm(path.join(app.getPath('userData'), SHARED_CALLS, record.id + '.md'), { force: true }).catch(() => undefined)
     legacyCalls.delete(id)
     const summaries = await pastCalls.list(record.agentId)
     for (const summary of summaries) if (summary.id === record.legacy?.id || (summary.callId && summary.callId === record.frameSession)) await pastCalls.remove(record.agentId, summary.id)
@@ -2119,6 +2147,7 @@ if (hookAt !== -1) {
     void FrameStore.cleanup(saved?.frameSession)
     // The sound kept to confirm names is deleted once answered or expired; checked now and every hour.
     void sweepConfirmSound()
+    void sweepSharedCalls()
     setInterval(() => void sweepConfirmSound(), 3600_000).unref()
     setupMediaAccess()
     registerIpc()

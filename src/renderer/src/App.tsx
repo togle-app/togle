@@ -34,6 +34,7 @@ import { isMicrophoneOn, type TogleMicrophoneStatus } from '@shared/microphone'
 import { CallPeople } from './CallPeople'
 import { CallToggle } from './CallToggle'
 import { FirstCallNotice, TellOthers } from './TellOthers'
+import { MeetingsPage } from './MeetingsPage'
 import { CallHistory } from './CallHistory'
 import { useChats, type LessonOffer, type Review, type ReviewEntry } from './chats'
 import { Conversation } from './Conversation'
@@ -124,7 +125,7 @@ function Elapsed({ since }: { since: number }) {
 }
 
 export default function App() {
-  const [view, setView] = useState<'main' | 'settings' | 'archive' | 'agents' | 'agent' | 'tasks' | 'todo'>('agent')
+  const [view, setView] = useState<'main' | 'settings' | 'archive' | 'agents' | 'agent' | 'tasks' | 'todo' | 'meetings'>('agent')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
   const openCurrentCall = useCallback(() => { setSidebarOpen(false); setView('main') }, [])
@@ -856,6 +857,7 @@ export default function App() {
     if (page === 'settings') { setSettingsAt(undefined); setView('settings') }
     else if (page === 'tasks') setView('tasks')
     else if (page === 'todo') setView('todo')
+    else if (page === 'meetings') setView('meetings')
     else { setAgentsRequest(previous => ({ seq: previous.seq + 1, create: page === 'new' })); setView('agents') }
   }, [])
 
@@ -1546,6 +1548,7 @@ export default function App() {
       )}
       {view === 'tasks' && <Tasks focus={taskFocus} />}
       {view === 'todo' && <Todo onOpenTask={openTask} />}
+      {view === 'meetings' && <div className="settings meetings-page"><MeetingsPage agents={agents} liveId={listening ? callKey : undefined} onOpenLive={openCurrentCall} onWriteDown={() => void startUnseen()} /></div>}
       {view === 'archive' && <div className="settings archived-calls"><CallHistory agents={agents} enabled={settings?.assist.rememberCalls !== false} selectedId={selectedCallId} onSelect={setSelectedCallId} onAgent={replaceAgent} onDone={() => setView('settings')} /></div>}
       {/* Kept while the conversation shows: an agent's page, and a reading of a website, are there to come back to. */}
       {settings && (
@@ -1563,7 +1566,7 @@ export default function App() {
         </div>
       )}
       {/* Kept while Settings or Agents is open: answers asked again keep coming in, and the call keeps its place. */}
-      <main className="main" hidden={view === 'settings' || view === 'archive' || view === 'agents' || view === 'tasks' || view === 'todo'}>
+      <main className="main" hidden={view === 'settings' || view === 'archive' || view === 'agents' || view === 'tasks' || view === 'todo' || view === 'meetings'}>
         {group && !settings?.assist.names?.trim() && !knownUserName && !groupSeen && (
           <div className="notice info">
             <span>

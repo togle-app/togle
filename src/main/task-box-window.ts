@@ -17,6 +17,8 @@ export class TaskBoxWindow {
   private picking = false
   /** It was asked for, and has not been put away: it shows as soon as its page is there. */
   private opened = false
+  /** What it opened with: a saved call to work from, which the task is told about. Gone when it is put away. */
+  private attach: { title: string; path: string } | null = null
 
   constructor(private readonly builtMain = __dirname) {}
 
@@ -34,15 +36,17 @@ export class TaskBoxWindow {
     else this.show()
   }
 
-  show(): void {
+  show(attach: { title: string; path: string } | null = null): void {
     if (this.stopped) return
     if (!this.window || this.window.isDestroyed()) this.create()
     this.opened = true
+    this.attach = attach
     this.render()
   }
 
   hide(): void {
     this.opened = false
+    this.attach = null
     const win = this.window
     if (win && !win.isDestroyed() && win.isVisible()) win.hide()
   }
@@ -81,7 +85,7 @@ export class TaskBoxWindow {
     const win = this.window
     if (!win || win.isDestroyed() || !this.ready) return
     this.place()
-    win.webContents.send('taskbox:shown', null)
+    win.webContents.send('taskbox:shown', this.attach)
     if (this.headless()) return
     win.show()
     win.setAlwaysOnTop(true, process.platform === 'win32' ? 'screen-saver' : 'floating')

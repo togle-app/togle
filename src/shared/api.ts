@@ -167,6 +167,10 @@ export interface TogleApi {
   clearTranscript(): Promise<CurrentCall | void>
   onCallReset(cb: (call: CurrentCall) => void): Unsubscribe
   callSessions(): Promise<CallSessionSummary[]>
+  /** The saved calls with these words in what was said, in their notes or title, with the first lines that have them. */
+  searchCalls(query: string): Promise<import('./types').CallSearchHit[]>
+  /** A finished call given to a coding agent: opens the task box with the call attached as a text file. */
+  giveCallToAgent(id: string): Promise<void>
   callSession(id: string): Promise<CallSession | null>
   renameCallSession(id: string, title: string): Promise<CallSession>
   deleteCallSession(id: string): Promise<void>
@@ -404,7 +408,8 @@ export interface TogleApi {
   /** Togle was opened on a task, from a notice or the tray: show it. */
   onShowTask(cb: (key: string) => void): Unsubscribe
   /** The task box was opened: its page is told, to make it ready to type in. */
-  onTaskBoxShown(cb: () => void): Unsubscribe
+  /** The box opened, with a saved call to work from when it was opened from one. */
+  onTaskBoxShown(cb: (attach: { title: string; path: string } | null) => void): Unsubscribe
   /** Puts the task box away. */
   closeTaskBox(): void
   /** Asks for a folder for a task, in a dialog that belongs to the task box. Null when it is closed without a choice. */
