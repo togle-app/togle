@@ -426,12 +426,17 @@ test('the saved record and names come back from their files, and a damaged file 
   await titles.load()
   titles.set('hermes:a', '  Named  ')
   titles.set('hermes:b', '   ')
-  await new Promise((r) => setTimeout(r, 900))
-  const reread = new T.StoredRecords()
-  await reread.load()
+  // Both are written a moment after the last change: read again until they are there (a busy computer takes longer).
+  let reread, names
+  for (let n = 0; n < 100; n++) {
+    await new Promise((r) => setTimeout(r, 100))
+    reread = new T.StoredRecords()
+    await reread.load()
+    names = new T.StoredTitles()
+    await names.load()
+    if (reread.all().length === 2 && names.get('hermes:a')) break
+  }
   assert.deepEqual(reread.all().map((r) => [r.id, r.title]), [['b', 'Second'], ['a', 'First again']], 'one record for a task, the latest')
-  const names = new T.StoredTitles()
-  await names.load()
   assert.equal(names.get('hermes:a'), 'Named')
   assert.equal(names.get('hermes:b'), undefined)
   await T.writeJson('runner-tasks.json', [{ runner: 'hermes', id: 'ok', title: 'Fine', folder: 'x', at: 1 }, { nonsense: true }, 7, null])
