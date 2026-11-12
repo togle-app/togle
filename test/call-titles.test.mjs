@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { workDir } from './helpers.mjs'
 const directory = workDir('call-titles')
-const { CallSessions, CallTitles, MeetingNotes, CallLearning, emptyLessons, sessionSummary, meetingForCall, cleanCallTitle, resolveCallTitle, titleFromReview, parseLessons, parseCallRecord } = await import('./.build/togle.mjs')
+const { CallSessions, CallTitles, sessionSummary, meetingForCall, cleanCallTitle, resolveCallTitle } = await import('./.build/togle.mjs')
 let sequence = 0
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes }); return { promise, resolve } }
 const state = (text = 'Yesterday we fixed checkout. Today we will finish QA. Any blockers?') => ({ transcript: [{ id: 'greeting', speaker: 'them', text: 'Hi guys', at: 1000, end: 2000 }, { id: 'topic', speaker: 'me', text, at: 3000, end: 6000 }], frames: [], notes: '', notesUntil: 0, answeredUntil: 0, callAnswers: [], brief: '', group: true })
@@ -74,22 +74,6 @@ test('existing greeting titles migrate once, while explicitly renamed greetings 
   assert.equal((await new CallSessions().list()).find(row => row.id === f.id).title, 'Untitled call')
   await reopened.rename(f.id, 'Hi guys')
   assert.equal((await new CallSessions().get(f.id)).title, 'Hi guys')
-})
-
-test('notes and reviews supply a topic without a separate naming request', async () => {
-  const f = await fixture({ complete: async () => '# Checkout release review\n\n## Decisions\nFinish QA.' })
-  const notes = new MeetingNotes(f.sessions, () => f.provider)
-  await notes.generate(f.id)
-  assert.equal((await f.titles.generate(f.id)).title, 'Checkout release review')
-  assert.equal(f.requests.length, 1)
-  assert.equal(titleFromReview('**TITLE:** Daily stand-up'), 'Daily stand-up')
-  const review = 'LESSON: none\nSKILL: Helpful | When relevant\n- Check the evidence\nTITLE: Daily stand-up\nSUMMARY: Discussed progress.'
-  assert.equal(parseLessons(review, []).skills[0].how, '- Check the evidence')
-  assert.equal(parseCallRecord('SUMMARY: Discussed progress.\nTITLE: Daily stand-up').summary, 'Discussed progress.')
-  const other = await fixture()
-  const learning = new CallLearning(other.sessions, { agent: () => ({ id: 'work', history: [], learning: 'off', memory: [], skills: [], answers: [] }), apply: async () => assert.fail('Naming does not train an agent'), review: async () => ({ agentId: 'work', title: 'Daily stand-up', ...emptyLessons() }) })
-  await learning.review(other.id)
-  assert.equal((await other.sessions.get(other.id)).title, 'Daily stand-up')
 })
 
 test('late naming cannot replace a rename or return a deleted call', async () => {

@@ -20,9 +20,7 @@ async function run() {
   while (!handlers.has('dev:transcript')) await delay(50)
   const accounts = await invoke('accounts:list')
   assert.ok(accounts.find(account => account.id === 'claude-default')?.signedIn, 'Sign in to the default Claude account for this opt-in check')
-  await invoke('settings:update', { subscriptionAccountId: 'claude-default', dictation: { showBar: false }, assist: { auto: false, rememberCalls: true, autoNotes: true, calendarReminders: false, voiceLabels: false } })
-  const agent = (await invoke('agents:list'))[0]
-  await invoke('agents:update', agent.id, { learning: 'off' })
+  await invoke('settings:update', { subscriptionAccountId: 'claude-default', dictation: { showBar: false }, assist: { rememberCalls: true, autoNotes: true, voiceLabels: false } })
   const live = await invoke('session:listening', true)
   assert.equal(live.accountId, 'claude-default')
   invoke('dev:transcript', 'me', 'This is a fictional test meeting. We agreed to postpone the launch. No new launch date has been set.')

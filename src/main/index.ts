@@ -1,5 +1,4 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, Notification, screen, session, shell } from 'electron'
-import { AgentCalendars } from './calendar'
 import { ApiConnections } from './auth/api-connections'
 import { effectiveAI, effectiveSettings, validateAIProfile } from '@shared/preferences'
 import { routedProvider } from './providers/routed'
@@ -40,19 +39,19 @@ import { TogleTray } from './tray'
 import { HotkeyPress } from './hotkey-press'
 import { voiceAccountId } from '@shared/dictation'
 import { modelSourceId } from '@shared/model-selection'
+import { randomUUID } from 'node:crypto'
 import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import koffi from 'koffi'
 import type { SettingsPatch } from '@shared/api'
 import {
-  type Agent,
   type CallSession,
   type CallSessionInfo,
   type CallSessionSummary,
+  type CurrentCall,
   type HotkeyId,
   type HotkeyInfo,
   type LocalModelId,
-  type PastCall,
   type SegmentKind,
   type Speaker,
   type SttStatus
@@ -62,30 +61,23 @@ import { mergeSpeakers } from '@shared/speakers'
 import { setCodePage, setReaderScript } from './agents/knowledge'
 import { setChatExports } from './agents/chat-exports'
 import { slug } from './agents/package'
-import { Conversations } from './agents/conversations'
-import { PastCalls } from './agents/past-calls'
 import { AgentStore } from './agents/store'
 import { ChatGPTAuth } from './auth/chatgpt'
 import { ClaudeCodeAuth } from './auth/claude-code'
 import { SubscriptionAccounts, accountChoice, defaultAccountId } from './auth/accounts'
 import { CallFile } from './call-file'
-import { CallSessions, callForAgent, exportCall, legacySession, sessionSummary } from './call-sessions'
+import { CallSessions, callForAgent, exportCall } from './call-sessions'
 import { ConfirmSound } from './confirm-sound'
 import { withRecent } from './recent-dictations'
 import { confirmVoices, namesToConfirm, pruneConfirm, type CallConfirm } from '@shared/confirm-names'
 import { myTodoItems, type CallOffer, type TodoOffer } from '@shared/call-todo'
 import { FIRST_NAMES } from './names'
-import { CallLearning } from './call-learning'
 import { CallTitles } from './call-titles'
-import { meetingForCall } from '@shared/meeting'
 import { externalUrl } from '@shared/links'
 import { MeetingNotes } from './meeting-notes'
 import type { MeetingNoteTemplate } from '@shared/types'
 import { CaptureProtection } from './capture-protection'
-import { CodeBase } from './code'
-import { Copilot } from './copilot'
-import type { CallCard } from './prompts'
-import { FrameStore, registerFrameScheme, serveFrames } from './frames'
+import { OngoingCall } from './ongoing-call'
 import { hearing, switchedLanguage } from './hearing'
 import { PerfLog } from './perf'
 import type { UsageStatus } from './plan'
@@ -94,8 +86,6 @@ import { ClaudeProvider } from './providers/claude'
 import { ClaudeSubscriptionProvider } from './providers/claude-subscription'
 import { CompatProvider } from './providers/compat'
 import type { LLMProvider, Usage } from './providers/types'
-import { captureFrame, resolveCaptureSource } from './screen'
-import { ScreenMonitor } from './screen-monitor'
 import { VoiceTracker, VOICE_MODEL } from './stt/voices'
 import { VoiceMemory } from './stt/voice-memory'
 import { getSettings, loadSettings, savedBeforeSpeechChoice, updateSettings, voiceAccountsMigrated, voiceAccountsToMigrate } from './settings'
@@ -106,8 +96,6 @@ import { SpeechInstaller, speechHome } from './stt/install'
 import { hearingStatus, OPENAI_MODEL, OPENAI_URL, SpeechApi } from './stt/speech-api'
 import { LocalWhisper } from './stt/whisper'
 import { keepPlace, lastPlace } from './window-place'
-
-registerFrameScheme()
 
 const auth = new ChatGPTAuth()
 const chatgpt = new ChatGPTProvider(auth)
@@ -231,10 +219,8 @@ function sttStatus(agentId?: string): SttStatus {
   return { ...hearingStatus(localSttStatus(), { me: speechApiFor('me', agentId), them: speechApiFor('them', agentId) }), transcriptionLanguage: callLanguage(agentId), callId: !agentId || agentId === currentSession?.agentId ? currentSession?.id : undefined }
 }
 
-const frameStore = new FrameStore()
 let win: BrowserWindow | null = null
 let protection: CaptureProtection | null = null
-let recording = false
 let tray: TogleTray | undefined
 let quitting = false
 // The coding agents' tasks (Codex, Claude Code): the Tasks screen's side of the app.
@@ -251,16 +237,16 @@ const callStrip = new CallStripWindow()
 function refreshCallStrip(): void {
   const closed = !win || win.isDestroyed() || !win.isVisible() || win.isMinimized()
   const since = currentSession?.startedAt
-  if (copilot.isListening && closed && since) {
-    const call = copilot.callState()
-    callStrip.show({ since, told: !!call.toldOthers, marks: call.marks?.length ?? 0 })
+  if (ongoing.isListening && closed && since) {
+    const state = ongoing.callState()
+    callStrip.show({ since, told: !!state.toldOthers, marks: state.marks?.length ?? 0 })
   } else callStrip.show(null)
 }
 /** A call started in another app: written down at once, offered in the corner, or left, as the person chose for that app. */
 function callAppStarted(appId: CallApp): void {
   const choice = getSettings().meetings.apps[appId]
   const mode = isCallAppMode(choice) ? choice : 'ask'
-  if (mode === 'never' || copilot.isListening) return
+  if (mode === 'never' || ongoing.isListening) return
   if (mode === 'always') send('hotkey', 'start-call-unseen')
   else callNotice.show({ app: appId, name: callAppName(appId) }, 60_000)
 }
@@ -269,15 +255,13 @@ const callDetector = new CallDetector({
   read: readMicrophoneUse,
   running: appRunning,
   titles: readWindowTitles,
-  active: () => process.platform === 'win32' && !quitting && !copilot.isListening && getSettings().meetings.notice && (app.isPackaged || process.env.TOGLE_CALL_DETECT !== '0'),
+  active: () => process.platform === 'win32' && !quitting && !ongoing.isListening && getSettings().meetings.notice && (app.isPackaged || process.env.TOGLE_CALL_DETECT !== '0'),
   onStart: callAppStarted,
   onEnd: (appId) => { if (callNotice.shown?.app === appId) callNotice.show(null) }
 })
 // The small notice in a corner of the screen, and what it tells: a task waits for the person, or one finished.
 const noticeWindow = new NoticeWindow()
 const attention = new Attention()
-/** Set by the window right before it opens the recorder stream: what getDisplayMedia should capture. */
-let pendingRecordSource: string | null = null
 
 const send = (channel: string, payload: unknown): void => {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
@@ -300,7 +284,7 @@ function routedAI(profile: AIProfile): LLMProvider { return routedProvider(profi
 function validateProfile(profile: AIProfile): void { for (const task of Object.values(validateAIProfile(profile).tasks)) sourceProvider(task.sourceId) }
 let dictationAgentId: string | undefined
 function voiceSettings() {
-  const id = copilot.isListening ? currentSession?.agentId : dictationAgentId
+  const id = ongoing.isListening ? currentSession?.agentId : dictationAgentId
   return effectiveSettings(getSettings(), agents.list().find(agent => agent.id === id))
 }
 function selectedAccount(provider: 'claude' | 'chatgpt', agentId?: string) {
@@ -315,18 +299,6 @@ function selectedAccount(provider: 'claude' | 'chatgpt', agentId?: string) {
   const entry = chosen ? accounts.get(chosen) : undefined
   if (override && entry?.kind !== provider) throw new Error(`This agent uses ${entry?.kind === 'claude' ? 'Claude' : 'ChatGPT'}. Choose a Claude account to use Claude connected apps.`)
   return entry?.kind === provider ? entry : accounts.get(defaultAccountId(provider))
-}
-function selectedClaude(agentId?: string) {
-  const entry = selectedAccount('claude', agentId)
-  if (entry.kind !== 'claude') throw new Error('Choose a Claude subscription account.')
-  return entry
-}
-
-/** Metadata-only discovery overlaps call setup; it never sends a model prompt. */
-function warmWorkApps(agent: Agent): void {
-  if (!agent.claudeConnections) return
-  try { void selectedClaude(agent.id).provider.connections().catch(error => console.warn('[work apps] preparation:', (error as Error).message)) }
-  catch { /* A missing route is explained when the agent requests its connected apps. */ }
 }
 function selectedChatGPT() {
   const entry = selectedAccount('chatgpt')
@@ -365,102 +337,20 @@ function studyAgain(): void {
     void agents.restudy(agent.id).catch((err: Error) => console.warn('[agents] could not study again:', err.message))
   }
 }
-// Summaries of each agent's past calls, to recall on later calls with the same people (Settings: on unless turned off).
-const pastCalls = new PastCalls()
-// Each agent's conversation, kept across restarts.
-const conversations = new Conversations()
-pastCalls.on('changed', (agentId: string, calls: PastCall[]) => send('past-calls:changed', { agentId, calls }))
 agents.on('changed', (agent) => {
-  send('agents:changed', agent)
-  pruneCodeBases()
-  calendar.sync()
-  if ((copilot.isListening ? currentSession?.agentId : dictationAgentId) === agent.id) refreshVoiceSettings()
-})
-agents.on('removed', async (id: string) => {
-  // Move the call to another agent before the window hears about the removal.
-  try {
-    if (getSettings().activeAgentId === id) await updateSettings({ activeAgentId: agents.list()[0]?.id ?? '' })
-  } catch (err) {
-    console.error('[agents] could not switch away from the removed agent:', err)
-  }
-  send('agents:removed', id)
-  calendar.sync()
-  pruneCodeBases()
-  // What it kept of its calls goes with it, and a review still running for it keeps nothing; so does its conversation.
-  await pastCalls.forget(id).catch((err: Error) => console.warn('[past calls] could not delete them:', err.message))
-  await conversations.forget(id).catch((err: Error) => console.warn('[conversations] could not delete it:', err.message))
+  if ((ongoing.isListening ? currentSession?.agentId : dictationAgentId) === agent.id) refreshVoiceSettings()
 })
 
-// One CodeBase per set of project folders, so its file list is shared between answers.
-const codeBases = new Map<string, CodeBase>()
-/** Forgets code bases no agent uses any more. */
-function pruneCodeBases(): void {
-  const used = new Set(agents.list().map((a) => a.codeFolders.join('|')))
-  for (const key of codeBases.keys()) if (!used.has(key)) codeBases.delete(key)
-}
-function codeBaseFor(folders: string[]): CodeBase | undefined {
-  if (!folders.length) return undefined
-  const key = folders.join('|')
-  let codeBase = codeBases.get(key)
-  if (!codeBase) codeBases.set(key, (codeBase = new CodeBase(folders)))
-  return codeBase
-}
 
-let callProvider: LLMProvider | undefined
+// Worked out once a call starts (see session:listening): the AI that writes its notes, and the person's name.
+let callRouted = false
 let callAI: AIProfile | undefined
 let callAccountId: string | undefined
 let callUserName: string | undefined
-const liveProvider = (): LLMProvider => callProvider ?? activeProvider(getSettings().activeAgentId)
-const screenMonitor = new ScreenMonitor(liveProvider, () => copilot.timelineNow())
-let screenSelection = 0
-function stopScreenMonitoring(end = false, id?: string): void {
-  if (!id) screenSelection++
-  screenMonitor.stop(id, end)
-}
-screenMonitor.on('changed', status => send('screen-monitor:status', status))
-screenMonitor.on('refresh', id => send('screen-monitor:refresh', id))
-const copilot = new Copilot(
-  send,
-  liveProvider,
-  {
-    monitor: screenMonitor,
-    snapshot: async (display) => {
-      const { image, thumb } = await captureFrame(win, protection?.isHiddenFromCapture() ?? false, display)
-      return frameStore.add('snapshot', Date.now(), image, thumb)
-    },
-    dataUrl: (frame, maxWidth) => frameStore.dataUrl(frame, maxWidth),
-    miniature: (frame) => frameStore.miniature(frame),
-    reset: () => frameStore.reset()
-  },
-  {
-    active: () => agents.get(getSettings().activeAgentId),
-    learnWords: async (agent, correction) => {
-      const current = agents.list().find(item => item.id === agent.id)
-      if (!current) return
-      await agents.update(current.id, { vocabulary: withSpeechWord(current.vocabulary, correction.heardAs, correction.word) }, 'train')
-    },
-    get: (id) => agents.get(id),
-    knowledgeFor: (agent, query, seen) => agents.knowledgeFor(agent, query, seen),
-    search: (agent, query, seen, firstNumber) => agents.search(agent, query, seen, firstNumber),
-    facts: (agent, question) => agents.factsFor(agent, question),
-    code: (agent) => codeBaseFor(agent.codeFolders),
-    noteUse: (agent, used) => agents.noteUse(agent.id, used),
-    // What I told the agent in its conversation lately: my preparation goes with every answer of the call.
-    talk: (agent) => conversations.talk(agent.id),
-    pastCalls: {
-      // Turned off, earlier calls kept before still aren't brought into answers.
-      recall: async (agent, context) => (getSettings().assist.rememberCalls === false ? [] : pastCalls.recall(agent.id, context)),
-      search: (agent, query) => pastCalls.search(agent.id, query),
-      recent: async (agent, since) => getSettings().assist.rememberCalls === false ? [] : (await pastCalls.list(agent.id)).filter(call => call.at >= since && call.at <= Date.now() && call.callId !== currentCallKey)
-    }
-  },
-  (timing) => perf.answer(timing),
-  () => callUserName,
-  activeProvider
-)
-// The call so far, saved as it goes: closing Togle or a crash doesn't lose it (call-file.ts).
-// A call is something once anything is in it: what was said or shown, its brief written beforehand, an answer
-// approved, or a card (a question typed before anyone spoke).
+const ongoing = new OngoingCall(send, () => callUserName, async (wording) => {
+  const current = agents.list().find(item => item.id === getSettings().activeAgentId)
+  if (current) await agents.update(current.id, { vocabulary: withSpeechWord(current.vocabulary, wording.heardAs, wording.word) }, 'train')
+})
 const callSessions = new CallSessions()
 const confirmSound = new ConfirmSound()
 // Calls given to a coding agent are written here as plain text: removed with the call, or after two weeks.
@@ -469,24 +359,24 @@ const SHARED_CALLS_KEEP_MS = 14 * 24 * 3600_000
 // The sound kept to confirm names is gone by then at the latest: the next day.
 const CONFIRM_KEEP_MS = 24 * 3600_000
 let currentSession: CallSessionInfo | undefined
-let currentCallKey = frameStore.sessionId
-const legacyCalls = new Map<string, CallSession>()
+let currentCallKey: string = randomUUID()
 callSessions.on('changed', (id: string) => send('calls:changed', { id }))
-const callFile = new CallFile((hasCards) => {
-  const state = copilot.callState()
-  const something = currentSession || state.transcript.length || state.frames.length || state.brief || state.callAnswers.length || hasCards
-  return something ? { frameSession: frameStore.sessionId, state, session: currentSession } : null
+// The call so far, saved as it goes: closing Togle or a crash doesn't lose it (call-file.ts). A call is something once
+// it started, or once anything was said in it.
+const callFile = new CallFile(() => {
+  const state = ongoing.callState()
+  return currentSession || state.transcript.length ? { frameSession: currentCallKey, state, session: currentSession } : null
 }, async (saved) => {
   if (saved.session && getSettings().assist.rememberCalls !== false) {
-    await callSessions.capture(saved.session, saved.frameSession, saved.state, saved.view)
-    if (saved.session.status !== 'live') { scheduleCallReview(saved.session.id); scheduleCallTitle(saved.session.id) }
+    await callSessions.capture(saved.session, saved.frameSession, saved.state)
+    if (saved.session.status !== 'live') { scheduleCallNotes(saved.session.id); scheduleCallTitle(saved.session.id) }
   }
 })
-copilot.onChange = () => callFile.changed()
+ongoing.onChange = () => callFile.changed()
 const voiceMemory = new VoiceMemory(VOICE_MODEL.sha256, () => send('voices:people-changed', undefined))
-const voices = new VoiceTracker((segment, voice, person) => copilot.identifyVoice(segment, voice, person), status => send('voices:status', status), {
+const voices = new VoiceTracker((segment, voice, person) => ongoing.identifyVoice(segment, voice, person), status => send('voices:status', status), {
   memory: voiceMemory, enabled: () => getSettings().assist.rememberVoices === true,
-  remembered: (voice, person) => copilot.rememberVoice(voice, person), revoked: segment => copilot.forgetVoiceSegment(segment)
+  remembered: (voice, person) => ongoing.rememberVoice(voice, person), revoked: segment => ongoing.forgetVoiceSegment(segment)
 })
 voices.keepClips = () => getSettings().meetings.confirmNames
 const dictationTarget = new DictationTargetBridge(path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'), 'dictation-windows.ps1'))
@@ -534,7 +424,7 @@ function createDictationSpeech(): DictationSpeech {
     ? (() => { try { return { provider: apiConnections.pinned(keySource), model: getSettings().ai?.tasks.quick.model } } catch { return undefined } })()
     : undefined
   const provider = accounts.pinned(entry.metadata.id, false)
-  const scopedSpeechWords = speechWords(agents.get(copilot.isListening ? currentSession?.agentId || getSettings().activeAgentId : dictationAgentId || getSettings().activeAgentId).vocabulary)
+  const scopedSpeechWords = speechWords(agents.get(ongoing.isListening ? currentSession?.agentId || getSettings().activeAgentId : dictationAgentId || getSettings().activeAgentId).vocabulary)
   const speech = new DictationSpeech({
     vocabulary: dictationVocabulary.get(entry.metadata.id).then(vocabulary => {
       const scoped = scopedSpeechWords
@@ -578,7 +468,7 @@ microphoneLink.on('changed', status => {
 })
 const dictation = new Dictation({
   target: dictationTarget, speech: createDictationSpeech,
-  inCall: () => copilot.isListening,
+  inCall: () => ongoing.isListening,
   microphone: () => voiceSettings().dictation.microphoneId,
   completed: (receipt, speech) => { void dictationHistoryRuns.get(speech)?.then(ticket => dictationHistory.record(ticket, receipt)).catch(error => console.warn('[dictation history]', (error as Error).message)) },
   changed: state => { send('dictation:state', state); dictationWindow.update(state); dictationEscape(); refreshTray() }
@@ -605,7 +495,7 @@ function refreshTray(): void {
   const state = dictation.status()
   // A dictation counts once its words are final: not the raw words before they are cleaned up.
   if (state.lastText && !['starting', 'recording', 'finishing', 'polishing'].includes(state.phase)) recentDictations = withRecent(recentDictations, state.lastText)
-  tray?.update(state, shortcut?.ok ? shortcut.keys : '', voiceSettings().dictation.showBar, copilot.isListening, recentDictations)
+  tray?.update(state, shortcut?.ok ? shortcut.keys : '', voiceSettings().dictation.showBar, ongoing.isListening, recentDictations)
 }
 function refreshVoiceSettings(): void {
   const settings = voiceSettings()
@@ -616,7 +506,7 @@ function refreshVoiceSettings(): void {
   refreshTray()
 }
 async function setVoiceBar(visible: boolean): Promise<void> {
-  const id = copilot.isListening ? currentSession?.agentId : dictationAgentId, agent = agents.list().find(agent => agent.id === id)
+  const id = ongoing.isListening ? currentSession?.agentId : dictationAgentId, agent = agents.list().find(agent => agent.id === id)
   if (agent?.preferences?.dictation) await agents.update(agent.id, { preferences: { ...agent.preferences, dictation: { ...agent.preferences.dictation, showBar: visible } } })
   else { const settings = await updateSettings({ dictation: { showBar: visible } }); send('settings:changed', settings) }
   refreshVoiceSettings()
@@ -633,7 +523,7 @@ function refreshNotices(): void {
   const look = attention.look(runners.attention())
   tray?.setWaiting(look.waiting)
   // During a call, notices wait: the tray still counts, and what finished meanwhile is kept to say after.
-  if (copilot.isListening) {
+  if (ongoing.isListening) {
     if (look.finished.length) finishedDuringCall = look.finished[look.finished.length - 1]
     if (noticeWindow.shown) noticeWindow.show(null)
     return
@@ -654,9 +544,9 @@ function showTask(key: string): void {
   openWindow()
   send('tasks:show', key)
 }
-/** What quitting would stop: a call, a recording or dictation, and the tasks Togle runs that have not finished. */
+/** What quitting would stop: a call or dictation, and the tasks Togle runs that have not finished. */
 function closeWarning(): CloseWarning {
-  return { call: copilot.isListening || recording || dictation.active, tasks: runners?.busy().map(task => task.title) ?? [] }
+  return { call: ongoing.isListening || dictation.active, tasks: runners?.busy().map(task => task.title) ?? [] }
 }
 async function requestQuit(confirmed = false): Promise<void> {
   if (quitting) return
@@ -680,44 +570,7 @@ function dictationEscape(): void {
     if (!globalShortcut.isRegistered('Escape')) tryKeys('Escape', () => dictation.cancel())
   } else globalShortcut.unregister('Escape')
 }
-const calendar = new AgentCalendars(() => agents.list(), (id, agentId) => {
-  const entry = accounts.get(id)
-  if (entry.kind !== 'claude') throw new Error('Choose a Claude subscription for this agent’s calendar.')
-  const expected = agents.list().find(agent => agent.id === agentId)?.calendar?.accountEmail
-  if (expected && entry.auth.cachedStatus().email?.toLowerCase() !== expected.toLowerCase()) throw new Error('The calendar account changed. Select the intended Claude account in this agent’s reminders.')
-  return { connections: async refresh => { const catalog = await entry.provider.connections(refresh); if (expected && catalog.account.toLowerCase() !== expected.toLowerCase()) throw new Error('The calendar identity changed. Select the intended Claude account in this agent’s reminders.'); return catalog }, stream: (input, options) => accounts.pinned(id, false).stream(input, options) }
-}, () => copilot.isListening,
-  status => send('calendar:status', status), event => {
-    if (Notification.isSupported()) {
-      const notice = new Notification({ title: `Togle · ${event.agentName}`, body: `${event.title}. Open Togle to start assistance.`, silent: true })
-      notice.on('click', () => { win?.show(); win?.focus(); send('calendar:status', calendar.status()) })
-      notice.show()
-    }
-  })
-const currentCall = () => ({ ...copilot.currentCall(), session: currentSession, view: { cards: [], reviewedLines: 0, ...callFile.view, key: currentCallKey }, restoredFrom })
-const callLearning = new CallLearning(callSessions, {
-  agent: id => {
-    const agent = agents.list().find(agent => agent.id === id)
-    if (!agent) throw new Error('This call’s agent was deleted.')
-    return agent
-  },
-  apply: (id, lessons, auto, source) => agents.applyLessons(id, lessons, auto, source),
-  review: async (record) => {
-    if (record.id === currentCallKey && record.agentId === getSettings().activeAgentId) return copilot.learn((callFile.view?.cards ?? []) as CallCard[], record.frameSession)
-    const provider = record.ai ? routedAI(record.ai) : record.accountId ? accounts.pinned(record.accountId) : activeProvider(record.agentId)
-    const archived = new Copilot(() => {}, () => provider, {
-      snapshot: async () => { throw new Error('Archived calls cannot capture the screen.') }, dataUrl: async () => '', reset: async () => {}
-    }, {
-      active: () => agents.get(record.agentId), get: id => agents.get(id),
-      knowledgeFor: (agent, query, seen) => agents.knowledgeFor(agent, query, seen), search: (agent, query, seen, first) => agents.search(agent, query, seen, first), facts: (agent, query) => agents.factsFor(agent, query), code: () => undefined
-    })
-    archived.restore({ transcript: record.transcript, frames: [], notes: record.notes, notesUntil: 0, answeredUntil: 0, callAnswers: record.callAnswers.map(answer => ({ ...answer, reviewed: false })), brief: record.brief, group: record.group })
-    return archived.learn(record.suggestions as CallCard[], record.frameSession)
-  },
-  summary: async (_record, review) => {
-    if (review.record && getSettings().assist.rememberCalls !== false) await pastCalls.add(review.agentId, review.record)
-  }
-})
+const currentCall = (): CurrentCall => ({ ...ongoing.current(), session: currentSession, key: currentCallKey, restoredFrom })
 const meetingNotes = new MeetingNotes(callSessions, record => record.ai ? routedAI(record.ai) : record.accountId ? accounts.pinned(record.accountId) : activeProvider(record.agentId))
 const callTitles = new CallTitles(callSessions, record => record.ai ? routedAI(record.ai) : record.accountId ? accounts.pinned(record.accountId) : activeProvider(record.agentId))
 const titleQueue = new Set<string>()
@@ -733,24 +586,24 @@ function armCallTitles(delay = 10000): void {
 }
 async function nameNextCall(): Promise<void> {
   if (quitting || getSettings().assist.rememberCalls === false) return
-  if (copilot.isListening || dictation.active) { armCallTitles(15000); return }
+  if (ongoing.isListening || dictation.active) { armCallTitles(15000); return }
   const id = titleQueue.values().next().value
   if (!id) return
   titleQueue.delete(id); namingCall = true
   let delay = 1500
   try {
     const record = await callSessions.get(id)
-    if (record?.minutes?.state === 'generating' || callLearning.isBusy(id)) { titleQueue.add(id); delay = 15000 }
+    if (record?.minutes?.state === 'generating') { titleQueue.add(id); delay = 15000 }
     else {
       const named = await callTitles.generate(id)
       if (named?.titleRetryAt && named.titleRetryAt > Date.now()) delay = 60000
     }
-    if (copilot.isListening || dictation.active) titleQueue.add(id)
+    if (ongoing.isListening || dictation.active) titleQueue.add(id)
   } catch (error) { console.warn('[call naming]', (error as Error).message) }
   finally { namingCall = false; armCallTitles(delay) }
 }
 
-// History, agent learning and chat can refresh together. Share one snapshot and one recovery flush.
+// Meetings and the to-do list can ask together: they share one list and one save of the call first.
 let listingCalls: Promise<CallSessionSummary[]> | undefined
 function listCallSessions(): Promise<CallSessionSummary[]> {
   if (listingCalls) return listingCalls
@@ -758,16 +611,7 @@ function listCallSessions(): Promise<CallSessionSummary[]> {
     await callFile.flush()
     const saved = await callSessions.list()
     for (const record of saved) if (!record.customTitle && record.titleSource === 'fallback' && record.status !== 'live' && (!record.titleKey || record.titleRetryAt && record.titleRetryAt <= Date.now())) scheduleCallTitle(record.id)
-    const ids = new Set(saved.map(record => record.id))
-    const frames = new Set(saved.map(record => record.frameSession).filter(Boolean))
-    const groups = await Promise.all(agents.list().map(async agent => ({ agent, calls: await pastCalls.list(agent.id) })))
-    legacyCalls.clear()
-    for (const { agent, calls } of groups) for (const past of calls) {
-      const id = `legacy-${past.id}`
-      if (ids.has(id) || (past.callId && frames.has(past.callId))) continue
-      legacyCalls.set(id, legacySession(past, agent.name))
-    }
-    return [...saved, ...[...legacyCalls.values()].map(sessionSummary)].sort((a, b) => b.startedAt - a.startedAt)
+    return saved.sort((a, b) => b.startedAt - a.startedAt)
   })()
   listingCalls = task
   void task.then(() => { if (listingCalls === task) listingCalls = undefined }, () => { if (listingCalls === task) listingCalls = undefined })
@@ -775,14 +619,12 @@ function listCallSessions(): Promise<CallSessionSummary[]> {
 }
 
 async function getCallSession(id: string): Promise<CallSession | null> {
-  return await callSessions.get(id) ?? legacyCalls.get(id) ?? null
+  return callSessions.get(id)
 }
 async function storedCallSession(id: string): Promise<CallSession> {
   const stored = await callSessions.get(id)
-  if (stored) return stored
-  const legacy = legacyCalls.get(id)
-  if (!legacy) throw new Error('This call is no longer available.')
-  return callSessions.put(legacy)
+  if (!stored) throw new Error('This call is no longer available.')
+  return stored
 }
 const automaticReviews = new Map<string, ReturnType<typeof setTimeout>>()
 /**
@@ -834,20 +676,21 @@ async function sweepConfirmSound(): Promise<void> {
     await confirmSound.sweep(id => waiting.has(id))
   } catch (error) { console.warn('[confirm names]', (error as Error).message) }
 }
-function scheduleCallReview(id: string, delay = 1500): void {
+/** After a call, its notes: written by the AI the person set up, once nothing else is going on. */
+function scheduleCallNotes(id: string, delay = 1500): void {
   const before = automaticReviews.get(id)
   if (before) clearTimeout(before)
   const timer = setTimeout(() => {
     automaticReviews.delete(id)
     void (async () => {
-      if (quitting || getSettings().assist.rememberCalls === false || callLearning.isBusy(id)) return
+      if (quitting || getSettings().assist.rememberCalls === false) return
       const record = await callSessions.get(id)
       const owner = record && agents.list().find(agent => agent.id === record.agentId)
-      if (!record || !owner || record.status === 'live' || (!record.transcript.length && !record.callAnswers.length)) return
-      if (copilot.isListening || dictation.active) { scheduleCallReview(id, 15000); return }
+      if (!record || !owner || record.status === 'live' || !record.transcript.length) return
+      if (ongoing.isListening || dictation.active) { scheduleCallNotes(id, 15000); return }
       if (record.transcript.length && getSettings().assist.autoNotes !== false) {
         const notes = await meetingNotes.generate(id, undefined, undefined, true).catch(error => { console.warn('[meeting notes]', (error as Error).message); return undefined })
-        if (notes?.minutes?.state === 'idle') { scheduleCallReview(id, 15000); return }
+        if (notes?.minutes?.state === 'idle') { scheduleCallNotes(id, 15000); return }
       }
       // Nothing else goes to the AI after a call: the plan writes its notes, and only that (the product design).
     })().catch(error => console.warn('[meeting notes]', (error as Error).message))
@@ -876,8 +719,7 @@ const started: Record<string, number> = {}
 
 /**
  * Keeps the window as the settings say. Hidden from captures, only the person at this PC sees it
- * (Windows leaves it out of screenshots, screen sharing and recordings). While recording it's always
- * hidden, so Togle never records (or reacts to) its own window.
+ * (Windows leaves it out of screenshots, screen sharing and recordings).
  */
 function applyWindowSettings(): void {
   if (!win || win.isDestroyed()) return
@@ -886,7 +728,7 @@ function applyWindowSettings(): void {
   const { hideFromCapture } = getSettings().window
   if (win.isAlwaysOnTop()) win.setAlwaysOnTop(false)
   win.setOpacity(1)
-  protection?.set(recording || hideFromCapture)
+  protection?.set(hideFromCapture)
 }
 
 function createWindow(): void {
@@ -973,7 +815,7 @@ function createWindow(): void {
     }
     if (!closeConfirmed && !pageDown && !pageFailed) {
       const warning = closeWarning()
-      if (copilot.isListening || recording || warning.tasks.length) {
+      if (ongoing.isListening || warning.tasks.length) {
         e.preventDefault()
         win?.show()
         send('window:confirm-close', warning)
@@ -1006,35 +848,24 @@ function createWindow(): void {
 }
 
 /**
- * The window's page is gone or loaded again (Reload after an error): the listening and the recording ran in it,
- * and stopped with it. Otherwise closing would ask about a call that isn't running, and the window would stay
- * hidden from capture for a recording that isn't.
+ * The window's page is gone or loaded again (Reload after an error): the listening ran in it, and stopped with it.
+ * Otherwise closing would ask about a call that isn't running.
  */
 function pageStopped(): void {
-  stopScreenMonitoring(true)
-  if (copilot.isListening) copilot.setListening(false)
-  if (recording) {
-    recording = false
-    applyWindowSettings()
-  }
+  if (ongoing.isListening) ongoing.setListening(false)
 }
 
 function setupMediaAccess(): void {
   const allowed = new Set(['media', 'display-capture', 'clipboard-sanitized-write'])
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => callback(allowed.has(permission)))
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => allowed.has(permission))
-  // getDisplayMedia() in the renderer is answered without a picker. With audio it's the listener: WASAPI
-  // loopback gives us everything the PC plays, the other side of the call (its video track is unused).
-  // Without audio it's the screen recorder, which captures the source the window asked for.
+  // getDisplayMedia() in the renderer is answered without a picker, and only for the call's sound: WASAPI loopback
+  // gives us everything the PC plays, the other side of the call (its video track is unused). Asked without sound,
+  // it is refused: Togle takes no pictures of the screen during a call.
   session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
     let streams: Electron.Streams | null = null
     try {
-      if (!request.audioRequested) {
-        const requested = pendingRecordSource
-        pendingRecordSource = null
-        const source = requested ? await resolveCaptureSource(requested) : undefined
-        if (source) streams = { video: source }
-      } else {
+      if (request.audioRequested) {
         const [source] = await desktopCapturer.getSources({ types: ['screen'] })
         if (source) streams = { video: source, audio: 'loopback' }
       }
@@ -1202,8 +1033,7 @@ function registerIpc(): void {
   ipcMain.handle('dictation:agent', (_e, id?: string) => { if (id) agents.get(id); dictationAgentId = id; refreshVoiceSettings() })
   ipcMain.handle('settings:get', event => event.sender && dictationWindow.owns(event.sender) ? voiceSettings() : getSettings())
   ipcMain.handle('settings:update', (_e, patch: SettingsPatch) => {
-    if ((copilot.isListening || currentSession) && patch?.activeAgentId && patch.activeAgentId !== getSettings().activeAgentId) throw new Error('Start a new call before changing its agent.')
-    const previousAgent = getSettings().activeAgentId
+    if ((ongoing.isListening || currentSession) && patch?.activeAgentId && patch.activeAgentId !== getSettings().activeAgentId) throw new Error('Start a new call before changing its agent.')
     if (patch.ai) validateProfile(patch.ai as AIProfile)
     if ((patch.provider || patch.subscriptionAccountId !== undefined) && patch.ai === undefined) patch = { ...patch, ai: null }
     if (patch.dictation?.accountId) accounts.get(patch.dictation.accountId)
@@ -1213,17 +1043,12 @@ function registerIpc(): void {
     } else if (patch.provider && patch.provider !== getSettings().provider) patch = { ...patch, subscriptionAccountId: '' }
     const saved = updateSettings(patch)
     void saved.then(settings => send('settings:changed', settings))
-    if (patch.subscriptionAccountId !== undefined || patch.provider || patch.claude?.auth) {
-      send('auth:changed', selectedChatGPT().auth.status())
-      void selectedClaude().auth.status().then(status => send('claude:auth-changed', status))
-    }
-    if (patch?.assist?.calendarReminders !== undefined) { calendar.cancel(); void calendar.refresh() }
-    if (patch?.assist?.voiceLabels !== undefined && copilot.isListening) { if (patch.assist.voiceLabels) void voices.start(); else voices.stop() }
+    if (patch.subscriptionAccountId !== undefined || patch.provider || patch.claude?.auth) send('auth:changed', selectedChatGPT().auth.status())
+    if (patch?.assist?.voiceLabels !== undefined && ongoing.isListening) { if (patch.assist.voiceLabels) void voices.start(); else voices.stop() }
     if (patch?.assist?.rememberVoices !== undefined) void voices.memoryChanged()
     if (patch?.tasks) refreshNotices()
     if (patch?.assist?.autoNotes === false || patch?.assist?.rememberCalls === false) meetingNotes.pauseAutomatic()
     if (patch?.assist?.rememberCalls === false) { callTitles.pause(); titleQueue.clear() }
-    if (getSettings().activeAgentId !== previousAgent) void copilot.refreshAgent()
     // Right away, not after the save: dragging the opacity slider should feel live.
     applyWindowSettings()
     if (patch?.dictation) refreshVoiceSettings()
@@ -1258,23 +1083,11 @@ function registerIpc(): void {
     } else chatgpt.plan.clear()
   })
 
-  let connectedClaudeAccount = ''
-  const calendarIdentities = new Map<string, string | undefined>()
   accounts.onChange = (status) => {
     if (quitting) return
     send('accounts:changed', undefined)
-    if (status.provider === 'claude') { const identity = accounts.get(status.id).auth.identity(); if (calendarIdentities.get(status.id) !== identity) calendar.clear(status.id); calendarIdentities.set(status.id, identity) }
     if (status.signedIn) studyAgain()
-    if (status.id !== selectedAccount(status.provider).metadata.id) return
-    if (status.provider === 'chatgpt') {
-      send('auth:changed', status); send('stt:status', sttStatus())
-      if (status.signedIn) studyAgain()
-      return
-    }
-    const account = status.signedIn ? status.email ?? '' : ''
-    if (account !== connectedClaudeAccount) { claudeSubscription.clearConnections(); connectedClaudeAccount = account }
-    send('claude:auth-changed', status)
-    if (status.signedIn && getSettings().provider === 'claude' && getSettings().claude.auth === 'subscription') studyAgain()
+    if (status.provider === 'chatgpt' && status.id === selectedAccount('chatgpt').metadata.id) { send('auth:changed', status); send('stt:status', sttStatus()) }
   }
   ipcMain.handle('models:list', (_event, sourceId?: string) => {
     if (sourceId === undefined) return activeProvider().listModels()
@@ -1318,14 +1131,12 @@ function registerIpc(): void {
     // Togle tells a question is theirs.
     vocabulary: async () => {
       const agent = agents.get(currentSession?.agentId || getSettings().activeAgentId)
-      warmWorkApps(agent)
-      // With the names I wrote to it lately: who the calls to come are with.
-      const words = await agents.vocabularyFor(agent, await conversations.talk(agent.id).catch(() => []))
+      const words = await agents.vocabularyFor(agent, [])
       const names = getSettings().assist.names?.trim()
       return names ? `${words ? `${words.replace(/\.$/, '')}, ` : ''}${names}.` : words
     },
-    copilot,
-    caption: (caption) => send('transcript:partial', { ...caption, ...(caption.speaker === 'them' ? copilot.speakerForSegment(caption.segmentId) : {}) }),
+    call: ongoing,
+    caption: (caption) => send('transcript:partial', { ...caption, ...(caption.speaker === 'them' ? ongoing.speakerForSegment(caption.segmentId) : {}) }),
     log: app.isPackaged ? undefined : (line) => console.log(line),
     heard: (timing) => perf.heard(timing)
   })
@@ -1337,13 +1148,13 @@ function registerIpc(): void {
     if (speaker === 'them') {
       callAudioPaused = paused
       if (paused) voices.stop()
-      else if (copilot.isListening && getSettings().assist.voiceLabels !== false) void voices.start()
+      else if (ongoing.isListening && getSettings().assist.voiceLabels !== false) void voices.start()
     }
   })
   ipcMain.on('audio:segment', (_e, speaker: Speaker, pcm: Float32Array, startedAt: number, segmentId: string, kind: SegmentKind) => {
     if (!['me', 'them'].includes(speaker) || !(pcm instanceof Float32Array) || pcm.length > 30 * 16000 || !pcm.every(Number.isFinite) || !Number.isFinite(startedAt) || typeof segmentId !== 'string' || segmentId.length > 160 || !['partial', 'pause', 'final'].includes(kind)) return
     if (speaker === 'me' && pcm instanceof Float32Array && dictation.overlaps(startedAt, startedAt + pcm.length / 16)) return
-    if (copilot.isListening && speaker === 'them' && !callAudioPaused && kind === 'final' && pcm.length) {
+    if (ongoing.isListening && speaker === 'them' && !callAudioPaused && kind === 'final' && pcm.length) {
       const call = currentCallKey, epoch = audioEpoch.them, before = routedFinals.them
       let delivered!: () => void
       routedFinals.them = new Promise(resolve => { delivered = resolve })
@@ -1357,53 +1168,42 @@ function registerIpc(): void {
             for (const turn of turns) void onSegment(speaker, pcm.slice(turn.from, turn.to), startedAt + turn.from / 16, turn.id, 'final')
           } else void onSegment(speaker, pcm, startedAt, segmentId, kind)
         } catch (error) {
-          if (currentCallKey === call && audioEpoch.them === epoch) { copilot.forgetVoiceSegment(segmentId); void onSegment(speaker, pcm, startedAt, segmentId, kind) }
+          if (currentCallKey === call && audioEpoch.them === epoch) { ongoing.forgetVoiceSegment(segmentId); void onSegment(speaker, pcm, startedAt, segmentId, kind) }
           console.warn('[speaker routing]', (error as Error).message)
         } finally { delivered() }
       })()
       return
     }
-    if (copilot.isListening && speaker === 'them' && !callAudioPaused && kind !== 'final') voices.hear(segmentId, pcm, startedAt, true)
+    if (ongoing.isListening && speaker === 'them' && !callAudioPaused && kind !== 'final') voices.hear(segmentId, pcm, startedAt, true)
     void onSegment(speaker, pcm, startedAt, segmentId, kind)
   })
 
-  ipcMain.handle('session:listening', async (_e, value: boolean, meetingId?: string) => {
-    if (meetingId !== undefined && (typeof meetingId !== 'string' || meetingId.length > 500)) throw new Error('Choose a valid calendar meeting.')
+  ipcMain.handle('session:listening', async (_e, value: boolean) => {
+    if (typeof value !== 'boolean') throw new Error('Say whether to write the call down.')
     if (value) { meetingNotes.pauseAutomatic(); callTitles.pause() }
-    if (value) calendar.cancel()
     if (value && !callAudioPaused && getSettings().assist.voiceLabels !== false && (app.isPackaged || process.env.TOGLE_SILENT_AUDIO !== '1')) void voices.start()
     else if (!value) await voices.finish()
     else voices.stop()
-    if (!value) {
-      stopScreenMonitoring(true)
-      recording = false
-      applyWindowSettings()
-    }
     if (value) {
       const agent = agents.get(getSettings().activeAgentId)
       if (currentSession && currentSession.agentId !== agent.id) throw new Error('Start a new call before choosing a different agent.')
-      if (!callProvider) {
+      if (!callRouted) {
         const profile = currentSession?.ai || configuredAI(agent.id)
         callAccountId = currentSession?.accountId ?? (profile ? !isApiSource(profile.tasks.deep.sourceId) ? profile.tasks.deep.sourceId : undefined : accountChoice(getSettings(), agent.subscriptionAccountId))
-        callProvider = profile ? routedAI(profile) : callAccountId ? accounts.pinned(callAccountId) : activeProvider(agent.id)
         callUserName = callAccountId ? accounts.identity(callAccountId).name : undefined
         callAI = profile
+        callRouted = true
       }
-      const meeting = currentSession?.meeting ?? (!currentSession ? meetingForCall(calendar.status(agent.id), agent.id, Date.now(), meetingId) : undefined)
-      currentSession = { ...currentSession, id: currentCallKey, agentId: agent.id, agentName: agent.name, accountId: callAccountId, ai: currentSession?.ai || callAI, speechSettings: currentSession?.speechSettings || structuredClone(speechSettings(agent.id)), speechLanguage: currentSession?.speechLanguage || speechSettings(agent.id).language, meeting: meeting && { id: meeting.id, title: meeting.title, start: meeting.start, end: meeting.end }, startedAt: currentSession?.startedAt ?? Date.now(), endedAt: undefined, status: 'live' }
+      currentSession = { ...currentSession, id: currentCallKey, agentId: agent.id, agentName: agent.name, accountId: callAccountId, ai: currentSession?.ai || callAI, speechSettings: currentSession?.speechSettings || structuredClone(speechSettings(agent.id)), speechLanguage: currentSession?.speechLanguage || speechSettings(agent.id).language, startedAt: currentSession?.startedAt ?? Date.now(), endedAt: undefined, status: 'live' }
     } else if (currentSession) currentSession = { ...currentSession, status: 'ended', endedAt: Date.now() }
     if (!value) void microphoneLink.endCall()
-    copilot.setListening(value)
+    ongoing.setListening(value)
     // Notices wait during a call, and come once it is over.
     refreshNotices()
     refreshVoiceSettings()
     callFile.changed()
     await callFile.flush()
     if (!value) void prepareConfirm(currentSession?.id)
-    // The work sessions the call's agent has, as they are now: worked on since they were added, they're read again.
-    if (value) void agents.refreshSessions(getSettings().activeAgentId).catch((err: Error) => console.warn('[agents] work sessions not read again:', err.message))
-    // What the call used of the agent's training is written once it's over, not while it goes on.
-    if (!value) void agents.saveUses().catch((err: Error) => console.warn('[agents] uses not written:', err.message))
     // The call's share of the plan's limit counts from here.
     const usedAccounts = currentSession?.ai ? [...new Set(Object.values(currentSession.ai.tasks).map(task => task.sourceId).filter(id => !isApiSource(id)))] : callAccountId ? [callAccountId] : []
     for (const id of usedAccounts) { const entry = accounts.get(id); if (value && entry.kind === 'chatgpt' && entry.auth.status().signedIn) { entry.provider.plan.callStarted(); void entry.provider.refreshUsage() } }
@@ -1411,7 +1211,6 @@ function registerIpc(): void {
   })
   const clearCurrentCall = async (notify = false) => {
     voices.reset()
-    stopScreenMonitoring(true)
     await callFile.flush()
     onSegment.reset()
     callAudioPaused = false
@@ -1419,14 +1218,13 @@ function registerIpc(): void {
     routedFinals.me = routedFinals.them = Promise.resolve()
     currentSession = undefined
     restoredFrom = undefined
-    // A call the user cleared mustn't come back: deleting a long call's pictures takes a while (and can fail on a
-    // busy file), and the saved call is deleted meanwhile.
-    await callFile.clear(() => copilot.clear())
-    callProvider = undefined; callAI = undefined; callAccountId = undefined; callUserName = undefined
+    // A call the user cleared mustn't come back: the saved call is deleted too.
+    await callFile.clear(async () => ongoing.clear())
+    callRouted = false; callAI = undefined; callAccountId = undefined; callUserName = undefined
     remoteSpeech.clear()
-    currentCallKey = frameStore.sessionId
+    currentCallKey = randomUUID()
     // A new call while listening: its share of the plan counts from here, as when listening starts.
-    if (copilot.isListening && getSettings().provider === 'chatgpt' && auth.status().signedIn) {
+    if (ongoing.isListening && getSettings().provider === 'chatgpt' && auth.status().signedIn) {
       chatgpt.plan.callStarted()
       void chatgpt.refreshUsage()
     }
@@ -1445,13 +1243,13 @@ function registerIpc(): void {
     if (typeof id !== 'string' || typeof name !== 'string') throw new Error('Enter a speaker name.')
     if (identity !== undefined && typeof identity !== 'string') throw new Error('Choose a remembered person.')
     if (identity) { await voiceMemory.load(); const person = voiceMemory.get(identity); if (!person) throw new Error('This remembered person was removed.'); name = person.name }
-    copilot.renameVoice(id, name)
+    ongoing.renameVoice(id, name)
     return voices.remember(id, name, identity)
   })
   ipcMain.handle('voices:status', () => voices.status())
   ipcMain.handle('voices:merge', async (_e, from: string, into: string) => {
     if (typeof from !== 'string' || typeof into !== 'string') throw new Error('Choose two speakers.')
-    const name = copilot.mergeVoices(from, into)
+    const name = ongoing.mergeVoices(from, into)
     await voices.merge(from, into, name)
   })
   ipcMain.handle('calls:speaker', async (_e, callId: string, voiceId: string, name: string) => {
@@ -1459,7 +1257,7 @@ function registerIpc(): void {
     const value = name.replace(/[\r\n\[\]<>]/g, '').trim().slice(0, 60)
     if (!value) throw new Error('Enter a speaker name.')
     await storedCallSession(callId)
-    if (callId === currentSession?.id) { copilot.renameVoice(voiceId, value); await callFile.flush() }
+    if (callId === currentSession?.id) { ongoing.renameVoice(voiceId, value); await callFile.flush() }
     return callSessions.update(callId, record => {
       if (!record.transcript.some(line => line.voiceId === voiceId)) throw new Error('That speaker is no longer in this call.')
       return { ...record, transcript: record.transcript.map(line => line.voiceId === voiceId ? { ...line, voiceName: value, voiceNamedBy: 'user' as const, voiceIdentityId: line.voiceName === value ? line.voiceIdentityId : undefined } : line) }
@@ -1481,7 +1279,7 @@ function registerIpc(): void {
     // The call that just ended is still the current call: its own copy of the names is corrected too, or the next save
     // of it (Start again, a change, reopening Togle) would bring the old names back.
     if (callId === currentSession?.id) {
-      try { if (value) copilot.renameVoice(voiceId, value); else copilot.dropVoiceName(voiceId) } catch { throw new Error('That speaker is no longer in this call.') }
+      try { if (value) ongoing.renameVoice(voiceId, value); else ongoing.dropVoiceName(voiceId) } catch { throw new Error('That speaker is no longer in this call.') }
       await callFile.flush()
     }
     const saved = await callSessions.update(callId, record => {
@@ -1499,7 +1297,7 @@ function registerIpc(): void {
       // The notes are corrected with the confirmed names: written again, unless the person edited them, turned automatic
       // notes off, keeps no calls, or a call is being written down.
       const settings = getSettings()
-      if (settings.assist.autoNotes !== false && settings.assist.rememberCalls !== false && !copilot.isListening) {
+      if (settings.assist.autoNotes !== false && settings.assist.rememberCalls !== false && !ongoing.isListening) {
         void meetingNotes.generate(callId, undefined, undefined, true).catch(error => console.warn('[meeting notes]', (error as Error).message))
       }
     }
@@ -1517,7 +1315,7 @@ function registerIpc(): void {
     mergeSpeakers(record.transcript, from, into)
     let merged: CallSession | undefined
     if (callId === currentSession?.id) {
-      const name = copilot.mergeVoices(from, into); await voices.merge(from, into, name); await callFile.flush()
+      const name = ongoing.mergeVoices(from, into); await voices.merge(from, into, name); await callFile.flush()
       const stored = await storedCallSession(callId)
       // If history was turned off mid-call, flushing updates only the recovery file.
       if (!stored.transcript.some(line => line.voiceId === from)) merged = stored
@@ -1529,13 +1327,13 @@ function registerIpc(): void {
     if (asked.confirm?.closed) await confirmSound.remove(callId)
     return asked
   })
-  ipcMain.on('call:told-others', (_e, told: boolean) => copilot.setToldOthers(!!told))
+  ipcMain.on('call:told-others', (_e, told: boolean) => ongoing.setToldOthers(!!told))
   // The answer to the notice that a call started in another app.
   // The buttons of the strip that shows while a call is written down and Togle's window is closed.
   ipcMain.on('callstrip:action', (event, action: unknown) => {
-    if (!callStrip.owns(event.sender) || !isCallStripAction(action) || !copilot.isListening) return
-    if (action === 'mark') copilot.mark()
-    else if (action === 'told') copilot.setToldOthers(true)
+    if (!callStrip.owns(event.sender) || !isCallStripAction(action) || !ongoing.isListening) return
+    if (action === 'mark') ongoing.mark()
+    else if (action === 'told') ongoing.setToldOthers(true)
     else if (action === 'copy') clipboard.writeText(tellOthersLine(getSettings().transcription))
     else send('hotkey', 'start-call-unseen')
     refreshCallStrip()
@@ -1544,11 +1342,11 @@ function registerIpc(): void {
     if (!callNotice.owns(event.sender)) return
     const shown = callNotice.shown
     callNotice.show(null)
-    if (!shown || !isCallApp(shown.app) || copilot.isListening) return
+    if (!shown || !isCallApp(shown.app) || ongoing.isListening) return
     if (choice === 'always') void updateSettings({ meetings: { ...getSettings().meetings, apps: { ...getSettings().meetings.apps, [shown.app]: 'always' } } }).then(() => send('settings:changed', getSettings()))
     if (choice === 'write' || choice === 'always') send('hotkey', 'start-call-unseen')
   })
-  ipcMain.handle('call:mark', () => copilot.mark())
+  ipcMain.handle('call:mark', () => ongoing.mark())
 
   ipcMain.handle('calls:list', listCallSessions)
   // What calls left for the person's day: names to confirm, notes that are ready, and the to-dos in them that are theirs.
@@ -1603,8 +1401,7 @@ function registerIpc(): void {
     return callSessions.rename(id, title)
   })
   ipcMain.handle('calls:delete', async (_e, id: string) => {
-    if (id === currentCallKey && copilot.isListening) throw new Error('End the call before deleting it.')
-    if (callLearning.isBusy(id)) throw new Error('Wait for this learning review to finish before deleting the call.')
+    if (id === currentCallKey && ongoing.isListening) throw new Error('End the call before deleting it.')
     const record = await getCallSession(id)
     if (!record) return
     meetingNotes.cancel(id)
@@ -1613,9 +1410,6 @@ function registerIpc(): void {
     await callSessions.remove(id)
     await confirmSound.remove(id)
     await fs.rm(path.join(app.getPath('userData'), SHARED_CALLS, record.id + '.md'), { force: true }).catch(() => undefined)
-    legacyCalls.delete(id)
-    const summaries = await pastCalls.list(record.agentId)
-    for (const summary of summaries) if (summary.id === record.legacy?.id || (summary.callId && summary.callId === record.frameSession)) await pastCalls.remove(record.agentId, summary.id)
   })
   ipcMain.handle('calls:export', async (_e, id: string) => {
     const record = await getCallSession(id)
@@ -1630,8 +1424,8 @@ function registerIpc(): void {
     // A line said; with the id of the live caption it ends, as speech recognition gives it.
     ipcMain.handle('dev:transcript', (_e, speaker: Speaker, text: string, segmentId?: string, voiceId?: string, seconds?: number) => {
       const at = Date.now()
-      copilot.add(speaker, text, at, at + Math.max(0, Number(seconds) || 0) * 1000, segmentId)
-      if (segmentId && voiceId && speaker === 'them') copilot.identifyVoice(segmentId, voiceId)
+      ongoing.add(speaker, text, at, at + Math.max(0, Number(seconds) || 0) * 1000, segmentId)
+      if (segmentId && voiceId && speaker === 'them') ongoing.identifyVoice(segmentId, voiceId)
     })
     // A live caption as speech recognition sends them, and when Togle started: for timing the window.
     ipcMain.handle('dev:caption', (_e, speaker: Speaker, text: string, segmentId: string) =>
@@ -1755,12 +1549,6 @@ if (hookAt !== -1) {
     if (!agents.list().some((a) => a.id === getSettings().activeAgentId)) {
       await updateSettings({ activeAgentId: agents.list()[0].id })
     }
-    warmWorkApps(agents.get(getSettings().activeAgentId))
-    if (getSettings().assist.calendarReminders) {
-      const owner = agents.list().find(agent => agent.id === getSettings().assist.calendarAgentId) || agents.get(getSettings().activeAgentId)
-      if (!owner.calendar) { await accountsRead; const id = selectedClaude().metadata.id; await agents.update(owner.id, { calendar: { enabled: true, accountId: id, accountEmail: accounts.identity(id).email } }) }
-      await updateSettings({ assist: { calendarReminders: false, calendarAgentId: '' } })
-    }
     // Voice typing's account became one setting (loadSettings): the agents' own choices carry over the same way.
     const oldVoiceAccounts = voiceAccountsToMigrate()
     if (oldVoiceAccounts) {
@@ -1771,26 +1559,25 @@ if (hookAt !== -1) {
       await voiceAccountsMigrated()
     }
     studyAgain()
-    serveFrames()
-    // The call that was open when Togle last closed goes on, with its pictures.
+    // The call that was open when Togle last closed goes on.
     const saved = await callFile.load()
     if (saved) {
-      frameStore.resume(saved.frameSession, Math.max(0, ...saved.state.frames.map((f) => f.n)))
       currentCallKey = saved.view?.key ?? saved.frameSession
       currentSession = saved.session ? { ...saved.session, status: saved.session.status === 'live' ? 'interrupted' : saved.session.status, endedAt: saved.session.endedAt ?? saved.savedAt } : saved.state.transcript.length ? {
         id: currentCallKey, agentId: getSettings().activeAgentId, agentName: agents.get(getSettings().activeAgentId).name, startedAt: saved.state.transcript[0].at, endedAt: saved.savedAt, status: 'interrupted'
       } : undefined
       if (currentSession && agents.list().some(agent => agent.id === currentSession!.agentId)) await updateSettings({ activeAgentId: currentSession.agentId })
-      copilot.restore(saved.state)
+      ongoing.restore(saved.state)
       restoredFrom = saved.savedAt
       if (currentSession && getSettings().assist.rememberCalls !== false) {
         try {
-          await callSessions.capture(currentSession, saved.frameSession, saved.state, saved.view)
-          scheduleCallReview(currentSession.id)
+          await callSessions.capture(currentSession, saved.frameSession, saved.state)
+          scheduleCallNotes(currentSession.id)
         } catch (error) { console.warn('[call history] recovery could not be archived:', (error as Error).message) }
       }
     }
-    void FrameStore.cleanup(saved?.frameSession)
+    // Pictures earlier versions took of the screen during calls: Togle takes none now, so they all go.
+    void fs.rm(path.join(app.getPath('userData'), 'sessions'), { recursive: true, force: true }).catch(() => undefined)
     // The sound kept to confirm names is deleted once answered or expired; checked now and every hour.
     void sweepConfirmSound()
     void sweepSharedCalls()
@@ -1848,8 +1635,6 @@ if (hookAt !== -1) {
     )
     started.window = Date.now()
     createWindow()
-    // Reminders check the Claude account they belong to: once its sign-in is read.
-    void accountsRead.then(() => { if (!quitting) calendar.start() })
     registerHotkeys()
     if (app.isPackaged || process.env.TOGLE_HEADLESS !== '1' || process.env.TOGLE_TEST_TRAY === '1') {
       try {
@@ -1885,8 +1670,7 @@ if (hookAt !== -1) {
     }
     // Claude's list says which efforts each model takes.
     if (getSettings().provider === 'claude') {
-      if (getSettings().claude.auth === 'subscription') void selectedClaude().auth.status()
-      else if (claude.hasApiKey()) void claude.listModels().catch(() => undefined)
+      if (getSettings().claude.auth !== 'subscription' && claude.hasApiKey()) void claude.listModels().catch(() => undefined)
     }
   })
 
@@ -1908,9 +1692,7 @@ if (hookAt !== -1) {
     dictation.dispose()
     tray?.close()
     dictationTarget.stop()
-    calendar.stop()
     voices.stop()
-    stopScreenMonitoring(true)
     for (const timer of automaticReviews.values()) clearTimeout(timer)
     clearTimeout(titleTimer); callTitles.pause()
     accounts.close()

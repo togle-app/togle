@@ -6,7 +6,7 @@ import electron from './electron.mjs'
 import { workDir } from './helpers.mjs'
 
 const work = workDir('shared-speech')
-const { cleanTranscript, mergedVoiceAccount, migrateVoicePreferences, automaticVoiceAccount, voiceAccountId, effectiveSettings, validatePreferences, voiceAccountsToMigrate, voiceAccountsMigrated, inTimeOrder, needsReply, getSettings, updateSettings, loadSettings } = await import('./.build/togle.mjs')
+const { cleanTranscript, mergedVoiceAccount, migrateVoicePreferences, automaticVoiceAccount, voiceAccountId, effectiveSettings, validatePreferences, voiceAccountsToMigrate, voiceAccountsMigrated, needsReply, getSettings, updateSettings, loadSettings } = await import('./.build/togle.mjs')
 const second = new Float32Array(16000)
 
 test('live assistance recognizes Chinese and Arabic question marks', () => {
@@ -133,20 +133,6 @@ test("automatic voice typing uses the AI's own subscription account, else one si
   assert.equal(voiceAccountId(settings, accounts), 'work-gpt')
   settings.dictation.accountId = 'claude-default'
   assert.equal(voiceAccountId(settings, accounts), 'claude-default', 'one picked for voice typing wins')
-})
-
-test('the call timeline merges lines and pictures in time order without sorting everything again', () => {
-  const line = (id, at) => ({ id, speaker: 'them', text: id, at, end: at })
-  const frame = (id, at) => ({ id, n: 1, at, kind: 'snapshot', thumbUrl: '', imageUrl: '' })
-  const ids = items => items.map(item => 'line' in item ? item.line.id : item.frame.id)
-  assert.deepEqual(ids(inTimeOrder([line('a', 1), line('b', 5), line('c', 9)], [frame('F1', 0), frame('F2', 5), frame('F3', 12)])), ['F1', 'a', 'b', 'F2', 'c', 'F3'], 'a line goes before a picture of the same moment')
-  assert.deepEqual(ids(inTimeOrder([line('late', 7), line('early', 3)], [frame('F1', 5)])), ['early', 'F1', 'late'], 'out of order: sorted')
-  assert.deepEqual(inTimeOrder([], []), [])
-  const long = Array.from({ length: 20000 }, (_, i) => line('l' + i, i * 10))
-  const pictures = Array.from({ length: 200 }, (_, i) => frame('f' + i, i * 1000 + 5))
-  const merged = inTimeOrder(long, pictures)
-  assert.equal(merged.length, 20200)
-  assert.ok(merged.every((item, i) => i === 0 || merged[i - 1].at <= item.at))
 })
 
 test('a saved automatic language setting survives restart without being rewritten to English', async () => {

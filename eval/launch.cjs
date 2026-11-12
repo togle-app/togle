@@ -1,6 +1,6 @@
 // Runs an evaluation in Electron on a private copy of Togle's data (agents, settings, the ChatGPT sign-in),
 // and deletes the copy once Electron has exited: while it runs, Electron keeps files in it open.
-//   node eval/launch.cjs eval/run.cjs [options]     (what `npm run eval` and `npm run e2e` do)
+//   node eval/launch.cjs eval/speech.cjs [options]     (what `npm run speech` does)
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')

@@ -1,6 +1,6 @@
-# Listening and learning during calls
+# Listening during calls
 
-Togle separates audio capture, speaker identity, transcription, and reusable agent learning. A speech provider turning audio into words does not establish who spoke. Local speaker models do that work independently of what turns the speech into words.
+Togle separates audio capture, speaker identity and transcription. A speech provider turning audio into words does not establish who spoke. Local speaker models do that work independently of what turns the speech into words.
 
 ## Speaker changes
 
@@ -12,15 +12,13 @@ Speaker processing runs in a utility process. Transcription waits at most 1.8 se
 
 The People count represents distinct voice identities. “Some labels pending” describes transcript passages without a confident label; it never presents those passages as additional people.
 
-## Agent wording and quiet learning
+## Wording learned from what I say
 
-An explicit first-person lesson such as “When I say so three, write SOH 3” saves an alias and spelling to the current agent. The direct chat path needs no model request. Other natural corrections can use the agent’s `save_speech_word` tool. During a call, only an explicit microphone-side lesson is learned immediately; remote speech cannot directly teach a wording rule.
+An explicit first-person lesson said into my microphone during a call, such as “When I say so three, write SOH 3”, saves an alias and its spelling to the words Togle hears calls with. It needs no AI request. Speech from the other side cannot teach a wording rule.
 
-Rules are readable lines in the existing agent vocabulary. Matching uses complete Unicode word boundaries, longest phrases first, and one replacement pass. Legacy comma-separated vocabulary remains valid. Corrected spellings receive priority in the transcription hint budget. Teaching phrases retain their original wording so an old correction cannot rewrite a new lesson before it is learned.
+Rules are readable lines in that word list. Matching uses complete Unicode word boundaries, longest phrases first, and one replacement pass. An older comma-separated list still works. Corrected spellings come first in the hint the speech recognizer gets. A teaching phrase keeps its original wording, so an old correction cannot rewrite a new lesson before it is learned.
 
-Call recognition uses its owning agent’s rules. Dictation snapshots the selected agent’s rules and its voice typing account’s dictionary before recording; agent-specific aliases take precedence. Later agent, account, or vocabulary changes cannot reroute that recording. Cleanup-off dictation still applies explicit spelling corrections.
-
-Routine automatic review is hidden from chat. Knowledge shows learned words and names; Learning retains corrections, evidence, pending approvals and Undo. Undo of one wording line preserves later independent corrections. Existing review safeguards for sensitive or conflicting changes remain in place. Learning changes stored context and assistance policies, rather than training model weights.
+Dictation takes the same rules together with its account's own word list before recording; the call's aliases come first. A change to either during a recording does not reach that recording. With cleanup off, dictation still applies explicit spelling corrections.
 
 ## Listening controls and voice bar
 
@@ -30,9 +28,9 @@ The idle and recording bar is 48×12 CSS pixels, with a translucent background a
 
 ## Verification
 
-- `npm test`: wording lessons, agent isolation, persistence and independent Undo; microphone-only teaching; dictation vocabulary snapshots; speaker handoffs, overlap, short-reply matching and later backfill; independent input pause, stale streams, caption clearing and late-result rejection.
+- `npm test`: wording lessons and microphone-only teaching; dictation vocabulary snapshots; speaker handoffs, overlap, short-reply matching and later backfill; independent input pause, stale streams, caption clearing and late-result rejection.
 - `npm run test:ui`: production renderer with isolated fixtures, including independent input controls and the People uncertainty wording.
 - `npm run test:dictation:ui`, also `-- --native`: fake audio, repeated hover, delayed expansion, cancellation, progress, drag, retained focus, renderer recovery and indicator preference. Neither moves the real pointer nor types into another app.
 - `npm run test:voices:handoffs`: cached public AMI audio with manual word timestamps. Prepare fixtures first with `npm run test:voices:meetings`. Every eligible fixed 20-word/4-word handoff in ES2002a and ES2003a is tested with a 400 ms boundary tolerance. Separate single-speaker controls exclude annotated overlap, enrollment and handoff windows. Identity controls compare against fixed enrollment examples; unknown is recorded separately from a confident wrong name. Reports include processing latency and raw split counts under `test/.work/voice-handoffs/report.json`.
 
-On the development machine, all five fixed handoffs passed, with boundary estimates 15–342 ms from the next speaker’s annotated onset. Thirteen separate single-speaker controls produced no extra splits or confidently wrong identities; two remained unknown. These are small regression fixtures, including cases used while debugging, not an end-to-end accuracy guarantee. Timing depends on hardware and does not include subscription transcription or suggestion generation. Public AMI recordings are licensed CC-BY-4.0; source and checksums are retained in the existing meeting fixture manifest. No user call audio is used by this benchmark.
+On the development machine, all five fixed handoffs passed, with boundary estimates 15–342 ms from the next speaker’s annotated onset. Thirteen separate single-speaker controls produced no extra splits or confidently wrong identities; two remained unknown. These are small regression fixtures, including cases used while debugging, not an end-to-end accuracy guarantee. Timing depends on hardware and does not include speech recognition by an online service. Public AMI recordings are licensed CC-BY-4.0; source and checksums are retained in the existing meeting fixture manifest. No user call audio is used by this benchmark.

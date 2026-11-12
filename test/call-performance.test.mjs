@@ -29,24 +29,18 @@ test('repeated and concurrent inspection decrypts a call once and returns indepe
   } finally { electron.safeStorage.decryptString = decrypt }
 })
 
-test('capture takes an immediate content snapshot while avoiding unused screen frame state', async () => {
+test('capture takes an immediate snapshot of the call, and nothing the call does not keep', async () => {
   const repo = new CallSessions()
   const owner = info('snapshot-call')
   const call = state()
-  call.callAnswers.push({ question: 'When?', answer: 'Tuesday', reviewed: false })
-  const view = { reviewedLines: 0, cards: [{ id: 'reply', kind: 'suggest', text: 'Tuesday.', deep: { text: 'Confirm the owner.' }, at: 1500 }] }
-  const pending = repo.capture(owner, 'frames', call, view)
+  const pending = repo.capture(owner, 'frames', call)
   owner.id = 'wrong-call'
   owner.agentName = 'Changed'
   call.transcript[0].text = 'Later words'
-  call.callAnswers[0].answer = 'Friday'
-  view.cards[0].deep.text = 'Later deep answer'
   const saved = await pending
   assert.equal(saved.id, 'snapshot-call')
   assert.equal(saved.agentName, 'General')
   assert.equal(saved.transcript[0].text, 'Send the report Tuesday.')
-  assert.equal(saved.callAnswers[0].answer, 'Tuesday')
-  assert.equal(saved.suggestions[0].deep, 'Confirm the owner.')
   assert.equal(saved.frames, undefined)
 })
 

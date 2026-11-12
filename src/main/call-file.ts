@@ -1,4 +1,4 @@
-import type { CallAnswer, CallSessionInfo, CallView, Frame, TranscriptEntry } from '@shared/types'
+import type { CallSessionInfo, CallView, TranscriptEntry } from '@shared/types'
 import { canStoreSecrets, readSecret, writeSecret, writeSecretSync } from './storage'
 
 const FILE = 'call.bin'
@@ -6,46 +6,34 @@ const FILE = 'call.bin'
 // loses a few seconds of it at most.
 const SAVE_DELAY_MS = 2000
 const SAVE_EVERY_MS = 10_000
-// An older call isn't picked up again: its pictures are deleted after as long (frames.ts).
+// An older call isn't picked up again.
 const KEEP_MS = 3 * 24 * 3600_000
 // A save that failed (the file held by another program, a full disk) is tried again this long after.
 const RETRY_MS = 5_000
 
-/** What the copilot keeps of a call, to pick it up again. */
+/** What is kept of a call, to pick it up again. Saves of earlier versions hold more, which is not read. */
 export interface CallState {
   transcript: TranscriptEntry[]
-  frames: Frame[]
-  notes: string
-  notesUntil: number
-  answeredUntil: number
-  callAnswers: (CallAnswer & { reviewed: boolean })[]
-  /** What the call is, in the user's words (saved by later versions; older saves have none). */
-  brief?: string
-  /** When the brief was told (older saves don't say). */
-  briefAt?: number
-  /** A call with several people (see Copilot.setGroup). */
-  group?: boolean
   /** When the person said they had told the others the call is written down (absent or 0: not yet). */
   toldOthers?: number
   /** The moments the person marked, on the call's clock. */
   marks?: number[]
-  /** The frames still waiting for a description (ids), to be described when the call is picked up again. */
-  undescribed?: string[]
 }
 
 export interface SavedCall {
   version: 1
   savedAt: number
-  /** The folder of the call's pictures (frames.ts). */
+  /** The call's key (the name is from earlier versions, where it was also the folder of its pictures). */
   frameSession: string
   state: CallState
+  /** Saved by earlier versions: the window's part of the call, with the call's key. */
   view?: CallView
   session?: CallSessionInfo
 }
 
 /**
  * The call so far, saved as it goes and encrypted like the ChatGPT sign-in, so closing Togle, a crash or a
- * restart loses neither the call nor what its review would teach the agent. Clearing the call deletes it.
+ * restart doesn't lose the call. Clearing the call deletes it.
  */
 export class CallFile {
   private timer: NodeJS.Timeout | null = null
@@ -56,23 +44,17 @@ export class CallFile {
   private writes: Promise<void> = Promise.resolve()
   /** Saves still being written. */
   private inFlight = 0
-  private savedView: CallView | undefined
   private warned = false
 
-  /** `current` gives the call to save, or null when there's nothing in it (told whether the window has cards). */
+  /** `current` gives the call to save, or null when there's nothing in it. */
   constructor(
-    private current: (hasCards: boolean) => { frameSession: string; state: CallState; session?: CallSessionInfo } | null,
+    private current: () => { frameSession: string; state: CallState; session?: CallSessionInfo } | null,
     private onSaved?: (saved: SavedCall) => Promise<void>
   ) {}
 
   /** Whether a change is waiting to be saved, or still being written. */
   get pending(): boolean {
     return this.dirtySince > 0 || this.inFlight > 0
-  }
-
-  /** The window's part of the call, as last saved or told. */
-  get view(): CallView | undefined {
-    return this.savedView
   }
 
   /** The call changed: it's saved shortly. */
@@ -83,14 +65,6 @@ export class CallFile {
     if (this.timer) clearTimeout(this.timer)
     const wait = Math.max(0, Math.min(SAVE_DELAY_MS, this.dirtySince + SAVE_EVERY_MS - now))
     this.timer = setTimeout(() => void this.flush(), wait)
-  }
-
-  /** The window's part of the call changed. */
-  setView(view: CallView): void {
-    // The same cards again (the window showing what was picked up) are no change to the call.
-    if (JSON.stringify(view) === JSON.stringify(this.savedView)) return
-    this.savedView = view
-    this.changed()
   }
 
   /** Saves now what's waiting to be saved. */
@@ -120,8 +94,8 @@ export class CallFile {
   }
 
   private saved(): SavedCall | null {
-    const call = this.current(!!this.savedView?.cards.length)
-    return call && { version: 1, savedAt: this.changedAt || Date.now(), ...call, view: this.savedView }
+    const call = this.current()
+    return call && { version: 1, savedAt: this.changedAt || Date.now(), ...call }
   }
 
   private queue(saved: SavedCall | null): Promise<void> {
@@ -131,9 +105,8 @@ export class CallFile {
   }
 
   /**
-   * A new call: `forget` empties the call in memory, which it does at once, before it waits on anything (the
-   * copilot's clear() then deletes the pictures, which takes a while); then the saved call is deleted. So nothing
-   * saved meanwhile (Windows shutting down) can bring the cleared call back.
+   * A new call: `forget` empties the call in memory, which it does at once, before it waits on anything; then the
+   * saved call is deleted. So nothing saved meanwhile (Windows shutting down) can bring the cleared call back.
    */
   async clear(forget: () => Promise<void> = async () => {}): Promise<void> {
     const forgetting = forget()
@@ -143,7 +116,6 @@ export class CallFile {
     this.timer = null
     this.dirtySince = 0
     this.changedAt = 0
-    this.savedView = undefined
     await this.queue(null)
     await forgetting
   }
@@ -152,7 +124,6 @@ export class CallFile {
   async load(): Promise<SavedCall | null> {
     const saved = await readSecret<SavedCall>(FILE)
     if (!saved || saved.version !== 1 || Date.now() - saved.savedAt > KEEP_MS) return null
-    this.savedView = saved.view
     this.changedAt = saved.savedAt
     return saved
   }

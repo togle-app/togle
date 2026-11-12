@@ -1,5 +1,5 @@
-# Speaks the end-to-end test's sales call into eval/audio as 16 kHz mono WAV files: the caller's questions
-# (Zira) and my replies (David), with the voices that come with Windows. Run by e2e.cjs when they're missing.
+# Speaks the speech evaluation's sales call into eval/audio as 16 kHz mono WAV files: the caller's questions
+# (Zira) and my replies (David), with the voices that come with Windows. Run by speech.cjs when they're missing.
 Add-Type -AssemblyName System.Speech
 $dir = Join-Path $PSScriptRoot 'audio'
 New-Item -ItemType Directory -Force $dir | Out-Null

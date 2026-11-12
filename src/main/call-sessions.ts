@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { EventEmitter } from 'node:events'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { CallSearchHit, CallSession, CallSessionInfo, CallSessionSummary, CallView, PastCall, SessionSuggestion } from '@shared/types'
+import type { CallSearchHit, CallSession, CallSessionInfo, CallSessionSummary, PastCall } from '@shared/types'
 import { emptyLessons, lessonCount, lessonItems } from '@shared/learning'
 import { speakerLabel } from '@shared/meeting'
 import { speechTurns } from '@shared/speakers'
@@ -170,42 +170,26 @@ export class CallSessions extends EventEmitter {
   }
 
   /** A capture update may not overwrite a title, summary, or learning result saved meanwhile. */
-  capture(info: CallSessionInfo, frameSession: string, state: CallState, view?: CallView): Promise<CallSession | null> {
+  capture(info: CallSessionInfo, frameSession: string, state: CallState): Promise<CallSession | null> {
     const owner = { ...info }
     fileFor(owner.id)
-    // Snapshot only what history stores. Screen frames and nested live card state can be large and aren't archived.
     const transcript = state.transcript.slice(-20_000).map(line => ({ ...line }))
-    const callAnswers = state.callAnswers.map(answer => ({ ...answer }))
-    const brief = state.brief ?? ''
-    const group = !!state.group
-    const notes = state.notes
-    const incoming: SessionSuggestion[] = (view?.cards ?? []).flatMap((value) => {
-      const card = value as Record<string, unknown> | null
-      if (!card || typeof card.id !== 'string' || !['suggest', 'ask', 'summary'].includes(String(card.kind))) return []
-      const text = typeof card.text === 'string' ? card.text.slice(0, 100_000) : ''
-      const deep = card.deep as { text?: unknown } | undefined
-      if (!text && typeof deep?.text !== 'string') return []
-      return [{ id: card.id, kind: card.kind as SessionSuggestion['kind'], question: typeof card.question === 'string' ? card.question.slice(0, 5000) : '', text, deep: typeof deep?.text === 'string' ? deep.text.slice(0, 100_000) : undefined, at: typeof card.at === 'number' ? card.at : owner.startedAt }]
-    }).slice(0, 200)
     return this.queue(async () => {
       if (this.deleted.has(owner.id)) return null
       const previous = await this.read(owner.id)
       if (previous && previous.agentId !== owner.agentId) throw new Error('A saved call cannot change its owning agent.')
       if (previous?.accountId && owner.accountId && previous.accountId !== owner.accountId) throw new Error('A saved call cannot change its subscription account.')
-      // The live window keeps a small recent list. History retains replies that have scrolled out of it.
-      const byId = new Map((previous?.suggestions ?? []).map(card => [card.id, card]))
-      for (const card of incoming) byId.set(card.id, card)
-      const suggestions = [...byId.values()].sort((a, b) => a.at - b.at).slice(-2000)
       return this.write({
         version: 1, ...owner, updatedAt: Date.now(), frameSession,
         accountId: previous?.accountId ?? owner.accountId,
         meeting: previous?.meeting ?? owner.meeting,
         title: previous?.title || 'Untitled call', titleSource: previous?.titleSource, titleKey: previous?.titleKey, titleRetryAt: previous?.titleRetryAt,
-        customTitle: previous?.customTitle, brief, group,
-        transcript, suggestions, notes, callAnswers,
+        // What earlier versions kept with a call (its brief, suggestions, running notes, answers) stays as it was.
+        customTitle: previous?.customTitle, brief: previous?.brief ?? '', group: previous?.group ?? false,
+        transcript, suggestions: previous?.suggestions ?? [], notes: previous?.notes ?? '', callAnswers: previous?.callAnswers ?? [],
         personalNotes: previous?.personalNotes, minutes: previous?.minutes,
         toldOthers: state.toldOthers || previous?.toldOthers || undefined, marks: state.marks?.length ? [...state.marks] : previous?.marks, confirm: previous?.confirm,
-        summary: previous?.summary || incoming.find(card => card.kind === 'summary')?.text || '',
+        summary: previous?.summary || '',
         learning: previous?.learning ?? { state: 'not-reviewed', pending: emptyLessons(), changes: [] }
       })
     })

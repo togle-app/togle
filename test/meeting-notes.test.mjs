@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 process.env.TOGLE_TEST_USER_DATA = path.join(import.meta.dirname, '.work', 'meeting-notes-' + process.pid)
 mkdirSync(process.env.TOGLE_TEST_USER_DATA, { recursive: true })
-const { CallSessions, MeetingNotes, meetingNoteChunks, CallLearning, emptyLessons, exportCall, sessionSummary } = await import('./.build/togle.mjs')
+const { CallSessions, MeetingNotes, meetingNoteChunks, exportCall, sessionSummary } = await import('./.build/togle.mjs')
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes }); return { promise, resolve } }
 let sequence = 0
 const info = id => ({ id, agentId: 'work', agentName: 'Team', accountId: 'claude-work', startedAt: 1000, endedAt: 100000, status: 'ended' })
@@ -109,15 +109,6 @@ test('personal notes are editable, included as a distinct source, exported, and 
   assert.equal(sessionSummary(saved).personalNotes, undefined)
   await f.sessions.capture(info(f.id), 'frames', state())
   assert.match((await f.sessions.get(f.id)).personalNotes, /incident timeline/)
-})
-
-test('learning reviews preserve generated and manually edited meeting notes', async () => {
-  const f = await fixture(), generated = await f.notes.generate(f.id)
-  await f.notes.save(f.id, generated.minutes.revision, 'My meeting notes.')
-  const agent = { id: 'work', learning: 'off', history: [], memory: [], answers: [], skills: [], aboutMe: '', instructions: '' }
-  const learning = new CallLearning(f.sessions, { agent: () => agent, apply: async () => agent, review: async () => ({ ...emptyLessons(), agentId: 'work', record: { summary: 'A separate learning summary.' } }) })
-  await learning.review(f.id)
-  assert.equal((await f.sessions.get(f.id)).summary, 'My meeting notes.')
 })
 
 test('deletion during generation cannot recreate a call or its notes', async () => {

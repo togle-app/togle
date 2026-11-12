@@ -626,25 +626,15 @@ export interface CallLearningResult {
 /** The call so far, for a window that opens (or reopens) on it. */
 export interface CurrentCall {
   session?: CallSessionInfo
+  /** The call's key: its record in Meetings once it is saved. */
+  key: string
   transcript: TranscriptEntry[]
-  frames: Frame[]
-  view?: CallView
-  /** Answers approved or corrected on cards that no review has offered yet. */
-  unreviewedAnswers: number
-  /** What the call is, in the user's words. */
-  brief: string
-  /** A call with several people: suggestions only when the user is the one asked. */
-  group: boolean
   /** When the person said they had told the others the call is written down (0: not yet). */
   toldOthers?: number
   /** The moments marked so far, on the call's clock. */
   marks?: number[]
   /** Set when the call was picked up from disk as Togle started: when it was last saved. */
   restoredFrom?: number
-  /** The parts of its cards still being answered ("<card id>:main", "<card id>:deep"). */
-  answering: string[]
-  /** The earlier calls with the same people its answers draw on. */
-  recalled: PastCall[]
 }
 
 /** One message of a Train conversation. */

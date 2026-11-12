@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import electron from './electron.mjs'
-import { agentAccess, quick, say, wait, workDir } from './helpers.mjs'
+import { say, workDir } from './helpers.mjs'
 
 workDir('plan')
 const { AgentStore, ChatGPTProvider, Copilot, PlanWatch, getSettings, readRefusal, readStatus, updateSettings, windowsFromHeaders } = await import(
@@ -208,108 +208,6 @@ test("nothing asks ChatGPT for the plan's usage figures: they are in ChatGPT's s
   assert.deepEqual(usage.windows, [])
   assert.equal(usage.limitedUntil, undefined)
   assert.equal(asked.usage, 0)
-})
-
-/** A copilot whose model has a plan: `state.until` is when its reached limit starts over, `state.saving` the model it saves with. */
-function copilotWithPlan(agentId, reply) {
-  const state = { until: 0, saving: undefined }
-  const inputs = []
-  const model = {
-    id: 'fake',
-    supportsTools: false,
-    plan: { limited: (now = Date.now()) => (state.until > now ? state.until : undefined), saving: () => state.saving },
-    listModels: async () => [],
-    stream: async (input, { onDelta, onAccepted }) => {
-      inputs.push(input)
-      onAccepted?.()
-      await wait(0)
-      onDelta(reply(input))
-    }
-  }
-  const frames = { snapshot: async () => assert.fail('no screen here'), dataUrl: async () => 'data:', reset: async () => {} }
-  const copilot = new Copilot(() => {}, () => model, frames, agentAccess(store, agentId))
-  return { copilot, inputs, state }
-}
-
-test("while the plan's limit is reached nothing is suggested on its own; once it starts over, it is again", async () => {
-  const sales = await store.create('sales')
-  const { copilot, inputs, state } = copilotWithPlan(sales.id, () => 'LEVEL: quick\nThirty seats come to 1,050 euros.')
-  copilot.setListening(true)
-  state.until = Date.now() + 60_000
-  copilot.anticipate('How much is it for thirty seats?', Date.now() - 2000, 'seg-1')
-  copilot.add('them', 'How much is it for thirty seats?', Date.now() - 2000, Date.now(), 'seg-1')
-  await wait(500)
-  assert.equal(inputs.length, 0)
-  await copilot.assist({ kind: 'suggest' })
-  assert.equal(quick(inputs).length, 1, 'Suggest still tries')
-  state.until = 0
-  copilot.add('them', 'And for forty?', Date.now() - 1000, Date.now())
-  await wait(500)
-  assert.equal(quick(inputs).length, 2)
-  copilot.setListening(false)
-})
-
-test('frames wait out a reached limit, and are described once it starts over', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.parse('2026-10-23T10:00:00Z') })
-  const flush = async () => {
-    for (let i = 0; i < 8; i++) await new Promise((resolve) => setImmediate(resolve))
-  }
-  const sales = await store.create('sales')
-  const { copilot, inputs, state } = copilotWithPlan(sales.id, (input) => (input.lane === 'vision' ? 'F1: Slide: pricing for the Growth plan.' : 'LEVEL: quick\nOk.'))
-  state.until = Date.now() + 120_000
-  copilot.addFrame({ id: 'f1', n: 1, at: Date.now(), kind: 'snapshot', thumbUrl: '', imageUrl: '' })
-  await flush()
-  t.mock.timers.tick(100_000)
-  await flush()
-  assert.equal(inputs.length, 0)
-  t.mock.timers.tick(30_001)
-  await flush()
-  assert.deepEqual(
-    inputs.map((i) => i.lane),
-    ['vision']
-  )
-})
-
-test('near the limit, code on the screen is no reason to start the deep answer before the verdict', async () => {
-  const sales = await store.create('sales')
-  const lanes = async (saving) => {
-    const { copilot, inputs, state } = copilotWithPlan(sales.id, (input) =>
-      input.lane === 'vision' ? 'F1: Code: a TypeScript function mergeOrders that skips undefined orders.' : 'LEVEL: quick\nIt skips undefined orders, so check the input.'
-    )
-    state.saving = saving
-    copilot.addFrame({ id: 'f1', n: 1, at: Date.now() - 1000, kind: 'snapshot', thumbUrl: '', imageUrl: '' })
-    await wait(20)
-    copilot.add('them', 'Why does this return null?', Date.now() - 1000, Date.now())
-    await copilot.assist({ kind: 'suggest' })
-    await wait(50)
-    return inputs.map((i) => i.lane).filter((lane) => lane !== 'vision')
-  }
-  assert.deepEqual(await lanes(undefined), ['quick', 'deep'], 'a weak hunch starts it early')
-  assert.deepEqual(await lanes('GPT-6 Luna'), ['quick'], 'saving: the quick verdict decides')
-})
-
-test('frames waiting out a limit a month away look again every minute, and are described once it lifts sooner', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.parse('2026-10-23T10:00:00Z') })
-  const flush = async () => {
-    for (let i = 0; i < 8; i++) await new Promise((resolve) => setImmediate(resolve))
-  }
-  const sales = await store.create('sales')
-  const { copilot, inputs, state } = copilotWithPlan(sales.id, (input) => (input.lane === 'vision' ? 'F1: Slide: pricing for the Growth plan.' : 'LEVEL: quick\nOk.'))
-  // Past what a timer can hold (about 24.8 days): it must not fire at once, again and again.
-  state.until = Date.now() + 30 * 86_400_000
-  copilot.addFrame({ id: 'f1', n: 1, at: Date.now(), kind: 'recorded', thumbUrl: '', imageUrl: '' })
-  await flush()
-  t.mock.timers.tick(5 * 60_000)
-  await flush()
-  assert.equal(inputs.length, 0)
-  // An answer came through on credits, or another provider was picked: the limit is gone.
-  state.until = 0
-  t.mock.timers.tick(60_000)
-  await flush()
-  assert.deepEqual(
-    inputs.map((i) => i.lane),
-    ['vision']
-  )
 })
 
 test("a call's share counts from the figures that come in after it starts, not from older ones", () => {

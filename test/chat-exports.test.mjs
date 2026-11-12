@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node
 import path from 'node:path'
 import { test } from 'node:test'
 import JSZip from 'jszip'
-import { backend, call, say, wait, workDir } from './helpers.mjs'
+import { call, wait, workDir } from './helpers.mjs'
 
 const dir = workDir('chat-exports')
 // Their home folder and Downloads, here: never the real ones of whoever runs the tests.
@@ -17,7 +17,7 @@ process.env.CODEX_HOME = path.join(home, '.codex')
 const downloads = path.join(home, 'Downloads')
 const list = path.join(dir, 'chat-exports.json')
 
-const { AgentStore, ChatGPTProvider, addExport, entryStream, exportAt, findSessions, readChat, sessionHomes, sessionInfo, setChatExports, train, zipEntries } =
+const { AgentStore, addExport, entryStream, exportAt, findSessions, readChat, sessionHomes, sessionInfo, setChatExports, zipEntries } =
   await import('./.build/togle.mjs')
 
 const write = (file, text, at) => {
@@ -221,17 +221,6 @@ setChatExports({ list, downloads })
 // What a chat is about, by what was asked in it, as studying it says.
 const store = new AgentStore(async (system, user) => `About: ${/Lisbon/.test(user) ? 'A weekend in Lisbon' : 'Deploying billing'}\n- Status as of Fri, Oct 23: planned`)
 await store.load()
-const provider = new ChatGPTProvider({ getAccess: async () => ({ accessToken: 'token', accountId: 'account' }) })
-const talk = async (agentId, message, rounds) => {
-  const requests = backend(rounds)
-  const changes = []
-  await train(store, provider, agentId, [], message, new AbortController().signal, { onDelta() {}, onChange: (c) => changes.push(c) })
-  const outputs = requests
-    .at(-1)
-    .input.filter((i) => i.type === 'function_call_output')
-    .map((i) => i.output)
-  return { outputs, changes }
-}
 async function until(check, what) {
   for (let i = 0; i < 300; i++) {
     if (check()) return
@@ -392,48 +381,6 @@ test('a chat given to an agent keeps the name it has in their list, and a newer 
   const text = readFileSync(path.join(dir, 'agents', agent.id, `${docOf(address).id}.txt`), 'utf8')
   assert.match(text, /Me \(\d\d:\d\d\): Moved to Thursday instead\.\n\nChatGPT: Thursday 15:00 then\.$/)
   assert.equal(docOf(address).name, 'Deploy checklist (ChatGPT chat)')
-})
-
-test('asked for a chat in words, the agent finds it, in one account or all, and adds it', async () => {
-  const agent = await store.create('general')
-  const { outputs, changes } = await talk(agent.id, 'Add my ChatGPT chat about the Acme SSO rollout.', [
-    call(1, 'find_work_sessions', { query: 'SSO rollout' }),
-    call(2, 'find_work_sessions', { query: 'deploy', from: 'ChatGPT' }),
-    call(3, 'find_work_sessions', { from: 'acme' }),
-    call(4, 'add_work_session', { id: GPT_SSO }),
-    say('Added it.')
-  ])
-  assert.match(outputs[0], /^Looked in all of them: Claude Code, claude\.ai, ChatGPT \(me@personal\.example\), ChatGPT \(me@acme\.example\)\.\n/)
-  assert.match(outputs[0], new RegExp(`\\n- id ${GPT_SSO}: "Acme SSO rollout" \\(ChatGPT \\(me@acme\\.example\\)\\), last worked on `))
-  assert.equal(outputs[1], '"ChatGPT" could be ChatGPT (me@personal.example), ChatGPT (me@acme.example): say which.')
-  assert.match(outputs[2], /^Looked in ChatGPT \(me@acme\.example\)\. Also on this PC: Claude Code, claude\.ai, ChatGPT \(me@personal\.example\)\.\n- id /)
-  assert.match(outputs[3], /^Added: "Acme SSO rollout \(ChatGPT chat\)"/)
-  assert.deepEqual(changes, ['Added to Knowledge: Acme SSO rollout (ChatGPT chat)'])
-
-  // An account on the web as its own.
-  const own = await talk(agent.id, 'This agent is for Acme: only my Acme ChatGPT.', [call(1, 'set_session_sources', { sources: ['acme'] }), call(2, 'find_work_sessions', {}), say('Done.')])
-  assert.match(own.outputs[0], /^Work sessions from: ChatGPT \(me@acme\.example\)\. find_work_sessions looks only there now/)
-  assert.match(own.outputs[1], /^Looked in this agent's own: ChatGPT \(me@acme\.example\)\./)
-  assert.doesNotMatch(own.outputs[1], /Deploy checklist|Checkout crash/)
-})
-
-test('with no export, a chat on the web they ask for is said to come from one', async () => {
-  setChatExports({})
-  try {
-    const agent = await store.create('general')
-    const { outputs } = await talk(agent.id, 'Add my ChatGPT chat about pricing.', [
-      call(1, 'find_work_sessions', { query: 'pricing' }),
-      call(2, 'find_work_sessions', { query: 'pricing', from: 'ChatGPT' }),
-      say('Export it first.')
-    ])
-    assert.equal(
-      outputs[0],
-      'No work session matches "pricing". Try other words, or none for the latest. No export of their chats on claude.ai or ChatGPT is on this PC yet: those come in from one.'
-    )
-    assert.equal(outputs[1], "There's no export of their ChatGPT chats on this PC yet: those come in from one. There are: Claude Code.")
-  } finally {
-    setChatExports({ list, downloads })
-  }
 })
 
 test('an export they gave that is gone is let go of', async () => {

@@ -9,7 +9,7 @@ import JSZip from 'jszip'
 import { workDir } from './helpers.mjs'
 
 const work = workDir('imports')
-const { AgentStore, CodeBase, SearchIndex, chunkText, extractText, globTest, listFolder, setCodePage, setReaderScript } = await import('./.build/togle.mjs')
+const { AgentStore, SearchIndex, chunkText, extractText, listFolder, setCodePage, setReaderScript } = await import('./.build/togle.mjs')
 
 const file = (name, content) => {
   const at = path.join(work, name)
@@ -132,34 +132,6 @@ test('a document past what one holds, or an agent past what it searches, is refu
   for (let i = 0; i < 4; i++) await store.addText(agent.id, `Part ${i}`, 'term '.repeat(980_000))
   await assert.rejects(store.addText(agent.id, 'One more', 'term '.repeat(200_000)), /would hold more than 20 million characters/)
   assert.equal(store.list().find((a) => a.id === agent.id).knowledge.length, 4)
-})
-
-test('a file pattern that would backtrack for minutes matches in a moment; patterns match as before', () => {
-  const started = Date.now()
-  assert.equal(globTest('**a**a**a**a**a**a**a**b')('a'.repeat(60)), false)
-  assert.ok(Date.now() - started < 500, `${Date.now() - started} ms`)
-  assert.equal(globTest('*.ts')('src/orders/app.ts'), true)
-  assert.equal(globTest('*.ts')('src/orders/app.tsx'), false)
-  assert.equal(globTest('src/orders/*')('src/orders/app.ts'), true)
-  assert.equal(globTest('src/**')('src/a/b/c.ts'), true)
-  assert.equal(globTest('app.?s')('src/app.ts'), true)
-  assert.equal(globTest('APP.TS')('src/app.ts'), true, 'case does not matter')
-  assert.equal(globTest('orders/*.ts')('src/orders/app.ts'), false, 'with a folder, from the top')
-})
-
-test("a file of long lines is read within what one answer takes", async () => {
-  // Not inside Togle's own repository, which git would take it for.
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'togle-code-'))
-  try {
-    writeFileSync(path.join(dir, 'bundle.js'), Array.from({ length: 300 }, (_, i) => `var line${i} = "${'x'.repeat(3200)}";`).join('\n'))
-    const code = new CodeBase([dir])
-    const read = await code.read('bundle.js')
-    assert.ok(read.length < 70_000, `${read.length.toLocaleString()} characters`)
-    assert.match(read, /… \(3,21\d characters\)/)
-    assert.match(read, /ask for more with start_line/)
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
 })
 
 test("a file is read in its worker; one that fails there says why; a worker that can't start reads it here", async () => {

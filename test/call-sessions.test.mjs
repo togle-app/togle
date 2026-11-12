@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import { workDir } from './helpers.mjs'
 
 const work = workDir('call-sessions')
-const { CallSessions, CallLearning, CallFile, AgentStore, emptyLessons, legacySession, exportCall } = await import('./.build/togle.mjs')
+const { CallSessions, CallFile, AgentStore, legacySession, exportCall } = await import('./.build/togle.mjs')
 const agents = new AgentStore(async () => '')
 await agents.load()
 let order = 0
@@ -24,24 +24,25 @@ test('short and empty calls are saved before any learning or summary exists', as
   assert.ok(readFileSync(path.join(work, 'call-history/short-call.bin'), 'utf8').startsWith('ENC:'))
 })
 
-test('a restarted repository can inspect the full transcript and saved suggestions', async () => {
+test('a restarted repository can inspect the full transcript, and its export says it', async () => {
   const repo = new CallSessions()
-  await repo.capture(info('inspect-call'), 'frames', state('What is our next step?'), { cards: [{ id: 'reply', kind: 'suggest', question: 'What is our next step?', text: 'Send the report.', deep: { text: 'Confirm the owner first.' }, at: 2500 }], reviewedLines: 0 })
+  await repo.capture(info('inspect-call'), 'frames', state('What is our next step?'))
   const saved = await new CallSessions().get('inspect-call')
   assert.equal(saved.transcript[0].text, 'What is our next step?')
-  assert.equal(saved.suggestions[0].text, 'Send the report.')
-  assert.equal(saved.suggestions[0].deep, 'Confirm the owner first.')
+  assert.deepEqual(saved.suggestions, [])
   assert.match(exportCall(saved), /Call: What is our next step\?/)
-  assert.match(exportCall(saved), /Confirm the owner first/)
 })
 
-test('history keeps earlier replies after they leave the live window and updates a streaming reply in place', async () => {
+test('what an earlier version kept with a call stays with it when the call is saved again', async () => {
   const repo = new CallSessions()
-  await repo.capture(info('long-call'), 'frames', state('A long meeting.'), { reviewedLines: 0, cards: [{ id: 'early', kind: 'suggest', text: 'An early answer.', at: 1000 }, { id: 'stream', kind: 'suggest', text: 'The first words', at: 2000 }] })
-  await repo.capture(info('long-call'), 'frames', state('A long meeting.'), { reviewedLines: 0, cards: [{ id: 'stream', kind: 'suggest', text: 'The first words and the completed answer.', at: 2000 }, { id: 'late', kind: 'suggest', text: 'A later answer.', at: 3000 }] })
-  const saved = await repo.get('long-call')
-  assert.deepEqual(saved.suggestions.map(card => card.id), ['early', 'stream', 'late'])
-  assert.equal(saved.suggestions[1].text, 'The first words and the completed answer.')
+  await repo.capture(info('older-call'), 'frames', state('A long meeting.'))
+  await repo.update('older-call', call => ({ ...call, brief: 'Acme renewal', notes: 'Pricing came up.', suggestions: [{ id: 'early', kind: 'suggest', question: '', text: 'An early answer.', at: 1000 }] }))
+  await repo.capture(info('older-call'), 'frames', state('A long meeting, still going.'))
+  const saved = await repo.get('older-call')
+  assert.equal(saved.transcript[0].text, 'A long meeting, still going.')
+  assert.deepEqual(saved.suggestions.map(card => card.id), ['early'])
+  assert.equal(saved.brief, 'Acme renewal')
+  assert.equal(saved.notes, 'Pricing came up.')
 })
 
 test('capture updates preserve renamed titles and learning committed while the call was saving', async () => {
@@ -129,136 +130,9 @@ test('older summary-only calls remain inspectable without inventing transcript l
 test('active call recovery forwards a committed snapshot into the history repository', async () => {
   const repo = new CallSessions()
   const session = info('recovery-hook')
-  const file = new CallFile(() => ({ frameSession: 'frames', session, state: state('A short call still matters.') }), saved => repo.capture(saved.session, saved.frameSession, saved.state, saved.view))
-  file.setView({ key: session.id, cards: [], reviewedLines: 0 })
+  const file = new CallFile(() => ({ frameSession: 'frames', session, state: state('A short call still matters.') }), saved => repo.capture(saved.session, saved.frameSession, saved.state))
+  file.changed()
   await file.flush()
   assert.equal((await repo.get(session.id)).transcript[0].text, 'A short call still matters.')
 })
 
-async function learner(mode = 'auto', extra = {}) {
-  const agent = await agents.create('blank', { name: 'Learner ' + ++order, learning: mode })
-  const repo = new CallSessions()
-  const id = 'learning-' + order
-  await repo.capture(info(id, agent.id), 'frame-' + id, state('How should we troubleshoot?'))
-  const calls = []
-  const service = new CallLearning(repo, {
-    agent: id => agents.get(id), apply: (id, lessons, auto) => agents.applyLessons(id, lessons, auto),
-    review: async record => { calls.push(record); return { ...emptyLessons(), agentId: agent.id, facts: ['Ask for the operating system before troubleshooting.', 'The price is EUR 49 per user.'] } },
-    ...extra
-  })
-  return { id, repo, service, agent, calls }
-}
-
-test('automatic improvement keeps a reusable lesson but stages a price for approval', async () => {
-  const { id, service, agent } = await learner()
-  const result = await service.review(id)
-  assert.deepEqual(agents.get(agent.id).memory, ['Ask for the operating system before troubleshooting.'])
-  assert.deepEqual(result.session.learning.pending.facts, ['The price is EUR 49 per user.'])
-  assert.equal(result.session.learning.changes.length, 1)
-  assert.equal(result.session.learning.state, 'reviewed')
-})
-
-test('ask-first and manual-only modes stage every lesson without changing memory', async () => {
-  for (const mode of ['ask', 'off']) {
-    const { id, service, agent } = await learner(mode)
-    const result = await service.review(id)
-    assert.equal(result.session.learning.pending.facts.length, 2)
-    assert.equal(agents.get(agent.id).memory.length, 0)
-  }
-})
-
-test('approving selected lessons applies only persisted proposals and rejects a stale decision', async () => {
-  const { id, service, agent } = await learner('ask')
-  const reviewed = await service.review(id)
-  const revision = reviewed.session.learning.reviewId
-  const kept = await service.approve(id, revision, ['facts:0'])
-  assert.equal(agents.get(agent.id).memory.length, 1)
-  assert.equal(kept.session.learning.pending.facts.length, 1)
-  await assert.rejects(service.approve(id, revision, ['facts:0']), /changed/)
-  assert.ok(!agents.get(agent.id).memory.some(fact => fact.includes('49')))
-})
-
-test('a review ID from another call cannot approve its lessons', async () => {
-  const first = await learner('ask')
-  const second = await learner('ask')
-  const a = await first.service.review(first.id)
-  await second.service.review(second.id)
-  await assert.rejects(second.service.approve(second.id, a.session.learning.reviewId, ['facts:0']), /changed/)
-  assert.equal(agents.get(second.agent.id).memory.length, 0)
-})
-
-test('a full live context does not block call approval and approved facts survive reopening', async () => {
-  const { id, service, agent } = await learner('ask')
-  const before = Array.from({ length: 20 }, (_, i) => `Existing fact ${i}: ${'verified '.repeat(26)}`)
-  await agents.update(agent.id, { memory: before })
-  const reviewed = await service.review(id)
-  const kept = await service.approve(id, reviewed.session.learning.reviewId, ['facts:0', 'facts:1'])
-  assert.equal(kept.session.learning.pending.facts.length, 0)
-  assert.deepEqual(agents.get(agent.id).memory.slice(0, before.length), before)
-  assert.equal(agents.get(agent.id).memory.length, before.length + 2)
-  const reopened = new AgentStore(async () => '')
-  await reopened.load()
-  assert.deepEqual(reopened.get(agent.id).memory, agents.get(agent.id).memory)
-  assert.equal((await new CallSessions().get(id)).learning.pending.facts.length, 0)
-})
-
-test('an unchanged call is reviewed once and undo is respected when it is inspected again', async () => {
-  const { id, service, calls, agent } = await learner()
-  const first = await service.review(id)
-  await service.review(id)
-  assert.equal(calls.length, 1)
-  await agents.undo(agent.id, first.session.learning.changes[0].id)
-  await service.review(id)
-  assert.equal(calls.length, 1)
-  assert.equal(agents.get(agent.id).memory.length, 0)
-})
-
-test('simultaneous review clicks share one model request', async () => {
-  let finish
-  const { id, service } = await learner('ask', { review: record => new Promise(resolve => { finish = () => resolve({ ...emptyLessons(), agentId: record.agentId, facts: ['A confirmed reusable fact.'] }) }) })
-  const first = service.review(id)
-  const second = service.review(id)
-  assert.equal(first, second)
-  while (!finish) await new Promise(resolve => setImmediate(resolve))
-  finish()
-  await first
-})
-
-test('a corrected answer causes a new review even when the transcript length stays the same', async () => {
-  const { id, service, repo, calls } = await learner('ask')
-  await service.review(id)
-  await repo.update(id, record => ({ ...record, callAnswers: [{ question: 'Which product?', answer: 'The approved product.' }] }))
-  await service.review(id)
-  assert.equal(calls.length, 2)
-})
-
-test('a failed review is visible and can be retried without losing the transcript', async () => {
-  let failed = false
-  const { id, service, repo } = await learner('ask', { review: async record => { if (!failed) { failed = true; throw new Error('Temporary provider limit') }; return { ...emptyLessons(), agentId: record.agentId } } })
-  await assert.rejects(service.review(id), /provider limit/)
-  assert.equal((await repo.get(id)).learning.state, 'error')
-  assert.equal((await repo.get(id)).transcript.length, 1)
-  assert.equal((await service.review(id)).session.learning.state, 'reviewed')
-})
-
-test('deleting an agent during a review cannot redirect its lessons into the fallback agent', async () => {
-  let finish
-  const { id, service, agent } = await learner('auto', { review: record => new Promise(resolve => { finish = () => resolve({ ...emptyLessons(), agentId: record.agentId, facts: ['Private information for the deleted agent.'] }) }) })
-  const fallback = agents.list().find(other => other.id !== agent.id)
-  const memory = structuredClone(fallback.memory)
-  const pending = service.review(id)
-  while (!finish) await new Promise(resolve => setImmediate(resolve))
-  await agents.remove(agent.id)
-  finish()
-  await assert.rejects(pending, /agent was deleted/)
-  assert.deepEqual(agents.get(fallback.id).memory, memory)
-})
-
-test('marking an approved answer as reviewed does not cause a second model review', async () => {
-  const { id, service, repo, calls } = await learner('ask')
-  await repo.update(id, record => ({ ...record, callAnswers: [{ question: 'Which product?', answer: 'The approved product.', reviewed: false }] }))
-  await service.review(id)
-  await repo.update(id, record => ({ ...record, callAnswers: record.callAnswers.map(answer => ({ ...answer, reviewed: true })) }))
-  await service.review(id)
-  assert.equal(calls.length, 1)
-})

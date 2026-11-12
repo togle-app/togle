@@ -130,7 +130,7 @@ module.exports = function install(fixture) {
   }
   // What the person did during the call besides listening: told the others, and the moments they marked.
   let flags = { toldOthers: 0, marks: [] }
-  const current = () => ({ session: currentInfo, transcript: clone(transcript), frames: [], brief: '', group: false, toldOthers: flags.toldOthers, marks: [...flags.marks], unreviewedAnswers: 0, answering: [], recalled: [], view: { key: currentKey, cards: [], reviewedLines: 0 } })
+  const current = () => ({ session: currentInfo, key: currentKey, transcript: clone(transcript), toldOthers: flags.toldOthers, marks: [...flags.marks] })
   api.setToldOthers = told => { record('setToldOthers', [told]); flags = { ...flags, toldOthers: told ? flags.toldOthers || Date.now() : 0 }; emit('onCallFlags', clone(flags)) }
   api.markCall = async () => { record('markCall', []); flags = { ...flags, marks: [...flags.marks, Date.now()] }; emit('onCallFlags', clone(flags)); return [...flags.marks] }
   const capture = () => {

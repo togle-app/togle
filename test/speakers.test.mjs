@@ -4,10 +4,10 @@ import { EventEmitter } from 'node:events'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import electron from './electron.mjs'
-import { copilotWith, workDir } from './helpers.mjs'
+import { ongoingCall, workDir } from './helpers.mjs'
 const profile = workDir('speakers')
 globalThis.__dirname = profile // Production workers are bundled as CommonJS.
-const { VoiceClusters, VoiceTracker, speechTurns, mergeSpeakers, Copilot, AgentStore } = await import('./.build/togle.mjs')
+const { VoiceClusters, VoiceTracker, speechTurns, mergeSpeakers, OngoingCall, AgentStore } = await import('./.build/togle.mjs')
 const basis = (i, dimensions = 64) => Float32Array.from({ length: dimensions }, (_, n) => n === i ? 1 : 0)
 const variant = (i, strength, noise = 20) => Float32Array.from({ length: 64 }, (_, n) => n === i ? strength : n === noise ? Math.sqrt(1 - strength * strength) : 0)
 const observation = (id, embedding, at, seconds = 3, evidence = 1) => ({ id, embedding, at, end: at + seconds * 1000, seconds, evidence })
@@ -135,21 +135,21 @@ test('explicit transcript merge keeps confirmed names, original timing and unrel
 
 test('live merge corrects past words and queued and late labels without resurrecting a duplicate', async () => {
   const store = new AgentStore(async () => ''); await store.load()
-  const { copilot, events } = copilotWith(Copilot, store, store.list()[0].id, [])
+  const { ongoing, events } = ongoingCall(OngoingCall)
   const now = Date.now()
-  copilot.add('them', 'My name is Dana.', now, now + 2000, 'a'); copilot.identifyVoice('a', 'v:1')
-  copilot.add('them', 'We ship on Tuesday.', now + 2300, now + 5000, 'b'); copilot.identifyVoice('b', 'v:2')
-  copilot.renameVoice('v:1', 'Diana')
-  copilot.identifyVoice('queued', 'v:2')
-  copilot.mergeVoices('v:2', 'v:1')
-  copilot.add('them', 'The first followup.', now + 5500, now + 6000, 'queued')
-  copilot.add('them', 'The second followup.', now + 6100, now + 7000, 'late'); copilot.identifyVoice('late', 'v:2')
-  assert.ok(copilot.currentCall().transcript.every(item => item.voiceId === 'v:1' && item.voiceName === 'Diana'))
-  assert.equal(speechTurns(copilot.currentCall().transcript).length, 1)
+  ongoing.add('them', 'My name is Dana.', now, now + 2000, 'a'); ongoing.identifyVoice('a', 'v:1')
+  ongoing.add('them', 'We ship on Tuesday.', now + 2300, now + 5000, 'b'); ongoing.identifyVoice('b', 'v:2')
+  ongoing.renameVoice('v:1', 'Diana')
+  ongoing.identifyVoice('queued', 'v:2')
+  ongoing.mergeVoices('v:2', 'v:1')
+  ongoing.add('them', 'The first followup.', now + 5500, now + 6000, 'queued')
+  ongoing.add('them', 'The second followup.', now + 6100, now + 7000, 'late'); ongoing.identifyVoice('late', 'v:2')
+  assert.ok(ongoing.current().transcript.every(item => item.voiceId === 'v:1' && item.voiceName === 'Diana'))
+  assert.equal(speechTurns(ongoing.current().transcript).length, 1)
   assert.ok(events.some(event => event.channel === 'transcript:updated' && event.payload.length >= 2))
-  await copilot.clear()
-  copilot.add('them', 'A new meeting.', Date.now() + 20000, Date.now() + 22000, 'new'); copilot.identifyVoice('new', 'v:2')
-  assert.equal(copilot.currentCall().transcript[0].voiceId, 'v:2', 'corrections do not leak into another call')
+  await ongoing.clear()
+  ongoing.add('them', 'A new meeting.', Date.now() + 20000, Date.now() + 22000, 'new'); ongoing.identifyVoice('new', 'v:2')
+  assert.equal(ongoing.current().transcript[0].voiceId, 'v:2', 'corrections do not leak into another call')
 })
 
 test('worker backfill, bounded queues, whole-turn audio, merge, pause and stale callbacks work together', async () => {

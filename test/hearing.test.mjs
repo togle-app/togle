@@ -1,4 +1,4 @@
-// From the window's audio segments to captions, transcript lines and answers started at a pause.
+// From the window's audio segments to captions and transcript lines.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { workDir } from './helpers.mjs'
@@ -20,7 +20,7 @@ test('pausing one input drops its late results, while the other side keeps trans
   assert.deepEqual(calls.filter(call => call[0] === 'add').map(call => call[2]), ['The other side keeps working.', 'Fresh resumed words.'])
 })
 
-test('agent terminology corrects captions, pause suggestions and final transcripts consistently', async () => {
+test('agent terminology corrects captions, pauses and final transcripts consistently', async () => {
   const { handler, calls } = ears({ normalize: text => text.replaceAll('so three', 'SOH 3'), parakeet: [
     { text: 'Is so three ready?', confidence: .99 }, { text: 'Is so three ready?', confidence: .99 }, { text: 'Is so three ready?', confidence: .99 }
   ] })
@@ -28,7 +28,7 @@ test('agent terminology corrects captions, pause suggestions and final transcrip
   await handler('them', second, 1000, 'word', 'pause')
   await handler('them', second, 1000, 'word', 'final')
   assert.ok(calls.some(call => call[0] === 'caption' && call[1] === 'Is SOH 3 ready?'))
-  assert.ok(calls.some(call => call[0] === 'anticipate' && call[1] === 'Is SOH 3 ready?'))
+  assert.equal(calls.filter(call => call[0] === 'caption' && call[1] === 'Is SOH 3 ready?').length, 2, 'the partial and the pause')
   assert.ok(calls.some(call => call[0] === 'add' && call[2] === 'Is SOH 3 ready?'))
 })
 
@@ -55,7 +55,7 @@ test('New call discards a slow previous transcript and does not make the new cal
   assert.deepEqual(calls.filter(([kind]) => kind === 'add').map(([, , text]) => text), ['Contoso interview question.'])
 })
 
-test('a pause from an old call cannot create a caption or suggestion in the new call', async () => {
+test('a pause from an old call cannot create a caption in the new call', async () => {
   let finish
   const slow = () => new Promise((resolve) => { finish = () => resolve({ text: 'Old private question?', confidence: 0.99 }) })
   const { handler, calls } = ears({ parakeet: [slow] })
@@ -63,10 +63,10 @@ test('a pause from an old call cannot create a caption or suggestion in the new 
   handler.reset()
   finish()
   await previous
-  assert.ok(!calls.some(([kind]) => ['caption', 'anticipate', 'talked on', 'add', 'drop'].includes(kind)))
+  assert.ok(!calls.some(([kind]) => ['caption', 'add'].includes(kind)))
 })
 
-test('a partial finishing after its final transcript cannot replace it or cancel an answer', async () => {
+test('a partial finishing after its final transcript cannot replace it', async () => {
   let finish
   const slow = () => new Promise((resolve) => { finish = () => resolve({ text: 'Obsolete incomplete words', confidence: 0.99 }) })
   const { handler, calls } = ears({ parakeet: [slow, { text: 'Correct final question?', confidence: 0.99 }] })
@@ -75,10 +75,10 @@ test('a partial finishing after its final transcript cannot replace it or cancel
   finish()
   await preview
   assert.ok(calls.some(([kind, , text]) => kind === 'add' && text === 'Correct final question?'))
-  assert.ok(!calls.some(([kind]) => kind === 'caption' || kind === 'talked on'))
+  assert.ok(!calls.some(([kind]) => kind === 'caption'))
 })
 
-/** The hearing handler with recognizers and a copilot that record what they were asked (`api`: the speech API picked for a side). */
+/** The hearing handler with recognizers and a call that record what they were asked (`api`: the speech API picked for a side). */
 function ears({ parakeet = [], whisper = [], language = 'en', api, normalize, whisperReady, whisperChecks } = {}) {
   const calls = []
   const handler = hearing({
@@ -104,28 +104,22 @@ function ears({ parakeet = [], whisper = [], language = 'en', api, normalize, wh
     },
     language: () => language,
     vocabulary: async () => 'Nordlink, SAP',
-    copilot: {
-      anticipate: (...args) => calls.push(['anticipate', ...args]),
-      dropAnticipated: (id) => calls.push(['drop', id]),
-      talkedOn: (id, heard) => calls.push(['talked on', id, heard]),
-      add: (...args) => calls.push(['add', ...args])
-    },
+    call: { add: (...args) => calls.push(['add', ...args]) },
     caption: ({ text }) => calls.push(['caption', text])
   })
   return { handler, calls }
 }
 
-test('a pause Parakeet is sure of starts the answer and shows its caption', async () => {
+test('a pause Parakeet is sure of shows its caption at once', async () => {
   const { handler, calls } = ears({ parakeet: [{ text: 'How much is it?', confidence: 0.95 }] })
   await handler('them', second, 1000, 'seg-1', 'pause')
   assert.deepEqual(calls, [
     ['parakeet', true],
-    ['caption', 'How much is it?'],
-    ['anticipate', 'How much is it?', 1000, 'seg-1', 2000]
+    ['caption', 'How much is it?']
   ])
 })
 
-test('a pause heard only after they went on talking starts nothing', async () => {
+test('a pause heard only after they went on talking does not bring back fewer words', async () => {
   let finish
   const slow = () => new Promise((resolve) => (finish = () => resolve({ text: 'How much is it?', confidence: 0.95 })))
   const { handler, calls } = ears({ parakeet: [slow, { text: 'How much is it for forty', confidence: 0.9 }] })
@@ -133,11 +127,7 @@ test('a pause heard only after they went on talking starts nothing', async () =>
   await handler('them', second, 1000, 'seg-2', 'partial')
   finish()
   await atPause
-  assert.ok(
-    calls.some(([what, id, heard]) => what === 'talked on' && id === 'seg-2' && heard === 'How much is it for forty'),
-    'talking again tells the copilot what was said by now, which drops an answer started at the pause for less'
-  )
-  assert.equal(calls.filter(([what]) => what === 'anticipate').length, 0)
+  assert.deepEqual(calls.filter(([what]) => what === 'caption').map(([, text]) => text), ['How much is it for forty'])
 })
 
 test("unsure Parakeet hands the utterance to Whisper, with the agent's words", async () => {
@@ -150,16 +140,13 @@ test("unsure Parakeet hands the utterance to Whisper, with the agent's words", a
   ])
 })
 
-test('an empty final drops an answer started at the pause and clears the caption', async () => {
+test('an empty final clears the caption', async () => {
   const { handler, calls } = ears()
   await handler('them', new Float32Array(0), 1000, 'seg-4', 'final')
-  assert.deepEqual(calls, [
-    ['drop', 'seg-4'],
-    ['caption', '']
-  ])
+  assert.deepEqual(calls, [['caption', '']])
 })
 
-test("without Parakeet, or in a language Parakeet doesn't hear, Whisper hears everything and pauses start nothing", async () => {
+test("without Parakeet, or in a language Parakeet doesn't hear, Whisper hears every finished line and a pause shows nothing early", async () => {
   for (const setup of [{ parakeet: null }, { language: 'sr' }]) {
     const { handler, calls } = ears({ ...setup, whisper: ['Koliko košta?'] })
     await handler('them', second, 1000, 'seg-5', 'pause')
@@ -176,7 +163,7 @@ test("Parakeet hears its other languages too: a Croatian call's pause and final 
   await handler('them', second, 1000, 'hr-1', 'pause')
   await handler('them', second, 1000, 'hr-1', 'final')
   assert.ok(!calls.some(([what]) => what === 'whisper'), 'no Whisper for a language Parakeet hears, accented letters and all')
-  assert.ok(calls.some(([what, text]) => what === 'anticipate' && text === 'Koliko košta?'))
+  assert.ok(calls.some(([what, text]) => what === 'caption' && text === 'Koliko košta?'))
   assert.ok(calls.some(([what, , text]) => what === 'add' && text === 'Koliko košta?'))
 })
 
@@ -196,7 +183,7 @@ test("without Whisper (a CPU's, for Parakeet's languages), Parakeet's text is ke
   await noisy.handler('them', speech(0.02), 1000, 'de-2', 'pause')
   await noisy.handler('them', speech(0.02), 1000, 'de-2', 'final')
   assert.ok(!noisy.calls.some(([what]) => what === 'whisper'))
-  assert.ok(noisy.calls.some(([what, text]) => what === 'anticipate' && text === 'Wie viel kostet das?'))
+  assert.ok(noisy.calls.some(([what, text]) => what === 'caption' && text === 'Wie viel kostet das?'))
   assert.ok(noisy.calls.some(([what, , text]) => what === 'add' && text === 'Wie viel kostet das?'))
 })
 
@@ -233,15 +220,15 @@ test('on a noisy line, Whisper hears the pause and the final transcript; caption
   await handler('them', noisy, 1000, 'seg-6', 'pause')
   await handler('them', noisy, 1000, 'seg-6', 'final')
   assert.deepEqual(
-    calls.filter(([what]) => what === 'parakeet' || what === 'whisper' || what === 'anticipate' || what === 'add'),
+    calls.filter(([what]) => what === 'parakeet' || what === 'whisper' || what === 'add'),
     [
       ['parakeet', true],
       ['whisper', 'Nordlink, SAP'],
-      ['anticipate', 'Does it work with SAP?', 1000, 'seg-6', 2000],
       ['whisper', 'Nordlink, SAP'],
       ['add', 'them', 'Does it work with SAP?', 1000, 2000, 'seg-6']
     ]
   )
+  assert.ok(calls.some(([what, text]) => what === 'caption' && text === 'Does it work with SAP?'), "the pause's caption is Whisper's")
   // A quiet line stays with Parakeet.
   const quiet = ears({ parakeet: [{ text: 'Does it work with SAP?', confidence: 0.95 }] })
   await quiet.handler('them', speech(0.0005), 1000, 'seg-7', 'final')
@@ -256,7 +243,7 @@ test('each finished utterance reports who heard it and whether the line was nois
     whisper: { transcribe: async () => ({ text: 'Does it work with SAP?' }) },
     language: () => 'en',
     vocabulary: async () => '',
-    copilot: { anticipate: () => {}, dropAnticipated: () => {}, talkedOn: () => {}, add: () => {} },
+    call: { add: () => {} },
     caption: () => {},
     heard: (timing) => heard.push(timing)
   })
@@ -289,13 +276,12 @@ test("the API picked for the other side writes their lines; captions, pauses and
   await handler('me', second, 3000, 'seg-12', 'final')
   assert.deepEqual(asked, [{ language: 'en', vocabulary: 'Nordlink, SAP' }], "only their finished line goes to it, with the call's language and the agent's words")
   assert.deepEqual(
-    calls.filter(([what]) => what !== 'talked on'),
+    calls,
     [
       ['parakeet', true],
       ['caption', 'How much is it'],
       ['parakeet', true],
       ['caption', 'How much is it per seat?'],
-      ['anticipate', 'How much is it per seat?', 1000, 'seg-11', 2000],
       ['add', 'them', 'How much is it per seat?', 1000, 2000, 'seg-11'],
       ['parakeet', false],
       ['add', 'me', 'Forty seats.', 3000, 4000, 'seg-12']
@@ -332,7 +318,7 @@ test('a line the API heard is reported as heard by it', async () => {
     api: (speaker) => (speaker === 'them' ? { id: 'server', transcribe: async () => 'Does it work with SAP?' } : null),
     language: () => 'en',
     vocabulary: async () => '',
-    copilot: { anticipate: () => {}, dropAnticipated: () => {}, talkedOn: () => {}, add: () => {} },
+    call: { add: () => {} },
     caption: () => {},
     heard: (timing) => heard.push(timing)
   })
@@ -390,7 +376,7 @@ test('a failed transcription does not let a later line overtake an earlier reque
   assert.deepEqual(calls.filter(([what]) => what === 'add').map(([, , text]) => text), ['How often would lessons be?', 'And what does it cost?'])
 })
 
-test('a later pause captions at once, but cannot answer before an earlier final line', async () => {
+test('a later pause captions at once, while an earlier line is still being heard', async () => {
   let finish
   const { handler, calls } = ears({
     api: () => ({ id: 'server', transcribe: () => new Promise((resolve) => (finish = resolve)) }),
@@ -400,10 +386,8 @@ test('a later pause captions at once, but cannot answer before an earlier final 
   const pause = handler('them', second, 3000, 'after-pause', 'pause')
   await new Promise((resolve) => setImmediate(resolve))
   assert.ok(calls.some(([what, text]) => what === 'caption' && text === 'And what does it cost?'))
-  assert.ok(!calls.some(([what]) => what === 'anticipate'), 'the earlier line is still needed by the answer')
+  assert.ok(!calls.some(([what]) => what === 'add'))
   finish('How often would lessons be?')
   await Promise.all([first, pause])
-  const add = calls.findIndex(([what]) => what === 'add')
-  const anticipate = calls.findIndex(([what]) => what === 'anticipate')
-  assert.ok(add >= 0 && anticipate > add, 'the answer starts with the earlier line in its context')
+  assert.deepEqual(calls.filter(([what]) => what === 'add').map(([, , text]) => text), ['How often would lessons be?'])
 })

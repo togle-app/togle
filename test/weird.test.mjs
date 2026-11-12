@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import { workDir } from './helpers.mjs'
 
 const work = workDir('weird')
-const { AgentStore, Copilot, PastCalls, getSettings, loadSettings, parseDraft, parseLesson, savedBeforeSpeechChoice, updateSettings } =
+const { AgentStore, getSettings, loadSettings, parseDraft, parseLesson, savedBeforeSpeechChoice, updateSettings } =
   await import('./.build/togle.mjs')
 
 // ---- A draft, however the model writes it ----
@@ -54,60 +54,6 @@ test('"LESSON: none", however it is said, is no lesson; a title that only starts
 
 // ---- A picture of the screen that can't be read ----
 
-test("a picture whose file is gone is left out: the answer still comes with the others, and they're still described", async () => {
-  const store = new AgentStore(async () => '')
-  await store.load()
-  const agent = store.list()[0]
-  const inputs = []
-  const model = {
-    id: 'fake',
-    supportsTools: false,
-    listModels: async () => [],
-    stream: async (input, { onDelta }) => {
-      inputs.push(input)
-      onDelta(/describe pictures/.test(input.system) ? 'F2: A slide: Growth plan, 39 euros per user a month.' : 'LEVEL: quick\nIt is 39 euros a user.')
-    }
-  }
-  // F1's file was deleted; F2 reads.
-  const frames = {
-    snapshot: async () => assert.fail('no screen here'),
-    dataUrl: async (f) => (f.n === 1 ? Promise.reject(new Error('ENOENT: F1.jpg')) : 'data:image/jpeg;base64,AAAA'),
-    reset: async () => {}
-  }
-  const access = {
-    active: () => store.list().find((a) => a.id === agent.id),
-    get: (id) => store.list().find((a) => a.id === id),
-    knowledgeFor: (a, q, seen) => store.knowledgeFor(a, q, seen),
-    search: (a, q, seen, first) => store.search(a, q, seen, first),
-    facts: (a, q) => store.factsFor(a, q),
-    code: () => undefined
-  }
-  const events = []
-  const copilot = new Copilot((channel, payload) => events.push({ channel, payload }), () => model, frames, access)
-  const t0 = Date.now() - 30_000
-  const f1 = { id: 'f1', n: 1, at: t0, kind: 'recorded', thumbUrl: '', imageUrl: '' }
-  const f2 = { id: 'f2', n: 2, at: t0 + 10_000, kind: 'recorded', thumbUrl: '', imageUrl: '' }
-  // Described: F1 is left out, F2 isn't held back by it.
-  copilot['frames'] = [f1, f2]
-  copilot['undescribed'] = [f1, f2]
-  await copilot['describeFrames']()
-  const described = inputs.find((i) => i.lane === 'vision')
-  assert.equal(described.images.length, 1)
-  assert.equal(f2.note, 'A slide: Growth plan, 39 euros per user a month.')
-  assert.equal(f1.note, undefined)
-  // Answered: with F2's picture, and no error.
-  copilot.add('them', 'How much is the plan on this slide?', Date.now() - 2000, Date.now())
-  await copilot.assist({ kind: 'suggest' })
-  for (let i = 0; i < 50 && !events.some((e) => e.payload?.type === 'done'); i++) await new Promise((r) => setTimeout(r, 10))
-  const quick = inputs.find((i) => i.lane === 'quick')
-  assert.ok(quick, 'answered')
-  assert.deepEqual(
-    quick.images.map((image) => image.n),
-    [2]
-  )
-  assert.ok(!events.some((e) => e.payload?.type === 'error'), JSON.stringify(events.filter((e) => e.payload?.type === 'error')))
-})
-
 // ---- An agent's file, damaged ----
 
 test("an agent's file with fields missing loads with them empty; one that isn't an agent is skipped, not fatal", async () => {
@@ -142,7 +88,7 @@ test("an agent's file with fields missing loads with them empty; one that isn't 
 
 // ---- What the window sends, if it ever sent anything ----
 
-test("ids that are paths delete nothing: an agent, a document, an agent's earlier calls", async () => {
+test("ids that are paths delete nothing: an agent, a document", async () => {
   // Things outside Togle's folders that a path-like id would reach.
   const outside = path.join(work, 'outside')
   mkdirSync(path.join(outside, 'precious', 'sub'), { recursive: true })
@@ -155,9 +101,6 @@ test("ids that are paths delete nothing: an agent, a document, an agent's earlie
   await store.remove('../../outside/precious')
   await store.remove('..')
   await store.removeDocument(agent.id, '../../../outside/secret')
-  const pastCalls = new PastCalls()
-  await assert.rejects(pastCalls.clear('../../outside/model'), /No such agent/)
-  await assert.rejects(pastCalls.remove('../outside/model', 'x'), /No such agent/)
   assert.ok(existsSync(path.join(outside, 'precious', 'sub', 'keep.txt')), 'the folder is still there')
   assert.ok(existsSync(path.join(outside, 'secret.txt')), 'the text file is still there')
   assert.ok(existsSync(path.join(outside, 'model.bin')), 'the .bin file is still there')

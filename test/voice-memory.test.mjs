@@ -4,10 +4,10 @@ import { EventEmitter } from 'node:events'
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import electron from './electron.mjs'
-import { copilotWith, workDir } from './helpers.mjs'
+import { ongoingCall, workDir } from './helpers.mjs'
 const root = workDir('voice-memory')
 globalThis.__dirname = root
-const { VoiceMemory, VoiceTracker, VoiceClusters, AgentStore, Copilot } = await import('./.build/togle.mjs')
+const { VoiceMemory, VoiceTracker, VoiceClusters, AgentStore, OngoingCall } = await import('./.build/togle.mjs')
 const basis = index => Float32Array.from({ length: 64 }, (_, n) => n === index ? 1 : 0)
 const shifted = (index, strength = .9, noise = 40) => Float32Array.from({ length: 64 }, (_, n) => n === index ? strength : n === noise ? Math.sqrt(1 - strength * strength) : 0)
 function folder(name) { const directory = path.join(root, name); mkdirSync(directory, { recursive: true }); process.env.TOGLE_TEST_USER_DATA = directory; return directory }
@@ -111,25 +111,25 @@ test('learning a familiar name reuses the call identity and backfills earlier un
 })
 
 test('remembered names appear before or after transcription, persist in history and yield to user corrections', async () => {
-  folder('copilot'); const store = new AgentStore(async () => ''); await store.load()
-  const { copilot } = copilotWith(Copilot, store, store.list()[0].id, [])
+  folder('ongoing'); const store = new AgentStore(async () => ''); await store.load()
+  const { ongoing } = ongoingCall(OngoingCall)
   const person = { id: 'person-a', name: 'Diana', createdAt: 1, updatedAt: 1 }, now = Date.now()
-  copilot.identifyVoice('a', 'v:1', person)
-  copilot.add('them', 'The release is ready.', now, now + 2000, 'a')
-  assert.equal(copilot.currentCall().transcript[0].voiceName, 'Diana')
-  assert.equal(copilot.currentCall().transcript[0].voiceNamedBy, 'remembered')
-  assert.equal(copilot.currentCall().transcript[0].voiceIdentityId, person.id)
-  const restored = copilotWith(Copilot, store, store.list()[0].id, []).copilot; restored.restore(copilot.callState())
-  assert.equal(restored.currentCall().transcript[0].voiceIdentityId, person.id)
-  copilot.renameVoice('v:1', 'Alice'); copilot.identifyVoice('a', 'v:1', person)
-  assert.equal(copilot.currentCall().transcript[0].voiceName, 'Alice')
-  assert.equal(copilot.currentCall().transcript[0].voiceIdentityId, undefined)
-  copilot.identifyVoice('preview', 'v:2', person)
-  assert.equal(copilot.speakerForSegment('preview').voiceName, 'Diana')
-  copilot.forgetVoiceSegment('preview')
-  assert.equal(copilot.speakerForSegment('preview').voiceId, undefined)
-  copilot.forgetVoiceSegment('a')
-  assert.equal(copilot.currentCall().transcript[0].voiceId, undefined)
+  ongoing.identifyVoice('a', 'v:1', person)
+  ongoing.add('them', 'The release is ready.', now, now + 2000, 'a')
+  assert.equal(ongoing.current().transcript[0].voiceName, 'Diana')
+  assert.equal(ongoing.current().transcript[0].voiceNamedBy, 'remembered')
+  assert.equal(ongoing.current().transcript[0].voiceIdentityId, person.id)
+  const restored = ongoingCall(OngoingCall).ongoing; restored.restore(ongoing.callState())
+  assert.equal(restored.current().transcript[0].voiceIdentityId, person.id)
+  ongoing.renameVoice('v:1', 'Alice'); ongoing.identifyVoice('a', 'v:1', person)
+  assert.equal(ongoing.current().transcript[0].voiceName, 'Alice')
+  assert.equal(ongoing.current().transcript[0].voiceIdentityId, undefined)
+  ongoing.identifyVoice('preview', 'v:2', person)
+  assert.equal(ongoing.speakerForSegment('preview').voiceName, 'Diana')
+  ongoing.forgetVoiceSegment('preview')
+  assert.equal(ongoing.speakerForSegment('preview').voiceId, undefined)
+  ongoing.forgetVoiceSegment('a')
+  assert.equal(ongoing.current().transcript[0].voiceId, undefined)
 })
 
 test('early recognition is throttled, cannot train on repeated prefixes and is withdrawn on mixed speech', async () => {

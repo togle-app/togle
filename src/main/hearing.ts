@@ -1,6 +1,6 @@
 import { parakeetHears, speechLanguageCode } from '@shared/speech'
 import type { SegmentKind, Speaker } from '@shared/types'
-import type { Copilot } from './copilot'
+import type { OngoingCall } from './ongoing-call'
 import type { HeardTiming } from './perf'
 import type { LocalParakeet, ParakeetResult } from './stt/parakeet'
 import type { SpeechApi } from './stt/speech-api'
@@ -72,15 +72,15 @@ export interface Ears {
   whisperChecks?: () => boolean
   /**
    * The API picked to hear a side (OpenAI's, or another server's), once it has what it needs: it writes that side's
-   * transcript in place of this PC's models. Live captions and answers started at a pause stay on this PC, where
-   * they're quick and cost nothing.
+   * transcript in place of this PC's models. Live captions stay on this PC, where they're quick and cost nothing.
    */
   api?: (speaker: Speaker) => Pick<SpeechApi, 'id' | 'transcribe'> | null
   /** The call's language setting. */
   language: () => string
   /** Words the active agent expects, which help Whisper. */
   vocabulary: () => Promise<string>
-  copilot: Pick<Copilot, 'anticipate' | 'dropAnticipated' | 'talkedOn' | 'add'>
+  /** Where each finished line goes. */
+  call: Pick<OngoingCall, 'add'>
   /** A live caption for an utterance still in progress; empty text clears it. */
   caption: (caption: { segmentId: string; speaker: Speaker; text: string; at: number }) => void
   /** Development logging; none in a packaged app. */
@@ -100,8 +100,7 @@ interface Heard {
 }
 
 /**
- * Turns the audio the window cuts out of the call into live captions, transcript lines, and answers
- * started at a pause.
+ * Turns the audio the window cuts out of the call into live captions and transcript lines.
  */
 export function hearing(ears: Ears): Hearing {
   /**
@@ -176,17 +175,17 @@ export function hearing(ears: Ears): Hearing {
   }
 
   // The newest piece of audio of each utterance still in progress: a pause transcribed after they went on
-  // talking mustn't start an answer.
+  // talking mustn't replace the newer caption.
   const latestPiece = new Map<string, number>()
   const captions = new Map<string, { speaker: Speaker; at: number }>()
-  // Requests may finish in another order. Keep them parallel, but deliver each side's finished lines in order so
-  // a later question cannot be answered twice while the earlier one is still missing. Captions stay immediate.
+  // Requests may finish in another order. Keep them parallel, but deliver each side's finished lines in order.
+  // Captions stay immediate.
   const finalized: Record<Speaker, Promise<void>> = { me: Promise.resolve(), them: Promise.resolve() }
   let pieces = 0
   let generation = 0
   const paused = { me: false, them: false }
   const sides = { me: 0, them: 0 }
-  const { copilot } = ears
+  const { call: ongoing } = ears
   const handler: SegmentHandler = async (speaker, pcm, startedAt, segmentId, kind) => {
     if (paused[speaker]) return
     const call = generation
@@ -198,10 +197,7 @@ export function hearing(ears: Ears): Hearing {
     else latestPiece.delete(segmentId)
     const clearCaption = (): void => { captions.delete(segmentId); ears.caption({ segmentId, speaker, text: '', at: startedAt }) }
     // An empty final means the sound was too short to be speech: just drop its live caption.
-    if (!pcm.length) {
-      copilot.dropAnticipated(segmentId)
-      return clearCaption()
-    }
+    if (!pcm.length) return clearCaption()
     if (!partial) ears.log?.(`[audio] ${speaker} utterance, ${(pcm.length / SAMPLE_RATE).toFixed(1)}s`)
     const before = finalized[speaker]
     let finishFinal: (() => void) | undefined
@@ -212,11 +208,6 @@ export function hearing(ears: Ears): Hearing {
         const text = raw && (ears.normalize?.(raw) ?? raw)
         if (!current() || !text || latestPiece.get(segmentId) !== piece) return
         ears.caption({ segmentId, speaker, text, at: startedAt })
-        // The answer needs any earlier finished utterance, even if this pause was heard locally first. If its final
-        // or another piece arrived while waiting, that settles it instead.
-        await before
-        if (!current() || latestPiece.get(segmentId) !== piece) return
-        copilot.anticipate(text, startedAt, segmentId, startedAt + (pcm.length / SAMPLE_RATE) * 1000)
         return
       }
       const started = Date.now()
@@ -231,23 +222,16 @@ export function hearing(ears: Ears): Hearing {
       if (partial) {
         if (latestPiece.get(segmentId) !== piece) return
         if (text) ears.caption({ segmentId, speaker, text, at: startedAt })
-        // Talking again after a pause: an answer started there was early, unless it's still the same words (a click
-        // or a breath after the question, which would only ask the same again).
-        copilot.talkedOn(segmentId, text)
         return
       }
-      if (!text) {
-        copilot.dropAnticipated(segmentId)
-        return clearCaption()
-      }
+      if (!text) return clearCaption()
       ears.log?.(`[transcript] ${speaker}: ${text}`)
-      copilot.add(speaker, text, startedAt, startedAt + (pcm.length / SAMPLE_RATE) * 1000, segmentId)
+      ongoing.add(speaker, text, startedAt, startedAt + (pcm.length / SAMPLE_RATE) * 1000, segmentId)
       captions.delete(segmentId)
     } catch (err) {
       if (partial || !current()) return
       await before
       if (!current()) return
-      copilot.dropAnticipated(segmentId)
       clearCaption()
       console.error('[stt]', (err as Error).message)
     } finally {
@@ -262,7 +246,6 @@ export function hearing(ears: Ears): Hearing {
       if (value) for (const [segmentId, caption] of captions) if (caption.speaker === speaker) {
         ears.caption({ segmentId, ...caption, text: '' }); captions.delete(segmentId); latestPiece.delete(segmentId)
       }
-      if (speaker === 'them') copilot.dropAnticipated()
     },
     reset(): void {
       generation++

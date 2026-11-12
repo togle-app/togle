@@ -100,7 +100,15 @@ run(async () => {
   await T.loadSettings()
   const dir = SET ? String(OPTS.set) : path.join(__dirname, 'audio')
   const calls = path.join(__dirname, 'audio')
-  if (!fs.existsSync(path.join(calls, 'r5.wav'))) throw new Error('No call audio yet: run npm run e2e -- --dry once (it speaks it).')
+  if (!fs.existsSync(path.join(calls, 'r5.wav'))) {
+    if (process.platform !== 'win32') throw new Error('No call audio yet: voices.ps1 speaks it with the voices that come with Windows.')
+    console.log('Speaking the call with Windows voices…')
+    // No input for PowerShell: given one that never closes, it waits on it after the script.
+    require('node:child_process').execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'voices.ps1')], {
+      stdio: ['ignore', 'inherit', 'inherit'],
+      timeout: 120_000
+    })
+  }
   // What's said, and in which file: the call's questions, or the set's recordings.
   const spoken = SET ? SET.map((c) => ({ name: c.name, file: c.file, text: c.text, set: c.set })) : Object.entries(SPOKEN).map(([name, text]) => ({ name, file: `${name}.wav`, text }))
   // What the app runs: what Settings installed, else the development copy. `--whisper-library` runs Whisper through
@@ -150,7 +158,7 @@ run(async () => {
     whisper: counted,
     language: () => LANGUAGE,
     vocabulary: async () => VOCABULARY,
-    copilot: { anticipate: () => {}, dropAnticipated: () => {}, talkedOn: () => {}, add: (_speaker, text) => (heard = text) },
+    call: { add: (_speaker, text) => (heard = text) },
     caption: () => {}
   })
 

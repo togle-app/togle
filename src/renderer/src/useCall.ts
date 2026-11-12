@@ -55,8 +55,8 @@ export function useCall(settings: Settings | null): CallView {
     if (!call) return
     setTranscript(call.transcript)
     setFlags({ toldOthers: call.toldOthers ?? 0, marks: call.marks ?? [] })
-    setCallKey(call.view?.key ?? call.session?.id ?? '')
-    setTitle(call.session?.meeting?.title || call.brief.split('\n')[0] || '')
+    setCallKey(call.key || call.session?.id || '')
+    setTitle(call.session?.meeting?.title || '')
     setSince(call.session?.status === 'live' ? call.session.startedAt : 0)
   }, [])
 
@@ -67,7 +67,6 @@ export function useCall(settings: Settings | null): CallView {
     const subs = [
       api.onCallReset((call) => load(call)),
       api.onCallFlags(setFlags),
-      api.onBrief((call) => setTitle((previous) => previous || call.brief.split('\n')[0] || '')),
       // In time order: a line that ends after a later one began comes in later, and goes before it.
       api.onTranscript((entry) => setTranscript((previous) => (!previous.length || previous[previous.length - 1].at <= entry.at ? [...previous, entry] : [...previous, entry].sort((a, b) => a.at - b.at)))),
       api.onTranscriptRemoved((ids) => setTranscript((previous) => previous.filter((entry) => !ids.includes(entry.id)))),

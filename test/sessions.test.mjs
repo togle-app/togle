@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { appendFileSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { test } from 'node:test'
-import { backend, call, say, wait, workDir } from './helpers.mjs'
+import { call, wait, workDir } from './helpers.mjs'
 
 const dir = workDir('sessions')
 // Where Claude Code and Codex keep their sessions, here: never the real ones of whoever runs the tests.
@@ -14,7 +14,7 @@ const codexHome = path.join(dir, 'codex')
 process.env.CLAUDE_CONFIG_DIR = claudeHome
 process.env.CODEX_HOME = codexHome
 
-const { AgentStore, ChatGPTProvider, findSessions, readSession, sessionForStudy, sessionInfo, train, withoutSecrets } = await import('./.build/togle.mjs')
+const { AgentStore, findSessions, readSession, sessionForStudy, sessionInfo, withoutSecrets } = await import('./.build/togle.mjs')
 
 const lines = (records) => records.map((r) => JSON.stringify(r)).join('\n') + '\n'
 const write = (file, records, at) => {
@@ -473,48 +473,6 @@ test('a session file dropped into the conversation goes in as a session, named b
   )
 })
 
-test('sessions of one title get a name each, before and after they are studied; read again, a session keeps its', async () => {
-  const fresh = await store.create('general')
-  const docs = () => store.list().find((a) => a.id === fresh.id).knowledge
-  // Three Claude Code titled alike on one day, as it titles many sessions "Codebase".
-  const files = ['dddd', 'eeee', 'ffff'].map((p) => {
-    const id = `${p}1111-2222-4333-8444-555566667777`
-    return write(path.join(claudeHome, 'projects', 'C--work-tidy', `${id}.jsonl`), [
-      said('Tidy up the codebase: take out what nothing uses.', day1, { cwd: 'C:\\work\\tidy', sessionId: id }),
-      replied([{ type: 'text', text: 'Took out three modules nothing used.' }], day1),
-      { type: 'ai-title', aiTitle: 'Codebase', sessionId: id }
-    ])
-  })
-  const added = []
-  for (const file of files) added.push((await store.addSession(fresh.id, file)).doc.name)
-  assert.deepEqual(added, ['Codebase (Claude Code session)', 'Codebase (Claude Code session, Oct 20)', 'Codebase (Claude Code session, Oct 20, 2)'])
-  await until(() => docs().length === 3 && docs().every((d) => d.digest), 'all studied')
-  // Studied two at a time, each takes a name no other has, and keeps the one it went in under.
-  assert.deepEqual(docs().map((d) => d.name).sort(), [
-    'Tidying up the codebase (Claude Code session)',
-    'Tidying up the codebase (Claude Code session, Oct 20)',
-    'Tidying up the codebase (Claude Code session, Oct 20, 2)'
-  ])
-  assert.deepEqual(docs().map((d) => d.addedAs).sort(), [...added].sort())
-
-  // The agent, asked which are in, sees them by these names.
-  const provider = new ChatGPTProvider({ getAccess: async () => ({ accessToken: 'token', accountId: 'account' }) })
-  const requests = backend([call(1, 'find_work_sessions', { query: 'tidy' }), say('All three are in.')])
-  await train(store, provider, fresh.id, [], 'Are my tidy-up sessions in?', new AbortController().signal, { onDelta() {}, onChange() {} })
-  const listing = requests.at(-1).input.find((i) => i.type === 'function_call_output').output
-  assert.equal(listing.match(/\[in Knowledge already, as "Tidying up the codebase \(Claude Code session[^"]*\)"\]/g)?.length, 3, listing)
-
-  // Worked on since: read again under the name it has, not named again.
-  const doc = docs().find((d) => d.source === files[0])
-  appendFileSync(files[0], lines([said('Tidy up the codebase some more: the old tests too.', day2, { cwd: 'C:\\work\\tidy' }), replied([{ type: 'text', text: 'Took out the old tests.' }], day2)]))
-  assert.equal((await store.addSession(fresh.id, files[0])).done, 'updated')
-  await until(() => docs().find((d) => d.source === files[0])?.digest, 'studied again')
-  const again = docs().find((d) => d.source === files[0])
-  assert.notEqual(again.id, doc.id)
-  assert.deepEqual([again.name, again.addedAs], [doc.name, doc.addedAs])
-  for (const file of files) rmSync(file)
-})
-
 test('what a session is about is cut to a name at a word, without its markup or full stop', async () => {
   const fresh = await store.create('general')
   const file = write(path.join(claudeHome, 'projects', 'C--work-db', 'abab1111-2222-4333-8444-555566667777.jsonl'), [
@@ -536,44 +494,4 @@ test('a work session is never shared with the agent, even ticked', async () => {
   const shared = Object.keys(files).filter((p) => p.startsWith('knowledge/'))
   assert.deepEqual(shared, ['knowledge/return-policy.md'])
   assert.ok(!JSON.stringify(files).includes('SHOP-142'))
-})
-
-test('a whole chat from claude.ai pasted in goes to the model by its start and end, and into Knowledge whole', async () => {
-  const fresh = await store.create('general')
-  const provider = new ChatGPTProvider({ getAccess: async () => ({ accessToken: 'token', accountId: 'account' }) })
-  const turns = Array.from({ length: 2000 }, (_, i) => (i % 2 ? `Claude: answer ${i} about the rollout plan, with the steps in order.` : `Me: question ${i} about the rollout plan?`))
-  const chat = `Rollout plan chat\n\n${turns.join('\n\n')}\n\nMe: so we ship on the 4th.`
-  const message = `My claude.ai chat about the rollout, for Thursday's call:\n\n${chat}`
-  assert.ok(message.length > 100_000)
-  const requests = backend([call(9, 'save_document', { name: 'Rollout plan chat (claude.ai)', starts_with: 'Rollout plan chat' }), say('Saved your chat about the rollout.')])
-  await train(store, provider, fresh.id, [], message, new AbortController().signal, { onDelta() {}, onChange() {} })
-  const sent = requests[0].input.at(-1).content[0].text
-  assert.ok(sent.length < 40_000, `sent ${sent.length} characters`)
-  assert.match(sent, /^My claude\.ai chat about the rollout/)
-  assert.match(sent, /more characters of this message, left out here; save_document still takes all of it/)
-  assert.match(sent, /so we ship on the 4th\.$/)
-  const [doc] = store.list().find((a) => a.id === fresh.id).knowledge
-  assert.equal(doc.chars, chat.length, 'the whole chat, from where it starts')
-})
-
-test('told to use a session, the agent finds it and adds it, and only one it listed', async () => {
-  const fresh = await store.create('general')
-  const provider = new ChatGPTProvider({ getAccess: async () => ({ accessToken: 'token', accountId: 'account' }) })
-  const requests = backend([
-    call(1, 'find_work_sessions', { query: 'payment retry' }),
-    [...call(2, 'add_work_session', { id: CID }), ...call(3, 'add_work_session', { id: 'made-up' })],
-    say('Added your Codex session about the payment retries.')
-  ])
-  const changes = []
-  await train(store, provider, fresh.id, [], 'Use my Codex session about the payment retries for the call with finance.', new AbortController().signal, {
-    onDelta() {},
-    onChange: (c) => changes.push(c)
-  })
-  // The last request has each tool's output so far.
-  const outputs = requests.at(-1).input.filter((i) => i.type === 'function_call_output').map((i) => i.output)
-  assert.match(outputs[0], /^- id 019e0000-1111-7222-8333-944445555666: "Payment retry 409" \(Codex, in D:\\work\\billing\), last worked on .+2026; first asked: "Payments fail on retry with a 409\. Find out why\."$/)
-  assert.match(outputs[1], /^Added: "Payment retry 409 \(Codex session\)" \(\d+ characters\)/)
-  assert.equal(outputs[2], 'No work session has that id: find it with find_work_sessions first.')
-  assert.deepEqual(changes, ['Added to Knowledge: Payment retry 409 (Codex session)'])
-  assert.match(requests[0].input[0].content[0].text, /Work sessions: their sessions with Claude Code or Codex/)
 })

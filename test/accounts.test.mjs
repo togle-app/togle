@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { copilotWith, workDir } from './helpers.mjs'
+import { workDir } from './helpers.mjs'
 
 const directory = workDir('subscription-accounts')
-const { SubscriptionAccounts, accountChoice, ChatGPTAuth, ChatGPTProvider, ClaudeCodeAuth, ClaudeSubscriptionProvider, AgentStore, Copilot, getSettings, callReadiness } = await import('./.build/togle.mjs')
+const { SubscriptionAccounts, accountChoice, ChatGPTAuth, ChatGPTProvider, ClaudeCodeAuth, ClaudeSubscriptionProvider, AgentStore, getSettings } = await import('./.build/togle.mjs')
 const fixture = () => {
   const openai = new ChatGPTAuth(), claude = new ClaudeCodeAuth()
   claude.status = async () => ({ available: true, signedIn: false })
@@ -20,9 +20,6 @@ test('global default and agent overrides route explicitly, including missing pro
   settings.provider = 'compat'
   assert.equal(accountChoice(settings), undefined); assert.equal(accountChoice(settings, 'work'), 'work')
   assert.throws(() => fixture().get('missing-work-account'), /unavailable/)
-  const ready = callReadiness(settings, { chatgpt: false, claudeSubscription: false, claudeKey: false }, { state: 'ready' }, { id: 'work', provider: 'claude', label: 'Work', signedIn: true })
-  assert.equal(ready.needsAI, false); assert.match(ready.answers, /Work/)
-  assert.equal(callReadiness(settings, { chatgpt: true, claudeSubscription: true, claudeKey: true }, { state: 'ready' }, null).needsAI, true)
 })
 
 test('personal and work ChatGPT profiles keep encrypted credentials, identity and sign-out independent', async () => {
@@ -126,27 +123,4 @@ test('prepared dictation rechecks the pinned account before delivering any text'
   identity = 'personal-organization'
   await assert.rejects(prepared.send('Private work dictation'), /identity changed/)
   assert.deepEqual(sent, []); assert.equal(closed, 1)
-})
-
-test('trying another agent uses its account while the live call keeps its own; corrected self names win', async () => {
-  const store = new AgentStore(async () => ''); await store.load()
-  const main = store.list()[0], work = await store.create('blank', { name: 'Work', subscriptionAccountId: 'work-profile' })
-  const { copilot } = copilotWith(Copilot, store, main.id, [])
-  const used = []
-  const provider = label => ({ id: 'claude', supportsTools: true, stream: async (input, options) => { used.push(label); options.onDelta('LEVEL: quick\nHere is the next step.') } })
-  copilot.provider = () => provider('current call')
-  copilot.agentProvider = id => { assert.equal(id, work.id); return provider('work account') }
-  copilot.ownName = () => 'Luka'
-  await copilot.test(work.id, 'What is the next step?')
-  assert.ok(used.length > 0 && used.every(label => label === 'work account'))
-  used.length = 0
-  await copilot.assist({ kind: 'ask', question: 'What is the next step?' })
-  assert.ok(used.length > 0 && used.every(label => label === 'current call'))
-  const now = Date.now()
-  copilot.add('me', 'Let us plan our next step.', now, now + 2000, 'self-1')
-  assert.equal(copilot.currentCall().transcript.at(-1).voiceName, 'Luka')
-  copilot.renameVoice('me', 'Lucas')
-  copilot.add('me', 'We can finish tomorrow.', now + 3000, now + 5000, 'self-2')
-  assert.equal(copilot.currentCall().transcript.at(-1).voiceName, 'Lucas')
-  await copilot.clear()
 })

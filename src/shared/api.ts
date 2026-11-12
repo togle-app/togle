@@ -94,7 +94,7 @@ export interface TogleApi {
   /** Live captions; an empty text means the caption is gone (the final line replaces it, or it was noise). */
   onPartialTranscript(cb: (partial: PartialTranscript) => void): Unsubscribe
 
-  setListening(listening: boolean, meetingId?: string): Promise<CallSessionInfo | void>
+  setListening(listening: boolean): Promise<CallSessionInfo | void>
   pauseCallInput(speaker: Speaker, paused: boolean): Promise<void>
   /** Clears the call: transcript, frames (their files too), the timeline, and the call saved on disk. */
   clearTranscript(): Promise<CurrentCall | void>
@@ -116,8 +116,6 @@ export interface TogleApi {
   onCallSessions(cb: (change: { id?: string }) => void): Unsubscribe
   /** The call so far: the one going on, or the one picked up from disk as Togle started. */
   currentCall(): Promise<CurrentCall>
-  /** What the call is, as the agent set it from what it was told in the conversation. */
-  onBrief(cb: (call: { brief: string; group: boolean }) => void): Unsubscribe
   /** The person told the others on the call that it is being written down (or took that back). */
   setToldOthers(told: boolean): void
   /** Marks this moment of the call; gives every mark of the call so far. */

@@ -1,6 +1,5 @@
-// Shared by the test files: a scratch user-data folder, the Codex backend's streamed events, and copilots
-// with a scripted model.
-import assert from 'node:assert/strict'
+// Shared by the test files: a scratch user-data folder, the Codex backend's streamed events, and the call being
+// written down.
 import { mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import electron from './electron.mjs'
@@ -47,40 +46,11 @@ export function backend(rounds) {
   return requests
 }
 
-// ---- Copilots ----
+// ---- The call being written down ----
 
-/** What the agent store gives the copilot, for one active agent. */
-export function agentAccess(store, id) {
-  return {
-    active: () => store.list().find((a) => a.id === id),
-    get: (other) => store.list().find((a) => a.id === other),
-    knowledgeFor: (a, query, seen) => store.knowledgeFor(a, query, seen),
-    search: (a, query, seen, first) => store.search(a, query, seen, first),
-    facts: (a, question) => store.factsFor(a, question),
-    code: () => undefined
-  }
-}
-
-/** A copilot for one agent, with a model that answers from a script; `access` adds to what it reads of the agent. */
-export function copilotWith(Copilot, store, id, replies, access = {}) {
+/** The call being written down, with what it tells the window kept in `events`. */
+export function ongoingCall(OngoingCall, { ownName, learnWords } = {}) {
   const events = []
-  const inputs = []
-  const model = {
-    id: 'fake',
-    supportsTools: false,
-    listModels: async () => [],
-    stream: async (input, { onDelta }) => {
-      inputs.push(input)
-      onDelta(replies.shift() ?? 'LEVEL: quick\nOk.')
-    }
-  }
-  const frames = { snapshot: async () => assert.fail('no screen here'), dataUrl: async () => 'data:', reset: async () => {} }
-  const copilot = new Copilot((channel, payload) => events.push({ channel, payload }), () => model, frames, { ...agentAccess(store, id), ...access })
-  return { copilot, events, inputs }
+  const ongoing = new OngoingCall((channel, payload) => events.push({ channel, payload }), ownName, learnWords)
+  return { ongoing, events }
 }
-
-/** The answer-card events a copilot sent, in order. */
-export const shown = (events) => events.filter((e) => e.channel === 'assist').map((e) => e.payload)
-
-/** The quick answers' requests to the model. */
-export const quick = (inputs) => inputs.filter((input) => input.lane === 'quick')

@@ -60,7 +60,7 @@ const api: TogleApi = {
   pushAudio: (speaker, pcm, startedAt, segmentId, kind) => ipcRenderer.send('audio:segment', speaker, pcm, startedAt, segmentId, kind),
   onPartialTranscript: (cb) => subscribe('transcript:partial', cb),
 
-  setListening: (listening, meetingId) => ipcRenderer.invoke('session:listening', listening, meetingId),
+  setListening: (listening) => ipcRenderer.invoke('session:listening', listening),
   pauseCallInput: (speaker, paused) => ipcRenderer.invoke('session:audio-pause', speaker, paused),
   clearTranscript: () => ipcRenderer.invoke('session:clear'),
   onCallReset: (cb) => subscribe('call:reset', cb),
@@ -77,7 +77,6 @@ const api: TogleApi = {
   exportCallSession: (id) => ipcRenderer.invoke('calls:export', id),
   onCallSessions: (cb) => subscribe('calls:changed', cb),
   currentCall: () => ipcRenderer.invoke('call:current'),
-  onBrief: (cb) => subscribe('call:briefed', cb),
   setToldOthers: (told) => ipcRenderer.send('call:told-others', told),
   markCall: () => ipcRenderer.invoke('call:mark'),
   onCallFlags: (cb) => subscribe('call:flags', cb),
