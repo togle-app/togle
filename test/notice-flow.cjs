@@ -104,7 +104,8 @@ async function run() {
   assert.deepEqual(dotPixel, [0x24, 0xa5, 0xf5], 'amber, whatever the byte order of the picture')
   fs.writeFileSync(path.join(profile, 'tray-waiting.png'), icon.image.toPNG())
   const size = notice.getBounds()
-  assert.ok(size.width === 392 && size.height > 100 && size.height < 400, 'the window is as tall as the notice: ' + JSON.stringify(size))
+  // A display with a fractional scale can round the width by a pixel; the notice follows the cursor's display.
+  assert.ok(Math.abs(size.width - 392) <= 1 && size.height > 100 && size.height < 400, 'the window is as tall as the notice: ' + JSON.stringify(size))
 
   // Allowing in the notice runs the command, and ends the notice and the dot. It cannot be allowed the instant it appears.
   const press = (label) => js(notice, `[...document.querySelectorAll('.task-notice-actions button')].find(b=>b.textContent===${JSON.stringify(label)}).click()`)
@@ -171,6 +172,19 @@ async function run() {
   await invoke('runners:answer', fromBox.key, waitingNow.pending[0].id, 'refuse')
   await wait(async () => (await invoke('runners:list')).some((task) => task.key === fromBox.key && task.state === 'idle'), 'the task from the box to finish')
 
+  // During a call, notices wait (the news that a task finished, still showing, goes as the call starts): the tray still counts, and the notice comes once the call is over.
+  await invoke('session:listening', true)
+  const during = await invoke('runners:start', { runner: 'hermes', folder, prompt: 'run during', title: 'During the call' })
+  const asking = await find(async () => (await invoke('runners:list')).find((task) => task.key === during.key && task.state === 'waiting'), 'the task to ask during the call')
+  await sleep(600)
+  assert.equal(await js(notice, "!!document.querySelector('.task-notice')"), false, 'nothing pops up during a call')
+  assert.ok(icon.tooltip.includes('waiting for you'), 'and the tray still says so')
+  await invoke('session:listening', false)
+  await wait(() => js(notice, "!!document.querySelector('.task-notice')"), 'the notice, once the call is over')
+  await invoke('runners:answer', during.key, asking.pending[0].id, 'refuse')
+  await wait(async () => (await invoke('runners:list')).some((task) => task.key === during.key && task.state === 'idle'), 'the task asked during the call to finish')
+  await invoke('session:clear')
+
   // The task still waits: quitting asks, and says which.
   item('Quit Togle').click()
   await wait(() => js(main, "document.body.innerText.includes('Quit Togle?')"), 'the question')
@@ -185,7 +199,7 @@ async function run() {
       assert.equal(icon.destroyed, true)
       assert.equal(BrowserWindow.getAllWindows().length, 0, 'Quit removes every window, the notice too')
       clearTimeout(timeout)
-      console.log('NOTICE PASS: notice when a task waits, dot on the tray, Allow once held for a moment, finished notice, quiet while Togle is in front, Open, the task box, notices turned off and on, question before quitting')
+      console.log('NOTICE PASS: notice when a task waits, dot on the tray, Allow once held for a moment, finished notice, quiet while Togle is in front, Open, the task box, notices turned off and on, notices waiting during a call, question before quitting')
     } catch (error) { console.error(error); app.exit(1) }
   })
   item('Quit Togle').click()

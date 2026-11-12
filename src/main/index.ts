@@ -688,17 +688,27 @@ function mainWindowActive(): boolean {
   return !!win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused()
 }
 /** Tells the person what waits for them: a small notice while Togle's window is not in front, and a dot on the tray. */
+// A task that finished while a call was written down: said once the call is over.
+let finishedDuringCall: ReturnType<Attention['look']>['finished'][number] | undefined
 function refreshNotices(): void {
   if (quitting || !runners) return
   const look = attention.look(runners.attention())
   tray?.setWaiting(look.waiting)
+  // During a call, notices wait: the tray still counts, and what finished meanwhile is kept to say after.
+  if (copilot.isListening) {
+    if (look.finished.length) finishedDuringCall = look.finished[look.finished.length - 1]
+    if (noticeWindow.shown) noticeWindow.show(null)
+    return
+  }
+  const finishedNews = look.finished.length ? look.finished[look.finished.length - 1] : finishedDuringCall
+  finishedDuringCall = undefined
   if (mainWindowActive()) { noticeWindow.show(null); return }
   // Settings → Coding agents can turn either notice off; the tray's dot stays.
   const { notices, finished } = getSettings().tasks
   const first = notices ? look.notices[0] : undefined
   if (first) noticeWindow.show(first)
   // Nothing waits any more. A task that finished is only news, shown a few seconds (and it takes the place of the notice that was answered).
-  else if (finished && look.finished.length) noticeWindow.show(look.finished[look.finished.length - 1], 8000)
+  else if (finished && finishedNews) noticeWindow.show(finishedNews, 8000)
   else if (noticeWindow.shown?.kind === 'waiting') noticeWindow.show(null)
 }
 /** Opens Togle on its Tasks screen, on one task when there is one to show. */
@@ -1477,6 +1487,8 @@ function registerIpc(): void {
     } else if (currentSession) currentSession = { ...currentSession, status: 'ended', endedAt: Date.now() }
     if (!value) void microphoneLink.endCall()
     copilot.setListening(value)
+    // Notices wait during a call, and come once it is over.
+    refreshNotices()
     refreshVoiceSettings()
     callFile.changed()
     await callFile.flush()
