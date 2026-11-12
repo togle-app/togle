@@ -98,6 +98,7 @@ const api: TogleApi = {
   callSessions: () => ipcRenderer.invoke('calls:list'),
   callSession: (id) => ipcRenderer.invoke('calls:get', id),
   searchCalls: (query) => ipcRenderer.invoke('calls:search', query),
+  meetingOffers: () => ipcRenderer.invoke('meetings:offers'),
   giveCallToAgent: (id) => ipcRenderer.invoke('calls:give', id),
   generateCallNotes: (id, template, revision) => ipcRenderer.invoke('calls:notes-generate', id, template, revision),
   saveCallNotes: (id, revision, text) => ipcRenderer.invoke('calls:notes-save', id, revision, text),

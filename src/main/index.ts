@@ -85,7 +85,8 @@ import { SubscriptionAccounts, accountChoice, defaultAccountId } from './auth/ac
 import { CallFile } from './call-file'
 import { CallSessions, callForAgent, exportCall, legacySession, sessionSummary } from './call-sessions'
 import { ConfirmSound } from './confirm-sound'
-import { confirmVoices, type CallConfirm } from '@shared/confirm-names'
+import { confirmVoices, namesToConfirm, type CallConfirm } from '@shared/confirm-names'
+import { myTodoItems, type CallOffer, type TodoOffer } from '@shared/call-todo'
 import { FIRST_NAMES } from './names'
 import { CallLearning } from './call-learning'
 import { CallTitles } from './call-titles'
@@ -1561,6 +1562,22 @@ function registerIpc(): void {
   ipcMain.handle('call:mark', () => copilot.mark())
 
   ipcMain.handle('calls:list', listCallSessions)
+  // What calls left for the person's day: names to confirm, notes that are ready, and the to-dos in them that are theirs.
+  ipcMain.handle('meetings:offers', async (): Promise<{ calls: CallOffer[]; items: TodoOffer[] }> => {
+    const settings = getSettings()
+    const names = [...(settings.assist.names ?? '').split(',').map(name => name.trim()).filter(Boolean), ...(callUserName ? [callUserName] : [])]
+    const midnight = new Date().setHours(0, 0, 0, 0)
+    const calls: CallOffer[] = [], items: TodoOffer[] = []
+    for (const call of await callSessions.list()) {
+      if (call.status === 'live' || call.legacy) continue
+      const toConfirm = namesToConfirm(call.confirm, Date.now())
+      const notes = (call.endedAt ?? call.startedAt) >= midnight && call.minutes?.state === 'ready' && !!call.summary
+      if (!toConfirm && !notes) continue
+      calls.push({ id: call.id, title: call.title, startedAt: call.startedAt, notes, toConfirm })
+      if (notes) for (const text of myTodoItems(call.summary, names)) items.push({ callId: call.id, title: call.title, text })
+    }
+    return { calls: calls.slice(0, 6), items: items.slice(0, 12) }
+  })
   ipcMain.handle('calls:search', (_e, query: unknown) => callSessions.search(typeof query === 'string' ? query.slice(0, 200) : ''))
   // A finished call given to a coding agent: written as a plain text file, and the task box opens with it attached.
   ipcMain.handle('calls:give', async (_e, id: string) => {

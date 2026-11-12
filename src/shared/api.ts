@@ -169,6 +169,8 @@ export interface TogleApi {
   callSessions(): Promise<CallSessionSummary[]>
   /** The saved calls with these words in what was said, in their notes or title, with the first lines that have them. */
   searchCalls(query: string): Promise<import('./types').CallSearchHit[]>
+  /** What calls left for the person's day: names to confirm, notes that are ready, and the to-dos in them that are theirs. */
+  meetingOffers(): Promise<{ calls: import('./call-todo').CallOffer[]; items: import('./call-todo').TodoOffer[] }>
   /** A finished call given to a coding agent: opens the task box with the call attached as a text file. */
   giveCallToAgent(id: string): Promise<void>
   callSession(id: string): Promise<CallSession | null>

@@ -129,6 +129,9 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
   const openCurrentCall = useCallback(() => { setSidebarOpen(false); setView('main') }, [])
+  // A call to open in Meetings (from a row on the to-do list).
+  const [meetingFocus, setMeetingFocus] = useState<{ id: string; seq: number }>()
+  const openMeeting = useCallback((id: string) => { setSidebarOpen(false); setMeetingFocus(previous => ({ id, seq: (previous?.seq ?? 0) + 1 })); setView('meetings') }, [])
   useEffect(() => {
     const media = window.matchMedia('(max-width: 560px)')
     const resize = (): void => { if (!media.matches) setSidebarOpen(false) }
@@ -1547,8 +1550,8 @@ export default function App() {
         <Settings settings={settings} auth={auth} claudeAuth={claudeAuth} stt={stt} at={settingsAt} onChange={setSettings} onDone={() => setView(workspaceReturn.current)} onArchive={() => { setSelectedCallId(undefined); setView('archive') }} />
       )}
       {view === 'tasks' && <Tasks focus={taskFocus} />}
-      {view === 'todo' && <Todo onOpenTask={openTask} />}
-      {view === 'meetings' && <div className="settings meetings-page"><MeetingsPage agents={agents} liveId={listening ? callKey : undefined} onOpenLive={openCurrentCall} onWriteDown={() => void startUnseen()} /></div>}
+      {view === 'todo' && <Todo onOpenTask={openTask} onOpenCall={openMeeting} />}
+      {view === 'meetings' && <div className="settings meetings-page"><MeetingsPage agents={agents} liveId={listening ? callKey : undefined} onOpenLive={openCurrentCall} onWriteDown={() => void startUnseen()} focus={meetingFocus} /></div>}
       {view === 'archive' && <div className="settings archived-calls"><CallHistory agents={agents} enabled={settings?.assist.rememberCalls !== false} selectedId={selectedCallId} onSelect={setSelectedCallId} onAgent={replaceAgent} onDone={() => setView('settings')} /></div>}
       {/* Kept while the conversation shows: an agent's page, and a reading of a website, are there to come back to. */}
       {settings && (

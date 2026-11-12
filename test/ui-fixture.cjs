@@ -470,6 +470,13 @@ module.exports = function install(fixture) {
   api.setTodoDone = async (ref, done) => { record('setTodoDone', [ref, done]); todoAt(ref).done = done; return clone(todoView()) }
   api.editTodo = async (ref, text) => { record('editTodo', [ref, text]); todoAt(ref).text = text; return clone(todoView()) }
   api.removeTodo = async ref => { record('removeTodo', [ref]); todoAt(ref); todoItems.splice(ref.line, 1); return clone(todoView()) }
+  // What calls left for today, in the scenario with a to-do list: names to confirm, notes ready, to-dos that are the person's.
+  api.meetingOffers = async () => fixture.scenario === 'tasks'
+    ? clone({
+      calls: [{ id: 'sprint', title: 'Sprint review', startedAt: Date.now() - 3600_000, notes: true, toConfirm: 2 }, { id: 'planning', title: 'Planning sync', startedAt: Date.now() - 7200_000, notes: true, toConfirm: 0 }],
+      items: [{ callId: 'planning', title: 'Planning sync', text: 'Send the API timeline to Dario.' }, { callId: 'planning', title: 'Planning sync', text: 'Book the staging review.' }]
+    })
+    : { calls: [], items: [] }
   api.linkTodo = async (ref, task) => { record('linkTodo', [ref, task]); const item = todoAt(ref); if (task) item.task = task; else delete item.task; return clone(todoView()) }
   api.showTodoFile = async () => { record('showTodoFile', []) }
   contextBridge.exposeInMainWorld('togle', api)

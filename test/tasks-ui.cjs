@@ -198,7 +198,7 @@ async function checkTodo(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.todo-add input').placeholder"), 'Add a to-do, or hold F9 and say it')
 
   // What waits for the person is on top, a command in full before it can be allowed, and one that looks dangerous only in the window.
-  assert.deepEqual(await texts(ui, '.todo-group > h3'), ['Waiting for you', 'To do'])
+  assert.deepEqual(await texts(ui, '.todo-group > h3'), ['Waiting for you', 'To do', 'From your calls'])
   assert.deepEqual(await texts(ui, '.todo-row.need b'), ['Add the status column', 'Clean the build folder'])
   assert.equal((await texts(ui, '.todo-row.need small'))[0], 'Codex · api-server · wants to run')
   assert.deepEqual(await texts(ui, '.todo-row.need .todo-command'), ['npm run migrate', 'rm -rf build'])
@@ -222,7 +222,7 @@ async function checkTodo(T, agent) {
   await ui.click('.todo-row.need button', 'Refuse')
   assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args[2]), ['allow-once', 'refuse'])
   await ui.wait("!document.querySelector('.todo-row.need')")
-  assert.deepEqual(await texts(ui, '.todo-group > h3'), ['To do'], 'nothing waits, so that part is not there')
+  assert.deepEqual(await texts(ui, '.todo-group > h3'), ['To do', 'From your calls'], 'nothing waits, so that part is not there')
 
   // Add, tick, change, delete.
   await ui.fill('.todo-add input', '  Call the bank  ')
@@ -284,6 +284,21 @@ async function checkTodo(T, agent) {
   await ui.wait("!!document.querySelector('.todo .error')")
   assert.ok((await texts(ui, '.todo .error'))[0].startsWith('The list changed while you were looking at it'))
   await ui.wait("document.querySelectorAll('.todo-item').length===2")
+
+  // What calls left for today: names to confirm, notes that are ready, and the to-dos in them that are the person's.
+  const offered = '.todo-group[aria-label="From your calls"] .todo-row'
+  assert.deepEqual(await texts(ui, offered + ' b'), ['Sprint review', 'Planning sync', 'Send the API timeline to Dario.', 'Book the staging review.'])
+  assert.deepEqual(await texts(ui, offered + ' small'), ['Notes are ready · 2 names to confirm', 'Notes are ready', 'From Planning sync', 'From Planning sync'])
+  assert.deepEqual(await texts(ui, offered + ' button'), ['Confirm names', 'Open', 'Add', 'Add'])
+  await ui.capture('todo-from-calls')
+  await ui.click(offered + ' button', 'Add')
+  await ui.wait("document.querySelectorAll('.todo-group[aria-label=\"From your calls\"] .todo-row').length===3")
+  assert.equal((await ui.calls('addTodo')).at(-1).args[0], 'Send the API timeline to Dario.')
+  assert.ok((await texts(ui, '.todo-item .todo-text')).includes('Send the API timeline to Dario.'), 'it is on the list now')
+  assert.deepEqual(await texts(ui, offered + ' b'), ['Sprint review', 'Planning sync', 'Book the staging review.'], 'and is not offered again')
+  await ui.click(offered + ' button', 'Confirm names')
+  await ui.wait("!!document.querySelector('.meetings')")
+  assert.equal(await ui.evaluate("document.querySelector('.sidebar-footer button[aria-current=page]')?.getAttribute('aria-label')"), 'Meetings', 'Confirm names opens the call in Meetings')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }

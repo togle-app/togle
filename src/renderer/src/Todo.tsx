@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import type { RunnerKind, RunnerStatus, TaskView, ViewRequest } from '@shared/runner'
 import { canAllowHere, shownPart } from '@shared/runner-command'
 import type { TodoItem, TodoList } from '@shared/todo'
+import type { CallOffer, TodoOffer } from '@shared/call-todo'
+import { meetingTitle } from './MeetingsPage'
 import { Icon } from './Icon'
 import { NewTask } from './Tasks'
 
@@ -41,8 +43,10 @@ function asking(request: ViewRequest | undefined, task: TaskView): { says: strin
 }
 
 /** The to-do list: what waits for the person at the top, then their own list, kept in a plain text file. */
-export function Todo({ onOpenTask }: { onOpenTask: (key: string, changes?: boolean) => void }) {
+export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, changes?: boolean) => void; onOpenCall: (id: string) => void }) {
   const [list, setList] = useState<TodoList | null>(null)
+  // What calls left for today: names to confirm, notes that are ready, and the to-dos in them that are the person's.
+  const [offers, setOffers] = useState<{ calls: CallOffer[]; items: TodoOffer[] }>({ calls: [], items: [] })
   const [tasks, setTasks] = useState<TaskView[]>([])
   const [status, setStatus] = useState<RunnerStatus[]>([])
   const [keys, setKeys] = useState('F9')
@@ -68,24 +72,37 @@ export function Todo({ onOpenTask }: { onOpenTask: (key: string, changes?: boole
     }
   }, [])
 
+  const refreshOffers = useCallback(async () => {
+    try {
+      const found = await api.meetingOffers()
+      if (found && Array.isArray(found.calls) && Array.isArray(found.items)) setOffers(found)
+    } catch {
+      // Calls are in Meetings; here the offers stay as they were.
+    }
+  }, [])
+
   useEffect(() => {
     void refreshList()
     void refreshTasks()
+    void refreshOffers()
+    const offCalls = api.onCallSessions(() => void refreshOffers())
     const offList = api.onTodoChanged(() => void refreshList())
     const offTasks = api.onRunnersChanged(() => void refreshTasks())
     const timer = setInterval(() => void refreshTasks(), REFRESH_MS)
     const again = (): void => {
       void refreshList()
       void refreshTasks()
+      void refreshOffers()
     }
     window.addEventListener('focus', again)
     return () => {
       offList()
       offTasks()
+      offCalls()
       clearInterval(timer)
       window.removeEventListener('focus', again)
     }
-  }, [refreshList, refreshTasks])
+  }, [refreshList, refreshTasks, refreshOffers])
 
   useEffect(() => {
     void api
@@ -152,6 +169,9 @@ export function Todo({ onOpenTask }: { onOpenTask: (key: string, changes?: boole
   const open = items.filter((item) => !item.done)
   const ticked = items.filter((item) => item.done)
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+  // A to-do from a call that is already on the list is not offered again.
+  const onList = new Set(items.map((item) => item.text.trim().toLocaleLowerCase()))
+  const fromCalls = offers.items.filter((offer) => !onList.has(offer.text.trim().toLocaleLowerCase()))
 
   const row = (item: TodoItem): ReactNode => {
     const task = item.task ? tasks.find((candidate) => candidate.key === item.task) : undefined
@@ -274,6 +294,37 @@ export function Todo({ onOpenTask }: { onOpenTask: (key: string, changes?: boole
         </div>
         {list && !items.length && <p className="empty">Nothing on your list. Add what you need to do today.</p>}
       </section>
+      {(!!offers.calls.length || !!fromCalls.length) && (
+        <section className="todo-group" aria-label="From your calls">
+          <h3 className="tasks-label">From your calls</h3>
+          <div role="list">
+            {offers.calls.map((call) => (
+              <div key={call.id} className="todo-row" role="listitem">
+                <span className="todo-grow">
+                  <b>{meetingTitle(call)}</b>
+                  <small>
+                    {[call.notes && 'Notes are ready', call.toConfirm > 0 && `${call.toConfirm} ${call.toConfirm === 1 ? 'name' : 'names'} to confirm`].filter(Boolean).join(' · ')}
+                  </small>
+                </span>
+                <button className={`small ${call.toConfirm > 0 ? 'primary' : 'ghost'}`} onClick={() => onOpenCall(call.id)}>
+                  {call.toConfirm > 0 ? 'Confirm names' : 'Open'}
+                </button>
+              </div>
+            ))}
+            {fromCalls.map((offer) => (
+              <div key={offer.callId + offer.text} className="todo-row" role="listitem">
+                <span className="todo-grow">
+                  <b>{offer.text}</b>
+                  <small>From {meetingTitle({ title: offer.title, startedAt: 0 })}</small>
+                </span>
+                <button className="small" onClick={() => void change(() => api.addTodo(offer.text)).then(() => refreshOffers())}>
+                  Add
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       <p className="hint todo-file">
         Your list is a plain text file on this computer.{' '}
         <button className="link" onClick={() => void api.showTodoFile()}>
