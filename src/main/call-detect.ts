@@ -9,9 +9,9 @@ const POLL_MS = 5_000
 const STALE_MS = 6 * 3600_000
 
 export interface MicrophoneUse {
-  /** What Windows calls the program: its path with # for \, or its package name. */
+  /** The program: on Windows its path with # for \ or its package name, as Windows keeps it; on Linux its file name. */
   name: string
-  /** When it began using the microphone (epoch ms). */
+  /** When it began using the microphone (epoch ms); on Linux, when it was seen, as nothing says when it began. */
   since: number
 }
 
@@ -38,31 +38,61 @@ export function parseMicrophoneUse(text: string): MicrophoneUse[] {
   return using
 }
 
+/**
+ * The programs recording from a microphone now on Linux, from `pactl list source-outputs` (run in the C locale, so its
+ * words are English): each stream's program by its file name (application.process.binary), else by the name it gives
+ * itself. PulseAudio and PipeWire's PulseAudio service list them the same way.
+ */
+export function parseSourceOutputs(text: string, now: number): MicrophoneUse[] {
+  const using: MicrophoneUse[] = []
+  for (const block of text.split(/^Source Output #/m).slice(1)) {
+    const property = (name: string): string | undefined => new RegExp(`^\\s*${name.replace(/\./g, '\\.')} = "(.*)"\\s*$`, 'm').exec(block)?.[1]
+    const name = property('application.process.binary') || property('application.name')
+    if (name) using.push({ name, since: now })
+  }
+  return using
+}
+
 /** The call apps among the programs using the microphone, once each, with the earliest start. */
 export function callAppsIn(using: MicrophoneUse[]): { app: CallApp; since: number }[] {
   const found = new Map<CallApp, number>()
   for (const entry of using) {
-    const app = CALL_APPS.find(candidate => candidate.match.test(entry.name))
+    // Windows names end in .exe or are packages, Linux names are bare file names: one never matches the other's pattern.
+    const app = CALL_APPS.find(candidate => candidate.match.test(entry.name) || !!candidate.linux?.test(entry.name))
     if (app) found.set(app.id, Math.min(found.get(app.id) ?? Infinity, entry.since))
   }
   return [...found].map(([app, since]) => ({ app, since }))
 }
 
 /** `reg query` of the microphone's consent store: empty if it cannot be read. */
-export function readMicrophoneUse(): Promise<string> {
+function readRegistry(): Promise<MicrophoneUse[]> {
   return new Promise(resolve => {
-    execFile('reg.exe', ['query', MICROPHONE_KEY, '/s'], { windowsHide: true, timeout: 4000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => resolve(error ? '' : stdout))
+    execFile('reg.exe', ['query', MICROPHONE_KEY, '/s'], { windowsHide: true, timeout: 4000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => resolve(error ? [] : parseMicrophoneUse(stdout)))
   })
 }
 
-// The browsers a call can be in: Meet, and the web versions of the other apps.
+/** `pactl list source-outputs`: none if there is no pactl or no sound service. */
+function readSourceOutputs(): Promise<MicrophoneUse[]> {
+  return new Promise(resolve => {
+    execFile('pactl', ['list', 'source-outputs'], { timeout: 4000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } }, (error, stdout) => resolve(error ? [] : parseSourceOutputs(stdout, Date.now())))
+  })
+}
+
+/** The programs using the microphone now, as this system tells it: Windows and Linux; none elsewhere. */
+export function readMicrophoneUse(): Promise<MicrophoneUse[]> {
+  return process.platform === 'win32' ? readRegistry() : process.platform === 'linux' ? readSourceOutputs() : Promise.resolve([])
+}
+
+// The browsers a call can be in: Meet, and the web versions of the other apps. On Windows by the name of their program,
+// on Linux by their file name.
 const BROWSER = /(?:^|[#\\])((?:chrome|msedge|firefox|brave|opera|vivaldi)\.exe)$/i
+const LINUX_BROWSER = /^(?:chrome|google-chrome(?:-stable|-beta|-unstable)?|chromium(?:-browser)?|brave(?:-browser)?|msedge|microsoft-edge(?:-stable|-beta|-dev)?|opera|vivaldi(?:-bin|-stable)?|firefox(?:-bin|-esr)?)$/i
 
 /** The browsers among the programs using the microphone, by their file name, with the earliest start. */
 export function browsersIn(using: MicrophoneUse[]): { program: string; since: number }[] {
   const found = new Map<string, number>()
   for (const entry of using) {
-    const program = BROWSER.exec(entry.name)?.[1]?.toLowerCase()
+    const program = (BROWSER.exec(entry.name)?.[1] ?? (LINUX_BROWSER.test(entry.name) ? entry.name : undefined))?.toLowerCase()
     if (program) found.set(program, Math.min(found.get(program) ?? Infinity, entry.since))
   }
   return [...found].map(([program, since]) => ({ program, since }))
@@ -79,19 +109,46 @@ export function parseWindowTitles(csv: string): string[] {
   return titles
 }
 
+// A browser's window, by its window class as `wmctrl -lx` gives it (google-chrome.Google-chrome, Navigator.firefox).
+const BROWSER_WINDOW = /chrom|firefox|brave|edge|opera|vivaldi/i
+
+/**
+ * The titles of the browsers' windows in `wmctrl -lx` (X11, and the windows of programs under XWayland): each line is the
+ * window's id, its desktop, its class, the computer and its title.
+ */
+export function parseBrowserWindows(text: string): string[] {
+  const titles: string[] = []
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^0x[0-9a-f]+\s+-?\d+\s+(\S+)\s+\S+\s+(.*)$/i.exec(line.trim())
+    if (match && BROWSER_WINDOW.test(match[1]) && match[2].trim()) titles.push(match[2].trim())
+  }
+  return titles
+}
+
 /**
  * The titles of a browser's windows, to tell a call in it from anything else that uses the microphone (one title a
- * process: the window in front of each). Read only while that browser uses the microphone; matched, never kept.
+ * process on Windows: the window in front of each). Read only while that browser uses the microphone; matched, never
+ * kept. On Linux, through wmctrl when it is installed: on Wayland it sees only the programs running under XWayland.
  */
 export function readWindowTitles(program: string): Promise<string[]> {
+  if (process.platform === 'linux') {
+    if (!LINUX_BROWSER.test(program)) return Promise.resolve([])
+    return new Promise(resolve => {
+      execFile('wmctrl', ['-lx'], { timeout: 4000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => resolve(error ? [] : parseBrowserWindows(stdout)))
+    })
+  }
   if (!BROWSER.test(program)) return Promise.resolve([])
   return new Promise(resolve => {
     execFile('tasklist.exe', ['/V', '/FO', 'CSV', '/NH', '/FI', `IMAGENAME eq ${program}`], { windowsHide: true, timeout: 6000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => resolve(error ? [] : parseWindowTitles(stdout)))
   })
 }
 
-/** Whether one of the app's programs is running, so a leftover from one that crashed does not count as a call. */
+/**
+ * Whether one of the app's programs is running, so a leftover from one that crashed does not count as a call. Linux
+ * lists only the programs recording now, so there is no leftover to check.
+ */
 export function appRunning(app: CallApp): Promise<boolean> {
+  if (process.platform !== 'win32') return Promise.resolve(true)
   const programs = CALL_APPS.find(candidate => candidate.id === app)?.programs ?? []
   return new Promise(resolve => {
     execFile('tasklist.exe', ['/FO', 'CSV', '/NH'], { windowsHide: true, timeout: 6000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
@@ -103,7 +160,8 @@ export function appRunning(app: CallApp): Promise<boolean> {
 }
 
 interface Options {
-  read: () => Promise<string>
+  /** The programs using the microphone now. */
+  read: () => Promise<MicrophoneUse[]>
   running: (app: CallApp) => Promise<boolean>
   /** The window titles of a browser using the microphone, to tell a call in it (Meet, or another app on the web). */
   titles?: (program: string) => Promise<string[]>
@@ -148,7 +206,7 @@ export class CallDetector {
     this.busy = true
     try {
       const now = (this.options.now ?? Date.now)()
-      const using = parseMicrophoneUse(await this.options.read())
+      const using = await this.options.read()
       const found: { app: CallApp; since: number; web?: boolean }[] = callAppsIn(using)
       // A browser using the microphone: a call in it is told by its window's title.
       for (const { program, since } of this.options.titles ? browsersIn(using) : []) {

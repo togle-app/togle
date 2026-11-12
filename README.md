@@ -116,7 +116,7 @@ src/main/              Electron main process
   call-file.ts         the call so far saved as it goes, so a crash or a restart doesn't lose it
   call-sessions.ts     calls saved encrypted; meeting-notes.ts and call-titles.ts write their notes and titles
   confirm-sound.ts     the one short clip of each voice that Who spoke? plays, deleted within a day
-  call-detect.ts       which call app uses the microphone (Windows); call-notice-window.ts, call-strip-window.ts
+  call-detect.ts       which call app uses the microphone (Windows, Linux); call-notice-window.ts, call-strip-window.ts
   runners/             Claude Code, Codex, Hermes and added agents (acp.ts speaks ACP for Hermes and any agent added):
                        their tasks, requests and stops; hub.ts holds them together; claude-sessions.ts lists
                        Claude Code's own sessions

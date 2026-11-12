@@ -13,6 +13,12 @@ npm run dist -- --linux
 Outputs include a `.deb`, an AppImage and `dist/linux-unpacked`. Do not relabel an x64 build as arm64. Current Ubuntu CI
 targets x64.
 
+When a call starts in Zoom, Teams for Linux, Webex, Slack or Skype, Togle offers to write it down: it sees which
+programs record from the microphone in what PulseAudio or PipeWire lists (`pactl list source-outputs`). A call in a
+browser is told by the browser window's title, read with `wmctrl -lx` when it is installed; on Wayland that sees only
+programs running under XWayland. This was written against pactl's and wmctrl's output and has not been tried on a Linux
+desktop yet.
+
 Removing background noise from your microphone for every call app is Togle Studio's job, a separate app. When it's
 installed, Togle finds it by itself, shows whether it's on, and can turn it on for calls (Settings → Togle Studio).
 

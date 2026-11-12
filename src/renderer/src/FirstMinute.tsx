@@ -97,7 +97,7 @@ export function FirstMinute({ settings, stt, onDone }: Props) {
         <li className="first-step" aria-label="Togle finds the rest">
           <h3>Togle finds the rest</h3>
           <Found />
-          {api.platform === 'win32' && <p className="hint">When a call starts in Zoom, Meet or Teams, Togle offers to write it down. After your first yes, it can do that by itself in that app.</p>}
+          {(api.platform === 'win32' || api.platform === 'linux') && <p className="hint">When a call starts in Zoom, Meet or Teams, Togle offers to write it down. After your first yes, it can do that by itself in that app.</p>}
         </li>
       </ol>
 

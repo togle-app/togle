@@ -247,12 +247,13 @@ function callAppStarted(appId: CallApp): void {
   if (mode === 'always') send('hotkey', 'start-call-unseen')
   else callNotice.show({ app: appId, name: callAppName(appId) }, 60_000)
 }
-// Looked for every few seconds while no call is being written down; Windows only (it reads which program uses the microphone).
+// Looked for every few seconds while no call is being written down: which program uses the microphone, as Windows or
+// Linux (PulseAudio, PipeWire) tells it. macOS has no list of that for other apps to read.
 const callDetector = new CallDetector({
   read: readMicrophoneUse,
   running: appRunning,
   titles: readWindowTitles,
-  active: () => process.platform === 'win32' && !quitting && !ongoing.isListening && getSettings().meetings.notice && (app.isPackaged || process.env.TOGLE_CALL_DETECT !== '0'),
+  active: () => (process.platform === 'win32' || process.platform === 'linux') && !quitting && !ongoing.isListening && getSettings().meetings.notice && (app.isPackaged || process.env.TOGLE_CALL_DETECT !== '0'),
   onStart: callAppStarted,
   onEnd: (appId) => { if (callNotice.shown?.app === appId) callNotice.show(null) }
 })

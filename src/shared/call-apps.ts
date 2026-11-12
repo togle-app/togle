@@ -6,6 +6,8 @@ export interface CallAppInfo {
   name: string
   /** Matches the name Windows keeps for a program that used the microphone: its path with # for \, or its package. */
   match: RegExp
+  /** Matches the program's file name on Linux, as PulseAudio and PipeWire give it for what records from a microphone. */
+  linux?: RegExp
   /** The program's file names, to see it is still running. */
   programs: string[]
   /** Matches the title of a browser window with a call of this app in it (the app on the web). */
@@ -13,13 +15,13 @@ export interface CallAppInfo {
 }
 
 export const CALL_APPS: CallAppInfo[] = [
-  { id: 'zoom', name: 'Zoom', match: /(?:^|[#\\])zoom\.exe$/i, programs: ['Zoom.exe'], site: /\bZoom (?:Meeting|Workplace|Webinar)\b/ },
+  { id: 'zoom', name: 'Zoom', match: /(?:^|[#\\])zoom\.exe$/i, linux: /^(?:zoom|zoom\.real|ZoomWebviewHost)$/i, programs: ['Zoom.exe'], site: /\bZoom (?:Meeting|Workplace|Webinar)\b/ },
   // Meet has no program of its own: it is noticed in a browser.
   { id: 'meet', name: 'Meet', match: /(?!)/, programs: [], site: /(?:^|\s)Meet\s[-–—]\s|\bGoogle Meet\b/ },
-  { id: 'teams', name: 'Teams', match: /(?:^|[#\\])(?:ms-teams|teams)\.exe$|^msteams_/i, programs: ['ms-teams.exe', 'Teams.exe'], site: /\bMicrosoft Teams\b/ },
-  { id: 'webex', name: 'Webex', match: /(?:^|[#\\])(?:webex|atmgr|ciscocollabhost)\.exe$|^cisco\.?webex/i, programs: ['CiscoCollabHost.exe', 'atmgr.exe', 'Webex.exe'], site: /\bWebex\b/ },
-  { id: 'skype', name: 'Skype', match: /(?:^|[#\\])skype(?:app)?\.exe$|^microsoft\.skypeapp_/i, programs: ['Skype.exe'] },
-  { id: 'slack', name: 'Slack', match: /(?:^|[#\\])slack\.exe$/i, programs: ['slack.exe'] }
+  { id: 'teams', name: 'Teams', match: /(?:^|[#\\])(?:ms-teams|teams)\.exe$|^msteams_/i, linux: /^teams(?:-for-linux|-insiders)?$/i, programs: ['ms-teams.exe', 'Teams.exe'], site: /\bMicrosoft Teams\b/ },
+  { id: 'webex', name: 'Webex', match: /(?:^|[#\\])(?:webex|atmgr|ciscocollabhost)\.exe$|^cisco\.?webex/i, linux: /^(?:webex|CiscoCollabHost)$/i, programs: ['CiscoCollabHost.exe', 'atmgr.exe', 'Webex.exe'], site: /\bWebex\b/ },
+  { id: 'skype', name: 'Skype', match: /(?:^|[#\\])skype(?:app)?\.exe$|^microsoft\.skypeapp_/i, linux: /^skypeforlinux$/i, programs: ['Skype.exe'] },
+  { id: 'slack', name: 'Slack', match: /(?:^|[#\\])slack\.exe$/i, linux: /^slack$/i, programs: ['slack.exe'] }
 ]
 
 /** What to do when a call starts in an app: tell the person, write it down at once, or leave it. */

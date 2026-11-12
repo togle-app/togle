@@ -1,7 +1,7 @@
 // Noticing a call that starts in another app: which programs use the microphone, and when to say so.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-const { parseMicrophoneUse, callAppsIn, CallDetector, browsersIn, parseWindowTitles, callSitesIn } = await import('./.build/togle.mjs')
+const { parseMicrophoneUse, parseSourceOutputs, parseBrowserWindows, callAppsIn, CallDetector, browsersIn, parseWindowTitles, callSitesIn } = await import('./.build/togle.mjs')
 
 const EPOCH = 11_644_473_600_000
 const filetime = ms => '0x' + BigInt(Math.round((ms + EPOCH) * 10_000)).toString(16)
@@ -45,7 +45,7 @@ function detector(listing, running = () => true, active = () => true) {
   const calls = { started: [], ended: [] }
   const state = { listing, now }
   const subject = new CallDetector({
-    read: async () => state.listing,
+    read: async () => parseMicrophoneUse(state.listing),
     running: async app => running(app),
     active,
     onStart: app => calls.started.push(app),
@@ -139,7 +139,7 @@ test('a call in a browser is told by its window title: Meet, and the web version
   // The detector reads a browser's titles only while it uses the microphone.
   const asked = [], started = []
   const state = { listing: header + using('C:#Program Files#Google#Chrome#Application#chrome.exe'), titles: ['Meet - abc-defg-hij - Google Chrome'] }
-  const subject = new CallDetector({ read: async () => state.listing, running: async () => false, titles: async program => { asked.push(program); return state.titles }, active: () => true, onStart: app => started.push(app), now: () => now })
+  const subject = new CallDetector({ read: async () => parseMicrophoneUse(state.listing), running: async () => false, titles: async program => { asked.push(program); return state.titles }, active: () => true, onStart: app => started.push(app), now: () => now })
   await subject.poll(); await subject.poll()
   assert.deepEqual(started, ['meet'], 'a browser window with a call in it is a call: there is no program of its own to check')
   assert.deepEqual(asked, ['chrome.exe', 'chrome.exe'])
@@ -161,4 +161,68 @@ test('a program that has used the microphone for hours before Togle looked is a 
   const recent = detector(header + using('C:#Program Files#Zoom#bin#Zoom.exe', now - 20 * 60_000))
   await recent.subject.poll(); await recent.subject.poll()
   assert.deepEqual(recent.calls.started, ['zoom'], 'a call under way as Togle started is said')
+})
+
+// ---- Linux: what PulseAudio or PipeWire lists as recording ----
+
+/** One stream as `pactl list source-outputs` prints it in the C locale. */
+const sourceOutput = (index, properties) => `Source Output #${index}
+	Driver: protocol-native.c
+	Owner Module: 10
+	Client: ${index + 20}
+	Source: 1
+	Sample Specification: float32le 1ch 48000Hz
+	Channel Map: mono
+	Format: pcm, format.sample_format = "\\"float32le\\""  format.rate = "48000"  format.channels = "1"  format.channel_map = "\\"mono\\""
+	Corked: no
+	Mute: no
+	Volume: mono: 65536 / 100% / 0.00 dB
+	        balance 0.00
+	Buffer Latency: 0 usec
+	Source Latency: 0 usec
+	Resample method: n/a
+	Properties:
+${Object.entries(properties).map(([key, value]) => `		${key} = "${value}"`).join('\n')}
+		native-protocol.peer = "UNIX socket client"
+		module-stream-restore.id = "source-output-by-application-name:${properties['application.name'] ?? ''}"
+
+`
+
+test('on Linux, the programs recording are read from what PulseAudio or PipeWire lists, by their file name', () => {
+  const text = sourceOutput(42, { 'media.name': 'RecordStream', 'application.name': 'ZOOM VoiceEngine', 'application.process.id': '4242', 'application.process.binary': 'zoom' })
+    + sourceOutput(43, { 'media.name': 'RecordStream', 'application.name': 'Google Chrome', 'application.process.binary': 'chrome' })
+    + sourceOutput(44, { 'media.name': 'Togle', 'application.name': 'Togle', 'application.process.binary': 'togle' })
+    + sourceOutput(45, { 'media.name': 'Capture', 'application.name': 'Slack' })
+  const found = parseSourceOutputs(text, now)
+  assert.deepEqual(found.map(item => item.name), ['zoom', 'chrome', 'togle', 'Slack'], 'by the file name, else by the name it gives itself')
+  assert.ok(found.every(item => item.since === now), 'nothing says when a stream began: it counts from when it is seen')
+  assert.deepEqual(parseSourceOutputs('', now), [])
+  assert.deepEqual(parseSourceOutputs('Connection failure: Connection refused\npa_context_connect() failed: Connection refused', now), [])
+  assert.deepEqual(callAppsIn(found).map(item => item.app).sort(), ['slack', 'zoom'])
+  assert.deepEqual(browsersIn(found).map(item => item.program), ['chrome'])
+})
+
+test("Linux programs match only Linux names, and Windows names only Windows'", () => {
+  const linux = ['zoom', 'ZoomWebviewHost', 'teams-for-linux', 'CiscoCollabHost', 'skypeforlinux', 'slack'].map(name => ({ name, since: now }))
+  assert.deepEqual(callAppsIn(linux).map(item => item.app).sort(), ['skype', 'slack', 'teams', 'webex', 'zoom'])
+  assert.deepEqual(callAppsIn(['zoomer', 'slack-helper', 'my-teams', 'discord'].map(name => ({ name, since: now }))), [], 'names that only start or end alike are not those apps')
+  assert.deepEqual(browsersIn(['firefox', 'google-chrome-stable', 'chromium-browser', 'brave', 'firefoxish'].map(name => ({ name, since: now }))).map(item => item.program), ['firefox', 'google-chrome-stable', 'chromium-browser', 'brave'])
+})
+
+test("on Linux, a browser's windows are read from wmctrl: their titles tell a call in it", async () => {
+  const listing = [
+    '0x03c00003  0 Navigator.firefox     pc Meet - abc-defg-hij — Mozilla Firefox',
+    '0x04400007  0 google-chrome.Google-chrome  pc Inbox - Gmail - Google Chrome',
+    '0x02200004 -1 gnome-shell.Gnome-shell  pc gnome-shell',
+    '0x05000001  1 org.gnome.Nautilus.Org.gnome.Nautilus  pc Meet - Files',
+    'not a window line'
+  ].join('\n')
+  const titles = parseBrowserWindows(listing)
+  assert.deepEqual(titles, ['Meet - abc-defg-hij — Mozilla Firefox', 'Inbox - Gmail - Google Chrome'], 'only the browsers\' windows')
+  assert.deepEqual(callSitesIn(titles), ['meet'])
+  // The detector with them: a browser recording, with a call in one of its windows.
+  const started = []
+  const subject = new CallDetector({ read: async () => [{ name: 'firefox', since: now }], running: async () => false, titles: async () => titles, active: () => true, onStart: app => started.push(app), now: () => now })
+  await subject.poll(); await subject.poll()
+  assert.deepEqual(started, ['meet'])
 })

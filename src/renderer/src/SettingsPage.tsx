@@ -179,9 +179,12 @@ function NamesAndTerms({ accountId }: { accountId: string }) {
 function Meetings({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
   const apps = settings.meetings.apps
   const modeOf = (id: CallApp): CallAppMode => (isCallAppMode(apps[id]) ? apps[id]! : 'ask')
+  const notices = platform === 'win32' || platform === 'linux'
+  const note = platform === 'win32' ? 'Togle sees which app uses the microphone, and for a browser the title of its window. It never listens before a call is written down.'
+    : platform === 'linux' ? 'Togle sees which app uses the microphone. It never listens before a call is written down.' : undefined
   return (
-    <Section id="settings-meetings" title="Meetings" note={platform === 'win32' ? 'Togle sees which app uses the microphone, and for a browser the title of its window. It never listens before a call is written down.' : undefined}>
-      {platform === 'win32'
+    <Section id="settings-meetings" title="Meetings" note={note}>
+      {notices
         ? CALL_APPS.map((app) => (
           <Row key={app.id} name={app.name}>
             <select aria-label={`When a call starts in ${app.name}`} value={modeOf(app.id)} onChange={(event) => void save({ meetings: { ...settings.meetings, notice: true, apps: { ...apps, [app.id]: event.target.value as CallAppMode } } })}>
@@ -191,7 +194,7 @@ function Meetings({ settings, save }: { settings: Settings; save: (patch: Settin
             </select>
           </Row>
         ))
-        : <Row label={false} name="Call apps" note="Togle notices calls by itself on Windows. Here, start one with Write down now in Meetings." />}
+        : <Row label={false} name="Call apps" note="Togle notices calls by itself on Windows and Linux. Here, start one with Write down now in Meetings." />}
       <RememberedVoices settings={settings} save={save} />
     </Section>
   )
