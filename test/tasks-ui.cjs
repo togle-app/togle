@@ -80,8 +80,8 @@ const groupTitles = (ui, heading) => ui.evaluate("(()=>{const group=[...document
 
 async function checkTasks(T, agent) {
   const ui = await open(T, agent, 1024)
-  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.workspace-nav button')].map(button=>button.getAttribute('aria-label'))"), ['To-do', 'Tasks', 'Meetings', 'Explore agents'])
-  await ui.click('.workspace-nav button', 'Tasks')
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.workspace-nav button')].map(button=>button.getAttribute('aria-label'))"), ['To-do', 'Agents', 'Meetings', 'Settings'])
+  await ui.click('.workspace-nav button', 'Agents')
   await ui.wait("document.querySelectorAll('.task-row').length===6")
   assert.deepEqual(await texts(ui, '.task-group > h3'), ['Waiting for you', 'Working', 'Earlier · 2 tasks'])
   const rows = await ui.evaluate("[...document.querySelectorAll('.task-row')].map(row=>({title:row.querySelector('strong').textContent,state:row.dataset.state,more:row.querySelector('.task-copy span').textContent,danger:!!row.querySelector('.task-danger')}))")
@@ -298,14 +298,14 @@ async function checkTodo(T, agent) {
   assert.deepEqual(await texts(ui, offered + ' b'), ['Sprint review', 'Planning sync', 'Book the staging review.'], 'and is not offered again')
   await ui.click(offered + ' button', 'Confirm names')
   await ui.wait("!!document.querySelector('.meetings')")
-  assert.equal(await ui.evaluate("document.querySelector('.sidebar-footer button[aria-current=page]')?.getAttribute('aria-label')"), 'Meetings', 'Confirm names opens the call in Meetings')
+  assert.equal(await ui.evaluate("document.querySelector('.workspace-nav button[aria-current=page]')?.getAttribute('aria-label')"), 'Meetings', 'Confirm names opens the call in Meetings')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
 
 async function checkChanges(T, agent) {
   const ui = await open(T, agent, 1024)
-  await ui.click('.workspace-nav button', 'Tasks')
+  await ui.click('.workspace-nav button', 'Agents')
   await ui.wait("document.querySelectorAll('.task-row').length===6")
 
   // From a task: the files, and what changed in the one that is picked.
@@ -350,7 +350,7 @@ async function checkChanges(T, agent) {
 
 async function checkOutside(T, agent) {
   const ui = await open(T, agent, 1024)
-  await ui.click('.workspace-nav button', 'Tasks')
+  await ui.click('.workspace-nav button', 'Agents')
   await ui.wait("document.querySelectorAll('.task-row').length===6")
 
   // Claude Code in a terminal: asking Togle is off until the person connects it, with the file it changes named.
@@ -376,7 +376,7 @@ async function checkOutside(T, agent) {
   const leaveAndReturn = async () => {
     await ui.click('.workspace-nav button', 'To-do')
     await ui.wait("!!document.querySelector('.todo')")
-    await ui.click('.workspace-nav button', 'Tasks')
+    await ui.click('.workspace-nav button', 'Agents')
     await ui.wait("!!document.querySelector('.tasks-connect')")
   }
   await ui.evaluate("window.togleUITest.hook({ installed: true, current: false })")
@@ -393,7 +393,7 @@ async function checkOutside(T, agent) {
 
 async function checkOutsideAsk(T, agent) {
   const ui = await open(T, agent, 1024)
-  await ui.click('.workspace-nav button', 'Tasks')
+  await ui.click('.workspace-nav button', 'Agents')
   await ui.wait("document.querySelectorAll('.task-row').length===6")
   // A session in a terminal asks about a command: it waits, and can be answered here as well as there.
   await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'ext-1', kind: 'command', command: 'npm run build', raw: 'npm run build', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
@@ -494,7 +494,7 @@ async function checkTaskBox(T, agent) {
 
 async function checkAgentSettings(T, agent) {
   const ui = await open(T, agent, 1024)
-  await ui.click('.sidebar-settings', 'Settings')
+  await ui.click('.shell-settings', 'Settings')
   await ui.wait("!!document.querySelector('#settings-agents')")
   const section = "document.querySelector('#settings-agents')"
   assert.deepEqual(await ui.evaluate(`[...${section}.querySelectorAll('.setting .name')].map(e=>e.textContent)`), ['Notice when a task waits', 'Notice when a task finishes', 'Start a task for a coding agent', 'Claude Code in a terminal', 'To-do list'])
@@ -532,21 +532,21 @@ async function checkQuit(T, agent) {
   // A task that has not finished: the question names it, Keep going leaves it, and Quit goes ahead.
   await warn({ call: false, tasks: ['Add the status column'] })
   await ui.wait("!!document.querySelector('[aria-label=\"Confirm quit Togle\"]')")
-  assert.equal(await notice(), 'Quit Togle? “Add the status column” has not finished. Quitting stops it. You can continue it from Tasks.')
+  assert.equal(await notice(), 'Quit Togle? “Add the status column” has not finished. Quitting stops it. You can continue it from Agents.')
   await ui.capture('tasks-quit')
   await ui.click('[aria-label="Confirm quit Togle"] button', 'Keep going')
   await ui.wait("!document.querySelector('[aria-label=\"Confirm quit Togle\"]')")
   assert.equal((await ui.calls('close')).length, 0, 'Keep going quits nothing')
   await warn({ call: false, tasks: ['One', 'Two'] })
   await ui.wait("!!document.querySelector('[aria-label=\"Confirm quit Togle\"]')")
-  assert.equal(await notice(), 'Quit Togle? 2 tasks have not finished. Quitting stops them. You can continue them from Tasks.')
+  assert.equal(await notice(), 'Quit Togle? 2 tasks have not finished. Quitting stops them. You can continue them from Agents.')
   await ui.click('[aria-label="Confirm quit Togle"] button', 'Quit Togle')
   assert.deepEqual((await ui.calls('close')).map(call => call.args), [[true]])
 
   // A call alone is asked as it always was; a call with tasks says both; Escape means Keep going.
   await warn({ call: true, tasks: [] })
   await ui.wait("!!document.querySelector('[aria-label=\"Confirm quit Togle\"]')")
-  assert.equal(await notice(), 'Quit Togle? Call assistance and dictation will stop. Your call is saved.')
+  assert.equal(await notice(), 'Quit Togle? Writing down the call and dictation will stop. What was said so far is saved.')
   await warn({ call: true, tasks: ['One'] })
   await ui.wait("document.querySelector('[aria-label=\"Confirm quit Togle\"] span').textContent.includes('so will a task')")
   await ui.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))")
@@ -690,7 +690,7 @@ async function checkCallStrip(T, agent) {
 // its own window is not Togle's to continue.
 async function checkStoppedTasks(T, agent) {
   const ui = await open(T, agent, 1024)
-  await ui.click('.workspace-nav button', 'Tasks')
+  await ui.click('.workspace-nav button', 'Agents')
   await ui.wait("document.querySelectorAll('.task-row').length===6")
   await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','The plan limit is reached until 14:00.')")
   await ui.evaluate("window.togleUITest.stopTask('claude:s4','stopped','')")
@@ -715,7 +715,7 @@ async function checkStoppedTasks(T, agent) {
 
 async function checkNarrow(T, agent) {
   const ui = await open(T, agent, 600)
-  await ui.click('.workspace-nav button', 'Tasks')
+  await ui.click('.workspace-nav button', 'Agents')
   await ui.wait("document.querySelectorAll('.task-row').length===6")
   const fits = () => ui.evaluate("document.documentElement.scrollWidth<=innerWidth&&document.querySelector('.tasks').scrollWidth<=document.querySelector('.tasks').clientWidth+1")
   assert.ok(await fits(), 'the list fits a narrow window')

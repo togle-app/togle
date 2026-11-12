@@ -189,9 +189,10 @@ test('a new Togle remembers no one’s voice until the person turns it on; setti
   rmSync(file, { force: true })
   assert.equal((await loadSettings()).assist.rememberVoices, false)
   // Saved before the default changed: they say yes because it was the default (they have no meetings part).
-  writeFileSync(file, JSON.stringify({ activeAgentId: 'work', assist: { auto: true, rememberVoices: true } }))
+  writeFileSync(file, JSON.stringify({ activeAgentId: 'work', assist: { auto: true, rememberVoices: true, autoNotes: false } }))
   assert.equal((await loadSettings()).assist.rememberVoices, false, 'the old default is not a choice')
-  assert.equal((await loadSettings()).assist.auto, true, 'nothing else changes')
+  assert.equal((await loadSettings()).assist.autoNotes, false, 'nothing else changes')
+  assert.equal((await loadSettings()).assist.auto, false, 'no suggestion comes unasked during a call, whatever was saved')
   // Saved since: a yes is the person's.
   writeFileSync(file, JSON.stringify({ activeAgentId: 'work', assist: { rememberVoices: true }, meetings: { introSeen: true, confirmNames: true } }))
   assert.equal((await loadSettings()).assist.rememberVoices, true, 'someone who turned it on keeps it')

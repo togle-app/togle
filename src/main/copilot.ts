@@ -982,7 +982,9 @@ export class Copilot {
       // Said while auto-suggest was off: turning it on later doesn't answer these.
       else this.autoHandled.add(entry.id)
     }
-    void this.updateNotes()
+    // Running notes only fed the answers given during a call, and none come unasked: the call's words go to the AI
+    // once it is over, for its notes.
+    if (getSettings().assist.auto) void this.updateNotes()
   }
 
   /**

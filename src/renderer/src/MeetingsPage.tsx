@@ -134,7 +134,6 @@ function MeetingDetail({ id, agents, tab, onTab, onBack, onDeleted }: { id: stri
     setBusy(true); setError('')
     try { await work() } catch (failure) { setError(errorText(failure)) } finally { setBusy(false) }
   }
-  const agent = record ? agents.find(item => item.id === record.agentId) : undefined
   const ended = !!record && record.status !== 'live'
   return (
     <div className="meetings meeting-detail call-history">
@@ -160,13 +159,13 @@ function MeetingDetail({ id, agents, tab, onTab, onBack, onDeleted }: { id: stri
           <label>Call title<input aria-label="Call title" value={title} maxLength={140} onChange={event => setTitle(event.target.value)} autoFocus /></label>
           <button className="primary" disabled={busy || !title.trim()}>Save title</button><button type="button" disabled={busy} onClick={() => setEditing(false)}>Cancel</button>
         </form>}
-        {deleting && <div className="notice ask"><span>Delete this call’s saved notes and transcript? Knowledge already kept by its agent stays until you undo it under Learning.</span><div className="row"><button disabled={busy} onClick={() => setDeleting(false)}>Keep call</button><button className="primary stop" disabled={busy} onClick={() => void run(async () => { await api.deleteCallSession(record.id); onDeleted() })}>Delete call</button></div></div>}
+        {deleting && <div className="notice ask"><span>Delete this call’s notes and transcript from this computer? This can’t be undone.</span><div className="row"><button disabled={busy} onClick={() => setDeleting(false)}>Keep call</button><button className="primary stop" disabled={busy} onClick={() => void run(async () => { await api.deleteCallSession(record.id); onDeleted() })}>Delete call</button></div></div>}
         {ended && <ConfirmNames key={`confirm-${record.id}`} record={record} onRecord={setRecord} />}
         <div className="tabs call-detail-tabs" role="tablist" aria-label="Call details">
           {(['notes', 'transcript'] as const).map(name => <button key={name} role="tab" id={`meeting-tab-${name}`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => onTab(name)}>{name === 'notes' ? 'Notes' : 'Transcript'}</button>)}
         </div>
         <section className="call-detail-content" role="tabpanel" aria-labelledby={`meeting-tab-${tab}`}>
-          {tab === 'notes' ? <CallNotes key={`notes-${record.id}`} record={record} onRecord={setRecord} canGenerate={!!agent} /> : <HistoryTranscript key={record.id} record={record} onRecord={setRecord} />}
+          {tab === 'notes' ? <CallNotes key={`notes-${record.id}`} record={record} onRecord={setRecord} canGenerate /> : <HistoryTranscript key={record.id} record={record} onRecord={setRecord} />}
         </section>
       </>}
       {error && record && <p className="error" role="status">{error}</p>}

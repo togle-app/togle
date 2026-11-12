@@ -3,7 +3,6 @@ import type { SettingsPatch } from '@shared/api'
 import type {
   AuthStatus,
   ClaudeAuthStatus,
-  HotkeyInfo,
   LocalModelId,
   LocalSpeechState,
   Recognizer,
@@ -375,7 +374,6 @@ function Hearing({ settings, stt, save }: HearingProps) {
 }
 
 // The shortcuts a call uses, shown first; the others are folded under them.
-const CALL_SHORTCUTS: HotkeyInfo['id'][] = ['suggest', 'suggest-screen', 'deeper', 'listen']
 
 // The page's parts, a click away from its top: it's long (several screens in a narrow window), and the part you came
 // for is often far down.
@@ -389,7 +387,7 @@ const PARTS: [id: string, label: string][] = [
   ['settings-meetings', 'Call apps'],
   ['settings-microphone', 'Togle Studio'],
   ['settings-agents', 'Coding agents'],
-  ['settings-window', 'Window & shortcuts']
+  ['settings-window', 'Window']
 ]
 
 /** Where the to-do list's file is, and a way to see it. */
@@ -437,7 +435,6 @@ interface Props {
  * window, and the shortcuts. Each setting is a row, its control on the right; the ones few people change are folded.
  */
 export function Settings({ settings, auth, claudeAuth, stt, at, onChange, onDone, onArchive }: Props) {
-  const [names, setNames] = useState(settings.assist.names ?? '')
   const hotkeys = useHotkeys()
   const [saveError, setSaveError] = useState('')
 
@@ -455,9 +452,6 @@ export function Settings({ settings, auth, claudeAuth, stt, at, onChange, onDone
     ;(at === 'name' ? target : target?.querySelector<HTMLElement>('h3'))?.focus({ preventScroll: true })
   }, [at])
 
-  const suggest = hotkeys.find((h) => h.id === 'suggest')
-  // Its keys, when they work: another app may hold them.
-  const suggestKeys = suggest?.ok ? suggest.keys : ''
   const hidden = settings.window.hideFromCapture
 
   return (
@@ -478,12 +472,6 @@ export function Settings({ settings, auth, claudeAuth, stt, at, onChange, onDone
       <AISettings settings={settings} save={save} />
 
       <Section id="settings-calls" title="During calls">
-        <Toggle
-          name="Automatic suggestions"
-          note={`A suggestion when you need to reply. ${suggestKeys ? `Press ${suggestKeys} anytime for one.` : 'Click Suggest reply anytime for one.'}`}
-          checked={settings.assist.auto}
-          onChange={(auto) => void save({ assist: { auto } })}
-        />
         {api.platform === 'linux' ? (
           // X11 and Wayland have no way for a window to keep out of captures.
           <Toggle name="Hide from screen sharing" note="Linux can't keep a window out of screenshots and screen shares." checked={false} disabled onChange={() => {}} />
@@ -495,16 +483,6 @@ export function Settings({ settings, auth, claudeAuth, stt, at, onChange, onDone
             onChange={(hideFromCapture) => void save({ window: { hideFromCapture } })}
           />
         )}
-        <Row name="Your name" note="In a group call, Togle suggests when someone says it.">
-          <input
-            id="settings-name"
-            aria-label="Your name, as people say it"
-            value={names}
-            placeholder="e.g. Luka, Luke"
-            onChange={(e) => setNames(e.target.value)}
-            onBlur={() => void save({ assist: { names: names.trim() } })}
-          />
-        </Row>
         <Toggle name="Automatic meeting notes" note={settings.assist.rememberCalls === false ? 'Needs Remember calls, under Privacy and history.' : 'Written after a saved call ends, with the agent’s AI account. Uses your plan’s allowance.'} checked={settings.assist.autoNotes !== false} disabled={settings.assist.rememberCalls === false} onChange={autoNotes => void save({ assist: { autoNotes } })} />
       </Section>
 
@@ -547,7 +525,7 @@ export function Settings({ settings, auth, claudeAuth, stt, at, onChange, onDone
       </Section>
 
       <details className="settings-extra" id="settings-window">
-        <summary>Window &amp; shortcuts</summary>
+        <summary>Window</summary>
         <Section title="Window">
           <Toggle name="Always on top" checked={settings.window.alwaysOnTop} onChange={(alwaysOnTop) => void save({ window: { alwaysOnTop } })} />
           <Row name="Opacity">
@@ -555,17 +533,6 @@ export function Settings({ settings, auth, claudeAuth, stt, at, onChange, onDone
           </Row>
         </Section>
 
-        <Section title="Shortcuts" note="They work from any app. Click one to give it other keys.">
-          {hotkeys.filter((h) => CALL_SHORTCUTS.includes(h.id)).map((h) => (
-            <Shortcut key={h.id} hotkey={h} />
-          ))}
-          <details className="more">
-            <summary>More shortcuts</summary>
-            {hotkeys.filter((h) => h.id !== 'dictate' && h.id !== 'task' && !CALL_SHORTCUTS.includes(h.id)).map((h) => (
-              <Shortcut key={h.id} hotkey={h} />
-            ))}
-          </details>
-        </Section>
       </details>
       <p className="settings-saved">Changes save automatically.</p>
       <details className="settings-extra"><summary>About &amp; licenses</summary>

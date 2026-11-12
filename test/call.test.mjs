@@ -7,6 +7,8 @@ import { copilotWith, quick, wait, workDir } from './helpers.mjs'
 
 const work = workDir('call')
 const { AgentStore, CallFile, Copilot, FrameStore } = await import('./.build/togle.mjs')
+// Suggestions that come by themselves are off in Togle (the product design); the old call assistant's tests turn them on until its code goes.
+await (await import('./.build/togle.mjs')).updateSettings({ assist: { auto: true } })
 const saved = path.join(work, 'call.bin')
 
 const store = new AgentStore(async () => 'digest')

@@ -41,7 +41,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   compat: { baseUrl: 'https://api.openai.com/v1', model: '' },
   // Other people's voices are remembered only when the person turns it on (Settings → Speakers).
-  assist: { auto: true, rememberVoices: false, autoNotes: true },
+  assist: { auto: false, rememberVoices: false, autoNotes: true },
   activeAgentId: '',
   // Calls are heard by this PC (no sign-in includes transcription), which detects the spoken language, unless a speech
   // API is picked for them.
@@ -133,6 +133,9 @@ export async function loadSettings(): Promise<Settings> {
   // `meetings` part) say yes because it was the default, not because the person chose it: it starts off, and the
   // person can turn it on in Settings → Speakers. Voices already remembered stay until they are forgotten there.
   if (Object.keys(stored).length > 0 && stored.meetings === undefined && current.assist.rememberVoices) current.assist = { ...current.assist, rememberVoices: false }
+  // Togle gives no answer or advice during a call that the person did not ask for: suggestions that came by themselves
+  // are gone, whatever an older version saved.
+  current.assist = { ...current.assist, auto: false }
   // Voice typing's account was two settings: a speech account it shared with calls (which never used it), and its own
   // over it. One now, voice typing's: the account it used.
   const speechAccount = (stored.transcription as { accountId?: unknown } | undefined)?.accountId

@@ -138,6 +138,8 @@ module.exports = function install(fixture) {
     suggestions: [{ id: 'old-reply', kind: 'suggest', question: 'When is the report due?', text: 'Tuesday.', at: 2000 }],
     notes: '', callAnswers: [], learning: { state: 'not-reviewed', pending: empty(), changes: [] }
   }))
+  // Notes in Markdown with all it can hold: links that open outside, and a picture and a script that must never load or run.
+  if (fixture.richText) Object.assign(sessions[0], { summary: fixture.richText, minutes: { state: 'ready', template: 'concise', revision: 'rich-notes', edited: false } })
   // Two calls with voices to confirm after them: one to answer, one to skip.
   if (fixture.scenario === 'confirm-names') {
     const base = sessions[0], line = (id, voiceId, text, at, name, by) => ({ id, speaker: 'them', voiceId, text, at, end: at + 4000, ...(name ? { voiceName: name, voiceNamedBy: by } : {}) })

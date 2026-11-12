@@ -89,8 +89,8 @@ else {
   // The always-visible voice bar doesn't load agents, call history, or the settings UI: the main window loads them
   // here, before its first render. Not with React.lazy: React 19 holds back what a Suspense boundary reveals for up to
   // 300 ms after its fallback, and the window would stay empty that long as Togle starts.
-  void import('./App').then(
-    ({ default: App }) => root.render(<StrictMode><Failed><App /></Failed></StrictMode>),
+  void import('./Shell').then(
+    ({ Shell }) => root.render(<StrictMode><Failed><Shell /></Failed></StrictMode>),
     (error: Error) => root.render(<Failed><Unloaded error={error} /></Failed>)
   )
 }

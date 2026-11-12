@@ -921,10 +921,8 @@ function scheduleCallReview(id: string, delay = 1500): void {
         const notes = await meetingNotes.generate(id, undefined, undefined, true).catch(error => { console.warn('[meeting notes]', (error as Error).message); return undefined })
         if (notes?.minutes?.state === 'idle') { scheduleCallReview(id, 15000); return }
       }
-      if (quitting || getSettings().assist.rememberCalls === false) return
-      if (copilot.isListening || dictation.active) { scheduleCallReview(id, 15000); return }
-      if (owner.learning !== 'off' && (record.transcript.length >= 2 || record.callAnswers.length)) await callLearning.review(id)
-    })().catch(error => console.warn('[call learning]', (error as Error).message))
+      // Nothing else goes to the AI after a call: the plan writes its notes, and only that (the product design).
+    })().catch(error => console.warn('[meeting notes]', (error as Error).message))
   }, delay)
   timer.unref()
   automaticReviews.set(id, timer)
@@ -1118,33 +1116,12 @@ function setupMediaAccess(): void {
   })
 }
 
-// Global shortcuts steal the combination from every other app, so Togle's own avoid Ctrl+Shift+letter (editor
-// shortcuts) and Ctrl+Alt+letter (AltGr characters on many European layouts), and keys picked in Settings are checked
-// the same way (hotkeyProblem). The last two have no keys until they're given some.
+// Global shortcuts steal the keys from every other app, so Togle has only the design's: Talk and Task (Show comes
+// with the screen picture). Keys picked in Settings are checked the same way (hotkeyProblem).
 const HOTKEYS: { id: HotkeyId; keys: string; label: string; run: () => void }[] = [
-  { id: 'dictate', keys: 'F9', label: 'Dictation', run: () => void dictation.toggle() },
-  { id: 'suggest', keys: 'Ctrl+Alt+Space', label: 'Suggest', run: () => void copilot.assist({ kind: 'suggest' }) },
-  { id: 'suggest-screen', keys: 'Ctrl+Alt+Enter', label: 'Suggest from the screen', run: () => void copilot.assist({ kind: 'suggest', withScreen: true }) },
-  { id: 'deeper', keys: 'Ctrl+Alt+Shift+D', label: 'Think deeper', run: () => copilot.deeper() },
-  // Out of sight (hidden, minimized), the window couldn't show the start-call picker: the call starts as last time.
-  { id: 'listen', keys: 'Ctrl+Alt+Shift+L', label: 'Start or end a call', run: () => send('hotkey', win?.isVisible() && !win.isMinimized() ? 'toggle-listening' : 'start-call-unseen') },
-  { id: 'snapshot', keys: 'Ctrl+Alt+Shift+S', label: 'Save a picture of the screen for the call', run: () => send('hotkey', 'snapshot') },
-  { id: 'record', keys: 'Ctrl+Alt+Shift+R', label: 'Watch the screen, or stop', run: () => send('hotkey', 'toggle-recording') },
-  // Minimized counts as hidden: the hotkey brings it back.
-  { id: 'show', keys: 'Ctrl+Alt+Shift+H', label: 'Show or hide Togle', run: () => (win?.isVisible() && !win.isMinimized() ? win.hide() : win?.showInactive()) },
-  {
-    id: 'ask',
-    keys: '',
-    label: 'Bring Togle up, ready to type',
-    run: () => {
-      win?.show()
-      win?.focus()
-      send('hotkey', 'ask')
-    }
-  },
-  { id: 'copy', keys: '', label: 'Copy the newest suggestion', run: () => send('hotkey', 'copy') },
+  { id: 'dictate', keys: 'F9', label: 'Talk', run: () => void dictation.toggle() },
   // The box to start a coding agent's task in, over whatever is on screen.
-  { id: 'task', keys: 'F10', label: 'Start a task for a coding agent', run: () => taskBox.toggle() }
+  { id: 'task', keys: 'F10', label: 'Task', run: () => taskBox.toggle() }
 ]
 let hotkeyStatus: HotkeyInfo[] = []
 const keyDown = process.platform === 'win32' ? koffi.load('user32.dll').func('int16_t __stdcall GetAsyncKeyState(int)') : undefined

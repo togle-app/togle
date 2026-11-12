@@ -31,7 +31,7 @@ test('a restarted repository can inspect the full transcript and saved suggestio
   assert.equal(saved.transcript[0].text, 'What is our next step?')
   assert.equal(saved.suggestions[0].text, 'Send the report.')
   assert.equal(saved.suggestions[0].deep, 'Confirm the owner first.')
-  assert.match(exportCall(saved), /Them: What is our next step\?/)
+  assert.match(exportCall(saved), /Call: What is our next step\?/)
   assert.match(exportCall(saved), /Confirm the owner first/)
 })
 

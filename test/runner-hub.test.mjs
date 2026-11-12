@@ -576,11 +576,11 @@ test('quitting stops what is still at work first, waits briefly for its commands
 })
 
 test('the question before quitting says what would stop, and the call wording is as it was', () => {
-  assert.equal(T.quitQuestion({ call: true, tasks: [] }), 'Quit Togle? Call assistance and dictation will stop. Your call is saved.')
-  assert.equal(T.quitQuestion({ call: false, tasks: ['Add the status column'] }), 'Quit Togle? “Add the status column” has not finished. Quitting stops it. You can continue it from Tasks.')
-  assert.equal(T.quitQuestion({ call: false, tasks: ['One', 'Two', 'Three'] }), 'Quit Togle? 3 tasks have not finished. Quitting stops them. You can continue them from Tasks.')
-  assert.equal(T.quitQuestion({ call: true, tasks: ['One'] }), 'Quit Togle? Call assistance and dictation will stop, and so will a task that has not finished. Your call is saved.')
-  assert.equal(T.quitQuestion({ call: true, tasks: ['One', 'Two'] }), 'Quit Togle? Call assistance and dictation will stop, and so will 2 tasks that have not finished. Your call is saved.')
+  assert.equal(T.quitQuestion({ call: true, tasks: [] }), 'Quit Togle? Writing down the call and dictation will stop. What was said so far is saved.')
+  assert.equal(T.quitQuestion({ call: false, tasks: ['Add the status column'] }), 'Quit Togle? “Add the status column” has not finished. Quitting stops it. You can continue it from Agents.')
+  assert.equal(T.quitQuestion({ call: false, tasks: ['One', 'Two', 'Three'] }), 'Quit Togle? 3 tasks have not finished. Quitting stops them. You can continue them from Agents.')
+  assert.equal(T.quitQuestion({ call: true, tasks: ['One'] }), 'Quit Togle? Writing down the call and dictation will stop, and so will a task that has not finished. What was said so far is saved.')
+  assert.equal(T.quitQuestion({ call: true, tasks: ['One', 'Two'] }), 'Quit Togle? Writing down the call and dictation will stop, and so will 2 tasks that have not finished. What was said so far is saved.')
   const long = 'x'.repeat(80)
   const said = T.quitQuestion({ call: false, tasks: [long] })
   assert.ok(said.includes(`“${'x'.repeat(47)}…”`) && !said.includes('x'.repeat(48)), 'a long name is cut')

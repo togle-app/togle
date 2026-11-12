@@ -3293,3 +3293,54 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 /* A task Togle runs that stopped waits for a reply, amber like one that asks. */
 .task-row[data-needs='you'] { background: #2a2418; border-color: #5a4a22; }
 .task-row[data-needs='you'] .task-dot { background: var(--them); }
+
+/* The window of the product design: three places and Settings on the left, the place on the right. */
+.shell-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 188px minmax(0, 1fr); }
+.shell-nav { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border-right: 1px solid var(--border); }
+.shell-nav button { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: none; border-radius: 8px; background: none; color: var(--muted); font-size: 13px; text-align: left; }
+.shell-nav button:hover { background: var(--panel); color: var(--text); }
+.shell-nav button[aria-current='page'] { background: var(--panel-2); color: var(--text); }
+.shell-nav > .spacer { flex: 1; }
+.shell-nav .nav-count { margin-left: auto; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--them); color: #1b1408; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
+.shell-nav .dot.live { margin-left: auto; flex-shrink: 0; }
+.shell-nav button > svg { flex-shrink: 0; }
+.shell-content { min-width: 0; min-height: 0; overflow: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 560px) {
+  .shell-layout { grid-template-columns: 52px minmax(0, 1fr); }
+  .shell-nav button > span:not(.nav-count):not(.dot) { display: none; }
+  .shell-nav button { justify-content: center; padding: 8px 0; }
+  .shell-nav .nav-count { position: absolute; top: 1px; right: 2px; margin: 0; min-width: 16px; line-height: 16px; font-size: 10px; }
+  .shell-nav .dot.live { position: absolute; top: 6px; right: 8px; margin: 0; width: 7px; height: 7px; }
+  .shell-content { padding: 12px; }
+}
+
+/* A call being written down. */
+.live-call { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+.live-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.live-head h2 { margin: 0; font-size: 17px; }
+.live-clock { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.live-head > .spacer { flex: 1; }
+.live-head button { padding: 5px 13px; font-size: 12px; }
+.live-head button.stop { color: var(--danger); }
+.live-sources { display: flex; gap: 8px; font-size: 12px; color: var(--muted); }
+.live-sources > span { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; }
+.live-sources .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.live-sources [data-state='on'] .dot { background: #3fb950; }
+.live-sources [data-state='starting'] .dot, .live-sources [data-state='paused'] .dot { background: var(--them); }
+.live-sources [data-state='off'] .dot { background: var(--danger); }
+.live-problem { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--danger); font-size: 12px; }
+.live-problem button { padding: 4px 11px; font-size: 12px; color: var(--text); }
+.live-people { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.person-chip { padding: 4px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text); font-size: 12px; }
+.person-chip.guess { border-style: dashed; color: var(--them); }
+.person-chip.you { color: var(--muted); }
+.person-chip.naming { display: inline-flex; gap: 6px; align-items: center; padding: 2px 4px 2px 8px; }
+.person-chip.naming input { width: 140px; padding: 3px 6px; font-size: 12px; }
+.live-lines { flex: 1; min-height: 140px; overflow: auto; display: flex; flex-direction: column; gap: 9px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.live-line { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: baseline; font-size: 13px; }
+.live-line .who { font-weight: 600; }
+.live-line.me .who { color: var(--muted); }
+.live-line time { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.live-line p { grid-column: 1 / -1; margin: 0; line-height: 1.45; }
+.live-line.partial { opacity: 0.6; }
+.marked-tag { margin-left: 8px; padding: 1px 6px; border-radius: 6px; background: var(--panel-2); color: var(--them); font-size: 10px; vertical-align: 1px; }

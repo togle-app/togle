@@ -107,8 +107,8 @@ test('the notes are asked to list the marked lines first, and are written again 
   const record = await sessions.get('flags-notes')
   const chunks = meetingNoteChunks(record)
   assert.equal(chunks.length, 1)
-  assert.match(chunks[0], /\[1:00\] \[MARKED\] Them: The API timeline/)
-  assert.doesNotMatch(chunks[0], /\[MARKED\] Them: Fine/)
+  assert.match(chunks[0], /\[1:00\] \[MARKED\] Call: The API timeline/)
+  assert.doesNotMatch(chunks[0], /\[MARKED\] Call: Fine/)
   const requests = []
   const provider = { stream: async (request, handlers) => { requests.push(request); handlers.onFinal('# Pricing sync\n\n## Marked\n- Them: the API timeline has to move. [1:00]') } }
   const notes = new MeetingNotes(sessions, () => provider)

@@ -3,7 +3,7 @@ const path = require('node:path')
 
 const env = { ...process.env }
 delete env.ELECTRON_RUN_AS_NODE
-const child = spawn(require('electron'), [path.join(__dirname, 'ui-flow.cjs'), ...process.argv.slice(2)], {
+const child = spawn(require('electron'), [path.join(__dirname, 'shell-flow.cjs'), ...process.argv.slice(2)], {
   env, windowsHide: true, stdio: 'inherit', cwd: path.resolve(__dirname, '..')
 })
 child.on('error', (error) => { console.error(error.message); process.exitCode = 1 })

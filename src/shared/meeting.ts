@@ -25,7 +25,21 @@ export function introducedName(text: string): string | undefined {
 }
 
 export function speakerLabel(line: Pick<TranscriptEntry, 'speaker' | 'voiceId' | 'voiceName' | 'voiceNamedBy'>): string {
-  return line.voiceName ? `${line.voiceName}${line.voiceNamedBy === 'suggested' ? '?' : ''}` : line.speaker === 'me' ? 'You' : line.voiceId ? `Speaker ${line.voiceId.split(':').at(-1)}` : 'Them'
+  return line.voiceName ? `${line.voiceName}${line.voiceNamedBy === 'suggested' ? '?' : ''}` : line.speaker === 'me' ? 'You' : line.voiceId ? `Voice ${line.voiceId.split(':').at(-1)}` : 'Call'
+}
+
+/** A mark names the line being said, or the last one finished just before: nothing said for this long before it names none. */
+const MARK_REACH_MS = 45_000
+
+/** The ids of the lines the person marked: for each mark, the last line that began before it, if it was recent. */
+export function markedLineIds(record: { transcript: TranscriptEntry[]; marks?: number[] }): Set<string> {
+  const marked = new Set<string>()
+  for (const mark of record.marks ?? []) {
+    let found: TranscriptEntry | undefined
+    for (const line of record.transcript) if (line.at <= mark && (!found || line.at >= found.at)) found = line
+    if (found && mark - found.end <= MARK_REACH_MS) marked.add(found.id)
+  }
+  return marked
 }
 
 export interface CalendarMeeting {

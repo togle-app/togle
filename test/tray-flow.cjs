@@ -60,7 +60,7 @@ async function run() {
   assert.equal(BrowserWindow.getAllWindows().length, 2, 'Toggling the bar reuses its one renderer')
   item('Dictation settings').click()
   await wait(() => js("!!document.querySelector('#settings-dictation')"))
-  assert.equal(await js("document.querySelectorAll('[aria-label=\"Dictation shortcut\"]').length"), 1, 'The shortcut has one editable home')
+  assert.equal(await js("document.querySelectorAll('[aria-label=\"Talk shortcut\"]').length"), 1, 'The shortcut has one editable home')
   await wait(() => js("!!document.querySelector('#settings-dictation option[value=headset]')"))
   assert.equal(invoke('settings:get').dictation.mode, process.platform === 'win32' ? 'hold' : 'toggle', 'Dictation uses the shortcut mode supported by this platform')
   await js("(()=>{const select=document.querySelector('[aria-label=\"Dictation microphone\"]');select.value='headset';select.dispatchEvent(new Event('change',{bubbles:true}))})()")

@@ -188,7 +188,7 @@ async function run() {
   // The task still waits: quitting asks, and says which.
   item('Quit Togle').click()
   await wait(() => js(main, "document.body.innerText.includes('Quit Togle?')"), 'the question')
-  assert.equal(await js(main, "document.querySelector('[aria-label=\"Confirm quit Togle\"] span').textContent"), 'Quit Togle? “Second task” has not finished. Quitting stops it. You can continue it from Tasks.')
+  assert.equal(await js(main, "document.querySelector('[aria-label=\"Confirm quit Togle\"] span').textContent"), 'Quit Togle? “Second task” has not finished. Quitting stops it. You can continue it from Agents.')
   assert.equal(main.isDestroyed(), false, 'asked, not quit')
   assert.equal((await invoke('runners:detail', second.key)).task.state, 'waiting', 'asking changed nothing')
   await js(main, "[...document.querySelectorAll('button')].find(button=>button.textContent==='Keep going').click()")

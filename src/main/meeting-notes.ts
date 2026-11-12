@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { CallSession, MeetingNoteTemplate } from '@shared/types'
-import { speakerLabel } from '@shared/meeting'
+import { markedLineIds, speakerLabel } from '@shared/meeting'
 import type { CallSessions } from './call-sessions'
 import type { LLMProvider } from './providers/types'
 import { abortable } from './dictation-speech'
@@ -14,19 +14,8 @@ const instructions: Record<MeetingNoteTemplate, string> = {
 }
 const sourceKey = (record: CallSession, template: MeetingNoteTemplate): string => createHash('sha256').update(JSON.stringify([record.transcript, record.brief, record.personalNotes || '', template, ...(record.marks?.length ? [record.marks] : [])])).digest('hex')
 const clock = (at: number, start: number): string => { const seconds = Math.max(0, Math.floor((at - start) / 1000)); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` }
-/** A mark names the line being said, or the last one finished just before: nothing said for this long before it names none. */
-const MARK_REACH_MS = 45_000
-
-/** The ids of the lines the person marked: for each mark, the last line that began before it, if it was recent. */
-export function markedLineIds(record: Pick<CallSession, 'transcript' | 'marks'>): Set<string> {
-  const marked = new Set<string>()
-  for (const mark of record.marks ?? []) {
-    let found: CallSession['transcript'][number] | undefined
-    for (const line of record.transcript) if (line.at <= mark && (!found || line.at >= found.at)) found = line
-    if (found && mark - found.end <= MARK_REACH_MS) marked.add(found.id)
-  }
-  return marked
-}
+// Which lines the person marked: shared with the window, which shows them as marked during the call.
+export { markedLineIds }
 
 /** Every retained line is included, split into bounded chunks for long calls. */
 export function meetingNoteChunks(record: CallSession): string[] {
