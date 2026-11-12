@@ -91,6 +91,7 @@ import { SubscriptionAccounts, accountChoice, defaultAccountId } from './auth/ac
 import { CallFile } from './call-file'
 import { CallSessions, callForAgent, exportCall, legacySession, sessionSummary } from './call-sessions'
 import { ConfirmSound } from './confirm-sound'
+import { withRecent } from './recent-dictations'
 import { confirmVoices, namesToConfirm, pruneConfirm, type CallConfirm } from '@shared/confirm-names'
 import { myTodoItems, type CallOffer, type TodoOffer } from '@shared/call-todo'
 import { FIRST_NAMES } from './names'
@@ -665,9 +666,14 @@ async function copyLastDictation(): Promise<void> {
   } catch (error) { dictation.copyFailed(state.id, text); throw error }
   dictation.copied(state.id, text)
 }
+// The last dictations, newest first, in memory only: the tray offers them to copy.
+let recentDictations: string[] = []
 function refreshTray(): void {
   const shortcut = hotkeyStatus.find(item => item.id === 'dictate')
-  tray?.update(dictation.status(), shortcut?.ok ? shortcut.keys : '', voiceSettings().dictation.showBar, copilot.isListening)
+  const state = dictation.status()
+  // A dictation counts once its words are final: not the raw words before they are cleaned up.
+  if (state.lastText && !['starting', 'recording', 'finishing', 'polishing'].includes(state.phase)) recentDictations = withRecent(recentDictations, state.lastText)
+  tray?.update(state, shortcut?.ok ? shortcut.keys : '', voiceSettings().dictation.showBar, copilot.isListening, recentDictations)
 }
 function refreshVoiceSettings(): void {
   const settings = voiceSettings()
@@ -2111,6 +2117,8 @@ function registerIpc(): void {
     ipcMain.handle('dev:hotkey', (_e, id: HotkeyId) => HOTKEYS.find((h) => h.id === id)?.run())
     testClipboard = ''
     ipcMain.handle('dev:clipboard', () => testClipboard)
+    // A dictation as if it had been said, for the tray's list of recent ones.
+    ipcMain.handle('dev:dictated', (_e, text: string) => { recentDictations = withRecent(recentDictations, String(text)); refreshTray() })
   }
 
   ipcMain.handle('hotkeys:list', () => hotkeyStatus)
@@ -2313,6 +2321,7 @@ if (hookAt !== -1) {
       try {
         tray = new TogleTray(path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'build'), process.platform === 'win32' ? 'icon.ico' : 'icon.png'), {
           open: openWindow, tasks: () => showTask(runners?.attention().find(task => task.pending.length)?.key ?? ''), settings: openDictationSettings, toggle: () => void dictation.toggle(), cancel: () => dictation.cancel(), copy: () => { void copyLastDictation().catch(() => {}) },
+          copyText: (text: string) => { if (testClipboard !== undefined) testClipboard = text; else clipboard.writeText(text) },
           indicator: visible => { void setVoiceBar(visible).catch(error => console.warn('[voice bar]', (error as Error).message)) },
           quit: () => void requestQuit()
         })

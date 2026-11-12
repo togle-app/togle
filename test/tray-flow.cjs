@@ -22,6 +22,8 @@ const profile = path.join(__dirname, '.work', 'tray-' + process.pid)
 fs.mkdirSync(profile, { recursive: true }); app.setPath('userData', profile)
 app.setAppPath(path.resolve(__dirname, '..'))
 process.env.TOGLE_HEADLESS = '1'; process.env.TOGLE_TEST_TRAY = '1'; process.env.TOGLE_SILENT_AUDIO = '1'
+// The test hooks (a dictation as if said, the clipboard kept in Togle), on a debugging port the system picks.
+process.env.TOGLE_DEBUG_PORT = '0'
 process.env.TOGLE_SPEECH_HOME = path.join(profile, 'speech'); process.env.TOGLE_SPEECH_SEEDS = ''
 process.env.CLAUDE_CONFIG_DIR = path.join(profile, 'claude')
 process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR
@@ -106,6 +108,19 @@ async function run() {
   await js("[...document.querySelectorAll('button')].find(button=>button.textContent==='Keep going').click()")
   await invoke('session:listening', false)
   await wait(() => bar.webContents.executeJavaScript(`document.querySelector('.dictation-prompt')?.textContent.startsWith(${JSON.stringify(defaultPrompt)})`))
+  // When typing failed, the tray offers the last dictations to copy, newest first (kept in memory until Togle closes).
+  assert.equal(item('Copy a recent dictation'), undefined, 'nothing to offer yet')
+  const long = 'Second thing said, a much longer sentence than fits on one line of a menu.'
+  await invoke('dev:dictated', 'First thing said.')
+  await invoke('dev:dictated', long)
+  await wait(() => item('Copy a recent dictation'))
+  const recent = item('Copy a recent dictation').submenu.items
+  assert.deepEqual(recent.map(entry => entry.label), [long.slice(0, 47).trimEnd() + '…', 'First thing said.'])
+  recent[1].click()
+  assert.equal(await invoke('dev:clipboard'), 'First thing said.', 'copied as it was said')
+  for (let n = 0; n < 12; n++) await invoke('dev:dictated', 'Note ' + n)
+  await wait(() => item('Copy a recent dictation').submenu.items[0].label === 'Note 11')
+  assert.equal(item('Copy a recent dictation').submenu.items.length, 10, 'the last ten')
   let lateView
   app.once('before-quit', () => {
     const view = invoke('call:current').view

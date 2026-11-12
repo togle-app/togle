@@ -1,6 +1,7 @@
 import { Menu, nativeImage, Tray } from 'electron'
 import type { DictationState } from '@shared/dictation'
 import { orderFromProbe, paintDot } from './tray-dot'
+import { recentLabel } from './recent-dictations'
 
 interface TrayActions {
   open(): void
@@ -10,6 +11,8 @@ interface TrayActions {
   toggle(): void
   cancel(): void
   copy(): void
+  /** Copies one of the last dictations. */
+  copyText(text: string): void
   indicator(visible: boolean): void
   quit(): void
 }
@@ -51,9 +54,9 @@ export class TogleTray {
     this.tray!.setImage(count > 0 && this.marked ? this.marked : this.plain)
     if (this.lastUpdate) this.update(...this.lastUpdate)
   }
-  update(state: DictationState, keys: string, showBar: boolean, inCall: boolean): void {
+  update(state: DictationState, keys: string, showBar: boolean, inCall: boolean, recent: string[] = []): void {
     if (!this.available) return
-    this.lastUpdate = [state, keys, showBar, inCall]
+    this.lastUpdate = [state, keys, showBar, inCall, recent]
     const recording = state.phase === 'recording'
     const busy = ['starting', 'finishing', 'polishing', 'inserting'].includes(state.phase)
     const status = recording ? 'Listening to dictation' : state.phase === 'starting' ? 'Preparing dictation' : state.phase === 'finishing' ? 'Transcribing dictation' : state.phase === 'polishing' ? 'Cleaning up dictation' : state.phase === 'inserting' ? 'Entering dictated text'
@@ -70,6 +73,8 @@ export class TogleTray {
       ...(recording || busy ? [{ label: 'Cancel dictation', enabled: state.phase !== 'inserting', click: this.actions.cancel }] : []),
       { label: 'Show voice bar', type: 'checkbox', checked: showBar, click: item => this.actions.indicator(item.checked) },
       ...(state.lastText && !recording && !busy ? [{ label: 'Copy last dictation', click: this.actions.copy }] : []),
+      // When typing them failed, the last ten are here to copy (kept in memory until Togle closes).
+      ...(recent.length > 1 ? [{ label: 'Copy a recent dictation', submenu: recent.map(text => ({ label: recentLabel(text), click: () => this.actions.copyText(text) })) }] : []),
       { label: 'Dictation settings', click: this.actions.settings },
       { type: 'separator' },
       { label: 'Quit Togle', click: this.actions.quit }
