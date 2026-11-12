@@ -3393,3 +3393,14 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .task-steps > summary { cursor: pointer; padding: 4px 0; color: var(--muted); font-size: 12px; }
 .task-steps[open] { display: flex; flex-direction: column; gap: 8px; }
 .task-always { justify-self: start; font-size: 12px; }
+
+/* F8 Show: the frozen screen, the part chosen, what is drawn on it, and the bar with Cancel and Save. */
+body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: crosshair; user-select: none; }
+.show { position: fixed; inset: 0; touch-action: none; }
+.show-shot { position: absolute; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
+.show-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.35); pointer-events: none; }
+.show-part { position: absolute; outline: 2px solid #fff; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45); pointer-events: none; }
+.show-ink { position: absolute; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
+.show-bar { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 8px 10px 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); color: var(--text); font-size: 13px; cursor: default; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+.show-bar > span { min-width: 0; }
+.show-bar button { flex-shrink: 0; }

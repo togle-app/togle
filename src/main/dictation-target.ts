@@ -64,6 +64,12 @@ export class DictationTargetBridge {
     try { return await this.request('insert', { token, text }) }
     catch (error) { return { inserted: false, message: (error as Error).message || 'The text box did not respond. Your words are still available.' } }
   }
+  /** F8 Show: the picture into the noted box (pasted, keeping the clipboard), or its path typed into a terminal. */
+  async insertPicture(token: string, file: string): Promise<DictationInsertion> {
+    if (process.platform !== 'win32') return { inserted: false, message: `The picture is saved at ${file}.` }
+    try { return await this.request('insertPicture', { token, file }) }
+    catch (error) { return { inserted: false, message: (error as Error).message || `The picture is saved at ${file}.` } }
+  }
   stop(): void {
     const child = this.child; this.child = undefined; this.ready = undefined
     for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error('Text insertion stopped.')) }

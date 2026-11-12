@@ -1,7 +1,7 @@
 // The window of the product design, with isolated accounts, silent audio and a fake IPC API: To-do at home, a call
 // written down from Meetings, its words and names as people speak, and after it, who spoke and its notes.
 // No real account, microphone, downloads or model requests are used.
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, nativeImage } = require('electron')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -19,7 +19,7 @@ app.on('window-all-closed', () => {})
 let checkpoint = 'startup'
 const timeout = setTimeout(() => { console.error('Window checks timed out at ' + checkpoint); app.exit(1) }, 300000)
 
-async function open(T, agent, scenario, width = 1024, height = 850) {
+async function open(T, agent, scenario, width = 1024, height = 850, surface) {
   checkpoint = scenario + ' at ' + width + 'px'
   const settings = structuredClone(T.getSettings())
   // The plan is ChatGPT's, not signed in yet (the fixture's ChatGPT account is signed out).
@@ -35,7 +35,9 @@ async function open(T, agent, scenario, width = 1024, height = 850) {
   settings.firstMinute = { done: !scenario.startsWith('first-minute') }
   const names = [...fs.readFileSync(path.join(project, 'src/shared/api.ts'), 'utf8').matchAll(/^  (\w+)\(/gm)].map(m => m[1])
   const richText = scenario === 'rich-text' ? require('./rich-text-fixtures.cjs').reply : undefined
-  const fixture = JSON.stringify({ settings, names, agents: [agent], scenario, readyAudio: !['speech', 'first-minute-new'].includes(scenario), templates: T.AGENT_TEMPLATES, richText })
+  // F8 Show: a frozen screen at twice the window's size, as on a screen scaled to 200%.
+  const showPicture = scenario === 'show' ? { dataUrl: nativeImage.createFromBitmap(Buffer.alloc(width * 2 * height * 2 * 4, 0x60), { width: width * 2, height: height * 2 }).toDataURL(), width: width * 2, height: height * 2 } : undefined
+  const fixture = JSON.stringify({ showPicture, settings, names, agents: [agent], scenario, readyAudio: !['speech', 'first-minute-new'].includes(scenario), templates: T.AGENT_TEMPLATES, richText })
   const preload = path.join(artifacts, 'preload-' + scenario + '-' + width + '.cjs')
   fs.writeFileSync(preload, 'const fixture=' + fixture + '\nrequire(' + JSON.stringify(path.join(__dirname, 'ui-fixture.cjs')) + ')(fixture)')
   const errors = []
@@ -83,8 +85,8 @@ async function open(T, agent, scenario, width = 1024, height = 850) {
     const sizes = await evaluate('({page:document.documentElement.scrollWidth,window:innerWidth})')
     assert.ok(sizes.page <= sizes.window, 'nothing is cut off at the side: ' + JSON.stringify(sizes))
   }
-  await window.loadFile(process.env.TOGLE_UI_RENDERER || path.join(project, 'out/renderer/index.html'))
-  await wait("!!document.querySelector('.workspace-nav')")
+  await window.loadFile(process.env.TOGLE_UI_RENDERER || path.join(project, 'out/renderer/index.html'), surface ? { query: { surface } } : undefined)
+  await wait(surface ? "document.body.classList.contains('" + surface + "-surface')" : "!!document.querySelector('.workspace-nav')")
   return { window, errors, remoteRequests, evaluate, paint, wait, click, fill, capture, calls, emit, fitsWidth }
 }
 
@@ -391,6 +393,52 @@ async function checkNoisyCall(T, agent) {
   console.log('Noisy room: one line on the call page after the call, with one link, passed.')
 }
 
+/** F8 Show's overlay: drag over a part, draw on it, Save; the picture is that part at the screen's own size. Esc leaves it. */
+async function checkShow(T, agent) {
+  const ui = await open(T, agent, 'show', 800, 600, 'show')
+  await ui.wait("document.querySelector('.show-shot')?.complete===true")
+  assert.equal(await ui.evaluate("document.querySelector('.show-bar span').textContent"), 'Drag over the part to show, and talk.')
+  const pointer = (type, x, y) => ui.evaluate(`document.querySelector('.show').dispatchEvent(new PointerEvent(${JSON.stringify(type)},{clientX:${x},clientY:${y},button:0,pointerId:1,bubbles:true}))`)
+  await pointer('pointerdown', 100, 100)
+  await pointer('pointermove', 300, 250)
+  await pointer('pointerup', 300, 250)
+  await ui.wait("!!document.querySelector('.show-part')")
+  assert.deepEqual(await ui.evaluate("(()=>{const s=document.querySelector('.show-part').style;return [s.left,s.top,s.width,s.height]})()"), ['100px', '100px', '200px', '150px'])
+  assert.equal(await ui.evaluate("document.querySelector('.show-bar span').textContent"), 'Draw on it while you talk. Save puts the picture and your words in.')
+  // Drawn on while talking.
+  await pointer('pointerdown', 150, 150)
+  await pointer('pointermove', 200, 200)
+  await pointer('pointermove', 250, 180)
+  await pointer('pointerup', 250, 180)
+  assert.equal(await ui.evaluate("document.querySelectorAll('.show-ink polyline').length"), 1)
+  await ui.capture('show')
+  const scale = await ui.evaluate('1600/innerWidth')
+  await ui.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))")
+  await ui.wait("window.togleUITest.calls().some(call=>call.name==='showDone')")
+  const [done] = (await ui.calls('showDone'))[0]
+  assert.deepEqual(done.head, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'a PNG')
+  assert.deepEqual([done.width, done.height], [Math.round(200 * scale), Math.round(150 * scale)], "the part chosen, at the screen's own size")
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+
+  // A click is not a part: Save then takes the whole screen. Esc leaves it.
+  const again = await open(T, agent, 'show', 800, 600, 'show')
+  await again.wait("document.querySelector('.show-shot')?.complete===true")
+  await again.evaluate("document.querySelector('.show').dispatchEvent(new PointerEvent('pointerdown',{clientX:50,clientY:50,button:0,pointerId:1,bubbles:true}))")
+  await again.evaluate("document.querySelector('.show').dispatchEvent(new PointerEvent('pointerup',{clientX:52,clientY:51,button:0,pointerId:1,bubbles:true}))")
+  assert.equal(await again.evaluate("!!document.querySelector('.show-part')"), false)
+  await again.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+  assert.equal((await again.calls('showCancel')).length, 1)
+  assert.equal((await again.calls('showDone')).length, 0)
+  await again.click('.show-bar button', 'Save')
+  await again.wait("window.togleUITest.calls().some(call=>call.name==='showDone')")
+  const [whole] = (await again.calls('showDone'))[0]
+  assert.deepEqual([whole.width, whole.height], [1600, 1200], 'the whole screen')
+  assert.deepEqual(again.errors, [])
+  again.window.destroy()
+  console.log('Show: a part dragged out and drawn on, saved at the screen\'s own size; a click takes the whole screen; Esc leaves it passed.')
+}
+
 /** The first minute, once: talk, sign in with the plan or skip it, what Togle found; what was skipped goes on To-do. */
 async function checkFirstMinute(T, agent) {
   // Speech recognition is not on this computer yet: one click gets it, then F9 works.
@@ -445,8 +493,8 @@ async function checkSettings(T, agent) {
   await ui.click('.workspace-nav button', 'Settings')
   await ui.wait("!!document.querySelector('#settings-accounts .ai-plan')")
   assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Voice', 'Meetings', 'Agents', 'Accounts'])
-  assert.deepEqual(await texts(ui, '#settings-keys .shortcut-what'), ['Talk', 'Task'])
-  assert.deepEqual(await texts(ui, '#settings-keys button.keys'), ['F9', 'F10'])
+  assert.deepEqual(await texts(ui, '#settings-keys .shortcut-what'), ['Talk', 'Show', 'Task'])
+  assert.deepEqual(await texts(ui, '#settings-keys button.keys'), ['F9', 'F8', 'F10'])
   const names = await texts(ui, '#settings-voice .setting > .name')
   assert.deepEqual(names.slice(0, 4), ['Microphone', 'Language', 'Names and terms', 'Clean up what I say'])
   assert.equal(await ui.evaluate("document.querySelector('#settings-voice [aria-label=\"Microphone\"]').value"), '', 'the system default')
@@ -566,6 +614,7 @@ app.whenReady().then(async () => {
     await checkRichText(T, agent)
     await checkSettings(T, agent)
     await checkFirstMinute(T, agent)
+    await checkShow(T, agent)
     clearTimeout(timeout)
     app.exit(0)
   } catch (error) {

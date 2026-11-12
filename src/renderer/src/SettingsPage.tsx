@@ -63,13 +63,14 @@ export function SettingsPage({ settings, stt, at, onChange }: Props) {
   )
 }
 
-/** Talk and Task: the keys that work from any app. */
+/** Talk, Show and Task: the keys that work from any app. */
 function Keys() {
   const keys = useHotkeys()
-  const talk = keys.find((key) => key.id === 'dictate'), task = keys.find((key) => key.id === 'task')
+  const talk = keys.find((key) => key.id === 'dictate'), show = keys.find((key) => key.id === 'show'), task = keys.find((key) => key.id === 'task')
   return (
     <Section id="settings-keys" title="Keys" note={platform === 'darwin' ? 'On most Mac keyboards, hold Fn with these keys, or pick other keys here.' : undefined}>
       {talk && <Shortcut hotkey={talk} />}
+      {show && <Shortcut hotkey={show} />}
       {task && <Shortcut hotkey={task} />}
     </Section>
   )

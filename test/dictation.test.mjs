@@ -15,6 +15,37 @@ function fixture(patch = {}) {
   return { job, states, inserted, heard }
 }
 const audio = number => new Float32Array(16000).fill(number)
+test('F8 Show: the picture goes in first, then the words, into the same box', async () => {
+  const order = []
+  const job = new Dictation({
+    target: { capture: async () => ({ token: 'box', label: 'Chat' }), insert: async (token, text) => { order.push(['words', token, text]); return { inserted: true } }, insertPicture: async (token, file) => { order.push(['picture', token, file]); return { inserted: true } } },
+    speech: () => ({ ready: async () => {}, transcribe: async () => 'make this button wider', polish: async text => text + '.' }),
+    changed: () => {}, inCall: () => false
+  })
+  await job.start(false); const id = job.status().id
+  job.attachPicture('C:\\pictures\\show.png')
+  job.push(id, audio(1)); job.stop(); await job.finish(id)
+  assert.deepEqual(order, [['picture', 'box', 'C:\\pictures\\show.png'], ['words', 'box', 'make this button wider.']])
+  assert.equal(job.status().phase, 'done')
+  job.dispose()
+})
+test('F8 Show: with nothing said the picture still goes in; a picture that cannot go in keeps the words back', async () => {
+  for (const [said, pictured, expected] of [['', true, ['picture']], ['the words', false, ['picture']]]) {
+    const order = []
+    const job = new Dictation({
+      target: { capture: async () => ({ token: 'box', label: 'Chat' }), insert: async () => { order.push('words'); return { inserted: true } }, insertPicture: async () => { order.push('picture'); return pictured ? { inserted: true } : { inserted: false, message: 'The cursor moved. The picture is saved at C:\\pictures\\show.png.' } } },
+      speech: () => ({ ready: async () => {}, transcribe: async () => said, polish: async text => text }),
+      changed: () => {}, inCall: () => false
+    })
+    await job.start(false); const id = job.status().id
+    job.attachPicture('C:\\pictures\\show.png')
+    job.push(id, audio(1)); job.stop(); await job.finish(id)
+    assert.deepEqual(order, expected)
+    if (pictured) assert.deepEqual([job.status().phase, job.status().message], ['done', 'Picture entered'])
+    else assert.deepEqual([job.status().phase, job.status().message, job.status().text], ['ready', 'The cursor moved. The picture is saved at C:\\pictures\\show.png.', 'the words'], 'the words wait to be copied')
+    job.dispose()
+  }
+})
 test('with no AI to clean them up, the words go in as heard and the bar says why', async () => {
   const inserted = [], job = new Dictation({
     target: { capture: async () => ({ token: 'box', label: 'Fixture chat' }), insert: async (token, text) => { inserted.push(text); return { inserted: true } } },

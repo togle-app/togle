@@ -180,7 +180,7 @@ module.exports = function install(fixture) {
     agent.updatedAt = Date.now(); emit('onAgentChanged', clone(agent))
   }
   api.platform = fixture.platform ?? process.platform
-  api.listHotkeys = async () => [{ id: 'dictate', keys: 'F9', defaultKeys: 'F9', label: 'Talk', ok: true }, { id: 'task', keys: 'F10', defaultKeys: 'F10', label: 'Task', ok: true }]
+  api.listHotkeys = async () => [{ id: 'dictate', keys: 'F9', defaultKeys: 'F9', label: 'Talk', ok: true }, { id: 'show', keys: 'F8', defaultKeys: 'F8', label: 'Show', ok: true }, { id: 'task', keys: 'F10', defaultKeys: 'F10', label: 'Task', ok: true }]
   api.getSettings = async () => clone(fixture.settings)
   api.listAgents = async () => clone(fixture.agents)
   api.agentTemplates = async () => clone(fixture.templates)
@@ -481,6 +481,11 @@ module.exports = function install(fixture) {
     : { calls: [], items: [] }
   api.linkTodo = async (ref, task) => { record('linkTodo', [ref, task]); const item = todoAt(ref); if (task) item.task = task; else delete item.task; return clone(todoView()) }
   api.showTodoFile = async () => { record('showTodoFile', []) }
+  // F8 Show's overlay: the frozen screen it shows, and the picture it gives back (its first bytes and its size, from the
+  // PNG's header).
+  api.showPicture = async () => fixture.showPicture ?? null
+  api.showDone = png => { const view = new DataView(png.buffer, png.byteOffset, png.byteLength); record('showDone', [{ head: [...png.slice(0, 8)], width: view.getUint32(16), height: view.getUint32(20) }]) }
+  api.showCancel = () => { record('showCancel', []) }
   contextBridge.exposeInMainWorld('togle', api)
   // A noisy call's measurement, as the capture's noise check reports it when the call ends (the audio here is silent).
   const noiseReport = () => ({ analyzedMs: 600000, speechMs: 180000, quietMs: 360000, noisyMs: 162000, bursts: 41, floorDb: -47, peakDb: -38, speechDb: -24, snrDb: 23, verdict: 'noisy', sample: new Float32Array(1600) })

@@ -11,6 +11,7 @@ import { DictationVocabularyStore } from './dictation-vocabulary'
 import { correctSpeech, speechLesson, speechWords, withSpeechWord } from '@shared/speech-words'
 import type { DictationVocabularyEdit } from '@shared/dictation'
 import { DictationTargetBridge } from './dictation-target'
+import { ShowWindow } from './show-window'
 import { DictationWindow } from './dictation-window'
 import { MicrophoneLink } from './microphone-link'
 import type { CloseWarning } from '@shared/close-warning'
@@ -1124,15 +1125,49 @@ function setupMediaAccess(): void {
   })
 }
 
-// Global shortcuts steal the keys from every other app, so Togle has only the design's: Talk and Task (Show comes
-// with the screen picture). Keys picked in Settings are checked the same way (hotkeyProblem).
+// Global shortcuts steal the keys from every other app, so Togle has only the design's three: Talk, Show and Task. Keys
+// picked in Settings are checked the same way (hotkeyProblem).
 const HOTKEYS: { id: HotkeyId; keys: string; label: string; run: () => void }[] = [
   { id: 'dictate', keys: 'F9', label: 'Talk', run: () => void dictation.toggle() },
+  // Part of the screen, drawn on while talking: the picture and the words land together.
+  { id: 'show', keys: 'F8', label: 'Show', run: () => void showPart() },
   // The box to start a coding agent's task in, over whatever is on screen.
   { id: 'task', keys: 'F10', label: 'Task', run: () => taskBox.toggle() }
 ]
 let hotkeyStatus: HotkeyInfo[] = []
-const keyDown = process.platform === 'win32' ? koffi.load('user32.dll').func('int16_t __stdcall GetAsyncKeyState(int)') : undefined
+const user32 = process.platform === 'win32' ? koffi.load('user32.dll') : undefined
+const keyDown = user32?.func('int16_t __stdcall GetAsyncKeyState(int)')
+const setForeground = user32?.func('int __stdcall SetForegroundWindow(intptr_t hwnd)')
+
+const showWindow = new ShowWindow()
+/**
+ * F8 Show. Dictation starts first, so it notes the box the person is in before the frozen screen takes the keyboard, and
+ * hears what they say meanwhile. Enter: the picture is saved (Togle's pictures folder; an agent in a terminal reads it from
+ * there), that box is put in front again, and the picture goes in, then the words. Esc: nothing goes in.
+ */
+async function showPart(): Promise<void> {
+  if (showWindow.open || dictation.active) return
+  await dictation.start(false)
+  if (dictation.status().phase !== 'recording') return
+  let png: Buffer | null = null
+  try { png = await showWindow.show() }
+  catch (error) { console.warn('[show]', (error as Error).message) }
+  if (!png) { dictation.cancel(); return }
+  const folder = path.join(app.getPath('userData'), 'pictures')
+  const file = path.join(folder, `show-${new Date().toISOString().replace(/[:.]/g, '-')}.png`)
+  try {
+    await fs.mkdir(folder, { recursive: true })
+    await fs.writeFile(file, png, { mode: 0o600 })
+  } catch (error) {
+    console.warn('[show] the picture was not saved:', (error as Error).message)
+    dictation.cancel()
+    return
+  }
+  const handle = dictation.noted()?.windowHandle
+  if (handle && setForeground) try { setForeground(BigInt(handle)) } catch { /* The check before pasting says when the app changed. */ }
+  dictation.attachPicture(file)
+  dictation.stop()
+}
 const dictationPress = new HotkeyPress(key => !!keyDown && !!((keyDown(key) as number) & 0x8000))
 let heldDictation: string | undefined
 function dictateShortcut(keys: string): void {
@@ -2147,6 +2182,14 @@ function registerIpc(): void {
     attention.dismiss(id)
     noticeWindow.show(null)
     refreshNotices()
+  })
+  // F8 Show's overlay: the frozen screen it shows, and the picture or the cancel it gives back.
+  ipcMain.handle('show:picture', (event) => (showWindow.owns(event.sender) ? showWindow.picture() : null))
+  ipcMain.on('show:done', (event, bytes: unknown) => {
+    if (showWindow.owns(event.sender) && bytes instanceof Uint8Array) showWindow.done(bytes)
+  })
+  ipcMain.on('show:cancel', (event) => {
+    if (showWindow.owns(event.sender)) showWindow.cancel()
   })
   // The task box's own messages: put it away, and ask for a folder with it as the dialog's parent.
   ipcMain.on('taskbox:close', (event) => {

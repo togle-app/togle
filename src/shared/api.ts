@@ -424,6 +424,11 @@ export interface TogleApi {
   closeTaskBox(): void
   /** Asks for a folder for a task, in a dialog that belongs to the task box. Null when it is closed without a choice. */
   pickTaskBoxFolder(): Promise<string | null>
+  /** F8 Show's overlay: the frozen screen to show (device pixels), or null for any other window. */
+  showPicture(): Promise<{ dataUrl: string; width: number; height: number } | null>
+  /** The picture made, as PNG bytes: it goes in with the words. */
+  showDone(png: Uint8Array): void
+  showCancel(): void
 
   /** The to-do list, kept in a plain text file on this PC. Each change answers with the whole list as it is after. */
   todoList(): Promise<TodoList>

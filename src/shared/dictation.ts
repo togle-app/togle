@@ -49,7 +49,8 @@ export interface DictationState {
   microphoneId?: string
   outcome?: 'inserted' | 'copied'
 }
-export interface DictationTarget { token?: string; label: string; reason?: string }
+/** The box dictation noted: its token for typing into it, its name, and (on Windows) its window, to put it in front again. */
+export interface DictationTarget { token?: string; label: string; reason?: string; windowHandle?: string }
 export interface DictationInsertion { inserted: boolean; message?: string }
 
 export interface DictationWord { id: string; word: string; heardAs: string }

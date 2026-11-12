@@ -47,6 +47,7 @@ async function run() {
   let opened = 0; main.show = () => { opened++ }; main.focus = () => {}
   const item = label => icon.menu.items.find(entry => entry.label === label)
   assert.equal(invoke('hotkeys:list').find(key => key.id === 'dictate').defaultKeys, 'F9')
+  assert.deepEqual(invoke('hotkeys:list').map(key => [key.id, key.defaultKeys, key.label]), [['dictate', 'F9', 'Talk'], ['show', 'F8', 'Show'], ['task', 'F10', 'Task']], "the design's three keys, and no other")
   assert.equal(bar.isFocusable(), false)
   // Windows reports always-on-top only once a window is shown. The native bar UI check verifies it.
   assert.equal(main.isVisible(), false); assert.equal(bar.isVisible(), false)

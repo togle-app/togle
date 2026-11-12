@@ -22,6 +22,8 @@ Hold **F9** and talk. Togle types the words where your cursor is: a chat, an edi
 - **Names and terms** (Settings): tell Togle once how a name or a word is spelled, or a phrase that stands for a longer text ("my work email"), and it writes it that way from then on.
 - The voice bar is a small strip that shows when the microphone listens. While idle, the microphone is off. You can hide the idle bar from the tray menu.
 
+**F8 Show.** Press F8 and the screen under the pointer stands still. Drag over the part to show and draw on it while you talk. **Save** (or Enter) puts the picture into the box you were in, then your words; **Cancel** (or Esc) leaves it. The picture is pasted through the clipboard, which gets back what it held right after. In a terminal, Togle types the picture's path instead, so an agent can read it. Pictures are kept in Togle's pictures folder. Pasting the picture works on Windows; elsewhere the picture is saved and the words are ready to copy.
+
 [How dictation reaches the box](docs/dictation-insertion.md).
 
 ### Meetings
@@ -58,6 +60,7 @@ One list for the day, kept as a plain text file on your computer. What your agen
 | Key | Does |
 | --- | --- |
 | F9 | Talk: hold, talk, let go (on a Mac or Linux: press to start, again to stop) |
+| F8 | Show: drag over part of the screen and draw on it while you talk; Save (or Enter) puts the picture and your words in |
 | F10 | Task: the box to give an agent a task |
 
 They work from any app. Settings can give each other keys: click it and press the keys you want. Keys that would stop working in every other app are refused with the reason. On most Mac keyboards, F keys need Fn held.

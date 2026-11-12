@@ -3,7 +3,12 @@ import type { DictationInsertion, DictationReceipt, DictationState, DictationTar
 import { abortable, type DictationEngine } from './dictation-speech'
 
 interface DictationOptions {
-  target: { capture(): Promise<DictationTarget>; insert(token: string, text: string): Promise<DictationInsertion> }
+  target: {
+    capture(): Promise<DictationTarget>
+    insert(token: string, text: string): Promise<DictationInsertion>
+    /** F8 Show: the picture goes into the same box first (in a terminal, its path is typed). */
+    insertPicture?(token: string, file: string): Promise<DictationInsertion>
+  }
   speech(): DictationEngine
   changed(state: DictationState): void
   inCall(): boolean
@@ -17,6 +22,8 @@ interface Job {
   samples: number; pending: number; failed?: string; start?: number; end?: number; finalizing?: boolean
   cleanup?: AbortController; original?: boolean
   speech: DictationEngine
+  /** F8 Show: the picture saved for this dictation, which lands with its words. */
+  picture?: string
 }
 
 /** Dictation is independent of agents and calls. A cancelled job can never deliver into a later target. */
@@ -102,6 +109,14 @@ export class Dictation {
       if (this.job === job && !job.controller.signal.aborted) { job.failed = (error as Error).message; this.failed(id, job.failed) }
     }).finally(() => { job.pending-- })
   }
+  /** The box the dictation going on now noted, if it noted one. */
+  noted(): DictationTarget | undefined {
+    return this.job?.target
+  }
+  /** F8 Show: the picture that goes with the words being said now. */
+  attachPicture(file: string): void {
+    if (this.job && this.current.phase === 'recording') this.job.picture = file
+  }
   async finish(id: string): Promise<void> {
     const job = this.job
     if (!job || job.id !== id || job.finalizing || this.current.phase !== 'finishing') return
@@ -114,6 +129,8 @@ export class Dictation {
     }
     if (this.job !== job || job.controller.signal.aborted) return
     const raw = job.parts.join(' ').trim()
+    // A picture with nothing said still lands.
+    if (!raw && job.picture) { await this.deliverPicture(job); return }
     if (!raw) {
       job.speech.dispose?.()
       this.set({ phase: 'ready', message: 'No speech heard. Try again.', text: undefined })
@@ -138,12 +155,34 @@ export class Dictation {
     this.set({ phase: 'inserting', message: 'Entering text…' })
     // Once insertion begins it is a single commit, never retried by a late callback or another shortcut.
     try {
+      // F8 Show: the picture first, then the words, in the same box. A picture that did not go in keeps the words back too.
+      if (job.picture) {
+        const shown = await this.pictureInto(job)
+        if (this.job !== job) return
+        if (!shown.inserted) { this.set({ phase: 'ready', message: shown.message || 'The picture could not go in. It is saved; your words are ready to copy.' }); this.receipt(job, raw, text, 'ready'); return }
+      }
       const result = await this.options.target.insert(job.target.token, text)
       if (this.job !== job) return
       // With no AI to clean the words up, they went in as heard, and the bar says why.
       this.set({ phase: result.inserted ? 'done' : 'ready', outcome: result.inserted ? 'inserted' : undefined, message: result.inserted ? result.message || job.speech.asHeard || (polishFailed || job.original ? 'Original words entered' : 'Text entered') : result.message || 'Text ready. The destination changed; copy it where you need it.' })
       this.receipt(job, raw, text, result.inserted ? 'inserted' : 'ready')
     } catch { if (this.job === job) { this.set({ phase: 'ready', message: 'Could not confirm insertion. Check your text box before copying.' }); this.receipt(job, raw, text, 'ready') } }
+  }
+  /** The picture into the box the dictation noted. */
+  private async pictureInto(job: Job): Promise<DictationInsertion> {
+    if (!job.target.token || !this.options.target.insertPicture) return { inserted: false, message: `The picture is saved at ${job.picture}.` }
+    try { return await this.options.target.insertPicture(job.target.token, job.picture!) }
+    catch (error) { return { inserted: false, message: (error as Error).message } }
+  }
+  /** F8 Show with nothing said: only the picture goes in. */
+  private async deliverPicture(job: Job): Promise<void> {
+    job.speech.dispose?.()
+    await job.targetReady
+    if (this.job !== job || job.controller.signal.aborted) return
+    this.set({ phase: 'inserting', message: 'Putting the picture in…', text: undefined })
+    const shown = await this.pictureInto(job)
+    if (this.job !== job) return
+    this.set({ phase: shown.inserted ? 'done' : 'ready', outcome: shown.inserted ? 'inserted' : undefined, message: shown.inserted ? 'Picture entered' : shown.message || 'The picture could not go in. It is saved.' })
   }
   private receipt(job: Job, originalText: string, text: string, outcome: DictationReceipt['outcome']): void {
     // History is outside the insertion path; saving can never delay delivery or retry insertion.

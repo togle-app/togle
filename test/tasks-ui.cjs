@@ -515,8 +515,8 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual(await texts(ui, '#settings-agents .setting .name'), ['Claude Code', 'Codex', 'Hermes'])
   assert.deepEqual(await texts(ui, '#settings-agents .setting-value'), ['Found', 'Found', 'Not found'])
   // The task box's key is with the other key, as Task.
-  assert.deepEqual(await texts(ui, '#settings-keys .shortcut-what'), ['Talk', 'Task'])
-  assert.deepEqual(await texts(ui, '#settings-keys button.keys'), ['F9', 'F10'])
+  assert.deepEqual(await texts(ui, '#settings-keys .shortcut-what'), ['Talk', 'Show', 'Task'])
+  assert.deepEqual(await texts(ui, '#settings-keys button.keys'), ['F9', 'F8', 'F10'])
   await ui.evaluate("document.querySelector('#settings-agents').scrollIntoView({ block: 'start' })")
   await ui.capture('settings-agents')
   assert.deepEqual(ui.errors, [], 'no errors in the console')

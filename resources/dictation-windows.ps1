@@ -4,8 +4,10 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
-Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @'
+Add-Type -AssemblyName System.Drawing
+Add-Type -ReferencedAssemblies System.Windows.Forms,System.Drawing -TypeDefinition @'
 using System;
+using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -69,6 +71,19 @@ public static class TogleTextInput {
       data.SetText(text,TextDataFormat.UnicodeText);
       data.SetData(MarkerFormat,false,marker);
       // Temporary dictation text should not become a clipboard-history entry.
+      data.SetData("CanIncludeInClipboardHistory",false,new MemoryStream(new byte[4]));
+      data.SetData("CanUploadToCloudClipboard",false,new MemoryStream(new byte[4]));
+      try { Clipboard.SetDataObject(data,true,5,20); }
+      finally { published=GetClipboardSequenceNumber(); }
+    }
+    // F8 Show: a picture, as a bitmap and as PNG (apps take one or the other), kept out of clipboard history.
+    public void PublishPicture(string path) {
+      if(captured!=GetClipboardSequenceNumber()) throw new InvalidOperationException("The clipboard changed. The picture is saved.");
+      var bytes=File.ReadAllBytes(path);
+      var data=new DataObject();
+      using(var stream=new MemoryStream(bytes)) using(var image=Image.FromStream(stream)) data.SetImage(new Bitmap(image));
+      data.SetData("PNG",false,new MemoryStream(bytes));
+      data.SetData(MarkerFormat,false,marker);
       data.SetData("CanIncludeInClipboardHistory",false,new MemoryStream(new byte[4]));
       data.SetData("CanUploadToCloudClipboard",false,new MemoryStream(new byte[4]));
       try { Clipboard.SetDataObject(data,true,5,20); }
@@ -242,6 +257,41 @@ while ($null -ne ($line = [Console]::ReadLine())) {
             try { $clipboard.Dispose() }
             catch { if ($inserted) { $result = @{ inserted=$true; message='Text entered. The clipboard could not be restored.' } } }
           }
+        }
+      }
+    } elseif ($request.command -eq 'insertPicture') {
+      # F8 Show: the picture goes in first. The target stays noted: the words follow with insert.
+      $token = [string]$request.token; $file = [string]$request.file
+      $target = $targets[$token]
+      if (!$target -or !(Test-Path -LiteralPath $file -PathType Leaf)) { throw 'This picture is no longer ready to insert.' }
+      for ($attempt=0; $attempt -lt 40 -and [TogleTextInput]::ModifiersDown(); $attempt++) { Start-Sleep -Milliseconds 20 }
+      if ([TogleTextInput]::ModifiersDown()) { throw "Release the shortcut keys. The picture is saved at $file." }
+      $current = Read-FocusedText
+      if (!(Test-SameTarget $target $current)) {
+        $result = @{ inserted=$false; message="The cursor moved. The picture is saved at $file." }
+      } elseif ($target.terminal) {
+        # A terminal takes text only: the picture's path, quoted, then a space for the words.
+        if ([TogleTextInput]::GetForegroundWindow().ToInt64().ToString() -ne $target.front) { throw "The focused app changed. The picture is saved at $file." }
+        $path = '"' + $file + '" '
+        $count = [TogleTextInput]::Write($path)
+        $result = @{ inserted=($count -eq $path.Length*2) }
+      } else {
+        # Pasted through the clipboard, which is given back as it was right after.
+        $clipboard = $null
+        try { $clipboard = New-Object 'TogleTextInput+ClipboardText' }
+        catch { throw "The clipboard could not be kept, so the picture was not pasted. It is saved at $file." }
+        $inserted = $false
+        try {
+          $clipboard.PublishPicture($file)
+          $beforePaste = Read-FocusedText
+          if (!(Test-SameTarget $target $beforePaste)) { throw "The cursor moved. The picture is saved at $file." }
+          if ([TogleTextInput]::ModifiersDown()) { throw 'Release the shortcut keys.' }
+          $inserted = [TogleTextInput]::Paste() -eq 4
+          # Let the app take the picture before the clipboard is given back.
+          Start-Sleep -Milliseconds 400
+          $result = @{ inserted=$inserted }
+        } finally {
+          try { $clipboard.Dispose() } catch { if ($inserted) { $result = @{ inserted=$true; message='Picture entered. The clipboard could not be restored.' } } }
         }
       }
     } else { throw 'Unknown dictation operation.' }
