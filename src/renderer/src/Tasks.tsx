@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import type { ClaudeHookStatus, LogEntry, RunnerKind, RunnerStatus, TaskDetail, TaskView, ViewRequest } from '@shared/runner'
+import { needsYou, type ClaudeHookStatus, type LogEntry, type RunnerKind, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
 import { Changes } from './Changes'
 import { Icon } from './Icon'
 import { Markdown } from './Markdown'
@@ -106,9 +106,10 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   )
 
   const installed = status.filter((s) => s.installed)
-  const waiting = tasks.filter((t) => t.state === 'waiting')
+  // A task Togle runs that stopped waits for a reply, with the ones that ask.
+  const waiting = tasks.filter(needsYou)
   const working = tasks.filter((t) => t.state === 'working')
-  const earlier = tasks.filter((t) => t.state !== 'waiting' && t.state !== 'working')
+  const earlier = tasks.filter((t) => !needsYou(t) && t.state !== 'working')
   const folders = [...new Set(tasks.map((t) => t.folder).filter(Boolean))].slice(0, 5)
   const row = (task: TaskView): ReactNode => (
     <TaskRow
@@ -297,10 +298,12 @@ function TaskGroup({ label, children }: { label: string; children: ReactNode }) 
 }
 
 function TaskRow({ task, now, selected, onSelect }: { task: TaskView; now: number; selected: boolean; onSelect: () => void }) {
-  const detail = task.line || (task.state === 'waiting' || task.state === 'working' ? STATE_WORDS[task.state] : ago(task.updatedAt, now))
+  const stoppedHere = needsYou(task) && task.state !== 'waiting'
+  // Stopped and waiting for a reply: it says why.
+  const detail = stoppedHere ? (task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : 'stopped · reply to go on') : task.line || (task.state === 'waiting' || task.state === 'working' ? STATE_WORDS[task.state] : ago(task.updatedAt, now))
   const dangerous = task.pending.some((request) => request.danger)
   return (
-    <button className={`task-row ${selected ? 'selected' : ''}`} role="listitem" data-state={task.state} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
+    <button className={`task-row ${selected ? 'selected' : ''}`} role="listitem" data-state={task.state} data-needs={stoppedHere ? 'you' : undefined} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
       <span className="task-dot" aria-hidden="true" />
       <span className="task-copy">
         <strong>{task.title}</strong>

@@ -686,6 +686,33 @@ async function checkCallStrip(T, agent) {
   ui.window.destroy()
 }
 
+// A task Togle runs that stopped (by an error, or by the Stop button) waits for a reply, and says why; one that runs in
+// its own window is not Togle's to continue.
+async function checkStoppedTasks(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Tasks')
+  await ui.wait("document.querySelectorAll('.task-row').length===6")
+  await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','The plan limit is reached until 14:00.')")
+  await ui.evaluate("window.togleUITest.stopTask('claude:s4','stopped','')")
+  const group = label => "[...document.querySelectorAll('.task-group')].find(g=>g.querySelector('h3').textContent.startsWith(" + JSON.stringify(label) + "))"
+  await ui.wait(group('Waiting for you') + "?.textContent.includes('Rebuild the pricing page')")
+  assert.deepEqual(await ui.evaluate("[..." + group('Waiting for you') + ".querySelectorAll('.task-row strong')].map(s=>s.textContent)"), ['Add the status column', 'Clean the build folder', 'Rebuild the pricing page'])
+  assert.ok((await ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page')).textContent")).includes('stopped by an error: The plan limit is reached until 14:00.'), 'it says why')
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page')).dataset.needs"), 'you')
+  assert.ok(!(await ui.evaluate(group('Waiting for you') + ".textContent")).includes('Write the release notes'), 'a task in its own window that stopped is not Togle\'s to continue')
+  await ui.capture('tasks-stopped')
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.wait("[...document.querySelectorAll('.todo-row.need b')].some(b=>b.textContent==='Rebuild the pricing page')")
+  const row = "[...document.querySelectorAll('.todo-row.need')].find(r=>r.querySelector('b').textContent==='Rebuild the pricing page')"
+  assert.equal(await ui.evaluate(row + ".querySelector('small').textContent"), 'Claude Code · website · stopped by an error')
+  assert.equal(await ui.evaluate(row + ".querySelector('.todo-command').textContent"), 'The plan limit is reached until 14:00.')
+  assert.deepEqual(await ui.evaluate("[..." + row + ".querySelectorAll('button')].map(b=>b.textContent)"), ['Reply'])
+  await ui.evaluate(row + ".querySelector('button').click()")
+  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Rebuild the pricing page'")
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 async function checkNarrow(T, agent) {
   const ui = await open(T, agent, 600)
   await ui.click('.workspace-nav button', 'Tasks')
@@ -721,6 +748,7 @@ app.whenReady().then(async () => {
     await checkTaskBox(T, agent)
     await checkCallNotice(T, agent)
     await checkCallStrip(T, agent)
+    await checkStoppedTasks(T, agent)
     await checkAgentSettings(T, agent)
     console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box and the settings for coding agents passed')
     clearTimeout(timeout)

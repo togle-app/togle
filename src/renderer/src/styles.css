@@ -3290,3 +3290,6 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .call-strip-bar button { padding: 4px 11px; border-radius: 999px; font-size: 12px; }
 .call-strip-bar button.stop { color: var(--danger); }
 @keyframes strip-pulse { 50% { opacity: 0.35; } }
+/* A task Togle runs that stopped waits for a reply, amber like one that asks. */
+.task-row[data-needs='you'] { background: #2a2418; border-color: #5a4a22; }
+.task-row[data-needs='you'] .task-dot { background: var(--them); }

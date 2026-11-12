@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import type { RunnerKind, RunnerStatus, TaskView, ViewRequest } from '@shared/runner'
+import { needsYou, type RunnerKind, type RunnerStatus, type TaskView, type ViewRequest } from '@shared/runner'
 import { canAllowHere, shownPart } from '@shared/runner-command'
 import type { TodoItem, TodoList } from '@shared/todo'
 import type { CallOffer, TodoOffer } from '@shared/call-todo'
@@ -36,6 +36,9 @@ function chipOf(task: TaskView | undefined): { text: string; tone: 'work' | 'wai
 
 /** What a waiting task asks, in a few words for a row. */
 function asking(request: ViewRequest | undefined, task: TaskView): { says: string; detail: string } {
+  // Stopped and waiting for a reply to go on: it says why.
+  if (!request && task.state === 'failed') return { says: 'stopped by an error', detail: task.line }
+  if (!request && task.state === 'stopped') return { says: 'was stopped', detail: 'Reply to go on.' }
   if (!request) return { says: task.line || 'is waiting', detail: '' }
   if (request.kind === 'question') return { says: 'asks', detail: shownPart(request.questions?.[0]?.text ?? 'A question') }
   if (request.kind === 'edit') return { says: 'wants to change', detail: shownPart((request.files ?? []).join('\n') || 'a file') }
@@ -164,7 +167,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
 
   const installed = status.filter((s) => s.installed)
   const folders = [...new Set(tasks.map((t) => t.folder).filter(Boolean))].slice(0, 5)
-  const waiting = tasks.filter((task) => task.state === 'waiting')
+  const waiting = tasks.filter(needsYou)
   const items = list?.items ?? []
   const open = items.filter((item) => !item.done)
   const ticked = items.filter((item) => item.done)
@@ -277,8 +280,9 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
                       Refuse
                     </button>
                   )}
-                  <button className={`small ${request?.kind === 'question' ? 'primary' : 'ghost'}`} onClick={() => onOpenTask(task.key)}>
-                    {request?.kind === 'question' ? 'Reply' : 'Open'}
+                  {/* A question, or a task Togle runs that stopped, goes on with a reply. */}
+                  <button className={`small ${request?.kind === 'question' || (!request && task.state !== 'waiting') ? 'primary' : 'ghost'}`} onClick={() => onOpenTask(task.key)}>
+                    {request?.kind === 'question' || (!request && task.state !== 'waiting') ? 'Reply' : 'Open'}
                   </button>
                 </div>
               )

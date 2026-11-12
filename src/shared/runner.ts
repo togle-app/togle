@@ -109,6 +109,14 @@ export interface TaskView extends TaskInfo {
   commandsRunning: boolean
 }
 
+/**
+ * Whether a task needs the person: it asks, or it is one Togle runs that stopped (by their Stop, or by itself) and
+ * waits for a reply to go on. A task stopped in its own window is not Togle's to continue.
+ */
+export function needsYou(task: Pick<TaskView, 'state' | 'mine'>): boolean {
+  return task.state === 'waiting' || (task.mine && (task.state === 'stopped' || task.state === 'failed'))
+}
+
 export interface TaskDetail {
   task: TaskView
   log: LogEntry[]

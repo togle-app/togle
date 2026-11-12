@@ -27,6 +27,16 @@ test('a command that waits becomes a notice with the command in full and both bu
   assert.deepEqual(look.finished, [])
 })
 
+test('a task that stopped, by the Stop button or by an error, waits for a reply: the tray counts it, and no notice asks', () => {
+  const attention = new T.Attention(clock())
+  const look = attention.look([task('codex:a', 'stopped'), task('claude:b', 'failed', [], { line: 'Codex is signed out.' }), task('claude:c', 'idle'), task('claude:d', 'working')])
+  assert.equal(look.waiting, 2, 'the stopped one and the broken one')
+  assert.deepEqual(look.notices, [], 'there is nothing to allow or answer in a notice')
+  const asked = attention.look([task('codex:a', 'stopped'), task('codex:e', 'waiting', [request('r1', 'command', { command: 'ls', raw: 'ls' })])])
+  assert.equal(asked.waiting, 2)
+  assert.equal(asked.notices[0].others, 1, 'the notice for the one that asks counts the stopped one among the others')
+})
+
 test('Allow once is offered only when everything asked is shown and nothing looks dangerous', () => {
   const attention = new T.Attention(clock())
   const long = `npm run build -- ${'--flag '.repeat(60)}`

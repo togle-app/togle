@@ -486,6 +486,8 @@ module.exports = function install(fixture) {
   contextBridge.exposeInMainWorld('togleUITest', {
     // A session that runs in a terminal asks about a command and the question is held here: it waits, and can be answered.
     askOutside: (key, request) => { const found = runnerFind(key); found.pending = [clone(request)]; found.state = 'waiting'; found.line = 'Wants to run ' + (request.command ?? ''); runnerChanged() },
+    // A task Togle runs stops: by the person's Stop, or by itself (an error).
+    stopTask: (key, state, line) => { const found = runnerFind(key); found.state = state; found.line = line; found.pending = []; runnerChanged() },
     // What the window is told of Claude Code's connection to Togle, changed by hand.
     hook: patch => { hookStatus = { ...hookStatus, ...patch } },
     failNextConnect: () => { failHook = true },

@@ -52,7 +52,8 @@ export class Attention {
       this.dismissed.delete(id)
     }
     requests.sort((a, b) => a.at - b.at)
-    const waitingTasks = new Set(requests.map(({ task }) => task.key))
+    // A task that stopped (by the person's Stop, or by itself) waits for a reply to go on: it counts too.
+    const waitingTasks = new Set([...requests.map(({ task }) => task.key), ...tasks.filter((task) => task.state === 'stopped' || task.state === 'failed').map((task) => task.key)])
     const notices = requests.filter(({ task, request }) => !this.dismissed.has(`${task.key}#${request.id}`)).map(({ task, request }) => waitingNotice(task, request, waitingTasks.size - 1))
 
     const finished: TaskNotice[] = []
