@@ -3096,6 +3096,12 @@ ul.pending-lessons > li > span:first-child { flex: 1 1 260px; min-width: 0; over
 .task-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--muted); font-size: 12px; }
 .task-banner .row { display: flex; gap: 8px; }
 .task-banner.signed-out { background: #2a2418; border-color: #5a4a22; color: var(--text); }
+/* A task in a terminal of Togle's own: the terminal fills what the panel has left. */
+.task-terminal { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+.task-banner.task-words { color: var(--text); }
+.task-banner.task-words q { color: var(--text); font-style: italic; overflow-wrap: anywhere; }
+.terminal-view { flex: 1; min-height: 220px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: #0f1217; overflow: hidden; }
+.terminal-view .xterm { height: 100%; }
 .no-agents { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
 .no-agents p { margin: 0; }
 .no-agents-row { display: flex; flex-direction: column; gap: 5px; }

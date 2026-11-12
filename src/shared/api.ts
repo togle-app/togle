@@ -152,8 +152,21 @@ export interface TogleApi {
 
   /** The coding agents on this PC (Codex, Claude Code), and whether each is installed. */
   runnerStatus(): Promise<RunnerStatus[]>
-  /** Adds an agent that speaks ACP, by its name and the command that starts it; answers with every agent as it is now. */
-  addCodingAgent(name: string, command: string): Promise<RunnerStatus[]>
+  /**
+   * Adds an agent by its name and the command that starts it: one that speaks ACP, or (`terminal`) any other, which runs
+   * in a terminal of Togle's own. Answers with every agent as it is now.
+   */
+  addCodingAgent(name: string, command: string, how?: 'acp' | 'terminal'): Promise<RunnerStatus[]>
+  /** A task in a terminal of Togle's own: what it printed so far, and where that ends among all it printed. */
+  terminalRead(key: string): Promise<{ text: string; end: number }>
+  /** The keys the person types into that terminal. */
+  terminalWrite(key: string, data: string): Promise<void>
+  /** The size that terminal is shown at, in characters. */
+  terminalResize(key: string, cols: number, rows: number): Promise<void>
+  /** Types the task's words into its terminal, without Enter. */
+  typeTerminalWords(key: string): Promise<void>
+  /** What a terminal of Togle's own printed, as it comes: `at` is where the part starts among all it printed. */
+  onTerminalData(cb: (chunk: { key: string; at: number; data: string }) => void): Unsubscribe
   /** Removes an agent the person added. */
   removeCodingAgent(id: string): Promise<RunnerStatus[]>
   /** Every agent task on this PC in one list: waiting for the person first, then working, then the rest. */

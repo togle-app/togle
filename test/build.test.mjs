@@ -105,6 +105,7 @@ test('package verification rejects development artifacts, stale files and an out
   const runtime = path.join('package/resources/app.asar.unpacked/node_modules')
   write(path.join(runtime, '@anthropic-ai', `claude-agent-sdk-${process.platform}-${process.arch}`, process.platform === 'win32' ? 'claude.exe' : 'claude'), 'fixture only')
   write(path.join(runtime, `sherpa-onnx-${process.platform === 'win32' ? 'win' : process.platform}-${process.arch}`, 'sherpa-onnx.node'), 'fixture only')
+  write(path.join(runtime, 'node-pty', process.platform === 'linux' ? 'build/Release' : `prebuilds/${process.platform}-${process.arch}`, 'pty.node'), 'fixture only')
   const archive = path.join(resources, 'app.asar')
   // asar 3 returns its WriteStream before the last writes finish. Reading it immediately races on macOS.
   const pack = async () => { await finished(await asar.createPackage(stage, archive)); asar.uncache(archive) }

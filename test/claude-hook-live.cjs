@@ -1,9 +1,7 @@
 // Live test, not part of `npm test`: the real Togle app, a real Claude Code session in a terminal, and Togle's hook between
 // them. Claude Code asks about a command; Togle shows it in a notice; the person's answer there decides the command, and an
 // answer given in the terminal first makes the question here go. It uses the signed-in Claude Code on this computer for three
-// short prompts, and needs `node-pty` (not a dependency of Togle): put its folder in TOGLE_PTY_MODULE.
-//
-//   npm i node-pty@1.1.0 --prefix <some folder>       then       TOGLE_PTY_MODULE=<that folder>/node_modules/node-pty npm run test:claude-hook:live
+// short prompts, in a terminal from node-pty (Togle's own, for agents without ACP; TOGLE_PTY_MODULE names another copy).
 //
 // Nothing of the person's own Claude settings is changed: the hook is given to Claude Code with --settings.
 const { app, BrowserWindow, ipcMain } = require('electron')
@@ -17,11 +15,7 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 
 const repo = path.resolve(__dirname, '..')
-if (!process.env.TOGLE_PTY_MODULE) {
-  console.log('SKIPPED: set TOGLE_PTY_MODULE to the folder of node-pty to run this test.')
-  app.exit(0)
-}
-const pty = process.env.TOGLE_PTY_MODULE ? require(process.env.TOGLE_PTY_MODULE) : null
+const pty = require(process.env.TOGLE_PTY_MODULE || 'node-pty')
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'togle-live-profile-'))
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'togle-live-work-'))

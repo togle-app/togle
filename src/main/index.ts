@@ -1658,7 +1658,8 @@ if (hookAt !== -1) {
       // Agents added in Settings: kept with the other settings.
       added: () => getSettings().addedAgents,
       saveAdded: async (agents) => { await updateSettings({ addedAgents: agents }) },
-      started: (task, request) => void putOnTodo(task, request)
+      // A task in a terminal of Togle's own is seen and answered only there: Togle opens on it.
+      started: (task, request) => { void putOnTodo(task, request); if (task.terminal) showTask(task.key) }
     })
     // Connecting Claude Code in a terminal: one entry in its settings that starts Togle as `--togle-hook`.
     const hubForClaude = runners

@@ -1,6 +1,6 @@
 // What the window can ask of the agents' tasks: each a message from the window to the hub, and one back when
 // something changed (the window then asks again for what it shows).
-import { addedAgentProblem, agentIdOf, KNOWN_AGENTS, type AddedAgent, type RunnerKind, type StartRequest, type TaskView } from '@shared/runner'
+import { addedAgentProblem, agentIdOf, KNOWN_AGENTS, runsInTerminal, type AddedAgent, type RunnerKind, type StartRequest, type TaskView } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
 import { AcpBackend, commandWords, whereIs } from './acp'
 import { ClaudeBackend } from './claude'
@@ -8,10 +8,15 @@ import { CodexBackend } from './codex'
 import { HermesBackend } from './hermes'
 import { RunnerHub, type RecordStore, type TitleStore } from './hub'
 import { widenSearchPath } from './search-path'
+import { TerminalBackend, type TerminalChunk } from './terminal'
 import type { Backend } from './types'
 
-/** An agent the person added: started by their command, its program found the way a terminal would find it. */
-export function addedBackend(agent: AddedAgent, version: string): AcpBackend {
+/**
+ * An agent the person added: started by their command, its program found the way a terminal would find it. One that runs
+ * in a terminal of Togle's own tells what it prints through `told`.
+ */
+export function addedBackend(agent: AddedAgent, version: string, told?: (chunk: TerminalChunk) => void): Backend {
+  if (runsInTerminal(agent.id)) return new TerminalBackend({ runner: agent.id, name: agent.name, command: agent.command }, told)
   return new AcpBackend({
     runner: agent.id,
     name: agent.name,
@@ -60,10 +65,12 @@ function word(value: unknown, what: string): string {
 }
 
 export function registerRunners(deps: RunnerDeps): RunnerHub {
+  // What a terminal of Togle's own prints goes to the window as it comes.
+  const told = (chunk: TerminalChunk): void => deps.send('runners:terminal-data', chunk)
   const hub = new RunnerHub({
     backends: [
       ...(deps.backends ?? [new CodexBackend({ version: deps.version }), new ClaudeBackend(), new HermesBackend({ version: deps.version })]),
-      ...(deps.added?.() ?? []).map((agent) => addedBackend(agent, deps.version))
+      ...(deps.added?.() ?? []).map((agent) => addedBackend(agent, deps.version, told))
     ],
     changed: () => {
       deps.send('runners:changed', null)
@@ -96,19 +103,32 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   handle('runners:end-commands', (key) => hub.endCommands(word(key, 'The task')))
   handle('runners:close', (key) => hub.close(word(key, 'The task')))
   handle('runners:pick-folder', () => deps.pickFolder())
-  // Settings → Agents → Add an agent: any agent that speaks ACP, by its name and the command that starts it.
-  handle('runners:add-agent', async (name, command) => {
+  // A task in a terminal of Togle's own: what it printed, the keys the person types, its size, and its words typed in.
+  handle('runners:terminal-read', (key) => hub.terminalRead(word(key, 'The task')))
+  handle('runners:terminal-write', (key, data) => {
+    if (typeof data !== 'string' || data.length > 65_536) throw new Error('That is not what a terminal is sent.')
+    hub.terminalWrite(word(key, 'The task'), data)
+  })
+  handle('runners:terminal-resize', (key, cols, rows) => {
+    const size = (value: unknown): number => (typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 1000 ? value : NaN)
+    if (Number.isNaN(size(cols)) || Number.isNaN(size(rows))) throw new Error('That is not a size.')
+    hub.terminalResize(word(key, 'The task'), size(cols), size(rows))
+  })
+  handle('runners:terminal-words', (key) => hub.typeWords(word(key, 'The task')))
+  // Settings → Agents → Add an agent: one that speaks ACP, or any other, which runs in a terminal of Togle's own; by its
+  // name and the command that starts it.
+  handle('runners:add-agent', async (name, command, how) => {
     const problem = addedAgentProblem(name, command)
     if (problem) throw new Error(problem)
     const given = (name as string).trim()
     if (Object.values(KNOWN_AGENTS).some((known) => known.toLowerCase() === given.toLowerCase())) throw new Error(`Togle finds ${given} by itself.`)
     const added = deps.added?.() ?? []
-    const base = agentIdOf(given)
+    const base = agentIdOf(given, how === 'terminal')
     let id = base
     for (let n = 2; hub.has(id) || added.some((agent) => agent.id === id); n++) id = `${base}-${n}`
     const agent: AddedAgent = { id, name: given, command: (command as string).trim() }
     await deps.saveAdded?.([...added, agent])
-    hub.addBackend(addedBackend(agent, deps.version))
+    hub.addBackend(addedBackend(agent, deps.version, told))
     return hub.status()
   })
   handle('runners:remove-agent', async (id) => {

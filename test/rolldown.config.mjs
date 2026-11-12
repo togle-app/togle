@@ -10,7 +10,7 @@ export default [
     input: path.join(here, 'entry.ts'),
     output: { file: path.join(here, '.build/togle.mjs'), format: 'esm' },
     platform: 'node',
-    external: ['jszip', 'unpdf', 'mammoth', 'koffi', '@anthropic-ai/sdk', '@anthropic-ai/claude-agent-sdk', 'zod', 'ws'],
+    external: ['jszip', 'unpdf', 'mammoth', 'koffi', 'node-pty', '@anthropic-ai/sdk', '@anthropic-ai/claude-agent-sdk', 'zod', 'ws'],
     resolve: { alias: { '@shared': shared, electron: path.join(here, 'electron.mjs') } }
   },
   {

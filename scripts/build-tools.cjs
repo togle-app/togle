@@ -140,6 +140,9 @@ function verifyPackage(resources, root = ROOT, target = { platform: process.plat
   if (!fs.statSync(cli).size) throw new Error('The official Claude runtime is missing from the package.')
   const voices = path.join(resources, 'app.asar.unpacked/node_modules', `sherpa-onnx-${target.platform === 'win32' ? 'win' : target.platform}-${target.arch}`, 'sherpa-onnx.node')
   if (!fs.statSync(voices).size) throw new Error('The native speech addon is missing from the package.')
+  // The terminal agents without ACP run in: node-pty's own build for this system (built on install on Linux).
+  const terminal = path.join(resources, 'app.asar.unpacked/node_modules/node-pty', target.platform === 'linux' ? 'build/Release' : `prebuilds/${target.platform}-${target.arch}`, 'pty.node')
+  if (!fs.statSync(terminal).size) throw new Error('The terminal addon (node-pty) is missing from the package.')
   console.log('Verified build ' + manifest.id + ': exact compiled files, resources and provenance.')
   return manifest
 }

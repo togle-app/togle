@@ -258,7 +258,7 @@ module.exports = function install(fixture) {
   const addedAgents = []
   const knownAgents = () => fixture.scenario === 'tasks' ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []
   api.runnerStatus = async () => [...knownAgents(), ...clone(addedAgents)]
-  api.addCodingAgent = async (name, command) => { record('addCodingAgent', [name, command]); addedAgents.push({ runner: 'acp-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, installed: true, added: true }); return api.runnerStatus() }
+  api.addCodingAgent = async (name, command, how) => { record('addCodingAgent', [name, command, how]); addedAgents.push({ runner: (how === 'terminal' ? 'term-' : 'acp-') + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, installed: true, added: true }); return api.runnerStatus() }
   api.removeCodingAgent = async id => { record('removeCodingAgent', [id]); addedAgents.splice(addedAgents.findIndex(agent => agent.runner === id), 1); return api.runnerStatus() }
   api.runnerTasks = async () => clone(runnerTasks.map(runnerView)).sort((a, b) => runnerRank(a) - runnerRank(b) || b.updatedAt - a.updatedAt)
   api.runnerDetail = async key => { const found = runnerFind(key); return clone({ task: runnerView(found), log: found.log }) }
@@ -291,6 +291,12 @@ module.exports = function install(fixture) {
   api.stopRunnerTask = async key => { record('stopRunnerTask', [key]); const found = runnerFind(key); found.state = 'stopped'; found.pending = []; found.line = ''; if (found.runner === 'codex') found.commandsRunning = true; runnerChanged() }
   api.endRunnerCommands = async key => { record('endRunnerCommands', [key]); runnerFind(key).commandsRunning = false; runnerChanged(); return 1 }
   api.closeRunnerTask = async key => { record('closeRunnerTask', [key]); runnerFind(key).mine = false; runnerChanged() }
+  // A task in a terminal of Togle's own: what it printed (a test adds to it with onTerminalData), and what is sent to it.
+  const terminals = new Map()
+  api.terminalRead = async key => { record('terminalRead', [key]); return clone(terminals.get(key) ?? { text: '', end: 0 }) }
+  api.terminalWrite = async (key, data) => { record('terminalWrite', [key, data]) }
+  api.terminalResize = async (key, cols, rows) => { record('terminalResize', [key, cols, rows]) }
+  api.typeTerminalWords = async key => { record('typeTerminalWords', [key]); delete runnerFind(key).words; runnerChanged() }
   api.pickRunnerFolder = async () => { record('pickRunnerFolder', []); return 'C:\\work\\picked' }
   api.pickTaskBoxFolder = async () => { record('pickTaskBoxFolder', []); return 'C:\\work\\chosen-for-box' }
   api.openTaskBox = async opening => { record('openTaskBox', [opening]) }
@@ -357,6 +363,8 @@ module.exports = function install(fixture) {
   contextBridge.exposeInMainWorld('togleUITest', {
     // A session that runs in a terminal asks about a command and the question is held here: it waits, and can be answered.
     askOutside: (key, request) => { const found = runnerFind(key); found.pending = [clone(request)]; found.state = 'waiting'; found.line = 'Wants to run ' + (request.command ?? ''); runnerChanged() },
+    // A task of an agent without ACP, in a terminal of Togle's own that has printed `printed` so far.
+    terminalTask: (props, printed) => { const added = task(props.key, { mine: true, state: 'working', terminal: true, line: 'Working…', ...props }); runnerTasks.push(added); terminals.set(added.key, { text: printed, end: printed.length }); runnerChanged() },
     // A task Togle runs stops: by the person's Stop, or by itself (an error, or its agent signed out: `extra`).
     stopTask: (key, state, line, extra) => { const found = runnerFind(key); found.state = state; found.line = line; found.pending = []; Object.assign(found, extra ?? {}); runnerChanged() },
     // What the window is told of Claude Code's connection to Togle, changed by hand.

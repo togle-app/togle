@@ -273,9 +273,36 @@ export class RunnerHub {
   async endCommands(key: string): Promise<number> {
     const owned = this.mine(key)
     const ended = await owned.handle.endCommands()
-    if (ended) this.log(owned, 'note', ended === 1 ? 'Ended the command that was running.' : `Ended ${ended} commands that were running.`)
+    if (ended) this.log(owned, 'note', owned.handle.terminal ? 'Ended it.' : ended === 1 ? 'Ended the command that was running.' : `Ended ${ended} commands that were running.`)
     this.fresh()
     return ended
+  }
+
+  // A task that runs in a terminal of Togle's own: what it printed, and what the person types and how big it is shown.
+  terminalRead(key: string): { text: string; end: number } {
+    return this.terminalOf(key).read()
+  }
+
+  terminalWrite(key: string, data: string): void {
+    this.terminalOf(key).write(data)
+  }
+
+  terminalResize(key: string, cols: number, rows: number): void {
+    this.terminalOf(key).resize(cols, rows)
+  }
+
+  /** Types the words the task was given into its terminal, without Enter. */
+  typeWords(key: string): void {
+    const owned = this.mine(key)
+    this.terminalOf(key).typeWords()
+    this.touch(owned)
+    this.changedSoon()
+  }
+
+  private terminalOf(key: string): NonNullable<TaskHandle['terminal']> {
+    const side = this.mine(key).handle.terminal
+    if (!side) throw new Error('That task does not run in a terminal.')
+    return side
   }
 
   /** Lets go of a task Togle runs. It stays on this computer. */
@@ -566,7 +593,8 @@ export class RunnerHub {
       pending,
       commandsRunning: owned.running > 0,
       ...(signedOut ? { signedOut: true } : {}),
-      ...(fix ? { fix } : {})
+      ...(fix ? { fix } : {}),
+      ...(handle.terminal ? { terminal: true, ...(handle.terminal.words ? { words: handle.terminal.words } : {}) } : {})
     }
   }
 }

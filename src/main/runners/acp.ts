@@ -72,7 +72,7 @@ export async function whereIs(program: string): Promise<string | null> {
 }
 
 /** Quotes a word for cmd.exe when it has to (spaces, or characters cmd reads): a .cmd shim only starts through it. */
-const forCmd = (word: string): string => (/[\s"&|<>^()%!]/.test(word) ? `"${word.replace(/"/g, '""')}"` : word)
+export const forCmd = (word: string): string => (/[\s"&|<>^()%!]/.test(word) ? `"${word.replace(/"/g, '""')}"` : word)
 
 // The ways ACP names what a tool does.
 const EDIT_KINDS = new Set(['edit', 'delete', 'move'])

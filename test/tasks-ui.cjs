@@ -782,6 +782,43 @@ async function checkSignedOut(T, agent) {
   ui.window.destroy()
 }
 
+// An agent without ACP: its task shows the terminal it runs in (what it printed, and the keys typed into it), with its
+// words to type in and a way to end it.
+async function checkTerminalTask(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===6")
+  await ui.evaluate("window.togleUITest.terminalTask({ key: 'term-aider:t1', runner: 'term-aider', agent: 'Aider', title: 'Rename the module', folder: 'C:\\\\work\\\\api-server', words: 'Rename the module and fix the imports' }, 'Aider v0.99\\r\\n> ')")
+  await ui.task('Rename the module')
+  await ui.wait("document.querySelector('.terminal-view')?.textContent.includes('Aider v0.99')")
+  assert.deepEqual((await ui.calls('terminalRead')).map(call => call.args), [['term-aider:t1']], 'it starts from what was printed so far')
+  assert.equal(await ui.evaluate("document.querySelector('.task-terminal .task-banner span').textContent"), 'Aider runs in this terminal. It asks here, and you answer here, as in any terminal.')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-reply')"), false, 'no reply box: the terminal is where it is answered')
+  // What it prints next follows; a part already shown is not shown twice.
+  const emit = chunk => ui.evaluate("window.togleUITest.emit('onTerminalData', " + JSON.stringify(chunk) + ")")
+  await emit({ key: 'term-aider:t1', at: 0, data: 'Aider v0.99\r\n> ' })
+  await emit({ key: 'term-aider:t1', at: 15, data: 'Added src/module.py to the chat' })
+  await emit({ key: 'other:x', at: 0, data: 'not this task' })
+  await ui.wait("document.querySelector('.terminal-view').textContent.includes('Added src/module.py to the chat')")
+  assert.equal(await ui.evaluate("document.querySelector('.terminal-view').textContent.split('Aider v0.99').length - 1"), 1)
+  assert.equal(await ui.evaluate("document.querySelector('.terminal-view').textContent.includes('not this task')"), false)
+  // The keys typed into it go to it.
+  await ui.evaluate("(() => { const area = document.querySelector('.terminal-view .xterm-helper-textarea'); area.focus(); area.dispatchEvent(new InputEvent('input', { data: 'y', inputType: 'insertText', bubbles: true })) })()")
+  await ui.wait("window.togleUITest.calls().some(call => call.name === 'terminalWrite')")
+  assert.deepEqual((await ui.calls('terminalWrite')).map(call => call.args), [['term-aider:t1', 'y']])
+  assert.ok((await ui.calls('terminalResize')).every(call => call.args[0] === 'term-aider:t1' && call.args[1] > 10 && call.args[2] > 3), 'its size follows the panel')
+  // Its words, typed in at the person's click; End it ends it.
+  assert.ok((await ui.evaluate("document.querySelector('.task-words span').textContent")).includes('Rename the module and fix the imports'))
+  await ui.capture('task-terminal')
+  await ui.click('.task-words button', 'Type them in')
+  await ui.wait("!document.querySelector('.task-words')")
+  assert.deepEqual((await ui.calls('typeTerminalWords')).map(call => call.args), [['term-aider:t1']])
+  await ui.click('.task-terminal .task-banner button', 'End it')
+  assert.deepEqual((await ui.calls('endRunnerCommands')).map(call => call.args), [['term-aider:t1']])
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 async function checkNarrow(T, agent) {
   const ui = await open(T, agent, 600)
   await ui.click('.workspace-nav button', 'Agents')
@@ -820,8 +857,9 @@ app.whenReady().then(async () => {
     await checkCallStrip(T, agent)
     await checkStoppedTasks(T, agent)
     await checkSignedOut(T, agent)
+    await checkTerminalTask(T, agent)
     await checkAgentSettings(T, agent)
-    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box, a signed-out agent, the offer to change keys and the agents in Settings passed')
+    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box, a signed-out agent, a task in a terminal of its own, the offer to change keys and the agents in Settings passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

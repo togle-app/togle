@@ -4,6 +4,7 @@ import { Changes } from './Changes'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { Markdown } from './Markdown'
+import { TerminalView } from './TerminalView'
 
 const api = window.togle
 
@@ -471,6 +472,10 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
         </div>
       )}
 
+      {task.terminal ? (
+        <TerminalPanel task={task} onEnd={onEndCommands} />
+      ) : (
+      <>
       <div className="task-log" role="log" aria-label="What happened">
         {log.length === 0 && task.mine && <p className="hint">Nothing yet.</p>}
         {log.length === 0 && !task.mine && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
@@ -499,6 +504,39 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
           </button>
         </form>
       )}
+      </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A task whose agent has no ACP: it runs in a terminal of Togle's own, which the person reads and types into. Togle cannot
+ * see what it asks, so the terminal is where it is answered. Words its command had no place for wait to be typed in.
+ */
+function TerminalPanel({ task, onEnd }: { task: TaskView; onEnd: () => void }) {
+  const running = task.state === 'working' || task.state === 'waiting'
+  return (
+    <div className="task-terminal">
+      <div className="task-banner" role="note">
+        <span>{running ? `${agentOf(task)} runs in this terminal. It asks here, and you answer here, as in any terminal.` : `${agentOf(task)} has ended. What it printed stays here.`}</span>
+        {running && task.mine && (
+          <button className="small" onClick={onEnd} title="Ends the agent and what it started">
+            End it
+          </button>
+        )}
+      </div>
+      {running && task.words && (
+        <div className="task-banner task-words" role="note">
+          <span>
+            When {agentOf(task)} is ready, type your words in and press Enter: <q>{task.words}</q>
+          </span>
+          <button className="primary small" onClick={() => void api.typeTerminalWords(task.key).catch(() => undefined)}>
+            Type them in
+          </button>
+        </div>
+      )}
+      <TerminalView taskKey={task.key} />
     </div>
   )
 }

@@ -105,7 +105,12 @@ const api: TogleApi = {
 
 
   runnerStatus: () => ipcRenderer.invoke('runners:status'),
-  addCodingAgent: (name, command) => ipcRenderer.invoke('runners:add-agent', name, command),
+  addCodingAgent: (name, command, how) => ipcRenderer.invoke('runners:add-agent', name, command, how),
+  terminalRead: (key) => ipcRenderer.invoke('runners:terminal-read', key),
+  terminalWrite: (key, data) => ipcRenderer.invoke('runners:terminal-write', key, data),
+  terminalResize: (key, cols, rows) => ipcRenderer.invoke('runners:terminal-resize', key, cols, rows),
+  typeTerminalWords: (key) => ipcRenderer.invoke('runners:terminal-words', key),
+  onTerminalData: cb => subscribe('runners:terminal-data', chunk => cb(chunk as { key: string; at: number; data: string })),
   removeCodingAgent: (id) => ipcRenderer.invoke('runners:remove-agent', id),
   runnerChanges: key => ipcRenderer.invoke('runners:changes', key),
   claudeHookStatus: () => ipcRenderer.invoke('claude-hook:status'),

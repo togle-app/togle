@@ -42,6 +42,15 @@ Every way of giving work to an agent opens this same box: **New task** in Agents
 
 **Add an agent** takes any other agent that speaks ACP, the open standard Hermes uses: give it a name and the command that starts it for ACP, as its own docs give it. Togle runs that command on this computer the way a terminal would (an agent installed with npm on Windows starts through cmd.exe). The agent then shows like the others: in the list, in the task box, and as `togle run acp-<name>`. It asks before a command as its own settings say, and "always allow" is its own option, in its words. **Remove** takes it off again; what it ran is not undone.
 
+## An agent without ACP, in a terminal of its own
+
+**Add an agent → In a terminal** takes any other agent, by its name and the command that starts it in a terminal. Its tasks run in a terminal of Togle's own (a pseudo-terminal, through [node-pty](https://github.com/microsoft/node-pty)), in the task's folder, and the task's panel is that terminal: you read the agent there and type into it as in any terminal, and F9 types into it as one line. Togle opens on the task when it starts. Its id is `term-<name>` (`togle run term-aider …`).
+
+- Put `{task}` in the command where the task's words go: `cursor-agent {task}`, `aider --message {task}`. They go in as one argument, exactly as written.
+- Without `{task}`, the words wait above the terminal, and **Type them in** types them, as one line and without Enter: you press Enter once the agent is ready for them. On Windows an agent installed with npm (a `.cmd` or `.bat`) starts through cmd.exe, which would read the words as commands, so there they always wait to be typed in.
+- Togle cannot read what such an agent asks. It shows no command before it runs, marks none dangerous, and sends no notice: the agent asks in its terminal, and you answer there.
+- The task is working while the program runs, done when it ends by itself, and stopped by an error, with the exit code, otherwise. **Stop** sends Ctrl+C; **End it** ends the agent and what it started. The tasks end with Togle and are not picked up again.
+
 ## To-do
 
 **To-do**, the screen Togle opens on, is your list. What waits for you is at the top, with the same buttons as in Agents. Below it is your own list.
@@ -90,4 +99,4 @@ How it works:
 - A question goes away from Togle when it is answered in the terminal: Togle sees the session's transcript grow, or the session stop waiting.
 - To see what a hook did, start Claude Code with the environment variable `TOGLE_HOOK_LOG` set to a file name.
 
-`npm run test:claude-hook:live` runs this against a real Claude Code session in a terminal. It needs [node-pty](https://github.com/microsoft/node-pty), which Togle does not depend on: install it in a folder of its own and name that folder in `TOGLE_PTY_MODULE`.
+`npm run test:claude-hook:live` runs this against a real Claude Code session in a terminal, from the same node-pty Togle runs agents without ACP in (`TOGLE_PTY_MODULE` names another copy).

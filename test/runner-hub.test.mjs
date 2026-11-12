@@ -426,6 +426,14 @@ test('what an agent ending with an error means it is signed out is told from its
   assert.deepEqual(T.SIGN_IN_COMMANDS, { claude: 'claude auth login', codex: 'codex login', hermes: 'hermes model' })
 })
 
+test('an agent added to run in a terminal gets a term- id, and settings keep it apart from one that speaks ACP', () => {
+  assert.equal(T.agentIdOf('Aider', true), 'term-aider')
+  assert.equal(T.agentIdOf('Gemini CLI'), 'acp-gemini-cli')
+  assert.deepEqual(T.addedAgentsFrom([{ id: 'term-aider', name: 'Aider', command: 'aider --message {task}' }, { id: 'acp-gemini', name: 'Gemini', command: 'gemini --acp' }, { id: 'shell-x', name: 'X', command: 'x' }]).map((agent) => agent.id), ['term-aider', 'acp-gemini'], 'what is neither is left out')
+  assert.ok(T.addedBackend({ id: 'term-aider', name: 'Aider', command: 'aider' }, '1.0') instanceof T.TerminalBackend)
+  assert.ok(!(T.addedBackend({ id: 'acp-gemini', name: 'Gemini', command: 'gemini --acp' }, '1.0') instanceof T.TerminalBackend))
+})
+
 test('a waiting command shows with its mark, and answering it is logged', async () => {
   const claude = new FakeBackend('claude')
   const { hub } = hubOf([claude])

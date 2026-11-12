@@ -26,6 +26,19 @@ export interface Detected {
   version?: string
 }
 
+/** A task that runs in a terminal of Togle's own: what it printed, and what the person types into it. */
+export interface TerminalSide {
+  /** What it printed so far (the last part, when it printed a lot), and where that ends among all it ever printed. */
+  read(): { text: string; end: number }
+  /** What the person types, as their keys send it. */
+  write(data: string): void
+  resize(cols: number, rows: number): void
+  /** The words it was given that its command had no place for, until they are typed in. */
+  readonly words?: string
+  /** Types those words into it, without pressing Enter: the person does, once the agent is ready for them. */
+  typeWords(): void
+}
+
 /** One task Togle is running: it can be watched, answered, stopped and talked to. */
 export interface TaskHandle {
   readonly runner: RunnerKind
@@ -50,6 +63,8 @@ export interface TaskHandle {
   endCommands(): Promise<number>
   /** Lets go of the task. It stays on this computer and can be picked up again. */
   close(): Promise<void>
+  /** Present for a task that runs in a terminal of Togle's own. */
+  readonly terminal?: TerminalSide
 }
 
 export interface Backend {

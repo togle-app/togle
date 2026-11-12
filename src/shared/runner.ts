@@ -35,8 +35,9 @@ export function isSignedOut(error: string): boolean {
 }
 
 /**
- * An agent the person added in Settings: any agent that speaks ACP, started by the command its docs give for that.
- * `id` is its id in task keys ("acp-gemini").
+ * An agent the person added in Settings: one that speaks ACP, started by the command its docs give for that, or one that
+ * runs in a terminal of Togle's own (any other agent). `id` is its id in task keys: "acp-gemini" for ACP, "term-aider"
+ * for a terminal.
  */
 export interface AddedAgent {
   id: string
@@ -44,8 +45,18 @@ export interface AddedAgent {
   command: string
 }
 
-/** The id an added agent gets from its name: "acp-" and the name's letters and digits ("Gemini CLI" is acp-gemini-cli). */
-export const agentIdOf = (name: string): string => `acp-${name.toLowerCase().normalize('NFKD').replace(/\p{M}+/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'agent'}`
+/**
+ * The id an added agent gets from its name: "acp-" (or "term-", for one that runs in a terminal) and the name's letters
+ * and digits ("Gemini CLI" is acp-gemini-cli).
+ */
+export const agentIdOf = (name: string, terminal = false): string =>
+  `${terminal ? 'term' : 'acp'}-${name.toLowerCase().normalize('NFKD').replace(/\p{M}+/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'agent'}`
+
+/** Whether an added agent runs in a terminal of Togle's own (it does not speak ACP). */
+export const runsInTerminal = (id: string): boolean => /^term-/.test(id)
+
+/** What, in an added terminal agent's command, stands for the task's words. */
+export const TASK_WORDS = '{task}'
 
 /** Why a name and a command cannot be an added agent, or undefined when they can. */
 export function addedAgentProblem(name: unknown, command: unknown): string | undefined {
@@ -63,7 +74,7 @@ export function addedAgentsFrom(value: unknown): AddedAgent[] {
   const seen = new Set<string>()
   return value.flatMap((item) => {
     const agent = item as Partial<AddedAgent> | null
-    if (!agent || typeof agent.id !== 'string' || !/^acp-[a-z0-9-]{1,40}$/.test(agent.id) || seen.has(agent.id) || addedAgentProblem(agent.name, agent.command)) return []
+    if (!agent || typeof agent.id !== 'string' || !/^(?:acp|term)-[a-z0-9-]{1,40}$/.test(agent.id) || seen.has(agent.id) || addedAgentProblem(agent.name, agent.command)) return []
     seen.add(agent.id)
     return [{ id: agent.id, name: agent.name!.trim(), command: agent.command!.trim() }]
   })
@@ -183,6 +194,10 @@ export interface TaskView extends TaskInfo {
   signedOut?: boolean
   /** The command that signs the agent in again, for an agent Togle knows. */
   fix?: string
+  /** It runs in a terminal of Togle's own: the person sees it and types into it there. */
+  terminal?: boolean
+  /** In such a task, the words it was given that its command had no place for: they wait to be typed in. */
+  words?: string
 }
 
 /**

@@ -18,9 +18,10 @@ export interface CliIo {
 const AGENTS = ['claude', 'codex', 'hermes'] as const
 const NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes' }
 
-export const USAGE = `togle run [claude|codex|hermes|acp-…] [--folder <folder>] [--title <name>] [<what to do>]
+export const USAGE = `togle run [claude|codex|hermes|acp-…|term-…] [--folder <folder>] [--title <name>] [<what to do>]
     Starts a task in the running Togle, for you to answer there. The agent is Claude Code when none is named;
-    one added in Settings goes by its id there (acp-…). The folder is the current one when left out.
+    one added in Settings goes by its id there (acp-…, or term-… for one in a terminal of Togle's own). The
+    folder is the current one when left out.
     Claude Code and Codex ask before every command and every change; Hermes and an added agent ask as their
     own settings say. Piped text is the task when none is typed. With no task at all, Togle's task box opens
     with that agent and folder, for you to type or say it.
@@ -35,7 +36,7 @@ interface RunArgs {
   prompt: string
 }
 
-const isAgent = (word: string): boolean => (AGENTS as readonly string[]).includes(word) || /^acp-[a-z0-9-]{1,40}$/.test(word)
+const isAgent = (word: string): boolean => (AGENTS as readonly string[]).includes(word) || /^(?:acp|term)-[a-z0-9-]{1,40}$/.test(word)
 
 /** What follows `togle run`: the agent when the first word names one, then the task. Throws a sentence for what cannot be understood. */
 export function parseRun(args: string[], cwd: string): RunArgs {

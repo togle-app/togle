@@ -26,6 +26,7 @@ test('what follows togle run is read: the agent, the folder, a title, and the wo
   assert.deepEqual(T.parseRun([`--folder=${path.resolve('elsewhere')}`, 'hermes', 'x'], cwd), { agent: 'hermes', folder: path.resolve('elsewhere'), prompt: 'x' })
   assert.deepEqual(T.parseRun(['claude'], cwd), { agent: 'claude', folder: cwd, prompt: '' }, 'an agent and no task, as the design has it')
   assert.equal(T.parseRun(['acp-gemini-cli', 'x'], cwd).agent, 'acp-gemini-cli', 'an agent added in Settings, by its id')
+  assert.equal(T.parseRun(['term-aider', 'x'], cwd).agent, 'term-aider', 'and one that runs in a terminal of Togle\'s own')
   assert.deepEqual(T.parseRun(['Fix', 'the', 'codex', 'config'], cwd), { agent: 'claude', folder: cwd, prompt: 'Fix the codex config' }, 'only the first word can name the agent')
   assert.deepEqual(T.parseRun(['--', 'codex', 'is', 'slow'], cwd), { agent: 'claude', folder: cwd, prompt: 'codex is slow' }, 'after -- everything is the task')
   assert.deepEqual(T.parseRun(['codex', '--', 'hermes', 'too'], cwd), { agent: 'codex', folder: cwd, prompt: 'hermes too' })

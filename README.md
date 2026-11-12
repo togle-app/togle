@@ -49,7 +49,7 @@ One list of every agent task on your computer: Claude Code, Codex and Hermes. A 
 
 When an agent starts waiting or finishes, one notice appears in the corner. It never takes your keyboard, and **Allow once** is held for a moment so a stray click can't allow anything. The tray icon carries an amber dot until nothing waits.
 
-Any other agent that speaks ACP, the open standard Hermes uses, can be added in **Settings → Agents → Add an agent**, with the command its own docs give for ACP. Togle starts each agent's own program and uses the agent's own sign-in. It never reads an agent's login or keys. See [Coding agents on this computer](docs/agents-on-this-computer.md).
+Any other agent can be added in **Settings → Agents → Add an agent**: one that speaks ACP, the open standard Hermes uses, with the command its own docs give for ACP; or any agent at all, which then runs in a terminal of Togle's own that you read and type into in the task. Togle starts each agent's own program and uses the agent's own sign-in. It never reads an agent's login or keys. See [Coding agents on this computer](docs/agents-on-this-computer.md).
 
 ### To-do
 

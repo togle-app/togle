@@ -9,15 +9,25 @@ directories:
   output: dist
 # Stops the build when the built app or its icons aren't there.
 beforePack: scripts/before-pack.cjs
+# The native packages come built: koffi, sherpa-onnx and node-pty for Windows and macOS ship their builds, and node-pty is
+# built on install on Linux. All three use Node's stable add-on interface (N-API), so Electron loads them as they are:
+# nothing is recompiled for it, which would need a C++ compiler on the build machine.
+npmRebuild: false
 afterPack: scripts/after-pack.cjs
 # What electron-vite built. electron-builder adds package.json and the dependencies (never the devDependencies).
 files:
   - out/**
-# The Agent SDK executes its official native Claude Code binary beside the app archive.
+  # node-pty's debugging symbols, sources and build inputs are most of its size, and nothing runs them.
+  - '!node_modules/node-pty/**/*.pdb'
+  - '!node_modules/node-pty/{deps,src,scripts,third_party,typings}/**'
+  - '!node_modules/node-pty/binding.gyp'
+# The Agent SDK executes its official native Claude Code binary beside the app archive. node-pty's addon and the console
+# programs it starts run from there too.
 asarUnpack:
   - node_modules/@anthropic-ai/claude-agent-sdk-*/**
   - node_modules/@koromix/koffi-*/**
   - node_modules/sherpa-onnx-*/**
+  - node_modules/node-pty/**
 # Read from beside the app (process.resourcesPath) once it's packaged.
 extraResources:
   - from: resources/licenses
