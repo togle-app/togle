@@ -35,11 +35,11 @@ These are development builds. Distribution with Developer ID signing and Apple n
 
 ## Permissions and behavior
 
-- **Microphone:** start a call or dictation and allow the macOS prompt. If denied, use System Settings → Privacy & Security → Microphone, then quit and reopen Togle.
-- **System audio and screen context:** allow the relevant prompts when starting a call or selecting a screen. Check System Settings → Privacy & Security → Screen & System Audio Recording if capture is unavailable. Development runs can appear as Electron; the packaged app appears as Togle. Test the packaged app's permissions separately.
-- **Screen sharing:** modern apps using ScreenCaptureKit can capture Togle even when Hide from screen sharing is enabled. Share a specific call or document window rather than relying on that setting. Togle's own snapshots mask its window when capture exclusion cannot be verified. The call indicator only claims verified capture hiding on Windows.
+- **Microphone:** write down a call or dictate, and allow the macOS prompt. If denied, use System Settings → Privacy & Security → Microphone, then quit and reopen Togle.
+- **The computer's sound:** allow the prompt the first time Togle writes down a call. Check System Settings → Privacy & Security → Screen & System Audio Recording if capture is unavailable. Development runs can appear as Electron; the packaged app appears as Togle. Test the packaged app's permissions separately.
+- **Screen sharing:** modern apps using ScreenCaptureKit can capture Togle even when Hide from screen sharing is enabled. Share a specific call or document window rather than relying on that setting. The title bar only claims verified capture hiding on Windows.
 - **Dictation:** the Mac uses press-to-start/stop and offers **Copy text** for pasting into the destination app. Automatic insertion and hold-to-speak remain Windows-only. No Accessibility permission is required for this copy workflow. F9 may require Fn; choose another shortcut in Settings if macOS uses it.
-- **Shortcuts:** the default call shortcuts use Control + Option (shown as Ctrl + Alt). The native Edit menu provides Command + C/V/X/A and undo/redo. Command + W follows the window's normal close-to-menu-bar behavior; Command + Q uses Togle's existing confirmation and save flow.
+- **Shortcuts:** F9 (Talk) and F10 (Task) need Fn held on most Mac keyboards; Settings can give them other keys. The native Edit menu provides Command + C/V/X/A and undo/redo. Command + W follows the window's normal close-to-menu-bar behavior; Command + Q uses Togle's existing confirmation and save flow.
 - **Local speech:** choose On this computer under Settings → Speech → Advanced speech settings → Call transcription, then install it there. `npm run setup:whisper` is a Windows-only development helper.
 
 ## Verification
@@ -73,9 +73,8 @@ Removing background noise from your microphone for every call app is Togle Studi
 Before treating a build as ready for daily calls, complete these checks on the packaged app:
 
 1. Open the app, edit text with Command shortcuts, close and reopen it from the menu bar and Dock, and quit during an active call to check confirmation and recovery.
-2. Grant microphone and screen/system-audio access. With headphones, confirm independent Mic and System audio levels and transcripts. Deny a permission, verify the explanation, then grant it and retry after restarting.
-3. Select a specific window and a Retina screen for context. Confirm the intended source and test an external display if available.
-4. Connect the provider you intend to use. Verify replies, saved-call questions, and press-to-start/stop dictation followed by Copy text and paste into another app.
-5. If using local speech, install and exercise the Metal Whisper framework and Parakeet on a real recording.
+2. Grant microphone and system-audio access. With headphones, confirm that You and Call are both heard and written down. Deny a permission, verify the explanation, then grant it and retry after restarting.
+3. Connect the AI you intend to use. Verify the notes after a call, and press-to-start/stop dictation followed by Copy text and paste into another app.
+4. If using local speech, install and exercise the Metal Whisper framework and Parakeet on a real recording.
 
-Live audio, provider sign-in, model downloads, screen permissions and Intel execution require these additional checks; passing scripted tests alone does not verify them.
+Live audio, provider sign-in, model downloads, permissions and Intel execution require these additional checks; passing scripted tests alone does not verify them.

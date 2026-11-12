@@ -2,9 +2,9 @@
 
 Togle lists the tasks of the coding agents on your computer (Claude Code, Codex and Hermes) in one place, and lets you answer what they ask. It starts each agent's own program and talks to it the way the agent's own editor extension does. It never reads their sign-ins.
 
-## Tasks
+## Agents
 
-The **Tasks** button in the sidebar opens the list. A task that waits for you comes first, with the command it wants to run shown in full.
+**Agents** in the sidebar opens the list. A task that waits for you comes first, with the command it wants to run shown in full.
 
 - **Allow once** lets that one command run. **Refuse** tells the agent no.
 - A command that looks dangerous (it deletes for good, pushes over what is on a server, runs hidden text, changes the computer) carries a red mark and the reason. The mark is a hint. The command shown is what runs.
@@ -36,7 +36,7 @@ When a task waits and Togle is not in front, a small notice appears in the corne
 
 ## To-do
 
-The **To-do** button opens your list. What waits for you is at the top, with the same buttons as in Tasks. Below it is your own list.
+**To-do**, the screen Togle opens on, is your list. What waits for you is at the top, with the same buttons as in Agents. Below it is your own list.
 
 The list is a plain text file you can also open in any editor: `to-do.md` in Togle's data folder (`%APPDATA%\togle` on Windows; **Show the file** opens it). Each item is a line of a Markdown checklist:
 
@@ -61,7 +61,7 @@ echo "Review the onboarding copy" | togle run  # piped text is the task
 togle tasks
 ```
 
-The task shows in Tasks like any other and asks before every command and every change. The command talks to Togle over the same local channel as the Claude Code hook below, so it needs Togle running, and it says so when it is not. It exits with 0 when it worked, 1 when Togle could not do it, and 2 when the command was not understood.
+The task shows in Agents like any other and asks before every command and every change. The command talks to Togle over the same local channel as the Claude Code hook below, so it needs Togle running, and it says so when it is not. It exits with 0 when it worked, 1 when Togle could not do it, and 2 when the command was not understood.
 
 The command is the program `out/main/cli.js`, started by Electron as plain Node (`ELECTRON_RUN_AS_NODE=1`). From a copy of the source, run `npm run build`, then `node bin/togle.cjs tasks`, or `npm link` to get `togle` on your path. An installed Togle has the command beside the app in `resources/bin` (`togle.cmd` on Windows, `togle` on Mac and Linux); add that folder to your path to use it from anywhere. The installer does not add it yet, and the Mac and Linux versions were not tried. From a development run, name the data folder: `TOGLE_DATA`.
 
@@ -69,7 +69,7 @@ The command is the program `out/main/cli.js`, started by Electron as plain Node 
 
 Claude Code asks the person at its terminal. With Togle connected, it also asks Togle, so you can answer from a notice or from this window. Either answer counts, and the first one wins. In a test with a real Claude Code session, the terminal's own question appeared at the same time as Togle's notice, an answer in the terminal worked while Togle's notice was still up, and an answer in Togle ended the terminal's question.
 
-Connect it from **Tasks → Connect Claude Code**. This adds one entry to Claude Code's settings file (`~/.claude/settings.json`, or the folder named by `CLAUDE_CONFIG_DIR`). The first time, a copy of the file is kept beside it as `settings.json.togle-backup`. A file that is not valid JSON is left alone. **Turn off** takes Togle's entry out again and leaves the rest. It needs Claude Code 2.1.139 or later.
+Connect it from **Agents → Connect Claude Code**. This adds one entry to Claude Code's settings file (`~/.claude/settings.json`, or the folder named by `CLAUDE_CONFIG_DIR`). The first time, a copy of the file is kept beside it as `settings.json.togle-backup`. A file that is not valid JSON is left alone. **Turn off** takes Togle's entry out again and leaves the rest. It needs Claude Code 2.1.139 or later.
 
 How it works:
 
