@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 const directory = path.join(import.meta.dirname, '.work', 'dictation-history-' + process.pid)
-mkdirSync(directory, { recursive: true }); process.env.TOGLE_TEST_USER_DATA = directory
+// Empty: Windows reuses process ids, and an earlier run's folder would still hold its dictations.
+rmSync(directory, { recursive: true, force: true }); mkdirSync(directory, { recursive: true }); process.env.TOGLE_TEST_USER_DATA = directory
 const { DictationHistoryStore, Dictation, spellingCorrection } = await import('./.build/togle.mjs')
 const receipt = (id = 'one', at = Date.now()) => ({ id, revision: 'original-' + id, startedAt: at - 3000, finishedAt: at, originalText: 'um send toggle tomorrow', text: 'Send toggle tomorrow.', destination: 'Slack', outcome: 'inserted' })
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes }); return { promise, resolve } }

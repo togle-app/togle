@@ -1,9 +1,11 @@
 // What the person does during a call besides listening: tell the others it is written down, and mark a moment.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 process.env.TOGLE_TEST_USER_DATA = path.join(import.meta.dirname, '.work', 'call-flags-' + process.pid)
+// Empty: Windows reuses process ids, and an earlier run's folder would still hold its calls.
+rmSync(process.env.TOGLE_TEST_USER_DATA, { recursive: true, force: true })
 mkdirSync(process.env.TOGLE_TEST_USER_DATA, { recursive: true })
 const { CallSessions, OngoingCall, MeetingNotes, exportCall, intoCall, markedLineIds, meetingNoteChunks, tellOthersLine, toldOthersLine } = await import('./.build/togle.mjs')
 const { ongoingCall } = await import('./helpers.mjs')

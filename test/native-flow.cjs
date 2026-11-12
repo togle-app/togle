@@ -8,6 +8,8 @@ const path = require('node:path')
 const http = require('node:http')
 
 const profile = path.join(__dirname, '.work', 'native-' + process.pid)
+// Empty: Windows reuses process ids, and an earlier run's profile would still hold its settings and calls.
+fs.rmSync(profile, { recursive: true, force: true })
 fs.mkdirSync(profile, { recursive: true })
 app.setPath('userData', profile)
 process.env.TOGLE_HEADLESS = '1'

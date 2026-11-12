@@ -24,6 +24,8 @@ const originalLoad = Module._load
 Module._load = function (name, ...args) { return name === 'electron' ? { ...electron, Tray: TestTray } : originalLoad.call(this, name, ...args) }
 
 const profile = path.join(__dirname, '.work', 'notice-' + process.pid)
+// Empty: Windows reuses process ids, and an earlier run's profile would still hold its settings and calls.
+fs.rmSync(profile, { recursive: true, force: true })
 fs.mkdirSync(profile, { recursive: true })
 app.setPath('userData', profile)
 app.setAppPath(path.resolve(__dirname, '..'))

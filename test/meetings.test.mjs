@@ -1,9 +1,11 @@
 // The calls Togle wrote down: searching what was said, and a call as a text file for an agent to work from.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 process.env.TOGLE_TEST_USER_DATA = path.join(import.meta.dirname, '.work', 'meetings-' + process.pid)
+// Empty: Windows reuses process ids, and an earlier run's folder would still hold its calls.
+rmSync(process.env.TOGLE_TEST_USER_DATA, { recursive: true, force: true })
 mkdirSync(process.env.TOGLE_TEST_USER_DATA, { recursive: true })
 const { CallSessions, callForAgent } = await import('./.build/togle.mjs')
 

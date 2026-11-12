@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 
 const directory = path.join(import.meta.dirname, '.work', 'dictation-vocabulary-' + process.pid)
-mkdirSync(directory, { recursive: true }); process.env.TOGLE_TEST_USER_DATA = directory
+// Empty: Windows reuses process ids, and an earlier run's folder would still hold its words.
+rmSync(directory, { recursive: true, force: true }); mkdirSync(directory, { recursive: true }); process.env.TOGLE_TEST_USER_DATA = directory
 const { DictationVocabularyStore, editVocabulary, prepareDictationText, DictationSpeech, Dictation, getSettings, speechWords, withSpeechWord } = await import('./.build/togle.mjs')
 const empty = () => ({ words: [], snippets: [] })
 const word = (word, heardAs = '') => ({ kind: 'word', word, heardAs })

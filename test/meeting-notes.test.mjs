@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 process.env.TOGLE_TEST_USER_DATA = path.join(import.meta.dirname, '.work', 'meeting-notes-' + process.pid)
+// Empty: Windows reuses process ids, and an earlier run's folder would still hold its calls.
+rmSync(process.env.TOGLE_TEST_USER_DATA, { recursive: true, force: true })
 mkdirSync(process.env.TOGLE_TEST_USER_DATA, { recursive: true })
 const { CallSessions, MeetingNotes, meetingNoteChunks, exportCall, sessionSummary } = await import('./.build/togle.mjs')
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes }); return { promise, resolve } }
