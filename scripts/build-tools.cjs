@@ -25,7 +25,7 @@ function files(directory, accept = () => true, base = directory) {
 }
 
 function sourceHash(root = ROOT) {
-  const input = ['package.json', 'package-lock.json', 'electron.vite.config.ts', 'electron-builder.yml', 'src', 'scripts', 'build', 'hub-template', 'resources']
+  const input = ['package.json', 'package-lock.json', 'electron.vite.config.ts', 'electron-builder.yml', 'src', 'scripts', 'build', 'resources']
   const hash = createHash('sha256')
   for (const name of input.sort()) {
     const file = path.join(root, name)
@@ -46,16 +46,13 @@ function extraResources(root) {
   for (const name of ['icon.png', 'icon.ico']) add('build/' + name, name)
   add('resources/dictation-windows.ps1', 'dictation-windows.ps1')
   for (const name of files(path.join(root, 'resources/licenses'))) add('resources/licenses/' + name, 'licenses/' + name)
-  for (const name of files(path.join(root, 'hub-template'))) {
-    if (name === 'index.json' || name.startsWith('agents/')) add('hub-template/' + name, 'hub-template/' + name)
-  }
   return result
 }
 
 function writeManifest(root = ROOT, expectedSource = sourceHash(root)) {
   if (sourceHash(root) !== expectedSource) throw new Error('Source changed during the build. Run npm run build again.')
   const out = path.join(root, 'out'), entries = files(out).filter(name => name !== MANIFEST)
-  const required = ['main/index.js', 'main/cli.js', 'main/reader-worker.js', 'main/parakeet-worker.js', 'main/whisper-worker.js', 'main/voice-worker.js', 'preload/index.js', 'renderer/index.html', 'renderer/pcm-tap.js']
+  const required = ['main/index.js', 'main/cli.js', 'main/parakeet-worker.js', 'main/whisper-worker.js', 'main/voice-worker.js', 'preload/index.js', 'renderer/index.html', 'renderer/pcm-tap.js']
   for (const name of required) if (!entries.includes(name)) throw new Error('Build is missing ' + name)
   const hashes = Object.fromEntries(entries.map(name => [name, digest(fs.readFileSync(path.join(out, name)))]))
   let commit, dirty

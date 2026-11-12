@@ -30,8 +30,8 @@ function fixture(t) {
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 })
   })
   write('package.json', JSON.stringify({ name: 'togle', version: '0.1.0' }))
-  for (const name of ['src/main.ts', 'build/icon.png', 'build/icon.ico', 'resources/dictation-windows.ps1', 'resources/licenses/test.txt', 'hub-template/index.json']) write(name)
-  for (const name of ['main/index.js', 'main/cli.js', 'main/reader-worker.js', 'main/parakeet-worker.js', 'main/whisper-worker.js', 'main/voice-worker.js', 'preload/index.js', 'renderer/index.html', 'renderer/pcm-tap.js', 'renderer/assets/current.js']) write('out/' + name)
+  for (const name of ['src/main.ts', 'build/icon.png', 'build/icon.ico', 'resources/dictation-windows.ps1', 'resources/licenses/test.txt']) write(name)
+  for (const name of ['main/index.js', 'main/cli.js', 'main/parakeet-worker.js', 'main/whisper-worker.js', 'main/voice-worker.js', 'preload/index.js', 'renderer/index.html', 'renderer/pcm-tap.js', 'renderer/assets/current.js']) write('out/' + name)
   return { root, write }
 }
 
@@ -99,7 +99,7 @@ test('package verification rejects development artifacts, stale files and an out
   const stage = path.join(root, 'package-input'), resources = path.join(root, 'package/resources')
   fs.mkdirSync(stage, { recursive: true }); fs.mkdirSync(resources, { recursive: true })
   fs.cpSync(path.join(root, 'out'), path.join(stage, 'out'), { recursive: true })
-  for (const [source, target] of [['build/icon.png', 'icon.png'], ['build/icon.ico', 'icon.ico'], ['resources/dictation-windows.ps1', 'dictation-windows.ps1'], ['resources/licenses/test.txt', 'licenses/test.txt'], ['hub-template/index.json', 'hub-template/index.json']]) {
+  for (const [source, target] of [['build/icon.png', 'icon.png'], ['build/icon.ico', 'icon.ico'], ['resources/dictation-windows.ps1', 'dictation-windows.ps1'], ['resources/licenses/test.txt', 'licenses/test.txt']]) {
     fs.mkdirSync(path.dirname(path.join(resources, target)), { recursive: true }); fs.copyFileSync(path.join(root, source), path.join(resources, target))
   }
   const runtime = path.join('package/resources/app.asar.unpacked/node_modules')

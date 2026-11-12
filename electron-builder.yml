@@ -7,7 +7,7 @@ appId: io.togle.app
 productName: Togle
 directories:
   output: dist
-# Stops the build when the market's index isn't there to go in with it.
+# Stops the build when the built app or its icons aren't there.
 beforePack: scripts/before-pack.cjs
 afterPack: scripts/after-pack.cjs
 # What electron-vite built. electron-builder adds package.json and the dependencies (never the devDependencies).
@@ -18,7 +18,7 @@ asarUnpack:
   - node_modules/@anthropic-ai/claude-agent-sdk-*/**
   - node_modules/@koromix/koffi-*/**
   - node_modules/sherpa-onnx-*/**
-# Read from beside the app (process.resourcesPath) once it's packaged: the agents of the market (agents/hub.ts).
+# Read from beside the app (process.resourcesPath) once it's packaged.
 extraResources:
   - from: resources/licenses
     to: licenses
@@ -31,11 +31,6 @@ extraResources:
     to: icon.png
   - from: build/icon.ico
     to: icon.ico
-  - from: hub-template
-    to: hub-template
-    filter:
-      - index.json
-      - agents/**
 win:
   icon: build/icon.ico
   target: nsis
