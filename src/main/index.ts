@@ -84,6 +84,9 @@ import { ClaudeCodeAuth } from './auth/claude-code'
 import { SubscriptionAccounts, accountChoice, defaultAccountId } from './auth/accounts'
 import { CallFile } from './call-file'
 import { CallSessions, exportCall, legacySession, sessionSummary } from './call-sessions'
+import { ConfirmSound } from './confirm-sound'
+import { confirmVoices, type CallConfirm } from '@shared/confirm-names'
+import { FIRST_NAMES } from './names'
 import { CallLearning } from './call-learning'
 import { CallTitles } from './call-titles'
 import { meetingForCall } from '@shared/meeting'
@@ -497,6 +500,9 @@ const copilot = new Copilot(
 // A call is something once anything is in it: what was said or shown, its brief written beforehand, an answer
 // approved, or a card (a question typed before anyone spoke).
 const callSessions = new CallSessions()
+const confirmSound = new ConfirmSound()
+// The sound kept to confirm names is gone by then at the latest: the next day.
+const CONFIRM_KEEP_MS = 24 * 3600_000
 let currentSession: CallSessionInfo | undefined
 let currentCallKey = frameStore.sessionId
 const legacyCalls = new Map<string, CallSession>()
@@ -517,6 +523,7 @@ const voices = new VoiceTracker((segment, voice, person) => copilot.identifyVoic
   memory: voiceMemory, enabled: () => getSettings().assist.rememberVoices === true,
   remembered: (voice, person) => copilot.rememberVoice(voice, person), revoked: segment => copilot.forgetVoiceSegment(segment)
 })
+voices.keepClips = () => getSettings().meetings.confirmNames
 const dictationTarget = new DictationTargetBridge(path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'), 'dictation-windows.ps1'))
 // Freeze the account, speech service and cleanup together for each recording.
 const dictationVocabulary = new DictationVocabularyStore()
@@ -796,6 +803,39 @@ async function storedCallSession(id: string): Promise<CallSession> {
   return callSessions.put(legacy)
 }
 const automaticReviews = new Map<string, ReturnType<typeof setTimeout>>()
+/**
+ * After a call: the voices worth asking about, each with a guess and what says so, and a short clip of each to play.
+ * The clips are the only sound Togle keeps of a call. They are encrypted, and deleted when the names are confirmed or
+ * skipped, or by the next day.
+ */
+async function prepareConfirm(id: string | undefined): Promise<void> {
+  // Taken either way, so the call's sound is not held in memory after it.
+  const clips = voices.takeClips()
+  try {
+    if (!id || quitting || getSettings().assist.rememberCalls === false || getSettings().assist.voiceLabels === false) return
+    const record = await callSessions.get(id)
+    if (!record || record.status === 'live' || !record.transcript.length) return
+    const files: { name: string; pcm: Float32Array }[] = []
+    const kept = new Map<string, { name: string; at: number; end: number }>()
+    for (const [voice, clip] of clips) {
+      if (files.length >= 20 || !record.transcript.some(line => line.voiceId === voice)) continue
+      const name = 'v' + files.length
+      files.push({ name, pcm: clip.pcm }); kept.set(voice, { name, at: clip.at, end: clip.end })
+    }
+    const asked = confirmVoices(record.transcript, FIRST_NAMES, kept)
+    if (!asked.length) { await confirmSound.remove(id); if (record.confirm) await callSessions.update(id, saved => ({ ...saved, confirm: undefined })); return }
+    await confirmSound.save(id, files.filter(file => asked.some(voice => voice.clip === file.name)))
+    const confirm: CallConfirm = { until: Date.now() + CONFIRM_KEEP_MS, voices: asked }
+    await callSessions.update(id, saved => ({ ...saved, confirm }))
+  } catch (error) { console.warn('[confirm names]', (error as Error).message) }
+}
+/** Deletes the clips of calls whose names were confirmed, skipped or expired, or that are gone. */
+async function sweepConfirmSound(): Promise<void> {
+  try {
+    const waiting = new Set((await callSessions.list()).filter(call => call.confirm && !call.confirm.closed && call.confirm.until > Date.now()).map(call => call.id))
+    await confirmSound.sweep(id => waiting.has(id))
+  } catch (error) { console.warn('[confirm names]', (error as Error).message) }
+}
 function scheduleCallReview(id: string, delay = 1500): void {
   const before = automaticReviews.get(id)
   if (before) clearTimeout(before)
@@ -1386,6 +1426,7 @@ function registerIpc(): void {
     refreshVoiceSettings()
     callFile.changed()
     await callFile.flush()
+    if (!value) void prepareConfirm(currentSession?.id)
     // The work sessions the call's agent has, as they are now: worked on since they were added, they're read again.
     if (value) void agents.refreshSessions(getSettings().activeAgentId).catch((err: Error) => console.warn('[agents] work sessions not read again:', err.message))
     // What the call used of the agent's training is written once it's over, not while it goes on.
@@ -1452,6 +1493,42 @@ function registerIpc(): void {
     })
   })
   ipcMain.on('call:view', (_e, view: CallView) => { if (view?.key === currentCallKey) callFile.setView(view) })
+  // Confirm names, after a call: hear a voice, answer who it is, or skip the rest (which deletes the sound).
+  ipcMain.handle('confirm:sound', async (_e, callId: string, clip: string) => {
+    const confirm = (await callSessions.get(callId))?.confirm
+    if (!confirm || confirm.closed || confirm.until <= Date.now() || !confirm.voices.some(voice => voice.clip === clip)) return null
+    return confirmSound.pcm(callId, clip)
+  })
+  ipcMain.handle('confirm:answer', async (_e, callId: string, voiceId: string, name: unknown) => {
+    if (typeof voiceId !== 'string') throw new Error('Choose a voice.')
+    const before = await storedCallSession(callId)
+    if (before.status === 'live') throw new Error('End the call first.')
+    if (!before.confirm || before.confirm.closed || !before.confirm.voices.some(voice => voice.id === voiceId)) throw new Error('This voice is not waiting to be confirmed.')
+    const value = typeof name === 'string' ? name.replace(/[\r\n\[\]<>]/g, '').trim().slice(0, 60) : ''
+    const saved = await callSessions.update(callId, record => {
+      const current = record.confirm
+      if (!current || current.closed) return record
+      const answered = current.voices.map(voice => voice.id === voiceId ? { ...voice, answered: value } : voice)
+      const done = answered.every(voice => voice.answered !== undefined)
+      const transcript = record.transcript.map(line => line.voiceId !== voiceId ? line
+        : value ? { ...line, voiceName: value, voiceNamedBy: 'user' as const, voiceIdentityId: line.voiceName === value ? line.voiceIdentityId : undefined }
+        // Not them: the guess is taken off its lines.
+        : line.voiceNamedBy === 'user' ? line : { ...line, voiceName: undefined, voiceNamedBy: undefined, voiceIdentityId: undefined })
+      return { ...record, transcript, confirm: { ...current, voices: answered, closed: done ? Date.now() : undefined } }
+    })
+    if (saved.confirm?.closed) {
+      await confirmSound.remove(callId)
+      // The notes are corrected with the confirmed names: written again, unless the person edited them.
+      void meetingNotes.generate(callId, undefined, undefined, true).catch(error => console.warn('[meeting notes]', (error as Error).message))
+    }
+    return saved
+  })
+  ipcMain.handle('confirm:finish', async (_e, callId: string) => {
+    await storedCallSession(callId)
+    const saved = await callSessions.update(callId, record => record.confirm && !record.confirm.closed ? { ...record, confirm: { ...record.confirm, closed: Date.now() } } : record)
+    await confirmSound.remove(callId)
+    return saved
+  })
   ipcMain.handle('calls:merge-speakers', async (_e, callId: string, from: string, into: string) => {
     if (typeof from !== 'string' || typeof into !== 'string') throw new Error('Choose two speakers.')
     const record = await storedCallSession(callId)
@@ -1496,6 +1573,7 @@ function registerIpc(): void {
     callTitles.cancel(id); titleQueue.delete(id)
     if (id === currentCallKey) await clearCurrentCall(true)
     await callSessions.remove(id)
+    await confirmSound.remove(id)
     legacyCalls.delete(id)
     const summaries = await pastCalls.list(record.agentId)
     for (const summary of summaries) if (summary.id === record.legacy?.id || (summary.callId && summary.callId === record.frameSession)) await pastCalls.remove(record.agentId, summary.id)
@@ -1879,9 +1957,9 @@ function registerIpc(): void {
 
   if (!app.isPackaged && process.env.TOGLE_DEBUG_PORT) {
     // A line said; with the id of the live caption it ends, as speech recognition gives it.
-    ipcMain.handle('dev:transcript', (_e, speaker: Speaker, text: string, segmentId?: string, voiceId?: string) => {
+    ipcMain.handle('dev:transcript', (_e, speaker: Speaker, text: string, segmentId?: string, voiceId?: string, seconds?: number) => {
       const at = Date.now()
-      copilot.add(speaker, text, at, at, segmentId)
+      copilot.add(speaker, text, at, at + Math.max(0, Number(seconds) || 0) * 1000, segmentId)
       if (segmentId && voiceId && speaker === 'them') copilot.identifyVoice(segmentId, voiceId)
     })
     // A live caption as speech recognition sends them, and when Togle started: for timing the window.
@@ -2039,6 +2117,9 @@ if (hookAt !== -1) {
       }
     }
     void FrameStore.cleanup(saved?.frameSession)
+    // The sound kept to confirm names is deleted once answered or expired; checked now and every hour.
+    void sweepConfirmSound()
+    setInterval(() => void sweepConfirmSound(), 3600_000).unref()
     setupMediaAccess()
     registerIpc()
     const runnerTitles = new StoredTitles()

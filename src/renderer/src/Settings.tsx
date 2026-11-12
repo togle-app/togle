@@ -512,7 +512,7 @@ export function Settings({ settings, auth, claudeAuth, stt, at, onChange, onDone
       <Section id="settings-privacy" title="Privacy and history">
         <Toggle
           name="Remember calls"
-          note="Keep each agent’s calls (transcripts, suggestions and notes), encrypted on this computer. The current call also survives a crash. Audio is never saved."
+          note="Keep each agent’s calls (transcripts, suggestions and notes), encrypted on this computer. The current call also survives a crash. Sound is not kept, except the short clips that Confirm names plays for a day (see Speakers)."
           checked={settings.assist.rememberCalls !== false}
           onChange={(rememberCalls) => void save({ assist: { rememberCalls } })}
         />

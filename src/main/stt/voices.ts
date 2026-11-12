@@ -27,13 +27,20 @@ interface MemoryOptions {
 }
 interface VoiceFeatures { embedding?: Float32Array; seconds?: number; evidence?: number; clean?: boolean }
 export interface DiarizedTurn { id: string; from: number; to: number }
+/** Speech a voice was heard saying, and whether it was clean (one voice, no overlap). */
+interface ClipSource { pcm: Float32Array; at: number; end: number; clean: boolean }
+/** The best short clip heard of one voice, to play when its name is confirmed after the call. */
+export interface VoiceClip { pcm: Float32Array; at: number; end: number; score: number }
+// A clip is a taste of the voice, not what it said: this long at most, and at least this long to be worth keeping.
+const MAX_CLIP_SECONDS = 8
+const MIN_CLIP_SECONDS = 1.5
 
 /** Audio stays transient. Only explicitly confirmed profiles can enter encrypted voice memory. */
 export class VoiceTracker {
   private child?: UtilityProcess
   private scope?: AbortController
   private ready = false
-  private running?: { id: string; at: number; end: number; preview: boolean; request: number }
+  private running?: { id: string; at: number; end: number; preview: boolean; request: number; pcm?: Float32Array }
   private queue: { id: string; pcm: Float32Array; at: number; end: number; preview: boolean }[] = []
   private request = 0
   private previewed = new Set<string>()
@@ -51,6 +58,11 @@ export class VoiceTracker {
   private remembering = new Map<string, Promise<RememberVoiceResult>>()
   private memoryError?: string
   private splits = new Map<string, { resolve: (turns: DiarizedTurn[]) => void; timer: NodeJS.Timeout }>()
+  /** The best clip heard of each voice (one each), in memory until the call ends: for Confirm names, never a profile. */
+  private clips = new Map<string, VoiceClip>()
+  private clipSources = new Map<string, ClipSource>()
+  /** Whether to keep a clip of each voice at all: the app says, and the person can turn it off. */
+  keepClips: () => boolean = () => false
   constructor(private result: (segment: string, voice: string, person?: RememberedVoice) => void, private changed: (status: VoiceStatus) => void, private memory?: MemoryOptions) {}
   status(): VoiceStatus { return this.current }
   get pending(): boolean { return this.remembering.size > 0 || !!this.memory?.memory.pending }
@@ -102,12 +114,15 @@ export class VoiceTracker {
           if (valid) {
             if (this.previewed.delete(job.id)) this.memory?.revoked?.(job.id)
             const slices = turns.map((turn, index) => ({ id: `${job.id}:turn:${index}`, from: turn.from, to: turn.to }))
+            if (job.pcm && this.keepClips()) turns.forEach((turn, index) => this.clipSources.set(slices[index].id, { pcm: job.pcm!.subarray(turn.from, turn.to), at: job.at + turn.from / 16, end: job.at + turn.to / 16, clean: turn.clean !== false }))
             turns.forEach((turn, index) => this.observe({ id: slices[index].id, at: job.at + turn.from / 16, end: job.at + turn.to / 16 }, turn))
             this.resolveSplit(job.id, slices)
           } else {
+            if (job.pcm && this.keepClips()) this.clipSources.set(job.id, { pcm: job.pcm, at: job.at, end: job.end, clean: message.clean !== false })
             this.observe(job, message)
             this.resolveSplit(job.id, [])
           }
+          this.clipSources.clear()
           this.pump()
         }
       })
@@ -121,6 +136,8 @@ export class VoiceTracker {
     if (this.previewed.delete(job.id) && !assignments.some(assignment => assignment.id === job.id)) this.memory?.revoked?.(job.id)
     for (const assignment of assignments) {
       const voice = this.canonical(`${this.namespace}:${assignment.voice}`), profile = this.clusters.profile(assignment.voice)
+      const source = this.clipSources.get(assignment.id)
+      if (source) this.offerClip(voice, source)
       if (this.memory?.enabled() && !this.bindings.has(voice) && profile && !this.pendingNames.has(voice)) {
         const person = profile.identity ? this.memory.memory.get(profile.identity) : profile.count >= 2 && profile.seconds >= 6 ? this.memory.memory.match(profile.samples) : undefined
         if (person) { this.bindings.set(voice, { person, confirmed: false }); this.clusters.remember(assignment.voice, person.id) }
@@ -128,6 +145,22 @@ export class VoiceTracker {
       this.result(assignment.id, voice, this.memory?.enabled() ? this.bindings.get(voice)?.person : undefined)
       if (this.pendingNames.has(voice)) void this.saveName(voice).catch(error => { this.memoryError = error.message; this.set(this.current) })
     }
+  }
+  /** Keeps this speech as the voice's clip if it beats the one kept: cleaner and longer, up to a few seconds. */
+  private offerClip(voice: string, source: ClipSource): void {
+    const seconds = source.pcm.length / 16000
+    if (seconds < MIN_CLIP_SECONDS) return
+    const used = source.pcm.subarray(0, Math.min(source.pcm.length, MAX_CLIP_SECONDS * 16000))
+    const score = (source.clean ? 1 : 0.5) * Math.min(seconds, MAX_CLIP_SECONDS)
+    const best = this.clips.get(voice)
+    if (best && best.score >= score) return
+    this.clips.set(voice, { pcm: used.slice(), at: source.at, end: source.at + used.length / 16, score })
+  }
+  /** The clips kept of this call's voices, by voice id; the tracker no longer holds them after. */
+  takeClips(): Map<string, VoiceClip> {
+    const taken = this.clips
+    this.clips = new Map()
+    return taken
   }
   private resolveSplit(id: string, turns: DiarizedTurn[]): void {
     const waiting = this.splits.get(id)
@@ -183,7 +216,7 @@ export class VoiceTracker {
     if (!this.queue.length) { this.drained?.(); return }
     if (!this.ready || !this.child) return
     const job = this.queue.shift()!
-    this.running = { id: job.id, at: job.at, end: job.end, preview: job.preview, request: ++this.request }
+    this.running = { id: job.id, at: job.at, end: job.end, preview: job.preview, request: ++this.request, pcm: job.preview ? undefined : job.pcm }
     this.timer = setTimeout(() => this.fail('Speaker recognition timed out. Transcription continues.'), 10_000)
     this.child.postMessage({ ...job, request: this.running.request })
   }
@@ -233,6 +266,9 @@ export class VoiceTracker {
     if (source === target) return
     const fromPerson = this.bindings.get(source), intoPerson = this.bindings.get(target)
     this.aliases.set(source, target)
+    const sourceClip = this.clips.get(source), targetClip = this.clips.get(target)
+    if (sourceClip && (!targetClip || sourceClip.score > targetClip.score)) this.clips.set(target, sourceClip)
+    this.clips.delete(source)
     if (source.startsWith(this.namespace + ':') && target.startsWith(this.namespace + ':')) this.clusters.merge(Number(source.split(':').at(-1)), Number(target.split(':').at(-1)))
     const pending = this.pendingNames.get(source)
     if (pending && !this.pendingNames.has(target)) this.pendingNames.set(target, { ...pending, name: name ?? pending.name })
@@ -281,7 +317,7 @@ export class VoiceTracker {
     void task.then(() => { if (this.finishing === task) this.finishing = undefined })
     return task
   }
-  reset(): void { this.stop(); this.clusters = new VoiceClusters(); this.aliases.clear(); this.bindings.clear(); this.pendingNames.clear(); this.finalized.clear(); this.namespace = randomUUID() }
+  reset(): void { this.stop(); this.clips.clear(); this.clipSources.clear(); this.clusters = new VoiceClusters(); this.aliases.clear(); this.bindings.clear(); this.pendingNames.clear(); this.finalized.clear(); this.namespace = randomUUID() }
   stop(): void {
     for (const id of this.splits.keys()) this.resolveSplit(id, [])
     const drained = this.drained; this.drained = undefined

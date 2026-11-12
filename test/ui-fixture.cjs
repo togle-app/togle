@@ -138,6 +138,18 @@ module.exports = function install(fixture) {
     suggestions: [{ id: 'old-reply', kind: 'suggest', question: 'When is the report due?', text: 'Tuesday.', at: 2000 }],
     notes: '', callAnswers: [], learning: { state: 'not-reviewed', pending: empty(), changes: [] }
   }))
+  // Two calls with voices to confirm after them: one to answer, one to skip.
+  if (fixture.scenario === 'confirm-names') {
+    const base = sessions[0], line = (id, voiceId, text, at, name, by) => ({ id, speaker: 'them', voiceId, text, at, end: at + 4000, ...(name ? { voiceName: name, voiceNamedBy: by } : {}) })
+    const until = Date.now() + 6 * 3600_000
+    sessions.unshift(
+      { ...clone(base), id: 'confirm-call', title: 'Sprint review', startedAt: Date.now() - 7200_000, endedAt: Date.now() - 3600_000, transcript: [line('c1', 'voice:1', 'Then the API timeline has to move to the end of the month.', 1000), line('c2', 'voice:2', 'I can take the staging logs.', 9000)],
+        confirm: { until, voices: [
+          { id: 'voice:1', guess: 'Marta', reason: 'Dario said “Marta” just before.', said: 'Then the API timeline has to move to the end of the month.', clip: 'v0', seconds: 5 },
+          { id: 'voice:2', said: 'I can take the staging logs.', clip: 'v1', seconds: 4 }] } },
+      { ...clone(base), id: 'confirm-skip', title: 'Design check', startedAt: Date.now() - 9000_000, endedAt: Date.now() - 8000_000, transcript: [line('s1', 'voice:1', 'The new header looks right to me.', 1000)],
+        confirm: { until, voices: [{ id: 'voice:1', said: 'The new header looks right to me.', clip: 'v0', seconds: 4 }] } })
+  }
   if (fixture.scenario === 'large-history') {
     sessions.push(...Array.from({ length: 120 }, (_, index) => ({ ...sessions[0], id: 'older-' + index, title: 'Older call ' + index, transcript: [], suggestions: [] })))
   }
@@ -268,6 +280,15 @@ module.exports = function install(fixture) {
     if ((session.personalNotes || '') !== before) throw new Error('Your notes changed')
     session.personalNotes = text; emit('onCallSessions', { id }); return clone(session)
   }
+  api.confirmSound = async (id, clip) => { record('confirmSound', [id, clip]); return new Float32Array(1600) }
+  api.confirmAnswer = async (id, voiceId, name) => {
+    record('confirmAnswer', [id, voiceId, name]); const session = needSession(id), value = (name || '').trim()
+    session.confirm.voices = session.confirm.voices.map(voice => voice.id === voiceId ? { ...voice, answered: value } : voice)
+    if (value) for (const line of session.transcript) if (line.voiceId === voiceId) { line.voiceName = value; line.voiceNamedBy = 'user' }
+    if (session.confirm.voices.every(voice => voice.answered !== undefined)) session.confirm.closed = Date.now()
+    emit('onCallSessions', { id }); return clone(session)
+  }
+  api.confirmFinish = async id => { record('confirmFinish', [id]); const session = needSession(id); session.confirm.closed = Date.now(); emit('onCallSessions', { id }); return clone(session) }
   api.mergeCallSpeakers = async (id, from, into) => {
     record('mergeCallSpeakers', [id, from, into]); const session = needSession(id); combine(session.transcript, from, into)
     if (id === currentKey) { combine(transcript, from, into); emit('onTranscriptUpdated', clone(transcript.filter(line => line.voiceId === into))) }

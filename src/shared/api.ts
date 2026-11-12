@@ -196,6 +196,12 @@ export interface TogleApi {
   markCall(): Promise<number[]>
   /** Told the others, and the marks, whenever either changes. */
   onCallFlags(cb: (flags: { toldOthers: number; marks: number[] }) => void): Unsubscribe
+  /** The short clip kept of a voice to confirm after a call, as samples at 16 kHz (null: none is kept any more). */
+  confirmSound(callId: string, clip: string): Promise<Float32Array | null>
+  /** Who a voice is, as the person says: a name, or none. Gives the call as it is then. */
+  confirmAnswer(callId: string, voiceId: string, name: string | null): Promise<CallSession>
+  /** The person skips the rest: nothing more is asked, and the sound is deleted now. */
+  confirmFinish(callId: string): Promise<CallSession>
   onTranscript(cb: (entry: TranscriptEntry) => void): Unsubscribe
   onTranscriptUpdated(cb: (entries: TranscriptEntry[]) => void): Unsubscribe
   renameVoice(id: string, name: string, identity?: string): Promise<RememberVoiceResult>

@@ -582,6 +582,8 @@ export interface CallSession extends CallSessionInfo {
   toldOthers?: number
   /** The moments the person marked during the call, on the call's clock like the transcript's `at`. */
   marks?: number[]
+  /** The voices to ask about after the call, while the short sound clips kept for it last. */
+  confirm?: import('./confirm-names').CallConfirm
   /** Older versions saved summaries only. Keep them inspectable without inventing a transcript. */
   legacy?: { agentId: string; id: string }
 }
@@ -800,6 +802,8 @@ export interface Settings {
   meetings: {
     /** The first-call notice (rules differ by place, where the words and the sound go) was shown and understood. */
     introSeen: boolean
+    /** Keep one short clip of each voice for a day, so the person can hear who spoke when they confirm the names. */
+    confirmNames: boolean
   }
 }
 

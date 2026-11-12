@@ -36,3 +36,19 @@ export function stopNoiseSample(): void {
   void current.ctx.close()
   current.done()
 }
+
+/** Plays a kept clip of one voice (samples at `rate`), to hear who it is. Returns a function that stops it. */
+export function playVoiceClip(pcm: Float32Array, rate: number, onEnd: () => void): () => void {
+  stopNoiseSample()
+  const ctx = new AudioContext()
+  const buffer = ctx.createBuffer(1, pcm.length, rate)
+  buffer.copyToChannel(new Float32Array(pcm), 0)
+  const source = ctx.createBufferSource()
+  source.buffer = buffer
+  source.connect(ctx.destination)
+  const current = { ctx, source, done: onEnd }
+  source.onended = () => { if (playing === current) stopNoiseSample() }
+  playing = current
+  source.start()
+  return stopNoiseSample
+}

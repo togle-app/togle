@@ -179,7 +179,7 @@ export class CallSessions extends EventEmitter {
         customTitle: previous?.customTitle, brief, group,
         transcript, suggestions, notes, callAnswers,
         personalNotes: previous?.personalNotes, minutes: previous?.minutes,
-        toldOthers: state.toldOthers || previous?.toldOthers || undefined, marks: state.marks?.length ? [...state.marks] : previous?.marks,
+        toldOthers: state.toldOthers || previous?.toldOthers || undefined, marks: state.marks?.length ? [...state.marks] : previous?.marks, confirm: previous?.confirm,
         summary: previous?.summary || incoming.find(card => card.kind === 'summary')?.text || '',
         learning: previous?.learning ?? { state: 'not-reviewed', pending: emptyLessons(), changes: [] }
       })

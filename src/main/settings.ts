@@ -57,7 +57,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // A task that waits is told in a notice, and one that finished too, until turned off in Settings → Coding agents.
   tasks: { notices: true, finished: true },
   // Said once, before the first call is written down.
-  meetings: { introSeen: false }
+  meetings: { introSeen: false, confirmNames: true }
 }
 
 let current: Settings = DEFAULT_SETTINGS
