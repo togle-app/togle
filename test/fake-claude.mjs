@@ -36,7 +36,12 @@ async function permission(tool_name, tool_input) {
   const response = await fetch(hookUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, cwd: process.cwd(), permission_mode: 'default', hook_event_name: 'PermissionRequest', tool_name, tool_input, permission_suggestions: [{ type: 'addRules', behavior: 'allow' }] }),
+    // As Claude Code suggests them: a rule for this command, kept in the project's local settings, and a change of mode,
+    // which "always" must never take.
+    body: JSON.stringify({ session_id: sessionId, cwd: process.cwd(), permission_mode: 'default', hook_event_name: 'PermissionRequest', tool_name, tool_input, permission_suggestions: [
+      ...(tool_name === 'Bash' ? [{ type: 'addRules', rules: [{ toolName: tool_name, ruleContent: tool_input.command }], behavior: 'allow', destination: 'localSettings' }] : []),
+      { type: 'setMode', mode: 'acceptEdits', destination: 'session' }
+    ] }),
     signal: controller.signal
   })
   const body = await response.text()
@@ -69,7 +74,8 @@ async function turn(prompt) {
     if (!decision) return undefined
     if (decision.behavior === 'allow') {
       toolResult(id, 'ok')
-      assistant([{ type: 'text', text: 'did it' }])
+      const kept = (decision.updatedPermissions ?? []).map((update) => `${update.type} ${(update.rules ?? []).map((rule) => rule.ruleContent).join(', ')} in ${update.destination}`)
+      assistant([{ type: 'text', text: kept.length ? `did it, and kept ${kept.join('; ')}` : 'did it' }])
     } else {
       toolResult(id, decision.message ?? 'No permission.', true)
       assistant([{ type: 'text', text: 'it was refused' }])

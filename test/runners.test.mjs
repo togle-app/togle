@@ -149,6 +149,22 @@ test('a command waits as a request, shows its script, and runs once allowed', { 
   }
 })
 
+test('always, for Codex, keeps the rule it proposed: the button says what commands it covers', { timeout: 30_000 }, async () => {
+  const backend = codex()
+  try {
+    const task = await backend.start({ folder: os.tmpdir(), prompt: 'run note', asks: true })
+    const events = watch(task)
+    const request = await until(() => task.pending[0], 'the command to wait')
+    assert.equal(request.always, 'Always allow commands that start with Set-Content')
+    task.answer(request.id, 'allow-always')
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    assert.deepEqual(events.filter((e) => e.type === 'message').map((e) => e.text), ['kept the rule Set-Content'], 'Codex got the rule it proposed, as it proposed it')
+    assert.deepEqual(events.find((e) => e.type === 'request-ended'), { type: 'request-ended', id: request.id, outcome: 'always' })
+  } finally {
+    await backend.close()
+  }
+})
+
 test('a refused command is declined and the agent goes on', { timeout: 30_000 }, async () => {
   const backend = codex()
   try {
@@ -393,6 +409,28 @@ test('a Claude Code command waits as a request, and what the person answers reac
   }
 })
 
+test('always, for Claude Code, keeps the one rule it suggested where it said, never a change of mode', { timeout: 30_000 }, async () => {
+  const backend = claude()
+  try {
+    const dir = scratch()
+    const task = await backend.start({ folder: dir, prompt: 'run note', asks: true })
+    const events = watch(task)
+    const request = await until(() => task.pending[0], 'the command to wait')
+    assert.equal(request.always, `Always allow this command in ${path.basename(dir)}`)
+    task.answer(request.id, 'allow-always')
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    assert.deepEqual(events.filter((e) => e.type === 'message').map((e) => e.text), ['did it, and kept addRules echo x > note.txt in localSettings'])
+    // An edit's only suggestion is a change of mode: it is not offered as always.
+    await task.send('edit page')
+    const edit = await until(() => task.pending[0], 'the edit to wait')
+    assert.equal(edit.always, undefined)
+    task.answer(edit.id, 'refuse')
+    await until(() => events.filter((e) => e.type === 'turn-ended').length === 2, 'the second turn to end')
+  } finally {
+    await backend.close()
+  }
+})
+
 test('a Claude Code edit shows its file, and a question is answered in words', { timeout: 30_000 }, async () => {
   const backend = claude()
   try {
@@ -607,6 +645,21 @@ test('a Hermes command waits as a request, and only allow once lets it run', { t
     await until(() => events.filter((e) => e.type === 'turn-ended').length === 2, 'the second turn to end')
     assert.deepEqual(events.filter((e) => e.type === 'command').map((e) => e.status), ['started', 'finished', 'started', 'declined'])
     assert.equal(events.filter((e) => e.type === 'message').at(-1).text, 'it was refused')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('always, for Hermes, picks its own always option, in its own words', { timeout: 30_000 }, async () => {
+  const backend = hermes()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'run note', asks: true })
+    const events = watch(task)
+    const request = await until(() => task.pending[0], 'the command to wait')
+    assert.equal(request.always, 'Always allow (Hermes keeps it)')
+    task.answer(request.id, 'allow-always')
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    assert.deepEqual(events.filter((e) => e.type === 'message').map((e) => e.text), ['ran it, and will not ask again'])
   } finally {
     await backend.close()
   }

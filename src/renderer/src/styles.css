@@ -3387,3 +3387,9 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .studio-mention { margin: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .studio-mention .link { font-size: 12px; }
 .meeting-detail .studio-mention { margin-block: 2px 10px; }
+
+/* An open task: where it stands first (what the agent said last), its steps and the conversation folded under one line. */
+.task-latest { max-width: 100%; }
+.task-steps > summary { cursor: pointer; padding: 4px 0; color: var(--muted); font-size: 12px; }
+.task-steps[open] { display: flex; flex-direction: column; gap: 8px; }
+.task-always { justify-self: start; font-size: 12px; }

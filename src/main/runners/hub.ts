@@ -193,7 +193,12 @@ export class RunnerHub {
   }
 
   answer(key: string, requestId: string, decision: Decision): void {
-    if (decision !== 'allow-once' && decision !== 'refuse') throw new Error('Allow once or refuse.')
+    if (decision !== 'allow-once' && decision !== 'allow-always' && decision !== 'refuse') throw new Error('Allow once or refuse.')
+    // Always only where the agent offered it for this very request, and never for one that looks dangerous.
+    if (decision === 'allow-always') {
+      const request = this.owned.has(key) ? this.mine(key).handle.pending.find((item) => item.id === requestId) : undefined
+      if (!request || !request.always || this.withMark(request).danger) throw new Error('This one can only be allowed once.')
+    }
     // A question held for a session that runs elsewhere: the answer goes back to its hook.
     if (this.outside.answer(key, requestId, decision)) return
     if (!this.owned.has(key) && this.outside.keys().includes(key)) throw new Error('That question is gone: it was answered where the session runs.')
@@ -357,8 +362,8 @@ export class RunnerHub {
     return owned
   }
 
-  private log(owned: Owned, kind: LogEntry['kind'], text: string, status?: LogEntry['status']): LogEntry {
-    const entry: LogEntry = { id: this.nextLog++, at: Date.now(), kind, text, ...(status ? { status } : {}) }
+  private log(owned: Owned, kind: LogEntry['kind'], text: string, status?: LogEntry['status'], paths?: string[]): LogEntry {
+    const entry: LogEntry = { id: this.nextLog++, at: Date.now(), kind, text, ...(status ? { status } : {}), ...(paths?.length ? { paths: paths.slice(0, 200) } : {}) }
     owned.log.push(entry)
     if (owned.log.length > LOG_LIMIT) owned.log.shift()
     return entry
@@ -381,13 +386,13 @@ export class RunnerHub {
         }
         break
       case 'files':
-        this.log(owned, 'files', `Changed ${event.paths.length} file${event.paths.length === 1 ? '' : 's'}: ${short(event.paths.join(', '), 160)}`)
+        this.log(owned, 'files', `Changed ${event.paths.length} file${event.paths.length === 1 ? '' : 's'}: ${short(event.paths.join(', '), 160)}`, undefined, event.paths)
         break
       case 'request':
         this.log(owned, 'asked', event.request.kind === 'question' ? (event.request.questions?.[0]?.text ?? 'A question') : event.request.command ?? `Change ${event.request.files?.join(', ') ?? 'a file'}`)
         break
       case 'request-ended':
-        this.log(owned, 'note', event.outcome === 'allowed' ? 'You allowed it.' : event.outcome === 'refused' ? 'You refused it.' : event.outcome === 'answered' ? 'You answered.' : 'It was not needed any more.')
+        this.log(owned, 'note', event.outcome === 'allowed' ? 'You allowed it.' : event.outcome === 'always' ? 'You allowed it, and the agent keeps that choice.' : event.outcome === 'refused' ? 'You refused it.' : event.outcome === 'answered' ? 'You answered.' : 'It was not needed any more.')
         break
       case 'title':
         this.options.titles?.set(owned.key, event.title)
@@ -413,7 +418,10 @@ export class RunnerHub {
 
   private withMark(request: PendingLike): ViewRequest {
     const danger = request.kind === 'command' ? dangerOf(request.command ?? request.raw ?? '') : null
-    return danger ? { ...request, danger } : { ...request }
+    // A command that looks dangerous is allowed once at most: never for always.
+    if (!danger) return { ...request }
+    const { always: _always, ...rest } = request as PendingLike & { always?: string }
+    return { ...rest, danger }
   }
 
   private viewOfInfo(info: TaskInfo): TaskView {

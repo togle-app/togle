@@ -280,6 +280,30 @@ test('a waiting command shows with its mark, and answering it is logged', async 
   }
 })
 
+test('always is passed on only where the agent offered it, and never for a command that looks dangerous', async () => {
+  const claude = new FakeBackend('claude')
+  const { hub } = hubOf([claude])
+  try {
+    await hub.start({ runner: 'claude', folder: scratch(), prompt: 'Clean up' })
+    const task = claude.started[0]
+    const risky = task.want({ id: 'r1', kind: 'command', command: 'rm -rf build', raw: 'rm -rf build', folder: 'C:\\work', offersAlways: true, always: 'Always allow this command in work' })
+    assert.equal((await hub.list())[0].pending[0].always, undefined, 'not shown for a command that looks dangerous')
+    assert.throws(() => hub.answer('claude:new1', 'r1', 'allow-always'), /only be allowed once/)
+    hub.answer('claude:new1', 'r1', 'refuse')
+    await risky
+    const plain = task.want({ id: 'r2', kind: 'command', command: 'npm test', raw: 'npm test', folder: 'C:\\work', offersAlways: false })
+    assert.throws(() => hub.answer('claude:new1', 'r2', 'allow-always'), /only be allowed once/, 'not offered, not taken')
+    hub.answer('claude:new1', 'r2', 'allow-once')
+    await plain
+    const offered = task.want({ id: 'r3', kind: 'command', command: 'npm test', raw: 'npm test', folder: 'C:\\work', offersAlways: true, always: 'Always allow this command in work' })
+    assert.equal((await hub.list())[0].pending[0].always, 'Always allow this command in work')
+    hub.answer('claude:new1', 'r3', 'allow-always')
+    assert.deepEqual(await offered, { kind: 'decision', decision: 'allow-always' })
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('what happens in a task is written down: words, commands with their outcome, files, and the second press', async () => {
   const codex = new FakeBackend('codex')
   const { hub } = hubOf([codex])
@@ -615,4 +639,14 @@ test('the window can ask for everything through its messages, and is told when s
   } finally {
     await hub.dispose()
   }
+})
+
+test('an open task says what it did in one line: steps, commands run, files changed, refused', () => {
+  const entry = (kind, extra = {}) => ({ id: Math.random(), at: 1, kind, text: '', ...extra })
+  assert.equal(T.stepsLine([entry('you'), entry('agent')]), undefined, 'only talk: nothing to sum up')
+  const log = [entry('you'), entry('command', { status: 'finished' }), entry('command', { status: 'failed' }), entry('command', { status: 'declined' }),
+    entry('files', { paths: ['a.ts', 'b.ts'] }), entry('files', { paths: ['b.ts', 'c.ts'] }), entry('agent')]
+  assert.equal(T.changedFiles(log), 3, 'each file once')
+  assert.equal(T.stepsLine(log), '5 steps: ran 2 commands, changed 3 files, 1 refused')
+  assert.equal(T.stepsLine([entry('command', { status: 'running' })]), '1 step: ran 1 command')
 })

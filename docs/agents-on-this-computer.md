@@ -7,6 +7,8 @@ Togle lists the tasks of the coding agents on your computer (Claude Code, Codex 
 **Agents** in the sidebar opens the list. A task that waits for you comes first, with the command it wants to run shown in full.
 
 - **Allow once** lets that one command run. **Refuse** tells the agent no.
+- **Always allow…** shows when the agent offers to remember the choice, and says how far it reaches: for Claude Code, the rule it suggests and where it keeps it (this task, this project, or everywhere); for Codex, the words the commands start with, wherever they run; for Hermes, its own option. Togle passes on only that, never a change of the agent's permission mode. It is not offered for a command that looks dangerous, nor in a notice.
+- An open task starts with what the agent said last and how many files it changed; its steps and the conversation fold under one line ("5 steps: ran 3 commands, changed 2 files").
 - A command that looks dangerous (it deletes for good, pushes over what is on a server, runs hidden text, changes the computer) carries a red mark and the reason. The mark is a hint. The command shown is what runs.
 - **New task** starts a task in a folder with one of the agents. A task started here asks before every command and every change.
 - **Stop** stops a task. Codex lets a command that was already running finish, so a stopped Codex task shows a second button, **End the running command**.

@@ -210,15 +210,21 @@ class HermesTask extends TaskBase {
     const options = list(params.options).map(rec)
     const edit = EDIT_KINDS.has(text(call.kind))
     const command = commandOf(call)
+    // Hermes's own "always" option, in its own words (it decides how long it keeps the choice).
+    const alwaysOption = options.find((o) => text(o.kind) === 'allow_always')
     const request: PendingRequest = edit
-      ? { id: String(rpcId), kind: 'edit', folder: this.folder, files: filesOf(call).length ? filesOf(call) : [oneLine(text(call.title))], offersAlways: options.some((o) => text(o.kind) === 'allow_always') }
-      : { id: String(rpcId), kind: 'command', command, raw: command, folder: this.folder, offersAlways: options.some((o) => text(o.kind) === 'allow_always') }
+      ? { id: String(rpcId), kind: 'edit', folder: this.folder, files: filesOf(call).length ? filesOf(call) : [oneLine(text(call.title))], offersAlways: !!alwaysOption }
+      : { id: String(rpcId), kind: 'command', command, raw: command, folder: this.folder, offersAlways: !!alwaysOption, ...(alwaysOption ? { always: `${oneLine(text(alwaysOption.name)) || 'Always allow'} (Hermes keeps it)` } : {}) }
     const answer = await this.ask(request)
     const choose = (kind: string): unknown => {
       const option = options.find((o) => text(o.kind) === kind)
       return option ? { outcome: { outcome: 'selected', optionId: text(option.optionId) } } : null
     }
-    if (answer.kind === 'decision' && answer.decision === 'allow-once') {
+    if (answer.kind === 'decision' && answer.decision === 'allow-always') {
+      const allowed = choose('allow_always')
+      if (allowed) return allowed
+    }
+    if (answer.kind === 'decision' && answer.decision !== 'refuse') {
       const allowed = choose('allow_once')
       if (allowed) return allowed
       this.emit({ type: 'error', message: 'Hermes offers no way to allow this once, so it was refused.' })

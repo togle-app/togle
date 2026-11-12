@@ -52,9 +52,11 @@ async function runTurn(thread, turn, prompt) {
     const answer = await ask('item/commandExecution/requestApproval', { itemId: item.id, threadId: thread.id, turnId: turn.id, command, cwd: thread.cwd, proposedExecpolicyAmendment: ['Set-Content'], startedAtMs: Date.now() })
     setStatus(thread, 'active', [])
     const decision = answer?.result?.decision
-    const done = decision === 'accept' ? { ...item, status: 'completed', exitCode: 0 } : { ...item, status: 'declined' }
+    // Always: Codex keeps the rule it proposed, and runs the command.
+    const rule = decision?.acceptWithExecpolicyAmendment?.execpolicy_amendment
+    const done = decision === 'accept' || rule ? { ...item, status: 'completed', exitCode: 0 } : { ...item, status: 'declined' }
     note('item/completed', { threadId: thread.id, turnId: turn.id, item: done })
-    say(decision === 'accept' ? 'ran it' : 'it was refused')
+    say(rule ? `kept the rule ${rule.join(' ')}` : decision === 'accept' ? 'ran it' : 'it was refused')
     return finish('completed')
   }
   const edit = /^edit (\S+)/.exec(prompt)

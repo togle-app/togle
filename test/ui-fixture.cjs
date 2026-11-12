@@ -393,10 +393,10 @@ module.exports = function install(fixture) {
   const task = (key, props) => ({ key, runner: key.split(':')[0], id: key.split(':')[1], folder: 'C:\\work\\site', state: 'idle', updatedAt: Date.now(), mine: false, line: '', pending: [], commandsRunning: false, log: [], ...props })
   const runnerTasks = fixture.scenario !== 'tasks' ? [] : [
     task('codex:t1', { title: 'Add the status column', folder: 'C:\\work\\api-server', state: 'waiting', updatedAt: Date.now() - 60000, mine: true, line: 'Wants to run npm run migrate',
-      pending: [{ id: 'r1', kind: 'command', command: 'npm run migrate', raw: 'npm run migrate', folder: 'C:\\work\\api-server', offersAlways: true }],
-      log: [{ id: 1, at: 1, kind: 'you', text: 'Add a status column to the orders table.' }, { id: 2, at: 2, kind: 'agent', text: 'I will add the column and a migration.' }, { id: 3, at: 3, kind: 'command', text: 'git status', status: 'finished' }, { id: 4, at: 4, kind: 'files', text: 'Changed 2 files: src/db/orders.ts, migrations/004.sql' }] }),
+      pending: [{ id: 'r1', kind: 'command', command: 'npm run migrate', raw: 'npm run migrate', folder: 'C:\\work\\api-server', offersAlways: true, always: 'Always allow commands that start with npm run' }],
+      log: [{ id: 1, at: 1, kind: 'you', text: 'Add a status column to the orders table.' }, { id: 2, at: 2, kind: 'agent', text: 'I will add the column and a migration.' }, { id: 3, at: 3, kind: 'command', text: 'git status', status: 'finished' }, { id: 4, at: 4, kind: 'files', text: 'Changed 2 files: src/db/orders.ts, migrations/004.sql', paths: ['src/db/orders.ts', 'migrations/004.sql'] }] }),
     task('claude:s5', { title: 'Clean the build folder', folder: 'C:\\work\\website', state: 'waiting', updatedAt: Date.now() - 120000, mine: true, line: 'Wants to run rm -rf build',
-      pending: [{ id: 'r2', kind: 'command', command: 'rm -rf build', raw: 'rm -rf build', folder: 'C:\\work\\website', offersAlways: false, danger: 'It deletes files or folders for good.' }],
+      pending: [{ id: 'r2', kind: 'command', command: 'rm -rf build', raw: 'rm -rf build', folder: 'C:\\work\\website', offersAlways: true, always: 'Always allow this command in website', danger: 'It deletes files or folders for good.' }],
       log: [{ id: 5, at: 5, kind: 'you', text: 'Clean up the build folder.' }, { id: 6, at: 6, kind: 'asked', text: 'rm -rf build' }] }),
     task('claude:s2', { title: 'Rebuild the pricing page', folder: 'C:\\work\\website', state: 'working', mine: true, line: 'Running npm test',
       log: [{ id: 7, at: 7, kind: 'you', text: 'Rebuild the pricing page with two plans.' }, { id: 8, at: 8, kind: 'agent', text: '**Two plans** it is. I will start with the table.' }, { id: 9, at: 9, kind: 'command', text: 'npm test', status: 'running' }] }),
@@ -425,7 +425,7 @@ module.exports = function install(fixture) {
   api.answerRunnerTask = async (key, requestId, decision) => {
     record('answerRunnerTask', [key, requestId, decision]); const found = runnerFind(key)
     found.pending = found.pending.filter(request => request.id !== requestId)
-    found.log.push({ id: 300 + ++sequence, at: Date.now(), kind: 'note', text: decision === 'allow-once' ? 'You allowed it.' : 'You refused it.' })
+    found.log.push({ id: 300 + ++sequence, at: Date.now(), kind: 'note', text: decision === 'refuse' ? 'You refused it.' : 'You allowed it.' })
     if (!found.pending.length) { found.state = 'working'; found.line = 'Working…' }
     runnerChanged()
   }

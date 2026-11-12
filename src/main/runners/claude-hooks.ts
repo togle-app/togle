@@ -13,7 +13,7 @@ import path from 'node:path'
 import { rec } from './jsonrpc'
 
 /** What Togle answers a permission request with. `null`: no decision, and Claude Code's own prompt decides. */
-export type HookVerdict = { behavior: 'allow'; updatedInput?: Record<string, unknown> } | { behavior: 'deny'; message: string } | null
+export type HookVerdict = { behavior: 'allow'; updatedInput?: Record<string, unknown>; updatedPermissions?: Record<string, unknown>[] } | { behavior: 'deny'; message: string } | null
 
 /** A task that hears its own requests. */
 export interface HookTarget {

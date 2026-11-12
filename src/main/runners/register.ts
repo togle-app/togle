@@ -55,7 +55,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   handle('runners:open', (key) => hub.open(word(key, 'The task')))
   handle('runners:take-over', (key) => hub.takeOver(word(key, 'The task')))
   handle('runners:send', (key, text) => hub.send(word(key, 'The task'), typeof text === 'string' ? text : ''))
-  handle('runners:answer', (key, requestId, decision) => hub.answer(word(key, 'The task'), word(requestId, 'The request'), decision as 'allow-once' | 'refuse'))
+  handle('runners:answer', (key, requestId, decision) => hub.answer(word(key, 'The task'), word(requestId, 'The request'), decision as 'allow-once' | 'allow-always' | 'refuse'))
   handle('runners:reply', (key, requestId, text) => hub.reply(word(key, 'The task'), word(requestId, 'The request'), typeof text === 'string' ? text : ''))
   handle('runners:stop', (key) => hub.stop(word(key, 'The task')))
   handle('runners:end-commands', (key) => hub.endCommands(word(key, 'The task')))

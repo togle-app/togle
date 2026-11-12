@@ -104,7 +104,7 @@ export abstract class TaskBase implements TaskHandle {
     if (!wait || wait.request.kind === 'question') return
     this.waits.delete(requestId)
     wait.settle({ kind: 'decision', decision })
-    this.emit({ type: 'request-ended', id: requestId, outcome: decision === 'allow-once' ? 'allowed' : 'refused' })
+    this.emit({ type: 'request-ended', id: requestId, outcome: decision === 'refuse' ? 'refused' : decision === 'allow-always' ? 'always' : 'allowed' })
     this.announce()
   }
 

@@ -45,6 +45,8 @@ export interface LogEntry {
   text: string
   /** A command's outcome. */
   status?: 'running' | 'finished' | 'declined' | 'failed'
+  /** The files a `files` step changed. */
+  paths?: string[]
 }
 
 /** A request as the window shows it: with Togle's mark on a command that looks dangerous. */
@@ -115,6 +117,27 @@ export interface TaskView extends TaskInfo {
  */
 export function needsYou(task: Pick<TaskView, 'state' | 'mine'>): boolean {
   return task.state === 'waiting' || (task.mine && (task.state === 'stopped' || task.state === 'failed'))
+}
+
+/** How many files a task changed, by what its log says (each file once). */
+export function changedFiles(log: readonly LogEntry[]): number {
+  return new Set(log.filter((entry) => entry.kind === 'files').flatMap((entry) => entry.paths ?? [])).size
+}
+
+/**
+ * What a task did, in one line, for the fold that holds its log: "5 steps: ran 3 commands, changed 2 files, 1 refused".
+ * Undefined while it has done nothing but talk.
+ */
+export function stepsLine(log: readonly LogEntry[]): string | undefined {
+  const commands = log.filter((entry) => entry.kind === 'command')
+  const ran = commands.filter((entry) => entry.status !== 'declined').length
+  const refused = commands.length - ran
+  const files = changedFiles(log)
+  const steps = commands.length + log.filter((entry) => entry.kind === 'files').length
+  if (!steps) return undefined
+  const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`
+  const parts = [...(ran ? [`ran ${plural(ran, 'command', 'commands')}`] : []), ...(files ? [`changed ${plural(files, 'file', 'files')}`] : []), ...(refused ? [`${refused} refused`] : [])]
+  return `${plural(steps, 'step', 'steps')}: ${parts.join(', ')}`
 }
 
 export interface TaskDetail {
@@ -196,17 +219,23 @@ export interface PendingRequest {
   questions?: AgentQuestion[]
   /** The agent also offers "always allow this". It is never passed on to another device. */
   offersAlways: boolean
+  /**
+   * For a command, when the agent offers it: what "always allow" would make the agent remember, in words that say how
+   * far it reaches ("Always allow this command in api-server", "Always allow commands that start with npm run"). It is
+   * the button's words. Never offered for a command that looks dangerous.
+   */
+  always?: string
 }
 
-/** The person's answer to a command or an edit. */
-export type Decision = 'allow-once' | 'refuse'
+/** The person's answer to a command or an edit. `allow-always` is only for a request that offers `always`. */
+export type Decision = 'allow-once' | 'allow-always' | 'refuse'
 
 export type TaskEvent =
   | { type: 'state'; state: TaskState }
   | { type: 'title'; title: string }
   | { type: 'message'; text: string }
   | { type: 'request'; request: PendingRequest }
-  | { type: 'request-ended'; id: string; outcome: 'allowed' | 'refused' | 'answered' | 'cancelled' }
+  | { type: 'request-ended'; id: string; outcome: 'allowed' | 'always' | 'refused' | 'answered' | 'cancelled' }
   | { type: 'command'; command: string; status: 'started' | 'finished' | 'declined' | 'failed'; exitCode: number | null }
   | { type: 'files'; paths: string[] }
   | { type: 'turn-ended'; outcome: 'completed' | 'interrupted' | 'failed'; error: string | null }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { needsYou, type ClaudeHookStatus, type LogEntry, type RunnerKind, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
+import { changedFiles, needsYou, stepsLine, type ClaudeHookStatus, type LogEntry, type RunnerKind, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
 import { Changes } from './Changes'
+import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { Markdown } from './Markdown'
 
@@ -133,7 +134,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
             New task
           </button>
         </div>
-        {loaded && !installed.length && <p className="empty">No coding agent found. Install Claude Code or Codex and Togle finds it.</p>}
+        {loaded && !installed.length && <p className="empty">No coding agent found. Install Claude Code, Codex or Hermes, and Togle finds it.</p>}
         {!!waiting.length && <TaskGroup label="Waiting for you">{waiting.map(row)}</TaskGroup>}
         {!!working.length && <TaskGroup label="Working">{working.map(row)}</TaskGroup>}
         {!!earlier.length && (
@@ -147,7 +148,6 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
           </TaskGroup>
         )}
         {loaded && !!installed.length && !tasks.length && <p className="empty">No tasks yet. Start one, or let an agent run in a terminal and it shows here.</p>}
-        {!!installed.length && <p className="hint tasks-found">Found: {installed.map((s) => s.name).join(', ')}</p>}
         <TerminalAnswers />
       </aside>
       <section className="tasks-detail">
@@ -299,8 +299,10 @@ function TaskGroup({ label, children }: { label: string; children: ReactNode }) 
 
 function TaskRow({ task, now, selected, onSelect }: { task: TaskView; now: number; selected: boolean; onSelect: () => void }) {
   const stoppedHere = needsYou(task) && task.state !== 'waiting'
-  // Stopped and waiting for a reply: it says why.
-  const detail = stoppedHere ? (task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : 'stopped · reply to go on') : task.line || (task.state === 'waiting' || task.state === 'working' ? STATE_WORDS[task.state] : ago(task.updatedAt, now))
+  // One line, as the design has it: the agent, where it works, and how it stands. Stopped and waiting for a reply, it
+  // says why; done, it says when.
+  const detail = stoppedHere ? (task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : 'stopped · reply to go on') : task.state === 'waiting' ? 'waiting' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : `done · ${ago(task.updatedAt, now)}`
+  const where = !task.mine && task.pid ? 'terminal' : baseName(task.folder)
   const dangerous = task.pending.some((request) => request.danger)
   return (
     <button className={`task-row ${selected ? 'selected' : ''}`} role="listitem" data-state={task.state} data-needs={stoppedHere ? 'you' : undefined} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
@@ -308,7 +310,7 @@ function TaskRow({ task, now, selected, onSelect }: { task: TaskView; now: numbe
       <span className="task-copy">
         <strong>{task.title}</strong>
         <span>
-          {NAMES[task.runner]} · {baseName(task.folder)} · {detail}
+          {NAMES[task.runner]} · {where} · {detail}
         </span>
       </span>
       {dangerous && <span className="task-danger">Dangerous</span>}
@@ -384,7 +386,7 @@ interface PanelProps {
   now: number
   onSeeChanges: () => void
   onBack: () => void
-  onAnswer: (requestId: string, decision: 'allow-once' | 'refuse') => void
+  onAnswer: (requestId: string, decision: 'allow-once' | 'allow-always' | 'refuse') => void
   onReply: (requestId: string, text: string) => void
   onSend: (text: string) => void
   onStop: () => void
@@ -396,6 +398,7 @@ interface PanelProps {
 
 function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, onTakeOver, onClose }: PanelProps) {
   const { task, log } = detail
+  const talkKey = useHotkeys().find((key) => key.id === 'dictate')?.keys || 'F9'
   const [text, setText] = useState('')
   const [confirmTakeOver, setConfirmTakeOver] = useState(false)
   const end = useRef<HTMLDivElement>(null)
@@ -403,6 +406,9 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
     end.current?.scrollIntoView?.({ block: 'end' })
   }, [log.length, task.pending.length])
   const running = task.state === 'working' || task.state === 'waiting'
+  const latest = [...log].reverse().find((entry) => entry.kind === 'agent')
+  const changed = changedFiles(log)
+  const steps = stepsLine(log)
   const send = (event: FormEvent): void => {
     event.preventDefault()
     const message = text.trim()
@@ -419,8 +425,9 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
         <div className="task-title">
           <h2 title={task.title}>{task.title}</h2>
           <p>
-            {NAMES[task.runner]} · {task.folder || 'No folder'} · <span className="task-state" data-state={task.state}>{STATE_WORDS[task.state]}</span>
+            {NAMES[task.runner]} · <span title={task.folder}>{task.folder ? baseName(task.folder) : 'No folder'}</span> · <span className="task-state" data-state={task.state}>{STATE_WORDS[task.state]}</span>
             {task.updatedAt && !running ? ` · ${ago(task.updatedAt, now)}` : ''}
+            {changed > 0 && ` · ${changed} ${changed === 1 ? 'file' : 'files'} changed`}
             {task.folder && (
               <>
                 {' · '}
@@ -489,19 +496,26 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
       <div className="task-log" role="log" aria-label="What happened">
         {log.length === 0 && task.mine && <p className="hint">Nothing yet.</p>}
         {log.length === 0 && !task.mine && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
-        {log.map((entry) => (
-          <LogLine key={entry.id} entry={entry} />
-        ))}
+        {/* Where it stands first: what the agent said last. Its steps and the conversation fold under one line. */}
+        {latest && <div className="task-agent task-latest"><Markdown text={latest.text} /></div>}
+        {log.length > 0 && (
+          <details className="task-steps">
+            <summary>{steps ?? 'What was said'}</summary>
+            {log.map((entry) => (
+              <LogLine key={entry.id} entry={entry} />
+            ))}
+          </details>
+        )}
         <div ref={end} />
       </div>
 
       {task.pending.map((request) => (
-        <RequestCard key={request.id} request={request} onAllow={() => onAnswer(request.id, 'allow-once')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
+        <RequestCard key={request.id} request={request} onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
       ))}
 
       {task.mine && (
         <form className="task-reply" onSubmit={send}>
-          <input value={text} onChange={(event) => setText(event.target.value)} placeholder="Reply to the agent" aria-label="Reply to the agent" />
+          <input value={text} onChange={(event) => setText(event.target.value)} placeholder={'Reply, or hold ' + talkKey + ' and talk'} aria-label="Reply to the agent" />
           <button className="primary small" disabled={!text.trim()}>
             Send
           </button>
@@ -539,7 +553,7 @@ function LogLine({ entry }: { entry: LogEntry }) {
   }
 }
 
-function RequestCard({ request, onAllow, onRefuse, onReply }: { request: ViewRequest; onAllow: () => void; onRefuse: () => void; onReply: (text: string) => void }) {
+function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { request: ViewRequest; onAllow: () => void; onAlways: () => void; onRefuse: () => void; onReply: (text: string) => void }) {
   const [text, setText] = useState('')
   if (request.kind === 'question') {
     const questions = request.questions ?? []
@@ -603,6 +617,8 @@ function RequestCard({ request, onAllow, onRefuse, onReply }: { request: ViewReq
           Refuse
         </button>
       </div>
+      {/* What always reaches, in the agent's terms; never for a command that looks dangerous. */}
+      {request.always && !request.danger && (<button className="link task-always" onClick={onAlways}>{request.always}</button>)}
     </section>
   )
 }

@@ -82,7 +82,13 @@ const infoOf = (thread: Record<string, unknown>, live: CodexTask | undefined): T
   updatedAt: (typeof thread.updatedAt === 'number' ? thread.updatedAt : 0) * 1000
 })
 
-const decisionOf = (answer: Answer): 'accept' | 'decline' | 'cancel' => (answer.kind === 'cancelled' ? 'cancel' : answer.kind === 'decision' && answer.decision === 'allow-once' ? 'accept' : 'decline')
+const decisionOf = (answer: Answer): 'accept' | 'decline' | 'cancel' => (answer.kind === 'cancelled' ? 'cancel' : answer.kind === 'decision' && answer.decision !== 'refuse' ? 'accept' : 'decline')
+/**
+ * A command's answer. Always: Codex keeps the rule it proposed (the words commands start with) and runs matching commands
+ * from then on without asking, wherever they run; the button says so.
+ */
+const commandDecisionOf = (answer: Answer, amendment: string[]): unknown =>
+  answer.kind === 'decision' && answer.decision === 'allow-always' && amendment.length ? { acceptWithExecpolicyAmendment: { execpolicy_amendment: amendment } } : decisionOf(answer)
 
 class CodexTask extends TaskBase {
   readonly runner = 'codex' as const
@@ -226,6 +232,7 @@ class CodexTask extends TaskBase {
     const id = String(rpcId)
     if (method === 'item/commandExecution/requestApproval') {
       const raw = text(params.command)
+      const amendment = list(params.proposedExecpolicyAmendment).map(text).filter(Boolean)
       const answer = await this.ask({
         id,
         kind: 'command',
@@ -233,9 +240,10 @@ class CodexTask extends TaskBase {
         raw,
         folder: text(params.cwd) || this.folder,
         reason: text(params.reason) || undefined,
-        offersAlways: list(params.proposedExecpolicyAmendment).length > 0
+        offersAlways: amendment.length > 0,
+        ...(amendment.length ? { always: `Always allow commands that start with ${amendment.join(' ')}` } : {})
       })
-      return { decision: decisionOf(answer) }
+      return { decision: commandDecisionOf(answer, amendment) }
     }
     if (method === 'item/fileChange/requestApproval') {
       const files = this.edits.get(text(params.itemId)) ?? (text(params.grantRoot) ? [text(params.grantRoot)] : [])

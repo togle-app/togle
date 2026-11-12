@@ -138,6 +138,8 @@ class ClaudeTask extends TaskBase implements HookTarget {
   /** Whether Claude Code has said or done anything since the last message was sent. */
   private active = false
   private requests = 0
+  /** The one rule Claude Code suggested for a request, kept when "always" was offered: the answer gives it back. */
+  private readonly rules = new Map<string, Record<string, unknown>>()
   private interrupts = 0
   private readonly errors: string[] = []
   /** Commands in flight: tool use id to the command. */
@@ -322,7 +324,11 @@ class ClaudeTask extends TaskBase implements HookTarget {
       // Every question of the tool gets the words: one at a time is what a person usually asks.
       return { behavior: 'allow', updatedInput: { ...input, answers: Object.fromEntries((request.questions ?? []).map((q) => [q.text, answer.text])) } }
     }
-    if (answer.kind === 'decision' && answer.decision === 'allow-once') return { behavior: 'allow' }
+    const rule = this.rules.get(id)
+    this.rules.delete(id)
+    // Always: Claude Code saves the very rule it suggested, where it said it would, and asks no more for what it matches.
+    if (answer.kind === 'decision' && answer.decision === 'allow-always' && rule) return { behavior: 'allow', updatedPermissions: [rule] }
+    if (answer.kind === 'decision' && answer.decision !== 'refuse') return { behavior: 'allow' }
     if (answer.kind === 'cancelled') return { behavior: 'deny', message: 'The task was stopped.' }
     if (request.command) this.refused.add(request.command)
     return { behavior: 'deny', message: 'The person refused this in Togle.' }
@@ -346,8 +352,35 @@ class ClaudeTask extends TaskBase implements HookTarget {
       return { id, kind: 'edit', folder, files: file ? [file] : [], offersAlways }
     }
     const command = summary(tool, input)
-    return { id, kind: 'command', command, raw: command, folder, offersAlways }
+    const always = alwaysRule(tool, command, folder, event)
+    if (always) this.rules.set(id, always.rule)
+    return { id, kind: 'command', command, raw: command, folder, offersAlways, ...(always ? { always: always.words } : {}) }
   }
+}
+
+/** Where Claude Code saves a rule, as the words on the button say it. */
+const REACH: Record<string, (folder: string) => string> = {
+  session: () => 'for the rest of this task',
+  localSettings: (folder) => 'in ' + folder,
+  projectSettings: (folder) => 'in ' + folder,
+  userSettings: () => 'everywhere'
+}
+
+/**
+ * The rule "always" would keep, when Claude Code suggested one: an allow rule for this tool only, saved where Claude
+ * Code says (this task, this project, or everywhere). Anything else it may suggest (a change of permission mode, more
+ * folders) is never offered here.
+ */
+function alwaysRule(tool: string, command: string, folder: string, event: Record<string, unknown>): { rule: Record<string, unknown>; words: string } | undefined {
+  for (const suggestion of list(event.permission_suggestions).map(rec)) {
+    const rules = list(suggestion.rules).map(rec)
+    const reach = REACH[text(suggestion.destination)]
+    if (text(suggestion.type) !== 'addRules' || text(suggestion.behavior) !== 'allow' || !reach || !rules.length || !rules.every((rule) => text(rule.toolName) === tool && text(rule.ruleContent))) continue
+    const what = rules.length === 1 && text(rules[0].ruleContent) === command ? 'this command' : rules.map((rule) => text(rule.ruleContent)).join(', ')
+    const name = folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
+    return { rule: suggestion, words: 'Always allow ' + what + ' ' + reach(name) }
+  }
+  return undefined
 }
 
 export class ClaudeBackend implements Backend {

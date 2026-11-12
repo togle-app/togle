@@ -87,20 +87,26 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await texts(ui, '.task-group > h3'), ['Waiting for you', 'Working', 'Earlier · 2 tasks'])
   const rows = await ui.evaluate("[...document.querySelectorAll('.task-row')].map(row=>({title:row.querySelector('strong').textContent,state:row.dataset.state,more:row.querySelector('.task-copy span').textContent,danger:!!row.querySelector('.task-danger')}))")
   assert.deepEqual(rows.map(row => row.title), ['Add the status column', 'Clean the build folder', 'Rebuild the pricing page', 'Write the release notes', 'Fix the login redirect', 'Port the settings screen'])
-  assert.equal(rows[0].more, 'Codex · api-server · Wants to run npm run migrate')
+  // One line each, as the design has it: the agent, where it works, and how it stands.
+  assert.equal(rows[0].more, 'Codex · api-server · waiting')
   assert.deepEqual(rows.map(row => row.danger), [false, true, false, false, false, false], 'only the command that looks dangerous is marked in the list')
-  assert.equal(rows[3].more, 'Claude Code · notes · Working in its own window')
-  assert.ok(/ago|yesterday/.test(rows[4].more) && /days ago/.test(rows[5].more), 'earlier tasks say when they were last worked on')
-  assert.ok((await texts(ui, '.tasks-found'))[0].includes('Found: Claude Code, Codex'))
-  assert.ok(!(await texts(ui, '.tasks-found'))[0].includes('Hermes'), 'an agent that is not installed is not listed as found')
+  assert.equal(rows[2].more, 'Claude Code · website · working')
+  assert.equal(rows[3].more, 'Claude Code · terminal · working', 'a task in a terminal says so')
+  assert.ok(/^Claude Code · website · done · .*(ago|yesterday)/.test(rows[4].more) && /days ago/.test(rows[5].more), 'earlier tasks say when they were last worked on')
+  assert.equal(await ui.evaluate("!!document.querySelector('.tasks-found')"), false, 'the agents found are listed in Settings')
   await ui.capture('tasks-list')
 
-  // A command waits: shown in full, allowed once.
+  // A command waits: shown in full, allowed once. The task starts with where it stands; its steps fold under one line.
   await ui.task('Add the status column')
   await ui.wait("!!document.querySelector('.task-request')")
   assert.equal(await ui.evaluate("document.querySelector('.task-request .task-command').textContent"), 'npm run migrate')
-  assert.deepEqual(await texts(ui, '.task-request button'), ['Allow once', 'Refuse'])
+  assert.deepEqual(await texts(ui, '.task-request button'), ['Allow once', 'Refuse', 'Always allow commands that start with npm run'])
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request .task-danger')"), false)
+  assert.equal(await ui.evaluate("document.querySelector('.task-latest').textContent"), 'I will add the column and a migration.')
+  assert.equal(await ui.evaluate("document.querySelector('.task-steps > summary').textContent"), '2 steps: ran 1 command, changed 2 files')
+  assert.equal(await ui.evaluate("document.querySelector('.task-steps').open"), false)
+  assert.ok((await ui.evaluate("document.querySelector('.task-title p').textContent")).includes('Waiting for you · 2 files changed'))
+  assert.ok((await ui.evaluate("document.querySelector('.task-reply input').placeholder")) === 'Reply, or hold F9 and talk')
   assert.deepEqual(await texts(ui, '.task-log .task-you'), ['Add a status column to the orders table.'])
   await ui.capture('tasks-request')
   await ui.click('.task-request button', 'Allow once')
@@ -111,15 +117,23 @@ async function checkTasks(T, agent) {
   await ui.wait("[...document.querySelectorAll('.task-group')].find(group=>group.querySelector('h3').textContent==='Waiting for you').querySelectorAll('.task-row').length===1")
   assert.deepEqual(await groupTitles(ui, 'Working'), ['Rebuild the pricing page', 'Write the release notes', 'Add the status column'], 'an answered task moves from waiting to working')
 
-  // A command that looks dangerous says so, with the reason, and is refused.
+  // Always, where the agent offers it: what it reaches is on the button.
+  await ui.evaluate("window.togleUITest.askOutside('codex:t1', { id: 'r9', kind: 'command', command: 'npm run seed', raw: 'npm run seed', folder: 'C:\\\\work\\\\api-server', offersAlways: true, always: 'Always allow commands that start with npm run' })")
+  await ui.wait("!!document.querySelector('.task-always')")
+  await ui.click('.task-always', 'Always allow commands that start with npm run')
+  await ui.wait("!document.querySelector('.task-request')")
+  assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args).at(-1), ['codex:t1', 'r9', 'allow-always'])
+
+  // A command that looks dangerous says so, with the reason, and is refused. It is never offered for always.
   await ui.task('Clean the build folder')
   await ui.wait("!!document.querySelector('.task-request.danger')")
   assert.equal(await ui.evaluate("document.querySelector('.task-request .task-danger').textContent"), 'Dangerous')
   assert.ok((await texts(ui, '.task-why'))[0].startsWith('It deletes files or folders for good.'))
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-always')"), false)
   await ui.capture('tasks-danger')
   await ui.click('.task-request button', 'Refuse')
   await ui.wait("!document.querySelector('.task-request')")
-  assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args[2]), ['allow-once', 'refuse'])
+  assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args[2]), ['allow-once', 'allow-always', 'refuse'])
 
   // A task that works: Stop, and for Codex the second press.
   await ui.task('Rebuild the pricing page')

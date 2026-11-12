@@ -41,7 +41,7 @@ Speech recognition (Parakeet, with Whisper for unclear speech) is downloaded for
 
 ### Agents
 
-One list of every agent task on your computer: Claude Code, Codex and Hermes. A task that waits for you comes first. A command an agent wants to run is shown in full before you can allow it, and one that looks dangerous carries a red mark and the reason. You answer by typing, by voice, or with the agent's own buttons. **See changes** shows what differs in the task's folder. A task you started in a terminal shows here too, and **Take over** moves a Claude Code task into Togle. `togle run claude` starts one there from the beginning.
+One list of every agent task on your computer: Claude Code, Codex and Hermes. A task that waits for you comes first. A command an agent wants to run is shown in full before you can allow it, and one that looks dangerous carries a red mark and the reason. Where the agent offers to remember the choice, **Always allow…** says how far that reaches (a Claude Code rule in this project, a Codex rule for commands that start the same way); it is never offered for a dangerous command. An open task starts with where it stands: what the agent said last, the files it changed, and its steps folded under one line. You answer by typing, by voice, or with the agent's own buttons. **See changes** shows what differs in the task's folder. A task you started in a terminal shows here too, and **Take over** moves a Claude Code task into Togle. `togle run claude` starts one there from the beginning.
 
 **F10** opens a small task box over whatever you are doing: say or type the task and press Enter, and the agent starts in the folder you used last.
 

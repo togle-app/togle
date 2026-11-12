@@ -44,8 +44,8 @@ async function turn(session, prompt, finish) {
     call('tc1', 'execute', title)
     const answer = await ask({ sessionId: session.id, toolCall: { toolCallId: 'tc1', title, kind: 'execute', content: [{ type: 'content', content: { type: 'text', text: `$ echo x > ${run[1]}.txt` } }] }, options })
     const picked = answer.result?.outcome
-    done('tc1', picked?.outcome === 'selected' && picked.optionId === 'once' ? 'completed' : 'failed')
-    say(picked?.optionId === 'once' ? 'ran it' : 'it was refused')
+    done('tc1', picked?.outcome === 'selected' && (picked.optionId === 'once' || picked.optionId === 'always') ? 'completed' : 'failed')
+    say(picked?.optionId === 'once' ? 'ran it' : picked?.optionId === 'always' ? 'ran it, and will not ask again' : 'it was refused')
     return finish('end_turn')
   }
   if (edit) {
