@@ -4,7 +4,7 @@ import { effectiveAI, effectiveSettings, validateAIProfile } from '@shared/prefe
 import { routedProvider } from './providers/routed'
 import type { AIProfile, KeysOffer } from '@shared/types'
 import { Dictation } from './dictation'
-import { codeEditorOf, frontProgram } from './front-program'
+import { codeEditorOf, frontEditor } from './front-program'
 import { DictationSpeech, type DictationEngine } from './dictation-speech'
 import { DictationHistoryStore, type DictationHistoryTicket } from './dictation-history'
 import { DictationVocabularyStore } from './dictation-vocabulary'
@@ -944,8 +944,9 @@ let keysOffered = false
 let afterShow: (() => void) | undefined
 function offerKeys(id: HotkeyId, keys: string): void {
   if (keysOffered || getSettings().keysOffer.shown || !/^F(8|9|10)$/.test(keys) || callNotice.shown) return
-  const program = (!app.isPackaged && process.env.TOGLE_TEST_FRONT_PROGRAM) || frontProgram()
-  const editor = program ? codeEditorOf(program) : undefined
+  // A test stands in for the program in front by its file; the app reads which one is (Windows, a Mac and Linux).
+  const forced = !app.isPackaged && process.env.TOGLE_TEST_FRONT_PROGRAM
+  const editor = forced ? codeEditorOf(forced) : frontEditor()
   if (!editor) return
   keysOffered = true
   void updateSettings({ keysOffer: { shown: true } }).catch((error) => console.warn('[keys]', (error as Error).message))

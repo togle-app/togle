@@ -65,7 +65,7 @@ One list for the day, kept as a plain text file on your computer. What your agen
 
 They work from any app. Settings can give each other keys: click it and press the keys you want. Keys that would stop working in every other app are refused with the reason. On most Mac keyboards, F keys need Fn held.
 
-F9, F8 and F10 are also debugger keys in VS Code, Visual Studio and JetBrains IDEs. The first time you press one while one of those editors is in front (on Windows, for now), a notice in the corner offers **Change keys** once; the key still does its job in Togle. The notice never comes back.
+F9, F8 and F10 are also debugger keys in VS Code, Visual Studio and JetBrains IDEs. The first time you press one while one of those editors is in front, a notice in the corner offers **Change keys** once; the key still does its job in Togle. The notice never comes back. On a Mac Togle tells the editor by its app (`lsappinfo`), on Linux by its window (`xprop`, X11 and XWayland); neither was tried on those systems yet.
 
 ## Your AI plan
 

@@ -1,6 +1,8 @@
 // Which program is in front, and whether it is a code editor that uses F8, F9 or F10 itself (for its debugger): the first
-// time one of Togle's keys is pressed there, Togle offers once to change its keys. Windows only for now; elsewhere
-// nothing is known to be in front, and no offer is made.
+// time one of Togle's keys is pressed there, Togle offers once to change its keys. On Windows the program's file is read
+// through user32; on a Mac the app's bundle id through lsappinfo (no permission is asked for it); on Linux the window's
+// class through xprop (X11, and XWayland). The Mac and Linux ways were not tried on those systems yet.
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import koffi from 'koffi'
 
@@ -18,6 +20,67 @@ const EDITORS: Readonly<Record<string, string>> = {
 export function codeEditorOf(program: string): string | undefined {
   const name = path.win32.basename(path.posix.basename(program)).toLowerCase().replace(/\.exe$/, '')
   return EDITORS[name] ?? JETBRAINS[name.replace(/64$/, '')]
+}
+
+// On a Mac, by bundle id: VS Code and the editors made from it, and Android Studio (JetBrains' are com.jetbrains.<name>).
+const MAC_EDITORS: Readonly<Record<string, string>> = {
+  'com.microsoft.vscode': 'VS Code', 'com.microsoft.vscodeinsiders': 'VS Code', 'com.vscodium': 'VSCodium', 'com.todesktop.230313mzl4w4u92': 'Cursor',
+  'com.exafunction.windsurf': 'Windsurf', 'com.google.android.studio': 'Android Studio'
+}
+
+/** The code editor a Mac app is, by its bundle id ("com.microsoft.VSCode", "com.jetbrains.pycharm.ce"). */
+export function macEditorOf(bundleId: string): string | undefined {
+  const id = bundleId.trim().toLowerCase()
+  const jetbrains = /^com\.jetbrains\.([a-z]+)/.exec(id)?.[1]
+  return MAC_EDITORS[id] ?? (jetbrains ? JETBRAINS[jetbrains === 'intellij' ? 'idea' : jetbrains] : undefined)
+}
+
+/** The code editor a Linux window is, by one of its classes ("code", "jetbrains-pycharm-ce"). */
+export function linuxEditorOf(windowClass: string): string | undefined {
+  const name = windowClass.trim().toLowerCase()
+  if (name === 'code - insiders' || name === 'code-insiders') return 'VS Code'
+  const jetbrains = /^jetbrains-([a-z]+)/.exec(name)?.[1]
+  return EDITORS[name] ?? (jetbrains ? JETBRAINS[jetbrains] : undefined)
+}
+
+/** The bundle id `lsappinfo info -only bundleid` printed: "CFBundleIdentifier"="com.microsoft.VSCode". */
+export const lsappinfoBundle = (output: string): string | undefined => /"CFBundleIdentifier"\s*=\s*"([^"]+)"/.exec(output)?.[1]
+
+/** The window `xprop -root _NET_ACTIVE_WINDOW` printed as active, if one is: "window id # 0x3a00007". */
+export const xpropActiveWindow = (output: string): string | undefined => {
+  const id = /window id # (0x[0-9a-f]+)/i.exec(output)?.[1]
+  return id && !/^0x0+$/i.test(id) ? id : undefined
+}
+
+/** The classes `xprop -id <window> WM_CLASS` printed: WM_CLASS(STRING) = "code", "Code". */
+export const xpropClasses = (output: string): string[] => [...output.matchAll(/"([^"]*)"/g)].map((match) => match[1]).filter(Boolean)
+
+/** What a small program prints, given half a second at most: the press of a key waits on it. */
+const quick = (file: string, args: string[]): string => {
+  try {
+    return execFileSync(file, args, { encoding: 'utf8', timeout: 500, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+  } catch {
+    return ''
+  }
+}
+
+/** The code editor in front, as the person knows it ("VS Code"), or undefined when it is not one or cannot be told. */
+export function frontEditor(): string | undefined {
+  if (process.platform === 'win32') {
+    const program = frontProgram()
+    return program ? codeEditorOf(program) : undefined
+  }
+  if (process.platform === 'darwin') {
+    const app = quick('lsappinfo', ['front']).trim()
+    const bundle = app ? lsappinfoBundle(quick('lsappinfo', ['info', '-only', 'bundleid', app])) : undefined
+    return bundle ? macEditorOf(bundle) : undefined
+  }
+  if (process.platform === 'linux') {
+    const window = xpropActiveWindow(quick('xprop', ['-root', '_NET_ACTIVE_WINDOW']))
+    const classes = window ? xpropClasses(quick('xprop', ['-id', window, 'WM_CLASS'])) : []
+    return classes.map(linuxEditorOf).find(Boolean)
+  }
+  return undefined
 }
 
 type Front = () => string | undefined
