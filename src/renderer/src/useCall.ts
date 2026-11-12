@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CurrentCall, Settings, TranscriptEntry } from '@shared/types'
 import { isMicrophoneOn } from '@shared/microphone'
 import { CallCapture, warmUpAudio, type CaptureInputs } from './audio/capture'
-import type { NoiseFinding } from './MicrophoneSuggestion'
+import type { NoiseFinding } from './StudioMention'
 
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -130,8 +130,8 @@ export function useCall(settings: Settings | null): CallView {
       capture.current = null
       // A loud room: what the microphone picked up, offered once the call is over (main decides whether it is time).
       if (report && report.verdict === 'noisy') {
-        const { sample, ...measured } = report
-        void api.noiseMeasured(measured).then((show) => { if (show) setNoise({ report: measured, sample }) }, () => undefined)
+        const { sample: _sample, ...measured } = report
+        void api.noiseMeasured(measured).then((show) => { if (show) setNoise({ report: measured }) }, () => undefined)
       }
       setListening(false)
       setSince(0)

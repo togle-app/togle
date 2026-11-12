@@ -6,6 +6,8 @@ import { callLength, HistoryTranscript } from './CallHistory'
 import { ConfirmNames } from './ConfirmNames'
 import { Icon } from './Icon'
 import { Menu } from './Menu'
+import { NoisyMicrophone, type NoiseFinding } from './StudioMention'
+import type { TogleMicrophoneStatus } from '@shared/microphone'
 
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -44,13 +46,16 @@ interface Props {
   onWriteDown: () => void
   /** A call to open (from outside, such as a row on the to-do list): `seq` makes the same call open again. */
   focus?: { id: string; seq: number }
+  /** After a call in a loud room: what the microphone picked up, for that call's page. */
+  noise?: { callId: string; finding: NoiseFinding }
+  microphone?: TogleMicrophoneStatus
 }
 
 /**
  * The calls Togle wrote down, newest first, with what is left to do for each: names to confirm, notes to read. Search
  * looks in what was said. A call opens to its notes and its transcript, and can be given to an agent or shared.
  */
-export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus }: Props) {
+export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus, noise, microphone }: Props) {
   const [calls, setCalls] = useState<CallSessionSummary[] | null>(null)
   const [openId, setOpenId] = useState<string>()
   const [openTab, setOpenTab] = useState<'notes' | 'transcript'>('notes')
@@ -79,7 +84,7 @@ export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus }:
   }, [query])
   const now = Date.now()
   const rows = useMemo(() => [...(calls ?? [])].sort((a, b) => Number(b.status === 'live') - Number(a.status === 'live') || b.startedAt - a.startedAt), [calls])
-  if (open) return <MeetingDetail id={open} agents={agents} tab={openTab} onTab={setOpenTab} onBack={() => setOpenId(undefined)} onDeleted={() => setOpenId(undefined)} />
+  if (open) return <MeetingDetail id={open} noise={noise?.callId === open ? noise.finding : undefined} microphone={microphone} agents={agents} tab={openTab} onTab={setOpenTab} onBack={() => setOpenId(undefined)} onDeleted={() => setOpenId(undefined)} />
   return (
     <div className="meetings call-history">
       <div className="page-head"><h2>Meetings</h2><span className="spacer" /><button className="primary" disabled={!!liveId} title={liveId ? 'A call is being written down' : 'Start writing down a call now'} onClick={onWriteDown}>Write down now</button></div>
@@ -113,7 +118,7 @@ export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus }:
   )
 }
 
-function MeetingDetail({ id, agents, tab, onTab, onBack, onDeleted }: { id: string; agents: Agent[]; tab: 'notes' | 'transcript'; onTab: (tab: 'notes' | 'transcript') => void; onBack: () => void; onDeleted: () => void }) {
+function MeetingDetail({ id, noise, microphone, agents, tab, onTab, onBack, onDeleted }: { id: string; noise?: NoiseFinding; microphone?: TogleMicrophoneStatus; agents: Agent[]; tab: 'notes' | 'transcript'; onTab: (tab: 'notes' | 'transcript') => void; onBack: () => void; onDeleted: () => void }) {
   const [record, setRecord] = useState<CallSession | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -160,6 +165,7 @@ function MeetingDetail({ id, agents, tab, onTab, onBack, onDeleted }: { id: stri
           <button className="primary" disabled={busy || !title.trim()}>Save title</button><button type="button" disabled={busy} onClick={() => setEditing(false)}>Cancel</button>
         </form>}
         {deleting && <div className="notice ask"><span>Delete this call’s notes and transcript from this computer? This can’t be undone.</span><div className="row"><button disabled={busy} onClick={() => setDeleting(false)}>Keep call</button><button className="primary stop" disabled={busy} onClick={() => void run(async () => { await api.deleteCallSession(record.id); onDeleted() })}>Delete call</button></div></div>}
+        {ended && noise && <NoisyMicrophone finding={noise} microphone={microphone} minutes={((record.endedAt ?? record.startedAt) - record.startedAt) / 60_000} />}
         {ended && <ConfirmNames key={`confirm-${record.id}`} record={record} onRecord={setRecord} />}
         <div className="tabs call-detail-tabs" role="tablist" aria-label="Call details">
           {(['notes', 'transcript'] as const).map(name => <button key={name} role="tab" id={`meeting-tab-${name}`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => onTab(name)}>{name === 'notes' ? 'Notes' : 'Transcript'}</button>)}

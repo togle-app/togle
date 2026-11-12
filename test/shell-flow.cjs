@@ -364,28 +364,31 @@ async function checkProblems(T, agent) {
 
 /** A noisy room: after the call, what the microphone picked up, and both ways to stop it. */
 async function checkNoisyCall(T, agent) {
-  for (const [width, choice] of [[640, 'See Togle Studio'], [1024, 'Don’t show this again']]) {
+  for (const width of [640, 1024]) {
     const ui = await open(T, agent, 'noisy-call', width)
     await ui.click('.workspace-nav button', 'Meetings')
     await ui.click('.meetings .page-head button', 'Write down now')
     await ui.wait('!!' + LIVE)
-    assert.equal(await ui.evaluate("!!document.querySelector('.microphone-suggestion')"), false, 'nothing about Togle Studio during a call')
+    assert.equal(await ui.evaluate("!!document.querySelector('.studio-mention')"), false, 'nothing about Togle Studio during a call')
     await ui.click('.live-head button', 'Stop')
-    await ui.wait("!!document.querySelector('.microphone-suggestion')")
-    const text = await ui.evaluate("document.querySelector('.microphone-suggestion').textContent")
-    assert.ok(text.includes('could hear your background'), text)
+    // One line on the call's page, with one link.
+    await ui.wait("!!document.querySelector('.meeting-detail .studio-mention')")
+    assert.equal(await ui.evaluate("document.querySelector('.studio-mention').textContent"), 'Your microphone picked up room noise for 3 of 10 minutes. Clean my microphone')
+    assert.equal(await ui.evaluate("document.querySelectorAll('.studio-mention button').length"), 1)
     assert.equal((await ui.calls('noiseMeasured'))[0][0].sample, undefined, 'the audio stays in the window: main gets levels only')
     await ui.fitsWidth()
     await ui.capture('noisy-call-' + width)
-    await ui.click('.microphone-suggestion button', choice)
-    await ui.wait("!document.querySelector('.microphone-suggestion')")
-    if (choice === 'See Togle Studio') assert.deepEqual(await ui.calls('openMicrophonePage'), [['after-call']])
-    // The fixture keeps each settings change as the change itself.
-    else assert.ok((await ui.calls('updateSettings')).some(patch => patch?.microphone?.suggestions === false))
+    await ui.click('.studio-mention button', 'Clean my microphone')
+    assert.deepEqual(await ui.calls('openMicrophonePage'), [['after-call']], 'not installed: its page, tagged with where it came from')
+    // Another call's page does not say it.
+    await ui.click('.meeting-detail button', 'Back to Meetings')
+    await ui.click('.meeting-row', 'Open call: Acme renewal')
+    await ui.wait("!!document.querySelector('.meeting-detail .call-detail-tabs')")
+    assert.equal(await ui.evaluate("!!document.querySelector('.studio-mention')"), false)
     assert.deepEqual(ui.errors, [])
     ui.window.destroy()
   }
-  console.log('Noisy room: offered after the call only, with the page and a way to stop it, passed.')
+  console.log('Noisy room: one line on the call page after the call, with one link, passed.')
 }
 
 /** The first minute, once: talk, sign in with the plan or skip it, what Togle found; what was skipped goes on To-do. */
