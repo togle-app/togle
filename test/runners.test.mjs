@@ -769,7 +769,7 @@ test('a turn Hermes cannot finish says why in its own words', { timeout: 30_000 
     const events = watch(task)
     await until(() => task.state === 'idle', 'the turn to end')
     assert.deepEqual(events.find((e) => e.type === 'error'), { type: 'error', message: 'The provider rejected the request.' })
-    assert.deepEqual(events.find((e) => e.type === 'turn-ended'), { type: 'turn-ended', outcome: 'failed', error: 'The provider rejected the request.' })
+    assert.deepEqual(events.find((e) => e.type === 'turn-ended'), { type: 'turn-ended', outcome: 'failed', error: 'The provider rejected the request.', fault: 'Internal error' }, 'its words are shown; what its program answered is what tells signed out')
     await task.send('say ok')
     await until(() => events.some((e) => e.type === 'message' && e.text === 'ok'), 'the next turn to be answered')
   } finally {

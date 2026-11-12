@@ -31,6 +31,11 @@ export class TaskBoxWindow {
     return !!this.window && !this.window.isDestroyed() && this.window.isVisible()
   }
 
+  /** What it is open with now, for its page to ask when it loads: the message sent on loading can come before the page listens. */
+  get current(): TaskBoxOpen | null {
+    return this.opened ? this.opening : null
+  }
+
   /** Opens it, ready to type in; asked while it is open, it closes. */
   toggle(): void {
     if (this.visible) this.hide()

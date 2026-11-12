@@ -209,6 +209,8 @@ export interface TogleApi {
   onTaskBoxShown(cb: (opening: import('./runner').TaskBoxOpen | null) => void): Unsubscribe
   /** Opens the task box: every way of giving work to an agent does, from a to-do item with its words, or empty. */
   openTaskBox(opening: import('./runner').TaskBoxOpen): Promise<void>
+  /** What the task box is open with now, asked by its page when it loads. */
+  taskBoxOpening(): Promise<import('./runner').TaskBoxOpen | null>
   /** Puts the task box away. */
   closeTaskBox(): void
   /** Asks for a folder for a task, in a dialog that belongs to the task box. Null when it is closed without a choice. */

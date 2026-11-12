@@ -89,7 +89,7 @@ export { CallDetector, browsersIn, callAppsIn, parseBrowserWindows, parseMicroph
 export { callSitesIn } from '../src/shared/call-apps'
 export { RECENT_DICTATIONS, recentLabel, withRecent } from '../src/main/recent-dictations'
 export { AGENT_INSTALLS, changedFiles, isSignedOut, needsYou, SIGN_IN_COMMANDS, stepsLine } from '../src/shared/runner'
-export { mergedPath, registryPath, shellPath } from '../src/main/runners/search-path'
+export { mergedPath, outputOf, pathFolders, savedPathFolders, shellPath } from '../src/main/runners/search-path'
 export { AcpBackend, commandWords, whereIs } from '../src/main/runners/acp'
 export { addedBackend } from '../src/main/runners/register'
 export { KNOWN_AGENTS, addedAgentProblem, addedAgentsFrom, agentIdOf } from '../src/shared/runner'

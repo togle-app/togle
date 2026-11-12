@@ -1466,6 +1466,7 @@ function registerIpc(): void {
     if (!taskBox.owns(event.sender)) throw new Error('That is not for this window.')
     return taskBox.pickFolder()
   })
+  ipcMain.handle('taskbox:opening', (event) => (taskBox.owns(event.sender) ? taskBox.current : null))
   // Every way of giving work to an agent opens the same box: from a to-do item with its words, or empty.
   ipcMain.handle('taskbox:open', (_e, value: unknown) => taskBox.show(taskBoxOpening(value)))
 }
@@ -1487,8 +1488,7 @@ function taskBoxOpening(value: unknown): TaskBoxOpen {
 async function putOnTodo(task: TaskView, request: StartRequest): Promise<void> {
   if (!todo) return
   try {
-    if (request.todo) await todo.link(request.todo, task.key)
-    else await todo.add(task.title || request.prompt, task.key)
+    await todo.putTask(task.key, task.title || request.prompt, request.todo)
   } catch (error) {
     console.warn('[to-do] the task is not on the list:', (error as Error).message)
   }

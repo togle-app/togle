@@ -269,8 +269,10 @@ module.exports = function install(fixture) {
     const started = task('claude:new' + ++sequence, { title: request.prompt.slice(0, 40), folder: request.folder, runner: request.runner, state: 'working', mine: true, line: 'Working…', log: [{ id: 100 + sequence, at: Date.now(), kind: 'you', text: request.prompt }] })
     started.key = request.runner + ':new' + sequence
     runnerTasks.push(started); runnerChanged()
-    // As the main process does: the task is on the to-do list, as the item it was given from or an item of its own.
-    if (request.todo) { const item = todoItems[request.todo.line]; if (item && item.text === request.todo.text) item.task = started.key }
+    // As the main process does: the task is on the to-do list, as the item it was given from (when that is as it was) or
+    // an item of its own.
+    const item = request.todo && todoItems[request.todo.line]
+    if (item && item.text === request.todo.text) item.task = started.key
     else todoItems.push({ text: started.title, done: false, task: started.key })
     emit('onTodoChanged')
     return clone(runnerView(started))
@@ -292,6 +294,8 @@ module.exports = function install(fixture) {
   api.pickRunnerFolder = async () => { record('pickRunnerFolder', []); return 'C:\\work\\picked' }
   api.pickTaskBoxFolder = async () => { record('pickTaskBoxFolder', []); return 'C:\\work\\chosen-for-box' }
   api.openTaskBox = async opening => { record('openTaskBox', [opening]) }
+  // What the box was opened with before its page listened (its first opening), when a test gives it one.
+  api.taskBoxOpening = async () => clone(fixture.taskBoxOpening ?? null)
   // Claude Code in a terminal asking Togle: the connection, as the window is told it.
   let hookStatus = { claude: fixture.scenario === 'tasks', version: '2.1.322 (Claude Code)', supported: true, minimum: '2.1.139', installed: false, current: false, file: 'C:\\Users\\demo\\.claude\\settings.json' }
   let failHook = false

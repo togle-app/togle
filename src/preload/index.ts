@@ -135,6 +135,7 @@ const api: TogleApi = {
   answerCallNotice: choice => ipcRenderer.send('callnotice:answer', choice),
   onTaskBoxShown: cb => subscribe('taskbox:shown', opening => cb((opening ?? null) as import('../shared/runner').TaskBoxOpen | null)),
   openTaskBox: opening => ipcRenderer.invoke('taskbox:open', opening),
+  taskBoxOpening: () => ipcRenderer.invoke('taskbox:opening'),
   closeTaskBox: () => ipcRenderer.send('taskbox:close'),
   pickTaskBoxFolder: () => ipcRenderer.invoke('taskbox:pick-folder'),
   showPicture: () => ipcRenderer.invoke('show:picture'),

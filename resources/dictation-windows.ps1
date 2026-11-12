@@ -132,7 +132,9 @@ function Read-FocusedText {
   [void][TogleTextInput]::GetWindowThreadProcessId($frontHandle, [ref]$frontProcess)
   if ([TogleTextInput]::AboveThis($frontProcess)) {
     $name = try { (Get-Process -Id $frontProcess -ErrorAction Stop).ProcessName } catch { 'That window' }
-    return @{ front=$front; identity="admin:$front"; kind='admin'; label=$name }
+    # An administrator terminal gets the copied words as one line too: pasted there, each line would run as a command.
+    $adminTerminal = ($frontClass -match '^(ConsoleWindowClass|CASCADIA_HOSTING_WINDOW_CLASS)$') -or ($name -match '^(WindowsTerminal|OpenConsole|conhost|cmd|powershell|pwsh|wezterm-gui|mintty|alacritty)$')
+    return @{ front=$front; identity="admin:$front"; kind='admin'; label=$name; terminal=[bool]$adminTerminal }
   }
   $terminal = $frontClass -match '^(ConsoleWindowClass|CASCADIA_HOSTING_WINDOW_CLASS)$'
   $element = [System.Windows.Automation.AutomationElement]::FocusedElement
@@ -211,7 +213,7 @@ while ($null -ne ($line = [Console]::ReadLine())) {
       try {
         $target = Read-FocusedText
         if ($target.kind -eq 'admin') {
-          $result = @{ label=$target.label; reason='That window runs as administrator, so Togle can''t type into it. Your words will be copied for you to paste.'; copy=$true }
+          $result = @{ label=$target.label; reason='That window runs as administrator, so Togle can''t type into it. Your words will be copied for you to paste.'; copy=$true; terminal=[bool]$target.terminal }
         } else {
           $token = [guid]::NewGuid().ToString()
           $targets[$token] = $target

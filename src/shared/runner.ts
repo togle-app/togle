@@ -31,7 +31,7 @@ export const SIGN_IN_COMMANDS: Readonly<Record<string, string>> = { claude: 'cla
  * service turned away. Read only from errors, never from what an agent wrote in a task (a task can be about a login page).
  */
 export function isSignedOut(error: string): boolean {
-  return /\bnot logged in\b|please run \/login|\b401\b|\bunauthori[sz]ed\b|authentication (?:is )?(?:required|failed)|missing bearer|invalid (?:api key|x-api-key|bearer token)|(?:token|session|credentials?) (?:has |have )?expired|expired (?:token|session|credentials?)|(?:log|sign) ?in again|re-?authenticate/i.test(error)
+  return /\bnot logged in\b|please run \/login|\bunauthori[sz]ed\b|(?<!proxy )authentication (?:is )?(?:required|failed)|missing bearer|invalid (?:api key|x-api-key|bearer token)|(?:token|session|credentials?) (?:has |have )?expired|expired (?:token|session|credentials?)|(?:log|sign) ?in again|re-?authenticate/i.test(error)
 }
 
 /**
@@ -331,6 +331,8 @@ export type TaskEvent =
   | { type: 'request-ended'; id: string; outcome: 'allowed' | 'always' | 'refused' | 'answered' | 'cancelled' }
   | { type: 'command'; command: string; status: 'started' | 'finished' | 'declined' | 'failed'; exitCode: number | null }
   | { type: 'files'; paths: string[] }
-  | { type: 'turn-ended'; outcome: 'completed' | 'interrupted' | 'failed'; error: string | null }
+  // `error` is what to show of a failed turn, which can be the agent's own words; `fault`, when given, is what its program
+  // said went wrong, apart from those words (the agent's words never decide that it is signed out).
+  | { type: 'turn-ended'; outcome: 'completed' | 'interrupted' | 'failed'; error: string | null; fault?: string }
   | { type: 'error'; message: string }
   | { type: 'ended'; reason: 'closed' | 'crashed' }

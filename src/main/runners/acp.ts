@@ -184,7 +184,8 @@ class AcpTask extends TaskBase {
     // An agent may tell why in words (a model that refused the request) before it answers with a plain error.
     const message = spoke ? oneLine(spoke.split('\n')[0], 160) : why
     if (!this.stopped) this.emit({ type: 'error', message })
-    this.emit({ type: 'turn-ended', outcome: this.stopped ? 'interrupted' : 'failed', error: this.stopped ? null : message })
+    // What the program answered is the fault; the agent's words above are only what is shown.
+    this.emit({ type: 'turn-ended', outcome: this.stopped ? 'interrupted' : 'failed', error: this.stopped ? null : message, ...(this.stopped ? {} : { fault: why }) })
     if (!this.open) this.setBase(this.stopped ? 'stopped' : 'idle')
   }
 

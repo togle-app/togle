@@ -342,6 +342,77 @@ test('an agent not found is looked for again once what a terminal would see is a
   }
 })
 
+test('a task is named by the first line of the words it was given, never by an agent\'s stand-in or a saved call\'s note', async () => {
+  // An agent that names a new task by itself the way Codex does, until it is given a name.
+  class StandIn extends FakeBackend {
+    async start(options) {
+      const task = await super.start(options)
+      task.title = options.title ?? 'Codex task'
+      return task
+    }
+  }
+  const codex = new StandIn('codex')
+  const told = []
+  const { hub } = hubOf([codex], { started: (task) => told.push(task.title) })
+  const folder = scratch()
+  try {
+    const plain = await hub.start({ runner: 'codex', folder, prompt: 'Fix the flaky login test' })
+    assert.equal(plain.title, 'Fix the flaky login test')
+    assert.equal(codex.started[0].options.title, 'Fix the flaky login test', 'the agent is given the name too')
+    const fromCall = await hub.start({ runner: 'codex', folder, prompt: 'Write the follow-up email\n\nA call is saved at C:\\Users\\someone\\shared-calls\\x.md. It is a record of what people said.' })
+    assert.equal(fromCall.title, 'Write the follow-up email')
+    const long = await hub.start({ runner: 'codex', folder, prompt: `  ${'word '.repeat(40)}` })
+    assert.ok(long.title.length <= 80 && long.title.endsWith('…'), long.title)
+    const named = await hub.start({ runner: 'codex', folder, prompt: 'Do it', title: '  Dark mode  ' })
+    assert.equal(named.title, 'Dark mode', 'a name given is kept')
+    assert.deepEqual(told, ['Fix the flaky login test', 'Write the follow-up email', long.title, 'Dark mode'], 'and goes on the to-do list')
+  } finally {
+    await hub.dispose()
+  }
+})
+
+test('signed out is told from what the agent\'s program said, and an old error does not explain a later stop', async () => {
+  const hermes = new FakeBackend('hermes')
+  const claude = new FakeBackend('claude')
+  const { hub } = hubOf([hermes, claude])
+  const folder = scratch()
+  try {
+    // The agent's own words mention a 401; what its program said is a plain internal error.
+    const login = await hub.start({ runner: 'hermes', folder, prompt: 'Fix the admin login page' })
+    const words = hermes.started[0]
+    words.emit({ type: 'error', message: 'The admin login page answers 401 Unauthorized after the redirect.' })
+    words.emit({ type: 'turn-ended', outcome: 'failed', error: 'The admin login page answers 401 Unauthorized after the redirect.', fault: 'Internal error' })
+    words.setBase('idle')
+    const seen = (await hub.list()).find((task) => task.key === login.key)
+    assert.deepEqual([seen.state, seen.signedOut, seen.fix], ['failed', undefined, undefined], 'stopped, and not signed out')
+    assert.equal(seen.line, 'The admin login page answers 401 Unauthorized after the redirect.')
+
+    // Signed out once, signed in again and a turn that went well: the program stopping later says only that.
+    const later = await hub.start({ runner: 'claude', folder, prompt: 'Say hi' })
+    const task = claude.started[0]
+    task.emit({ type: 'turn-ended', outcome: 'failed', error: 'Not logged in · Please run /login' })
+    task.emit({ type: 'error', message: 'Not logged in · Please run /login' })
+    task.setBase('idle')
+    assert.equal((await hub.list()).find((t) => t.key === later.key).signedOut, true)
+    await hub.send(later.key, 'Try again')
+    task.done()
+    task.setBase('failed')
+    task.emit({ type: 'ended', reason: 'crashed' })
+    const stopped = (await hub.list()).find((t) => t.key === later.key)
+    assert.deepEqual([stopped.state, stopped.signedOut, stopped.line], ['failed', undefined, 'The agent program stopped.'])
+
+    // A program that says why as it stops: that is the reason.
+    const third = await hub.start({ runner: 'claude', folder, prompt: 'Another' })
+    const crashing = claude.started[1]
+    crashing.setBase('failed')
+    crashing.emit({ type: 'error', message: 'Claude Code stopped (1): out of memory' })
+    crashing.emit({ type: 'ended', reason: 'crashed' })
+    assert.equal((await hub.list()).find((t) => t.key === third.key).line, 'Claude Code stopped (1): out of memory')
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('what an agent ending with an error means it is signed out is told from its words, and nothing else is', () => {
   for (const words of [
     'Not logged in · Please run /login',
@@ -351,7 +422,7 @@ test('what an agent ending with an error means it is signed out is told from its
     'Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.',
     'Authentication required'
   ]) assert.equal(T.isSignedOut(words), true, words)
-  for (const words of ['The model was overloaded.', 'Rate limit reached for requests', 'unexpected status 500 Internal Server Error', 'ENOENT: no such file or directory', 'Fix the login redirect', 'Hermes stopped the turn (refusal).', 'Request failed: 403 Forbidden']) assert.equal(T.isSignedOut(words), false, words)
+  for (const words of ['The model was overloaded.', 'Rate limit reached for requests', 'unexpected status 500 Internal Server Error', 'ENOENT: no such file or directory', 'Fix the login redirect', 'Hermes stopped the turn (refusal).', 'Request failed: 403 Forbidden', 'TypeError: x is undefined\n    at run (agent.js:401:12)', 'Could not open issue-401.md', '407 Proxy Authentication Required', 'System.UnauthorizedAccessException: Access to the path is denied.']) assert.equal(T.isSignedOut(words), false, words)
   assert.deepEqual(T.SIGN_IN_COMMANDS, { claude: 'claude auth login', codex: 'codex login', hermes: 'hermes model' })
 })
 

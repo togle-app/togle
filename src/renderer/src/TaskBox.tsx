@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { asksEveryTime, type RunnerKind, type RunnerStatus } from '@shared/runner'
+import { asksEveryTime, type RunnerKind, type RunnerStatus, type TaskBoxOpen } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
 import { useHotkeys } from './hotkeys'
 
@@ -64,18 +64,24 @@ export function TaskBox() {
   }, [])
 
   useEffect(() => {
-    void load()
-    return api.onTaskBoxShown((shown) => {
-      void load()
-      // What it opened with stays, like the words typed, until the task starts or the person leaves it out.
+    // What it opened with stays, like the words typed, until the task starts or the person leaves it out.
+    const apply = (shown: TaskBoxOpen | null): void => {
       if (shown?.attach) setAttach(shown.attach)
       if (shown?.prompt) setText(shown.prompt)
       if (shown?.todo) setTodo(shown.todo)
       if (shown?.runner) setRunner(shown.runner)
       if (shown?.folder) setFolder(shown.folder)
+    }
+    void load()
+    const stop = api.onTaskBoxShown((shown) => {
+      void load()
+      apply(shown)
       setError('')
       input.current?.focus()
     })
+    // Opened for the first time, the box can be told before this page listens: it asks.
+    void api.taskBoxOpening().then(apply, () => undefined)
+    return stop
   }, [load])
 
   // The folder last used, else the one a task was most recently in.

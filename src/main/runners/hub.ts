@@ -62,8 +62,12 @@ interface Owned {
   off: () => void
   /** The error the last turn ended with, until the person replies: the task stopped by itself. */
   problem?: string
-  /** What the agent last said went wrong, for a program that stopped. */
-  lastError?: string
+  /** What the agent's program said of that error, apart from the agent's own words: what tells that it is signed out. */
+  fault?: string
+  /** An error the agent told just now: it explains the program stopping, when that comes right after. */
+  justSaid?: string
+  /** Why the agent's program stopped, when it stopped by itself. */
+  crash?: string
 }
 
 const LOG_LIMIT = 400
@@ -73,6 +77,8 @@ const short = (value: string, longest = 90): string => {
   return line.length > longest ? `${line.slice(0, longest - 1)}…` : line
 }
 const firstSentence = (value: string): string => short(/^[^.!?\n]*[.!?]?/.exec(value.trim())?.[0] ?? value)
+/** A task's name from the words it was given: their first line, cut short. */
+const taskName = (words: string): string => short(words.split('\n').find((line) => line.trim()) ?? words, 80)
 const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
 
 /** What a request asks, in one line. */
@@ -181,10 +187,13 @@ export class RunnerHub {
     if (!prompt) throw new Error('Say what the task is.')
     const folder = await fs.stat(request.folder).catch(() => null)
     if (!folder?.isDirectory()) throw new Error('That folder is not there.')
+    // Named by the person's words (their first line), never by an agent's stand-in like "Codex task" or by what is added
+    // after the words (where a saved call is).
+    const title = request.title?.trim().slice(0, 120) || taskName(prompt)
     // A task started here always asks before a command or an edit.
-    const handle = await backend.start({ folder: request.folder, prompt, title: request.title?.trim() || undefined, asks: true })
+    const handle = await backend.start({ folder: request.folder, prompt, title, asks: true })
     const owned = await this.adopt(handle, prompt)
-    this.options.titles?.set(owned.key, owned.handle.title)
+    this.options.titles?.set(owned.key, title)
     this.fresh()
     const view = this.viewOfOwned(owned, undefined)
     this.options.started?.(view, request)
@@ -232,6 +241,7 @@ export class RunnerHub {
     this.touch(owned)
     // A reply goes on from where it stopped: what went wrong is past.
     owned.problem = undefined
+    owned.fault = undefined
     await owned.handle.send(message)
     this.fresh()
   }
@@ -418,6 +428,9 @@ export class RunnerHub {
 
   private record(owned: Owned, event: TaskEvent): void {
     owned.updatedAt = Date.now()
+    // An error explains the program stopping only when the stop comes right after it (a state change between is fine).
+    const justSaid = owned.justSaid
+    if (event.type !== 'state') owned.justSaid = undefined
     switch (event.type) {
       case 'message':
         this.log(owned, 'agent', event.text)
@@ -448,12 +461,14 @@ export class RunnerHub {
         if (event.outcome === 'interrupted') this.log(owned, 'note', 'Stopped.')
         // A turn that ended with an error stops the task until the person replies; a turn that ended well clears it.
         owned.problem = event.outcome === 'failed' ? event.error || 'The turn ended with an error.' : undefined
+        owned.fault = event.outcome === 'failed' ? (event.fault ?? event.error ?? undefined) : undefined
         break
       case 'error':
         this.log(owned, 'note', event.message)
-        owned.lastError = event.message
+        owned.justSaid = event.message
         break
       case 'ended':
+        if (event.reason === 'crashed') owned.crash = justSaid ?? 'The agent program stopped.'
         owned.running = 0
         this.log(owned, 'note', event.reason === 'crashed' ? 'The agent program stopped.' : 'Let go of the task.')
         break
@@ -520,9 +535,10 @@ export class RunnerHub {
     const lastWords = [...owned.log].reverse().find((e) => e.kind === 'agent')
     const first = pending[0]
     // Stopped by itself (a turn that ended with an error, or a program that stopped), it waits for a reply and says why.
-    const why = handle.state === 'failed' ? (owned.lastError ?? owned.problem) : handle.state === 'idle' ? owned.problem : undefined
+    const why = handle.state === 'failed' ? (owned.crash ?? owned.problem) : handle.state === 'idle' ? owned.problem : undefined
     const state: TaskState = why ? 'failed' : handle.state
-    const signedOut = !!why && isSignedOut(why)
+    // Signed out is told from what the agent's program said, never from what the agent wrote in the task.
+    const signedOut = !!why && !!owned.fault && isSignedOut(owned.fault)
     const fix = signedOut ? SIGN_IN_COMMANDS[handle.runner] : undefined
     const line = first
       ? requestLine(first)

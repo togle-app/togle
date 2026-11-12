@@ -47,12 +47,12 @@ test('F8 Show: with nothing said the picture still goes in; a picture that canno
   }
 })
 test('a window that runs as administrator takes no typing: the words are copied, and the bar says to paste', async () => {
-  const admin = { label: 'powershell', reason: 'That window runs as administrator, so Togle can\'t type into it. Your words will be copied for you to paste.', copy: true }
-  const run = async (copy) => {
+  const admin = { label: 'notepad', reason: 'That window runs as administrator, so Togle can\'t type into it. Your words will be copied for you to paste.', copy: true }
+  const run = async (copy, target = admin, said = 'restart the print service') => {
     const inserted = []
     const job = new Dictation({
-      target: { capture: async () => admin, insert: async (token, text) => { inserted.push(text); return { inserted: true } } },
-      speech: () => ({ ready: async () => {}, transcribe: async () => 'restart the print service', polish: async text => text + '.' }),
+      target: { capture: async () => target, insert: async (token, text) => { inserted.push(text); return { inserted: true } } },
+      speech: () => ({ ready: async () => {}, transcribe: async () => said, polish: async text => text + '.' }),
       changed: () => {}, inCall: () => false, ...(copy ? { copy } : {})
     })
     await job.start(false); const id = job.status().id
@@ -67,9 +67,15 @@ test('a window that runs as administrator takes no typing: the words are copied,
   assert.deepEqual(inserted, [], 'nothing is typed')
   assert.deepEqual([status.phase, status.outcome], ['done', 'copied'])
   assert.match(status.message, /^Copied: that window runs as administrator, so Togle can't type there\. Press (Ctrl\+V|⌘V) to paste\.$/)
-  // The clipboard would not take it: the words wait on the bar, to copy by hand.
+  // The clipboard would not take it: the words wait on the bar, to copy by hand, and the bar says so.
   const refused = await run(() => { throw new Error('The clipboard is busy.') })
-  assert.deepEqual([refused.status.phase, refused.status.text, refused.status.message], ['ready', 'restart the print service.', admin.reason])
+  assert.deepEqual([refused.status.phase, refused.status.text], ['ready', 'restart the print service.'])
+  assert.equal(refused.status.message, "That window runs as administrator, so Togle can't type there, and the clipboard didn't take the words. Copy them from here.")
+  // An administrator terminal: the words are copied as one line, so a paste runs no line by itself.
+  const terminal = []
+  const asOne = await run(text => terminal.push(text), { ...admin, label: 'cmd', terminal: true }, 'cd C:\\work\nrun the tests\tnow')
+  assert.deepEqual(terminal, ['cd C:\\work run the tests now.'])
+  assert.equal(asOne.status.text, 'cd C:\\work run the tests now.')
 })
 
 test('with no AI to clean them up, the words go in as heard and the bar says why', async () => {

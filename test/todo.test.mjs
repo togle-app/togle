@@ -35,6 +35,18 @@ test('an item can be added already given to a task, as a task started elsewhere 
   await assert.rejects(todo.add('Another', 'two words'), /That task has no name/)
 })
 
+test('a task goes on the item it came from, or on an item of its own when that item changed or there was none', async () => {
+  const todo = new T.TodoFile(fileOf())
+  await todo.add('Review the onboarding copy')
+  await todo.add('Fix the login redirect')
+  assert.deepEqual((await todo.putTask('claude:a', 'Review the onboarding copy', { line: 2, text: 'Review the onboarding copy' })).map((item) => [item.text, item.task]), [['Review the onboarding copy', 'claude:a'], ['Fix the login redirect', undefined]])
+  // The item was edited after the box opened: the task is not lost, it gets its own item.
+  await todo.edit({ line: 3, text: 'Fix the login redirect' }, 'Fix the login redirect on Safari')
+  const items = await todo.putTask('codex:b', 'Fix the login redirect', { line: 3, text: 'Fix the login redirect' })
+  assert.deepEqual(items.map((item) => [item.text, item.task]), [['Review the onboarding copy', 'claude:a'], ['Fix the login redirect on Safari', undefined], ['Fix the login redirect', 'codex:b']])
+  assert.deepEqual((await todo.putTask('hermes:c', 'Write the release notes')).at(-1), { line: 5, text: 'Write the release notes', done: false, task: 'hermes:c' })
+})
+
 test('a list that is not there yet is empty, and the first item makes the file', async () => {
   const file = fileOf()
   const todo = new T.TodoFile(file)

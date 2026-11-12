@@ -78,6 +78,21 @@ export class TodoFile {
     })
   }
 
+  /**
+   * A task that started, on the list: given to the item it came from, or, when it came from none or that item changed
+   * since (edited, moved or gone), added as an item of its own. Every task given to an agent is on the list.
+   */
+  async putTask(task: string, words: string, item?: TodoRef): Promise<TodoItem[]> {
+    if (item) {
+      try {
+        return await this.link(item, task)
+      } catch {
+        // The item is not as it was: the task gets an item of its own below.
+      }
+    }
+    return this.add(words, task)
+  }
+
   /** Tells `changed` when the file changes in an editor too. */
   async watch(): Promise<void> {
     if (this.watcher) return
