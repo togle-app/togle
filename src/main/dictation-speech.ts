@@ -35,6 +35,17 @@ interface Options {
 /** Said when dictation types the words as heard because there is no AI to clean them up. */
 export const AS_HEARD = 'Typed as heard. Sign in to your AI plan in Settings to clean it up.'
 
+/** Why the words went in as heard when the clean-up did not answer, from what the AI service said. */
+export function asHeardBecause(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  const name = error instanceof Error || (typeof error === 'object' && error !== null) ? String((error as { name?: unknown }).name ?? '') : ''
+  if (/usage limit|at its limit|rate limit|limit reached|plan limit|quota|too many requests|\b429\b/i.test(message)) return 'Typed as heard: your plan is at its limit for now.'
+  if (/can't reach|internet connection|fetch failed|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETUNREACH|ECONNRESET|getaddrinfo|socket hang up|net::ERR_|offline/i.test(message)) return 'Typed as heard: no internet.'
+  if (name === 'TimeoutError' || /in time|took too long|timed out/i.test(message)) return 'Typed as heard: the clean-up took too long.'
+  if (/signed out|sign in again|\b401\b|unauthori[sz]ed|turned down the API key/i.test(message)) return 'Typed as heard: sign in to your AI plan again in Settings.'
+  return 'Typed as heard: the clean-up did not answer.'
+}
+
 type Route = 'chatgpt' | 'claude' | 'key'
 
 const cleanupInput = (source: Route, text = '', words: string[] = [], model?: string): CompletionInput => ({ lane: 'quick', model: source === 'claude' ? 'haiku' : model, effort: 'low', webSearch: false, tools: [],

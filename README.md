@@ -16,7 +16,7 @@ The window has three places, **To-do**, **Agents** and **Meetings**, and **Setti
 
 Hold **F9** and talk. Togle types the words where your cursor is: a chat, an editor, a terminal. On a Mac and on Linux, F9 starts and stops instead of being held. **Esc** cancels.
 
-- Your AI plan cleans the words up: punctuation, filler words, and a correction you make halfway ("send it to Dario, no wait, to Marta"). Without a plan, or with cleanup off, Togle types the words as heard. Cleanup has eight seconds; if it fails, you get the words as heard.
+- Your AI plan cleans the words up: punctuation, filler words, and a correction you make halfway ("send it to Dario, no wait, to Marta"). Without a plan, or with cleanup off, Togle types the words as heard. Cleanup has eight seconds; if it fails, you get the words as heard, and the voice bar says why (no internet, the plan at its limit, too slow).
 - Speech is heard on this computer. Your plan gets words, never sound.
 - Togle never presses Enter or sends anything. In a terminal it types everything as one line. Windows lets no app type into a window that runs as administrator, so there Togle copies your words for you to paste. When it can't type into the box for another reason (a password field, a window that changed), the voice bar keeps your words for **Copy text**, and the tray menu lists your last ten dictations under **Copy a recent dictation**, in memory only.
 - **Names and terms** (Settings): tell Togle once how a name or a word is spelled, or a phrase that stands for a longer text ("my work email"), and it writes it that way from then on.
@@ -80,9 +80,9 @@ Your plan gets words, never sound. Your agents keep their own sign-ins, which To
 ## When something goes wrong
 
 - **Togle can't type into the box.** Your words are kept for Copy, and the tray lists your last ten dictations.
-- **An agent is signed out, or stops by itself.** Its row waits for you and says why.
-- **No agent is installed.** The Agents screen says which ones Togle knows.
-- **No internet, or your plan is at its limit.** Dictation types the words as heard. Transcripts and the to-do list still work.
+- **An agent is signed out, or stops by itself.** Its row waits for you and says why. Signed out, it gives the command that signs the agent in again, with **Copy**.
+- **No agent is installed.** The Agents screen names the ones Togle knows, each with the line that installs it.
+- **No internet, or your plan is at its limit.** Dictation types the words as heard and says which. Transcripts and the to-do list still work.
 - **The microphone or the call's sound can't be opened.** The call goes on with the other one and says so, and **Reconnect audio** tries again.
 
 ## Setup

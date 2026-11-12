@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { DictationInsertion, DictationReceipt, DictationState, DictationTarget } from '@shared/dictation'
-import { abortable, type DictationEngine } from './dictation-speech'
+import { abortable, asHeardBecause, type DictationEngine } from './dictation-speech'
 
 interface DictationOptions {
   target: {
@@ -142,10 +142,11 @@ export class Dictation {
       return
     }
     this.set({ ...(job.speech.polishes !== false ? { phase: 'polishing' as const } : {}), text: raw, lastText: raw, message: job.speech.polishes !== false ? 'Cleaning up your text…' : 'Preparing text…' })
-    let text = raw, polishFailed = false
+    // With no internet, or a plan at its limit, the words go in as heard and the bar says why.
+    let text = raw, asHeard: string | undefined
     job.cleanup = new AbortController()
     const cleanupSignal = AbortSignal.any([job.controller.signal, job.cleanup.signal])
-    try { const cleaned = await abortable(job.speech.polish(raw, cleanupSignal), cleanupSignal); text = cleaned.trim() ? cleaned : raw } catch { polishFailed = !job.original; text = job.speech.format?.(raw) ?? raw }
+    try { const cleaned = await abortable(job.speech.polish(raw, cleanupSignal), cleanupSignal); text = cleaned.trim() ? cleaned : raw } catch (error) { if (!job.original) asHeard = asHeardBecause(error); text = job.speech.format?.(raw) ?? raw }
     if (this.job !== job || job.controller.signal.aborted) return
     // Cleanup and destination capture overlap; a slow text field must not delay the model.
     if (!job.targetResolved) this.set({ message: 'Finding your text box…' })
@@ -177,7 +178,7 @@ export class Dictation {
       const result = await this.options.target.insert(job.target.token, text)
       if (this.job !== job) return
       // With no AI to clean the words up, they went in as heard, and the bar says why.
-      this.set({ phase: result.inserted ? 'done' : 'ready', outcome: result.inserted ? 'inserted' : undefined, message: result.inserted ? result.message || job.speech.asHeard || (polishFailed || job.original ? 'Original words entered' : 'Text entered') : result.message || 'Text ready. The destination changed; copy it where you need it.' })
+      this.set({ phase: result.inserted ? 'done' : 'ready', outcome: result.inserted ? 'inserted' : undefined, message: result.inserted ? result.message || job.speech.asHeard || asHeard || (job.original ? 'Original words entered' : 'Text entered') : result.message || 'Text ready. The destination changed; copy it where you need it.' })
       this.receipt(job, raw, text, result.inserted ? 'inserted' : 'ready')
     } catch { if (this.job === job) { this.set({ phase: 'ready', message: 'Could not confirm insertion. Check your text box before copying.' }); this.receipt(job, raw, text, 'ready') } }
   }

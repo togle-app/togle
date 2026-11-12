@@ -32,7 +32,7 @@ export { presetProfile, profileSettings, pinnedClaudeModels, PRESETS, PRESET_VER
 export { routedProvider, planFor } from '../src/main/providers/routed'
 export { ApiConnections } from '../src/main/auth/api-connections'
 export { HotkeyPress, virtualKey } from '../src/main/hotkey-press'
-export { DictationSpeech, abortable } from '../src/main/dictation-speech'
+export { DictationSpeech, abortable, asHeardBecause } from '../src/main/dictation-speech'
 export { DictationVocabularyStore, editVocabulary, prepareDictationText } from '../src/main/dictation-vocabulary'
 export { DictationHistoryStore } from '../src/main/dictation-history'
 export { spellingCorrection } from '../src/shared/dictation'

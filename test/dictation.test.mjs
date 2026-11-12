@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { Dictation, DictationSpeech, abortable, getSettings, cleanTranscript } from './.build/togle.mjs'
+import { Dictation, DictationSpeech, abortable, asHeardBecause, getSettings, cleanTranscript } from './.build/togle.mjs'
 import { Segmenter } from './.build/capture.mjs'
 
 const tick = () => new Promise(resolve => setImmediate(resolve))
@@ -184,9 +184,26 @@ test('dictation: unsupported text fields retain text for Copy', async () => {
   await job.finish(await recorded(job))
   assert.equal(inserted.length, 0); assert.equal(job.status().phase, 'ready'); assert.equal(job.status().text, 'phrase 1.'); job.dispose()
 })
-test('dictation: cleanup failure still inserts the recognized words', async () => {
-  const { job, inserted } = fixture({ polish: async () => { throw Error('Plan limit') } })
-  await job.finish(await recorded(job)); assert.equal(inserted[0].text, 'phrase 1'); assert.match(job.status().message, /original words/i); job.dispose()
+test('dictation: cleanup failure still inserts the recognized words, and the bar says why', async () => {
+  const { job, inserted } = fixture({ polish: async () => { throw Error('Usage limit reached on your ChatGPT plan. Review your plan in ChatGPT settings.') } })
+  await job.finish(await recorded(job)); assert.equal(inserted[0].text, 'phrase 1'); assert.equal(job.status().message, 'Typed as heard: your plan is at its limit for now.'); job.dispose()
+})
+
+test('why the words went in as heard is told from what the AI service said', () => {
+  const timeout = new Error('The operation was aborted due to timeout'); timeout.name = 'TimeoutError'
+  for (const [error, said] of [
+    [new Error('Usage limit reached on your ChatGPT plan.'), 'Typed as heard: your plan is at its limit for now.'],
+    [new Error('Your Claude subscription hit its rate limit. Try again later.'), 'Typed as heard: your plan is at its limit for now.'],
+    [new Error('The AI service is at its limit right now. Try again in a moment.'), 'Typed as heard: your plan is at its limit for now.'],
+    [new Error("Can't reach ChatGPT. Check your internet connection."), 'Typed as heard: no internet.'],
+    [new Error('fetch failed'), 'Typed as heard: no internet.'],
+    [new Error('getaddrinfo ENOTFOUND api.openai.com'), 'Typed as heard: no internet.'],
+    [timeout, 'Typed as heard: the clean-up took too long.'],
+    [new Error("ChatGPT didn't respond in time."), 'Typed as heard: the clean-up took too long.'],
+    [new Error('The AI service turned down the API key (401). Check it in Settings.'), 'Typed as heard: sign in to your AI plan again in Settings.'],
+    [new Error('Cleanup did not return usable text.'), 'Typed as heard: the clean-up did not answer.'],
+    ['something odd', 'Typed as heard: the clean-up did not answer.']
+  ]) assert.equal(asHeardBecause(error), said, String(error?.message ?? error))
 })
 test('dictation: cancel during cleanup never delivers a late response', async () => {
   const delayed = deferred(), { job, inserted } = fixture({ polish: () => delayed.promise })
