@@ -1,6 +1,7 @@
 // What the window can ask of the agents' tasks: each a message from the window to the hub, and one back when
 // something changed (the window then asks again for what it shows).
-import { addedAgentProblem, agentIdOf, KNOWN_AGENTS, type AddedAgent, type RunnerKind } from '@shared/runner'
+import { addedAgentProblem, agentIdOf, KNOWN_AGENTS, type AddedAgent, type RunnerKind, type StartRequest, type TaskView } from '@shared/runner'
+import type { TodoRef } from '@shared/todo'
 import { AcpBackend, commandWords, whereIs } from './acp'
 import { ClaudeBackend } from './claude'
 import { CodexBackend } from './codex'
@@ -40,6 +41,16 @@ export interface RunnerDeps {
   /** The agents the person added (any that speaks ACP), and keeping a changed list. */
   added?(): AddedAgent[]
   saveAdded?(agents: AddedAgent[]): Promise<void>
+  /** A task was started, from the window, the task box or the togle command (see HubOptions.started). */
+  started?(task: TaskView, request: StartRequest): void
+}
+
+/** The to-do item a task is for, as the window names it: its line and its words. */
+function todoOf(value: unknown): TodoRef | undefined {
+  if (value === undefined || value === null) return undefined
+  const given = value as Record<string, unknown>
+  if (typeof given.line !== 'number' || !Number.isInteger(given.line) || given.line < 0 || typeof given.text !== 'string') throw new Error('Pick an item.')
+  return { line: given.line, text: given.text }
 }
 
 function word(value: unknown, what: string): string {
@@ -58,7 +69,8 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
       deps.changed?.()
     },
     titles: deps.titles,
-    records: deps.records
+    records: deps.records,
+    started: deps.started
   })
   const { handle } = deps
   handle('runners:status', () => hub.status())
@@ -69,7 +81,8 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     const given = (request ?? {}) as Record<string, unknown>
     const runner = given.runner as RunnerKind
     if (typeof runner !== 'string' || !hub.has(runner)) throw new Error('Pick an agent.')
-    return hub.start({ runner, folder: word(given.folder, 'The folder'), prompt: word(given.prompt, 'The task'), title: typeof given.title === 'string' ? given.title : undefined })
+    const todo = todoOf(given.todo)
+    return hub.start({ runner, folder: word(given.folder, 'The folder'), prompt: word(given.prompt, 'The task'), title: typeof given.title === 'string' ? given.title : undefined, ...(todo ? { todo } : {}) })
   })
   handle('runners:open', (key) => hub.open(word(key, 'The task')))
   handle('runners:take-over', (key) => hub.takeOver(word(key, 'The task')))

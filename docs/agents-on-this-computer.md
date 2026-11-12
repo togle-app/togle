@@ -10,7 +10,7 @@ Togle lists the tasks of the coding agents on your computer (Claude Code, Codex 
 - **Always allow…** shows when the agent offers to remember the choice, and says how far it reaches: for Claude Code, the rule it suggests and where it keeps it (this task, this project, or everywhere); for Codex, the words the commands start with, wherever they run; for Hermes, its own option. Togle passes on only that, never a change of the agent's permission mode. It is not offered for a command that looks dangerous, nor in a notice.
 - An open task starts with what the agent said last and how many files it changed; its steps and the conversation fold under one line ("5 steps: ran 3 commands, changed 2 files").
 - A command that looks dangerous (it deletes for good, pushes over what is on a server, runs hidden text, changes the computer) carries a red mark and the reason. The mark is a hint. The command shown is what runs.
-- **New task** starts a task in a folder with one of the agents. A task started here asks before every command and every change.
+- **New task** opens the task box (below). A task started in Togle asks before every command and every change.
 - **Stop** stops a task. Codex lets a command that was already running finish, so a stopped Codex task shows a second button, **End the running command**.
 - **Let go** stops Togle running a task. The task stays on the computer, and **Continue here** picks it up again.
 - A task that runs in a terminal or in an app shows in the list too. For Claude Code, **Take over** ends the program in the terminal and carries the conversation on here. Togle asks first.
@@ -30,13 +30,15 @@ When a task waits and Togle is not in front, a small notice appears in the corne
 
 ## Task box
 
-**F10** opens a small box over whatever you are doing. Pick the agent and the folder, type the task (or hold the dictation key and say it), and press Enter. It starts the task like **New task** does, and puts itself away. **Esc** closes it, and so does a click elsewhere; what you typed stays for next time, and so do the agent and folder you picked. The key is a setting like the others (**Settings → Coding agents**, or **Window & shortcuts**), and F10 can be changed there if another program needs it.
+**F10** opens a small box over whatever you are doing. Pick the agent and the folder, type the task (or hold the dictation key and say it), and press Enter. The task starts, goes on the to-do list, and the box puts itself away. **Esc** closes it, and so does a click elsewhere; what you typed stays for next time, and so do the agent and folder you picked. The key is a setting like the others (**Settings → Keys**), and F10 can be changed there if another program needs it.
+
+Every way of giving work to an agent opens this same box: **New task** in Agents, **Give to an agent** on a to-do item or a saved call, and `togle run claude` in a terminal. Opened from a to-do item, it has the item's words and a chip naming the item; the task that starts is given to that item. **×** on the chip makes it a task of its own.
 
 ## Settings
 
 **Settings → Agents** lists Claude Code, Codex and Hermes, found or not. The task box key is under **Keys** (Task, F10). Connecting Claude Code in a terminal is on the Agents screen, and the to-do file is shown on To-do.
 
-**Add an agent** takes any other agent that speaks ACP, the open standard Hermes uses: give it a name and the command that starts it for ACP, as its own docs give it. Togle runs that command on this computer the way a terminal would (an agent installed with npm on Windows starts through cmd.exe). The agent then shows like the others: in the list, in New task and the task box, and as `togle run --agent acp-<name>`. It asks before a command as its own settings say, and "always allow" is its own option, in its words. **Remove** takes it off again; what it ran is not undone.
+**Add an agent** takes any other agent that speaks ACP, the open standard Hermes uses: give it a name and the command that starts it for ACP, as its own docs give it. Togle runs that command on this computer the way a terminal would (an agent installed with npm on Windows starts through cmd.exe). The agent then shows like the others: in the list, in the task box, and as `togle run acp-<name>`. It asks before a command as its own settings say, and "always allow" is its own option, in its words. **Remove** takes it off again; what it ran is not undone.
 
 ## To-do
 
@@ -52,20 +54,23 @@ The list is a plain text file you can also open in any editor: `to-do.md` in Tog
 
 Lines that are not items are left as they are. An item given to an agent keeps the task in the comment at its end. A change in an editor shows in Togle, and a change in Togle names the item by its line and its words, so it cannot land on another item if the file was edited meanwhile.
 
-**Give to an agent** opens the New task form with the item's words filled in. The item then shows what the task is doing, and **See changes** when it has finished. You tick the item yourself once you have looked.
+**Give to an agent** opens the task box with the item's words filled in. The item then shows what the task is doing, and **See changes** when it has finished. You tick the item yourself once you have looked. A task started any other way (the task box on its own, **New task**, the `togle` command) gets an item of its own, so every task you give an agent is on the list.
 
 ## From a terminal
 
 The `togle` command starts a task in the running Togle from any terminal, and lists the tasks:
 
 ```
-togle run --agent codex --folder ./api "Add a status column to the orders table"
-togle run "Fix the failing login test"        # Claude Code, in the current folder
+togle run claude                               # opens the task box with Claude Code and this folder
+togle run codex --folder ./api "Add a status column to the orders table"
+togle run "Fix the failing login test"         # Claude Code, in the current folder
 echo "Review the onboarding copy" | togle run  # piped text is the task
 togle tasks
 ```
 
-The task shows in Agents like any other and asks before every command and every change. The command talks to Togle over the same local channel as the Claude Code hook below, so it needs Togle running, and it says so when it is not. It exits with 0 when it worked, 1 when Togle could not do it, and 2 when the command was not understood.
+The first word names the agent: `claude`, `codex`, `hermes`, or the id of one added in Settings (`acp-…`). Without one it is Claude Code; a task that starts with one of those words goes after `--`. With no task, Togle's task box opens with that agent and folder, for you to type or say it. A script that pipes in nothing is told to say what the task is, and no box opens.
+
+The task shows in Agents like any other, goes on the to-do list, and asks before every command and every change. The command talks to Togle over the same local channel as the Claude Code hook below, so it needs Togle running, and it says so when it is not. It exits with 0 when it worked, 1 when Togle could not do it, and 2 when the command was not understood.
 
 The command is the program `out/main/cli.js`, started by Electron as plain Node (`ELECTRON_RUN_AS_NODE=1`). From a copy of the source, run `npm run build`, then `node bin/togle.cjs tasks`, or `npm link` to get `togle` on your path. An installed Togle has the command beside the app in `resources/bin` (`togle.cmd` on Windows, `togle` on Mac and Linux); add that folder to your path to use it from anywhere. The installer does not add it yet, and the Mac and Linux versions were not tried. From a development run, name the data folder: `TOGLE_DATA`.
 

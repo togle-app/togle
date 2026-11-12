@@ -205,8 +205,10 @@ export interface TogleApi {
   onCallNotice(cb: (notice: { app: import('./call-apps').CallApp; name: string } | null) => void): Unsubscribe
   /** The answer to that notice: write the call down, not now, or always for this app. */
   answerCallNotice(choice: 'write' | 'later' | 'always'): void
-  /** The box opened, with a saved call to work from when it was opened from one. */
-  onTaskBoxShown(cb: (attach: { title: string; path: string } | null) => void): Unsubscribe
+  /** The box opened, with what it was opened with (a saved call, a to-do item, an agent and a folder), or null. */
+  onTaskBoxShown(cb: (opening: import('./runner').TaskBoxOpen | null) => void): Unsubscribe
+  /** Opens the task box: every way of giving work to an agent does, from a to-do item with its words, or empty. */
+  openTaskBox(opening: import('./runner').TaskBoxOpen): Promise<void>
   /** Puts the task box away. */
   closeTaskBox(): void
   /** Asks for a folder for a task, in a dialog that belongs to the task box. Null when it is closed without a choice. */

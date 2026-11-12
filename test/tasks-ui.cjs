@@ -185,20 +185,11 @@ async function checkTasks(T, agent) {
   await ui.wait("![...document.querySelectorAll('.task-actions button')].some(b=>b.textContent==='End the running command')")
   assert.deepEqual((await ui.calls('endRunnerCommands')).map(call => call.args), [['codex:t1']])
 
-  // A new task: the agent, the folder, what to do.
+  // A new task: the task box, as every way of giving work to an agent opens it.
   await ui.click('.tasks-head button', 'New task')
-  await ui.wait("!!document.querySelector('.task-new')")
-  assert.deepEqual(await texts(ui, '.task-new-agents label'), ['Claude Code', 'Codex'], 'only agents that are installed can be picked')
-  assert.equal(await ui.evaluate("document.querySelector('.task-new .primary').disabled"), true)
-  await ui.click('.task-new-agents label', 'Codex')
-  await ui.click('.task-new button', 'Choose…')
-  await ui.wait("document.querySelector('.task-new-folder input').value==='C:\\\\work\\\\picked'")
-  await ui.fill('.task-new textarea', 'Add a dark mode switch to the settings page')
-  await ui.capture('tasks-new')
-  await ui.click('.task-new .primary', 'Start')
-  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Add a dark mode switch to the settings p'")
-  assert.deepEqual((await ui.calls('startRunnerTask')).map(call => call.args), [[{ runner: 'codex', folder: 'C:\\work\\picked', prompt: 'Add a dark mode switch to the settings page' }]])
-  assert.equal(await ui.evaluate("document.querySelector('.task-state').textContent"), 'Working')
+  await ui.wait("window.togleUITest.calls().some(call=>call.name==='openTaskBox')")
+  assert.deepEqual((await ui.calls('openTaskBox')).map(call => call.args), [[{}]])
+  assert.equal((await ui.calls('startRunnerTask')).length, 0, 'the box starts it, not this screen')
 
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
@@ -261,22 +252,16 @@ async function checkTodo(T, agent) {
   await ui.wait("document.querySelectorAll('.todo-item').length===4")
   assert.deepEqual((await ui.calls('removeTodo')).map(call => call.args), [[{ line: 4, text: 'Call the bank about the card' }]])
 
-  // Give an item to an agent: the form has its words, and the item is linked to the task that starts.
+  // Give an item to an agent: the task box opens with its words and the item, which the task that starts is given to.
   assert.deepEqual(await todo(), ['Review the onboarding copy', 'Fix the login redirect', 'Write the release notes', 'Send the invoice to Marta'], 'unticked, it is back where it was in the file')
   await ui.click('.todo-item .todo-row > button.small', 'Give to an agent')
-  await ui.wait("!!document.querySelector('.todo-give .task-new')")
-  assert.equal(await ui.evaluate("document.querySelector('.todo-give .task-new h2').textContent"), 'Give to an agent')
-  assert.equal(await ui.evaluate("document.querySelector('.todo-give textarea').value"), 'Review the onboarding copy', 'the task has the item\'s words')
-  assert.deepEqual(await texts(ui, '.todo-give .task-new-agents label'), ['Claude Code', 'Codex'])
-  await ui.capture('todo-give')
-  await ui.click('.todo-give .task-new .primary', 'Start')
-  await ui.wait("!document.querySelector('.todo-give')")
-  assert.deepEqual((await ui.calls('startRunnerTask')).map(call => call.args[0]), [{ runner: 'claude', folder: 'C:\\work\\website', prompt: 'Review the onboarding copy', title: 'Review the onboarding copy' }], 'the folder is the one most recently used')
-  const linked = await ui.calls('linkTodo')
-  assert.equal(linked.length, 1)
-  assert.deepEqual(linked[0].args[0], { line: 0, text: 'Review the onboarding copy' }, 'the item as it was when the person looked')
-  assert.ok(/^claude:new\d+$/.test(linked[0].args[1]), 'linked to the task that started: ' + linked[0].args[1])
+  await ui.wait("window.togleUITest.calls().some(call=>call.name==='openTaskBox')")
+  const item = { line: 0, text: 'Review the onboarding copy' }
+  assert.deepEqual((await ui.calls('openTaskBox')).map(call => call.args[0]), [{ prompt: 'Review the onboarding copy', todo: item }], 'the item as it was when the person looked')
+  // The box starts it for that item (checkTaskBox has the box itself), and the item has the task.
+  await ui.evaluate(`window.togle.startRunnerTask({ runner: 'claude', folder: 'C:\\\\work\\\\website', prompt: 'Review the onboarding copy', todo: ${JSON.stringify(item)} })`)
   await ui.wait("document.querySelectorAll('.todo-chip').length===3")
+  assert.equal(await ui.evaluate("document.querySelectorAll('.todo-item').length"), 4, 'given from the list, the task is that item, not a new one')
   assert.equal(await ui.evaluate("document.querySelector('.todo-item:nth-child(1) .todo-chip').textContent"), 'Claude Code · working')
   assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['See changes'], 'an item with an agent cannot be given again')
 
@@ -477,8 +462,29 @@ async function checkTaskBox(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.taskbox-agents button[aria-checked=true]').textContent"), 'Codex', 'the agent used last')
   assert.equal(await ui.evaluate("document.querySelector('.taskbox-folder select').value"), 'C:\\work\\chosen-for-box', 'and the folder')
 
+  // Opened from a to-do item: its words, a chip naming the item, and the task started for it carries the item.
+  await ui.evaluate("window.togleUITest.emit('onTaskBoxShown',{prompt:'Review the onboarding copy',todo:{line:0,text:'Review the onboarding copy'},runner:'claude',folder:'C:\\\\work\\\\website'})")
+  await ui.wait("!!document.querySelector('.taskbox-todo')")
+  assert.equal((await texts(ui, '.taskbox-todo span'))[0], 'To-do: Review the onboarding copy')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').value"), 'Review the onboarding copy')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox-agents button[aria-checked=true]').textContent"), 'Claude Code', 'the agent it was opened with')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox-folder select').value"), 'C:\\work\\website', 'and the folder')
+  await ui.capture('task-box-todo')
+  await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
+  await ui.wait("document.querySelector('.taskbox textarea').value===''")
+  assert.deepEqual((await ui.calls('startRunnerTask')).at(-1).args[0], { runner: 'claude', folder: 'C:\\work\\website', prompt: 'Review the onboarding copy', todo: { line: 0, text: 'Review the onboarding copy' } })
+  assert.equal(await ui.evaluate("!!document.querySelector('.taskbox-todo')"), false, 'started: the next task is for no item')
+  // The item can be left out: the task then goes on the list as an item of its own.
+  await ui.evaluate("window.togleUITest.emit('onTaskBoxShown',{prompt:'Write the release notes',todo:{line:2,text:'Write the release notes'}})")
+  await ui.wait("!!document.querySelector('.taskbox-todo')")
+  await ui.click('.taskbox-todo button', 'Not for this to-do')
+  assert.equal(await ui.evaluate("!!document.querySelector('.taskbox-todo')"), false)
+  await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
+  await ui.wait("document.querySelector('.taskbox textarea').value===''")
+  assert.equal((await ui.calls('startRunnerTask')).at(-1).args[0].todo, undefined)
+
   // Opened from a saved call (Give to an agent): a chip names it, and the task is told where it is and what it is.
-  const attach = "window.togleUITest.emit('onTaskBoxShown',{title:'Sprint review',path:'C:/data/shared-calls/confirm-call.md'})"
+  const attach = "window.togleUITest.emit('onTaskBoxShown',{attach:{title:'Sprint review',path:'C:/data/shared-calls/confirm-call.md'}})"
   await ui.evaluate(attach)
   await ui.wait("!!document.querySelector('.taskbox-attach')")
   assert.equal((await texts(ui, '.taskbox-attach span'))[0], 'Call: Sprint review')

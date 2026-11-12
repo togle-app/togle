@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, screen } from 'electron'
 import path from 'node:path'
+import type { TaskBoxOpen } from '@shared/runner'
 
 const WIDTH = 600
 const HEIGHT = 268
@@ -17,8 +18,8 @@ export class TaskBoxWindow {
   private picking = false
   /** It was asked for, and has not been put away: it shows as soon as its page is there. */
   private opened = false
-  /** What it opened with: a saved call to work from, which the task is told about. Gone when it is put away. */
-  private attach: { title: string; path: string } | null = null
+  /** What it opened with (a saved call to work from, a to-do item, an agent and a folder). Gone when it is put away. */
+  private opening: TaskBoxOpen | null = null
 
   constructor(private readonly builtMain = __dirname) {}
 
@@ -36,17 +37,17 @@ export class TaskBoxWindow {
     else this.show()
   }
 
-  show(attach: { title: string; path: string } | null = null): void {
+  show(opening: TaskBoxOpen | null = null): void {
     if (this.stopped) return
     if (!this.window || this.window.isDestroyed()) this.create()
     this.opened = true
-    this.attach = attach
+    this.opening = opening
     this.render()
   }
 
   hide(): void {
     this.opened = false
-    this.attach = null
+    this.opening = null
     const win = this.window
     if (win && !win.isDestroyed() && win.isVisible()) win.hide()
   }
@@ -85,7 +86,7 @@ export class TaskBoxWindow {
     const win = this.window
     if (!win || win.isDestroyed() || !this.ready) return
     this.place()
-    win.webContents.send('taskbox:shown', this.attach)
+    win.webContents.send('taskbox:shown', this.opening)
     if (this.headless()) return
     win.show()
     win.setAlwaysOnTop(true, process.platform === 'win32' ? 'screen-saver' : 'floating')

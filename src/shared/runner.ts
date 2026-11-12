@@ -1,6 +1,8 @@
 // Coding agents on this computer (Codex, Claude Code, Hermes) as the rest of Togle sees them: tasks, the state each is
 // in, and what a waiting one asks. Each agent has one backend in src/main/runners that turns its own protocol into this.
 
+import type { TodoRef } from './todo'
+
 /** An agent, by its id in task keys: one Togle knows (`codex`, `claude`, `hermes`), or one the person added (`acp-…`). */
 export type RunnerKind = string
 
@@ -198,6 +200,20 @@ export interface StartRequest {
   folder: string
   prompt: string
   title?: string
+  /** The to-do item the task is for. Without one, the task goes on the to-do list as an item of its own. */
+  todo?: TodoRef
+}
+
+/**
+ * What the task box opens with, besides what was typed in it before: a saved call to work from, the words to start with
+ * and the to-do item they are, and the agent and folder to use.
+ */
+export interface TaskBoxOpen {
+  attach?: { title: string; path: string }
+  prompt?: string
+  todo?: TodoRef
+  runner?: RunnerKind
+  folder?: string
 }
 
 /** One question an agent asks the person, with the answers it suggests. */

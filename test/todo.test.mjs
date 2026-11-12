@@ -27,6 +27,14 @@ const until = async (check, what, ms = 4000) => {
   assert.fail(`timed out waiting for ${what}`)
 }
 
+test('an item can be added already given to a task, as a task started elsewhere is', async () => {
+  const todo = new T.TodoFile(fileOf())
+  const items = await todo.add('Add a dark mode switch', 'claude:abc-123')
+  assert.deepEqual(items, [{ line: 2, text: 'Add a dark mode switch', done: false, task: 'claude:abc-123' }])
+  assert.equal(read(todo.file), '# To do\n\n- [ ] Add a dark mode switch <!-- togle:task=claude:abc-123 -->\n')
+  await assert.rejects(todo.add('Another', 'two words'), /That task has no name/)
+})
+
 test('a list that is not there yet is empty, and the first item makes the file', async () => {
   const file = fileOf()
   const todo = new T.TodoFile(file)

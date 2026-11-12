@@ -246,6 +246,23 @@ test('a task started here asks before commands, is named, is logged, and the win
   }
 })
 
+test('every task started here is told with what it was started from, so it goes on the to-do list', async () => {
+  const told = []
+  const { hub } = hubOf([new FakeBackend('claude')], { started: (task, request) => told.push([task.key, task.title, request.todo]) })
+  const folder = scratch()
+  try {
+    await hub.start({ runner: 'claude', folder, prompt: 'Review the onboarding copy', todo: { line: 2, text: 'Review the onboarding copy' } })
+    await hub.start({ runner: 'claude', folder, prompt: 'Add a dark mode switch' })
+    await assert.rejects(hub.start({ runner: 'claude', folder, prompt: ' ' }), /Say what the task is/)
+    assert.deepEqual(told, [
+      ['claude:new1', 'Review the onboarding copy', { line: 2, text: 'Review the onboarding copy' }],
+      ['claude:new2', 'Add a dark mode switch', undefined]
+    ], 'once each, and only for a task that started')
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('a waiting command shows with its mark, and answering it is logged', async () => {
   const claude = new FakeBackend('claude')
   const { hub } = hubOf([claude])
@@ -631,6 +648,8 @@ test('the window can ask for everything through its messages, and is told when s
     assert.throws(() => handlers.get('runners:detail')(''), /The task is missing/)
     assert.throws(() => handlers.get('runners:answer')('claude:x', '', 'refuse'), /The request is missing/)
     const folder = scratch()
+    assert.throws(() => handlers.get('runners:start')({ runner: 'claude', folder, prompt: 'Go', todo: { line: -1, text: 'x' } }), /Pick an item/)
+    assert.throws(() => handlers.get('runners:start')({ runner: 'claude', folder, prompt: 'Go', todo: 'line 3' }), /Pick an item/)
     const view = await handlers.get('runners:start')({ runner: 'claude', folder, prompt: 'Go', title: 'Named', extra: 'ignored' })
     assert.equal(view.title, 'Named')
     await until(() => sent.some(([channel]) => channel === 'runners:changed'), 'a change to be sent')

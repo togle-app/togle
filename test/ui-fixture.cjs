@@ -268,7 +268,12 @@ module.exports = function install(fixture) {
     if (failTask) { failTask = false; throw new Error('That folder is not there.') }
     const started = task('claude:new' + ++sequence, { title: request.prompt.slice(0, 40), folder: request.folder, runner: request.runner, state: 'working', mine: true, line: 'Working…', log: [{ id: 100 + sequence, at: Date.now(), kind: 'you', text: request.prompt }] })
     started.key = request.runner + ':new' + sequence
-    runnerTasks.push(started); runnerChanged(); return clone(runnerView(started))
+    runnerTasks.push(started); runnerChanged()
+    // As the main process does: the task is on the to-do list, as the item it was given from or an item of its own.
+    if (request.todo) { const item = todoItems[request.todo.line]; if (item && item.text === request.todo.text) item.task = started.key }
+    else todoItems.push({ text: started.title, done: false, task: started.key })
+    emit('onTodoChanged')
+    return clone(runnerView(started))
   }
   api.openRunnerTask = async key => { record('openRunnerTask', [key]); const found = runnerFind(key); found.mine = true; runnerChanged(); return clone(runnerView(found)) }
   api.takeOverRunnerTask = async key => { record('takeOverRunnerTask', [key]); const found = runnerFind(key); found.mine = true; delete found.pid; found.line = ''; runnerChanged(); return clone(runnerView(found)) }
@@ -286,6 +291,7 @@ module.exports = function install(fixture) {
   api.closeRunnerTask = async key => { record('closeRunnerTask', [key]); runnerFind(key).mine = false; runnerChanged() }
   api.pickRunnerFolder = async () => { record('pickRunnerFolder', []); return 'C:\\work\\picked' }
   api.pickTaskBoxFolder = async () => { record('pickTaskBoxFolder', []); return 'C:\\work\\chosen-for-box' }
+  api.openTaskBox = async opening => { record('openTaskBox', [opening]) }
   // Claude Code in a terminal asking Togle: the connection, as the window is told it.
   let hookStatus = { claude: fixture.scenario === 'tasks', version: '2.1.322 (Claude Code)', supported: true, minimum: '2.1.139', installed: false, current: false, file: 'C:\\Users\\demo\\.claude\\settings.json' }
   let failHook = false

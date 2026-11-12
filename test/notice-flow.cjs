@@ -124,13 +124,15 @@ async function run() {
   await js(notice, "document.querySelector('.task-notice-head button').click()")
   await wait(async () => !(await js(notice, "!!document.querySelector('.task-notice')")), 'the notice to close')
 
-  // The to-do list is a plain file in Togle's folder, and an item can be given to the task that was run.
+  // The to-do list is a plain file in Togle's folder, and every task given to an agent is on it: the task started above is
+  // an item of its own, given to that task. An item added by hand can be given to a task too.
   const todoFile = path.join(profile, 'to-do.md')
-  const listed = await invoke('todo:add', 'Update the notes')
-  assert.deepEqual(listed, { items: [{ line: 2, text: 'Update the notes', done: false }], file: todoFile })
-  await invoke('todo:link', { line: 2, text: 'Update the notes' }, first.key)
+  assert.deepEqual(await invoke('todo:list'), { items: [{ line: 2, text: 'Update the notes', done: false, task: first.key }], file: todoFile })
   assert.equal(fs.readFileSync(todoFile, 'utf8'), `# To do\n\n- [ ] Update the notes <!-- togle:task=${first.key} -->\n`)
-  assert.equal((await invoke('todo:list')).items[0].task, first.key)
+  const listed = await invoke('todo:add', 'Check the notes')
+  assert.deepEqual(listed.items.at(-1), { line: 3, text: 'Check the notes', done: false })
+  await invoke('todo:link', { line: 3, text: 'Check the notes' }, first.key)
+  assert.equal((await invoke('todo:list')).items[1].task, first.key)
 
   // While Togle's own window is in front nothing pops up, and the tray still counts. When it goes behind, the notice comes.
   main.isFocused = () => true
@@ -162,6 +164,10 @@ async function run() {
   const fromBox = await find(async () => (await invoke('runners:list')).find((task) => task.title === 'run frombox'), 'the task from the box')
   assert.equal(fromBox.runner, 'hermes')
   await wait(() => js(box, "document.querySelector('.taskbox textarea').value===''"), 'the box to empty')
+  // Every task given to an agent is on the to-do list: this one as an item of its own, given to the task.
+  const onList = await find(async () => (await invoke('todo:list')).items.find((item) => item.task === fromBox.key), 'the task on the to-do list')
+  assert.equal(onList.text, 'run frombox')
+  assert.ok(fs.readFileSync(path.join(profile, 'to-do.md'), 'utf8').includes(`- [ ] run frombox <!-- togle:task=${fromBox.key} -->`), 'in the plain file')
   // Notices can be turned off in Settings: the tray still counts, and nothing appears; turned on again, it does.
   await invoke('settings:update', { tasks: { notices: false } })
   await wait(async () => !(await js(notice, "!!document.querySelector('.task-notice')")), 'the notice to go')

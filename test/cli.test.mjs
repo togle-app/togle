@@ -22,16 +22,20 @@ after(() => {
 test('what follows togle run is read: the agent, the folder, a title, and the words of the task', () => {
   const cwd = path.resolve('somewhere', 'project')
   assert.deepEqual(T.parseRun(['Add', 'a', 'dark', 'mode'], cwd), { agent: 'claude', folder: cwd, prompt: 'Add a dark mode' })
-  assert.deepEqual(T.parseRun(['--agent', 'Codex', '--folder', 'api', '--title', 'Dark mode', 'Do', 'it'], cwd), { agent: 'codex', folder: path.join(cwd, 'api'), title: 'Dark mode', prompt: 'Do it' })
-  assert.deepEqual(T.parseRun(['--agent=hermes', `--folder=${path.resolve('elsewhere')}`, 'x'], cwd), { agent: 'hermes', folder: path.resolve('elsewhere'), prompt: 'x' })
-  assert.equal(T.parseRun(['--', '--not-a-flag', 'is', 'words'], cwd).prompt, '--not-a-flag is words', 'after -- everything is the task')
+  assert.deepEqual(T.parseRun(['Codex', '--folder', 'api', '--title', 'Dark mode', 'Do', 'it'], cwd), { agent: 'codex', folder: path.join(cwd, 'api'), title: 'Dark mode', prompt: 'Do it' }, 'the first word names the agent')
+  assert.deepEqual(T.parseRun([`--folder=${path.resolve('elsewhere')}`, 'hermes', 'x'], cwd), { agent: 'hermes', folder: path.resolve('elsewhere'), prompt: 'x' })
+  assert.deepEqual(T.parseRun(['claude'], cwd), { agent: 'claude', folder: cwd, prompt: '' }, 'an agent and no task, as the design has it')
+  assert.equal(T.parseRun(['acp-gemini-cli', 'x'], cwd).agent, 'acp-gemini-cli', 'an agent added in Settings, by its id')
+  assert.deepEqual(T.parseRun(['Fix', 'the', 'codex', 'config'], cwd), { agent: 'claude', folder: cwd, prompt: 'Fix the codex config' }, 'only the first word can name the agent')
+  assert.deepEqual(T.parseRun(['--', 'codex', 'is', 'slow'], cwd), { agent: 'claude', folder: cwd, prompt: 'codex is slow' }, 'after -- everything is the task')
+  assert.deepEqual(T.parseRun(['codex', '--', 'hermes', 'too'], cwd), { agent: 'codex', folder: cwd, prompt: 'hermes too' })
+  assert.equal(T.parseRun(['--', '--not-a-flag', 'is', 'words'], cwd).prompt, '--not-a-flag is words')
   assert.equal(T.parseRun(['  spaced  ', 'out'], cwd).prompt, 'spaced   out', 'the words are joined as typed, and trimmed at the ends')
-  assert.equal(T.parseRun([], cwd).prompt, '', 'no words is an empty task, which the command refuses')
-  assert.throws(() => T.parseRun(['--agent', 'gpt', 'x'], cwd), /Pick an agent/)
-  assert.equal(T.parseRun(['--agent', 'acp-gemini-cli', 'x'], cwd).agent, 'acp-gemini-cli', 'an agent added in Settings, by its id')
-  assert.throws(() => T.parseRun(['--agent', 'acp-', 'x'], cwd), /Pick an agent/)
+  assert.equal(T.parseRun([], cwd).prompt, '', 'no words is an empty task')
+  assert.equal(T.parseRun(['acp-', 'x'], cwd).prompt, 'acp- x', 'not an id, so a word of the task')
   assert.throws(() => T.parseRun(['--folder'], cwd), /--folder needs a value/)
-  assert.throws(() => T.parseRun(['--agent='], cwd), /--agent needs a value/)
+  assert.throws(() => T.parseRun(['--title='], cwd), /--title needs a value/)
+  assert.throws(() => T.parseRun(['--agent', 'codex', 'x'], cwd), /does not know --agent/, 'the agent is the first word')
   assert.throws(() => T.parseRun(['--fast', 'x'], cwd), /does not know --fast/)
 })
 
@@ -70,8 +74,9 @@ const togle = async (hubOptions = {}) => {
   const dataFolder = scratch()
   const backend = new Backend()
   const hub = new T.RunnerHub({ backends: [backend], changed() {}, ...hubOptions })
-  const server = await T.startChannel({ dataFolder, hub })
-  return { dataFolder, backend, hub, server, close: async () => { await server.close(); await hub.dispose() } }
+  const opened = []
+  const server = await T.startChannel({ dataFolder, hub, openBox: (opening) => opened.push(opening) })
+  return { dataFolder, backend, hub, server, opened, close: async () => { await server.close(); await hub.dispose() } }
 }
 const run = async (argv, { dataFolder, cwd = os.tmpdir(), stdin = null } = {}) => {
   const out = []
@@ -102,11 +107,36 @@ test('piped text is the task when none is typed, and a task needs words', async 
     const piped = await run(['run'], { dataFolder: running.dataFolder, stdin: '  Fix the failing test\nin the login form.  \n' })
     assert.equal(piped.code, 0, piped.err)
     assert.equal(running.backend.started[0].options.prompt, 'Fix the failing test\nin the login form.')
-    const none = await run(['run'], { dataFolder: running.dataFolder })
+    // A pipe with nothing in it is a script that forgot the task, not a person: it is refused, and no box opens.
+    const none = await run(['run'], { dataFolder: running.dataFolder, stdin: ' \n' })
     assert.equal(none.code, 2)
     assert.match(none.err, /^Say what the task is\./)
-    assert.match(none.err, /togle run \[--agent/, 'and shows how')
+    assert.match(none.err, /togle run \[claude\|codex/, 'and shows how')
+    const titled = await run(['run', '--title', 'Dark mode'], { dataFolder: running.dataFolder })
+    assert.equal(titled.code, 2, 'a title is for a task, so it needs one')
+    assert.match(titled.err, /^Say what the task is\./)
     assert.equal(running.backend.started.length, 1)
+    assert.deepEqual(running.opened, [])
+  } finally {
+    await running.close()
+  }
+})
+
+test('togle run claude, with no task, opens the task box in Togle with that agent and folder', async () => {
+  const running = await togle()
+  try {
+    const folder = scratch()
+    const result = await run(['run', 'claude'], { dataFolder: running.dataFolder, cwd: folder })
+    assert.equal(result.code, 0, result.err)
+    assert.equal(result.out, `Togle's task box is open, with Claude Code in ${folder}. Type or say the task there, and press Enter.\n`)
+    assert.deepEqual(running.opened, [{ runner: 'claude', folder }])
+    assert.equal(running.backend.started.length, 0, 'nothing starts before the person says what')
+    // What it cannot be opened with is said in the terminal, and the box stays shut.
+    const missing = await run(['run', 'claude', '--folder', 'not-there'], { dataFolder: running.dataFolder, cwd: folder })
+    assert.deepEqual([missing.code, missing.err], [1, 'That folder is not there.\n'])
+    const other = await run(['run', 'codex'], { dataFolder: running.dataFolder, cwd: folder })
+    assert.deepEqual([other.code, other.err], [1, 'Pick an agent: claude, codex, hermes, or one added in Settings.\n'], 'one this Togle does not work with')
+    assert.equal(running.opened.length, 1)
   } finally {
     await running.close()
   }
@@ -131,11 +161,11 @@ test('what cannot be done is said in words, with a code that tells a script: 1 f
     const missing = await run(['run', '--folder', path.join(scratch(), 'not-there'), 'x'], { dataFolder: running.dataFolder })
     assert.equal(missing.code, 1)
     assert.equal(missing.err, 'That folder is not there.\n')
-    for (const [argv, words] of [[[], /^togle run/], [['help'], null], [['--help'], null], [['fly'], /does not know "fly"/], [['run', '--agent', 'gpt', 'x'], /Pick an agent/], [['run', '--bogus', 'x'], /does not know --bogus/]]) {
+    for (const [argv, words] of [[[], /^togle run/], [['help'], null], [['--help'], null], [['fly'], /does not know "fly"/], [['run', '--agent', 'codex', 'x'], /does not know --agent/], [['run', '--bogus', 'x'], /does not know --bogus/]]) {
       const result = await run(argv, { dataFolder: running.dataFolder })
       assert.equal(result.code, argv[0] === 'help' || argv[0] === '--help' ? 0 : 2, JSON.stringify(argv))
       if (words) assert.match(result.out + result.err, words)
-      else assert.match(result.out, /togle run \[--agent/)
+      else assert.match(result.out, /togle run \[claude\|codex/)
     }
   } finally {
     await running.close()
@@ -189,6 +219,21 @@ test('Togle checks what it is asked: the agent, a folder in full, words, and a l
   await assert.rejects(T.startTask(added, JSON.stringify({ runner: 'codex', folder, prompt: 'x' })), /Pick an agent/, 'one the hub does not work with')
 })
 
+test('Togle checks what the task box is opened with: an agent it has, installed, and a folder that is there', async () => {
+  const hub = { async status() { return [{ runner: 'claude', name: 'Claude Code', installed: true }, { runner: 'hermes', name: 'Hermes', installed: false }] } }
+  const folder = scratch()
+  const opened = []
+  const ask = (given) => T.openBox(hub, typeof given === 'string' ? given : JSON.stringify(given), (opening) => opened.push(opening))
+  assert.deepEqual(await ask({ runner: 'claude', folder, prompt: 'ignored' }), { runner: 'claude', name: 'Claude Code', folder })
+  assert.deepEqual(opened, [{ runner: 'claude', folder }], 'with only the agent and the folder')
+  await assert.rejects(ask('not json'), /not a task/)
+  await assert.rejects(ask({ runner: 'codex', folder }), /Pick an agent/)
+  await assert.rejects(ask({ runner: 'hermes', folder }), /^Error: Hermes is not installed on this computer\.$/)
+  await assert.rejects(ask({ runner: 'claude', folder: 'relative' }), /folder in full/)
+  await assert.rejects(ask({ runner: 'claude', folder: path.join(folder, 'gone') }), /That folder is not there/)
+  assert.equal(opened.length, 1, 'none of those opened it')
+})
+
 // ---- the program itself, started the way the command starts it ----
 
 test('the command works as the program it is built into, started as plain Node by Electron', async () => {
@@ -220,6 +265,9 @@ test('the command works as the program it is built into, started as plain Node b
     const piped = await exec(['run'], { env, input: 'Task from a pipe' })
     assert.equal(piped.status, 0, piped.stderr)
     assert.equal(running.backend.started[1].options.prompt, 'Task from a pipe')
+    const empty = await exec(['run', 'claude'], { env })
+    assert.equal(empty.status, 2, 'started by a script with nothing piped in: no box opens')
+    assert.deepEqual(running.opened, [])
     const listed = await exec(['tasks'], { env })
     assert.equal(listed.status, 0, listed.stderr)
     assert.match(listed.stdout, /From a terminal/)

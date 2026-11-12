@@ -3117,17 +3117,6 @@ ul.pending-lessons > li > span:first-child { flex: 1 1 260px; min-width: 0; over
 .task-options { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 .task-reply { display: flex; gap: 8px; }
 .task-reply input { flex: 1; min-width: 0; }
-.task-new { display: grid; gap: 12px; max-width: 560px; }
-.task-new h2 { margin: 0; font-size: 16px; }
-.task-new .row { display: flex; gap: 8px; }
-.task-new-agents { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; border: 0; }
-.task-new-agents legend { margin-bottom: 6px; padding: 0; font-size: 12px; color: var(--muted); }
-.task-new-agents label { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
-.task-new-agents label.on { border-color: var(--accent); }
-.task-new-agents input { width: auto; }
-.task-new-field { display: grid; gap: 5px; }
-.task-new-field > span:first-child { font-size: 12px; color: var(--muted); }
-.task-new-folder { display: flex; gap: 8px; }
 @media (max-width: 760px) {
   .tasks { grid-template-columns: minmax(0, 1fr); }
   .tasks.has-detail .tasks-list, .tasks:not(.has-detail) .tasks-detail { display: none; }
@@ -3190,7 +3179,6 @@ body.notice-surface { background: transparent; color: var(--text); overflow: hid
 .todo-chip.fail { color: var(--danger); border-color: #5c2a33; }
 .todo-remove { flex: none; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--faint); }
 .todo-remove:hover { color: var(--danger); }
-.todo-give { padding: 12px 4px 4px; }
 .todo-file { margin: 4px 0 0; }
 
 /* What differs from the last commit in the folder a task works in. */
@@ -3271,9 +3259,9 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .confirm-reason { margin: 0; }
 .confirm-name { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .confirm-name input { flex: 1 1 140px; min-width: 0; padding: 5px 8px; font-size: 12px; }
-.taskbox-attach { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); font-size: 12px; color: var(--muted); }
-.taskbox-attach span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.taskbox-attach button { padding: 0 6px; border: none; background: none; color: inherit; font-size: 15px; line-height: 1; }
+.taskbox-attach, .taskbox-todo { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); font-size: 12px; color: var(--muted); }
+.taskbox-attach span, .taskbox-todo span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.taskbox-attach button, .taskbox-todo button { padding: 0 6px; border: none; background: none; color: inherit; font-size: 15px; line-height: 1; }
 
 /* The corner notice that a call started in another app. */
 .call-notice { display: grid; gap: 6px; box-sizing: border-box; height: 100vh; padding: 12px 14px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; background: var(--panel); color: var(--text); font-size: 12px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }

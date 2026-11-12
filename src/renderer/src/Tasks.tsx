@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { asksEveryTime, changedFiles, KNOWN_AGENTS, needsYou, stepsLine, type ClaudeHookStatus, type LogEntry, type RunnerKind, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
+import { changedFiles, KNOWN_AGENTS, needsYou, stepsLine, type ClaudeHookStatus, type LogEntry, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
 import { Changes } from './Changes'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
@@ -43,7 +43,6 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   const [status, setStatus] = useState<RunnerStatus[]>([])
   const [selected, setSelected] = useState<string | undefined>(remembered)
   const [detail, setDetail] = useState<TaskDetail | null>(null)
-  const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
   const [loaded, setLoaded] = useState(false)
   const [now, setNow] = useState(Date.now())
@@ -87,7 +86,6 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   // Opened on a task from outside: it is the one shown.
   useEffect(() => {
     if (!focus?.key) return
-    setStarting(false)
     setSelected(focus.key)
     setSeeing(focus.changes ? focus.key : null)
   }, [focus?.key, focus?.seq, focus?.changes])
@@ -112,26 +110,22 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   const waiting = tasks.filter(needsYou)
   const working = tasks.filter((t) => t.state === 'working')
   const earlier = tasks.filter((t) => !needsYou(t) && t.state !== 'working')
-  const folders = [...new Set(tasks.map((t) => t.folder).filter(Boolean))].slice(0, 5)
   const row = (task: TaskView): ReactNode => (
     <TaskRow
       key={task.key}
       task={task}
       now={now}
-      selected={task.key === selected && !starting}
-      onSelect={() => {
-        setStarting(false)
-        setSelected(task.key)
-      }}
+      selected={task.key === selected}
+      onSelect={() => setSelected(task.key)}
     />
   )
 
   return (
-    <div className={`tasks ${selected || starting ? 'has-detail' : ''}`} aria-label="Tasks">
+    <div className={`tasks ${selected ? 'has-detail' : ''}`} aria-label="Tasks">
       <aside className="tasks-list" aria-label="Agent tasks on this computer">
         <div className="tasks-head">
           <span className="tasks-label">This computer</span>
-          <button className="primary small" disabled={!installed.length} onClick={() => setStarting(true)}>
+          <button className="primary small" disabled={!installed.length} onClick={() => void api.openTaskBox({}).catch((caught) => setError(errorText(caught)))}>
             New task
           </button>
         </div>
@@ -157,20 +151,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
             {error}
           </p>
         )}
-        {starting ? (
-          <NewTask
-            installed={installed}
-            folders={folders}
-            onCancel={() => setStarting(false)}
-            onStart={(request) =>
-              act(async () => {
-                const view = await api.startRunnerTask(request)
-                setStarting(false)
-                setSelected(view.key)
-              })
-            }
-          />
-        ) : detail && seeing === detail.task.key ? (
+        {detail && seeing === detail.task.key ? (
           <Changes taskKey={detail.task.key} title={detail.task.title} folder={detail.task.folder} onBack={() => setSeeing(null)} />
         ) : detail ? (
           <TaskPanel
@@ -316,69 +297,6 @@ function TaskRow({ task, now, selected, onSelect }: { task: TaskView; now: numbe
       </span>
       {dangerous && <span className="task-danger">Dangerous</span>}
     </button>
-  )
-}
-
-/** The form that starts a task: the agent, the folder and what to do. `prompt` fills the task in, for a task made from something else. */
-export function NewTask({ installed, folders, prompt: given = '', heading = 'New task', onCancel, onStart }: { installed: RunnerStatus[]; folders: string[]; prompt?: string; heading?: string; onCancel: () => void; onStart: (request: { runner: RunnerKind; folder: string; prompt: string }) => Promise<void> }) {
-  const [runner, setRunner] = useState<RunnerKind>(installed[0]?.runner ?? 'claude')
-  const [folder, setFolder] = useState(folders[0] ?? '')
-  const [prompt, setPrompt] = useState(given)
-  const [busy, setBusy] = useState(false)
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault()
-    if (busy || !folder.trim() || !prompt.trim()) return
-    setBusy(true)
-    try {
-      await onStart({ runner, folder: folder.trim(), prompt })
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <form className="task-new" onSubmit={(event) => void submit(event)} aria-label="New task">
-      <h2>{heading}</h2>
-      <fieldset className="task-new-agents">
-        <legend>Agent</legend>
-        {installed.map((s) => (
-          <label key={s.runner} className={runner === s.runner ? 'on' : ''}>
-            <input type="radio" name="agent" value={s.runner} checked={runner === s.runner} onChange={() => setRunner(s.runner)} />
-            {s.name}
-          </label>
-        ))}
-      </fieldset>
-      <label className="task-new-field">
-        <span>Folder</span>
-        <span className="task-new-folder">
-          <input value={folder} onChange={(event) => setFolder(event.target.value)} placeholder="The folder it works in" aria-label="Folder" />
-          <button type="button" onClick={() => void api.pickRunnerFolder().then((picked) => picked && setFolder(picked))}>
-            Choose…
-          </button>
-        </span>
-      </label>
-      {folders.length > 0 && (
-        <div className="chips" aria-label="Recent folders">
-          {folders.map((recent) => (
-            <button key={recent} type="button" className={`chip ${recent === folder ? 'on' : ''}`} onClick={() => setFolder(recent)} title={recent}>
-              {baseName(recent)}
-            </button>
-          ))}
-        </div>
-      )}
-      <label className="task-new-field">
-        <span>Task</span>
-        <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} placeholder="Say what it should do" aria-label="Task" autoFocus />
-      </label>
-      <p className="hint">{asksEveryTime(runner) ? 'Every command and every change asks you first.' : `${installed.find((s) => s.runner === runner)?.name ?? 'It'} asks before a command only when its own settings say so.`}</p>
-      <div className="row">
-        <button className="primary" disabled={busy || !folder.trim() || !prompt.trim()}>
-          {busy ? 'Starting…' : 'Start'}
-        </button>
-        <button type="button" className="ghost" onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </form>
   )
 }
 

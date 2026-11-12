@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { KNOWN_AGENTS, needsYou, type RunnerKind, type RunnerStatus, type TaskView, type ViewRequest } from '@shared/runner'
+import { KNOWN_AGENTS, needsYou, type RunnerStatus, type TaskView, type ViewRequest } from '@shared/runner'
 import { canAllowHere, shownPart } from '@shared/runner-command'
 import type { TodoItem, TodoList } from '@shared/todo'
 import type { CallOffer, TodoOffer } from '@shared/call-todo'
 import { meetingTitle } from './MeetingsPage'
 import { Icon } from './Icon'
-import { NewTask } from './Tasks'
 
 const api = window.togle
 
@@ -56,7 +55,6 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
   const [keys, setKeys] = useState('F9')
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState<{ line: number; text: string } | null>(null)
-  const [giving, setGiving] = useState<number | null>(null)
   const [error, setError] = useState('')
 
   const refreshList = useCallback(async () => {
@@ -154,20 +152,13 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
     setEditing(null)
     if (next && next !== item.text) await change(() => api.editTodo({ line: item.line, text: item.text }, next))
   }
-  const give = async (item: TodoItem, request: { runner: RunnerKind; folder: string; prompt: string }): Promise<void> => {
+  // The task box, as for any task: with the item's words, and the item, which the task is then given to.
+  const give = (item: TodoItem): void => {
     setError('')
-    try {
-      const started = await api.startRunnerTask({ ...request, title: item.text.slice(0, 60) })
-      setGiving(null)
-      if (!(await change(() => api.linkTodo({ line: item.line, text: item.text }, started.key)))) setError((previous) => `The task started, but the item could not be given to it. ${previous}`)
-      void refreshTasks()
-    } catch (caught) {
-      setError(errorText(caught))
-    }
+    api.openTaskBox({ prompt: item.text, todo: { line: item.line, text: item.text } }).catch((caught) => setError(errorText(caught)))
   }
 
   const installed = status.filter((s) => s.installed)
-  const folders = [...new Set(tasks.map((t) => t.folder).filter(Boolean))].slice(0, 5)
   const waiting = tasks.filter(needsYou)
   const items = list?.items ?? []
   const open = items.filter((item) => !item.done)
@@ -216,7 +207,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
             </button>
           )}
           {!item.done && !item.task && !!installed.length && (
-            <button className="small" onClick={() => setGiving(giving === item.line ? null : item.line)}>
+            <button className="small" onClick={() => give(item)}>
               Give to an agent
             </button>
           )}
@@ -224,11 +215,6 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
             <Icon name="close" size={12} />
           </button>
         </div>
-        {giving === item.line && (
-          <div className="todo-give">
-            <NewTask heading="Give to an agent" prompt={item.text} installed={installed} folders={folders} onCancel={() => setGiving(null)} onStart={(request) => give(item, request)} />
-          </div>
-        )}
       </div>
     )
   }

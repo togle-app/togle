@@ -35,12 +35,14 @@ export class TodoFile {
     return parse(split(await this.read()).lines)
   }
 
-  add(text: string): Promise<TodoItem[]> {
+  /** Adds an item at the end; with `task`, already given to that task. */
+  add(text: string, task?: string): Promise<TodoItem[]> {
     const words = clean(text)
     if (!words) return Promise.reject(new Error('Say what the item is.'))
+    if (task !== undefined && !/^\S+$/.test(task)) return Promise.reject(new Error('That task has no name.'))
     return this.change((lines) => {
       if (!lines.length) lines.push('# To do', '')
-      lines.push(`- [ ] ${words}`)
+      lines.push(`- [ ] ${words}${note(task)}`)
     })
   }
 

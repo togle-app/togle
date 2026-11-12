@@ -29,6 +29,7 @@ import { callAppName, isCallApp, isCallAppMode, type CallApp } from '@shared/cal
 import { Attention } from './runners/attention'
 import type { RunnerHub } from './runners/hub'
 import type { Backend } from './runners/types'
+import type { StartRequest, TaskBoxOpen, TaskView } from '@shared/runner'
 import type { TodoFile } from './todo'
 import { registerTodo } from './todo-register'
 import { registerRunners } from './runners/register'
@@ -1348,7 +1349,7 @@ function registerIpc(): void {
     // Only the person can read it: it holds what other people said.
     await fs.writeFile(file, callForAgent(record), { encoding: 'utf8', mode: 0o600 })
     const title = Array.from(record.title).filter(letter => letter.charCodeAt(0) >= 32).join('').trim().slice(0, 140)
-    taskBox.show({ title: title || 'A call', path: file })
+    taskBox.show({ attach: { title: title || 'A call', path: file } })
   })
   ipcMain.handle('calls:get', (_e, id: string) => getCallSession(id))
   ipcMain.handle('calls:notes-generate', async (_e, id: string, template: MeetingNoteTemplate, revision?: string) => {
@@ -1463,6 +1464,32 @@ function registerIpc(): void {
     if (!taskBox.owns(event.sender)) throw new Error('That is not for this window.')
     return taskBox.pickFolder()
   })
+  // Every way of giving work to an agent opens the same box: from a to-do item with its words, or empty.
+  ipcMain.handle('taskbox:open', (_e, value: unknown) => taskBox.show(taskBoxOpening(value)))
+}
+
+/** What the window asks the task box to open with, checked: words, a to-do item, an agent and a folder. */
+function taskBoxOpening(value: unknown): TaskBoxOpen {
+  const given = (value ?? {}) as Record<string, unknown>
+  const text = (key: string, longest: number): string | undefined => typeof given[key] === 'string' && given[key] ? (given[key] as string).slice(0, longest) : undefined
+  const todo = given.todo as Record<string, unknown> | undefined
+  return {
+    ...(text('prompt', 20_000) ? { prompt: text('prompt', 20_000) } : {}),
+    ...(todo && typeof todo.line === 'number' && Number.isInteger(todo.line) && todo.line >= 0 && typeof todo.text === 'string' ? { todo: { line: todo.line, text: todo.text } } : {}),
+    ...(text('runner', 100) ? { runner: text('runner', 100) } : {}),
+    ...(text('folder', 4000) ? { folder: text('folder', 4000) } : {})
+  }
+}
+
+/** Every task given to an agent is on the to-do list: the item it was given from, or an item of its own, by its name. */
+async function putOnTodo(task: TaskView, request: StartRequest): Promise<void> {
+  if (!todo) return
+  try {
+    if (request.todo) await todo.link(request.todo, task.key)
+    else await todo.add(task.title || request.prompt, task.key)
+  } catch (error) {
+    console.warn('[to-do] the task is not on the list:', (error as Error).message)
+  }
 }
 
 // Dev only: lets scripts drive the UI over the Chrome DevTools Protocol.
@@ -1578,7 +1605,8 @@ if (hookAt !== -1) {
       version: app.getVersion(),
       // Agents added in Settings: kept with the other settings.
       added: () => getSettings().addedAgents,
-      saveAdded: async (agents) => { await updateSettings({ addedAgents: agents }) }
+      saveAdded: async (agents) => { await updateSettings({ addedAgents: agents }) },
+      started: (task, request) => void putOnTodo(task, request)
     })
     // Connecting Claude Code in a terminal: one entry in its settings that starts Togle as `--togle-hook`.
     const hubForClaude = runners
@@ -1595,7 +1623,7 @@ if (hookAt !== -1) {
     })
     // A question from a Claude Code hook can only come once the channel is open; without it the hook finds nobody and
     // the question stays with the person where the session runs.
-    startChannel({ dataFolder: app.getPath('userData'), hub: runners }).then(
+    startChannel({ dataFolder: app.getPath('userData'), hub: runners, openBox: opening => taskBox.show(opening) }).then(
       server => { if (quitting) void server.close(); else hookChannel = server },
       error => console.warn('[channel] could not open:', (error as Error).message)
     )

@@ -46,6 +46,8 @@ export interface HubOptions {
   /** How often the requests of sessions Togle does not run are looked at, and how long each is left alone first, in milliseconds. */
   outsideEveryMs?: number
   outsideGraceMs?: number
+  /** A task was started here, from whichever place: told with what it was started from. */
+  started?: (task: TaskView, request: StartRequest) => void
 }
 
 interface Owned {
@@ -175,7 +177,9 @@ export class RunnerHub {
     this.log(owned, 'you', prompt)
     this.options.titles?.set(owned.key, owned.handle.title)
     this.fresh()
-    return this.viewOfOwned(owned, undefined)
+    const view = this.viewOfOwned(owned, undefined)
+    this.options.started?.(view, request)
+    return view
   }
 
   /** Picks up a task that was started earlier, so it can be answered and replied to here. */
