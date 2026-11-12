@@ -436,6 +436,8 @@ export interface Settings {
   }
   /** The first minute (talk, sign in with the plan, what Togle found) was gone through, once. */
   firstMinute: { done: boolean }
+  /** The offer to change Togle's keys, made once: the first time one is pressed while a code editor that uses it is in front. */
+  keysOffer: { shown: boolean }
   /** Agents the person added in Settings: any that speaks ACP, by the command that starts it. */
   addedAgents: import('./runner').AddedAgent[]
 }
@@ -558,7 +560,13 @@ export interface SttStatus {
 export type AssistKind = 'suggest' | 'ask' | 'summary'
 
 /** 'start-call-unseen': the call shortcut while Togle's window is hidden or minimized (no picker it couldn't show). */
-export type HotkeyAction = 'toggle-listening' | 'start-call-unseen' | 'toggle-recording' | 'snapshot' | 'ask' | 'copy' | 'dictation-settings'
+export type HotkeyAction = 'toggle-listening' | 'start-call-unseen' | 'toggle-recording' | 'snapshot' | 'ask' | 'copy' | 'dictation-settings' | 'keys-settings'
+
+/** One of Togle's keys was pressed in a code editor that uses it too: the key ("F9") and the editor ("VS Code"). */
+export interface KeysOffer {
+  key: string
+  editor: string
+}
 
 /** A shortcut that works from any app (see shared/hotkeys.ts). */
 export interface HotkeyInfo {

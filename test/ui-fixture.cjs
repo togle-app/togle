@@ -296,6 +296,9 @@ module.exports = function install(fixture) {
   api.openTaskBox = async opening => { record('openTaskBox', [opening]) }
   // What the box was opened with before its page listened (its first opening), when a test gives it one.
   api.taskBoxOpening = async () => clone(fixture.taskBoxOpening ?? null)
+  // What the corner notices showed before their pages listened, when a test gives it.
+  api.callNoticeNow = async () => { record('callNoticeNow', []); return clone(fixture.callNoticeNow ?? null) }
+  api.keysNoticeNow = async () => { record('keysNoticeNow', []); return clone(fixture.keysNoticeNow ?? null) }
   // Claude Code in a terminal asking Togle: the connection, as the window is told it.
   let hookStatus = { claude: fixture.scenario === 'tasks', version: '2.1.322 (Claude Code)', supported: true, minimum: '2.1.139', installed: false, current: false, file: 'C:\\Users\\demo\\.claude\\settings.json' }
   let failHook = false

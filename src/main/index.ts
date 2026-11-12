@@ -2,8 +2,9 @@ import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut,
 import { ApiConnections } from './auth/api-connections'
 import { effectiveAI, effectiveSettings, validateAIProfile } from '@shared/preferences'
 import { routedProvider } from './providers/routed'
-import type { AIProfile } from '@shared/types'
+import type { AIProfile, KeysOffer } from '@shared/types'
 import { Dictation } from './dictation'
+import { codeEditorOf, frontProgram } from './front-program'
 import { DictationSpeech, type DictationEngine } from './dictation-speech'
 import { DictationHistoryStore, type DictationHistoryTicket } from './dictation-history'
 import { DictationVocabularyStore } from './dictation-vocabulary'
@@ -20,7 +21,7 @@ import { registerConnection, startChannel } from './channel/register'
 import type { ChannelServer } from './channel/server'
 import { NoticeWindow } from './notice-window'
 import { TaskBoxWindow } from './task-box-window'
-import { CallNoticeWindow } from './call-notice-window'
+import { CallNoticeWindow, CornerNoticeWindow } from './call-notice-window'
 import { CallStripWindow } from './call-strip-window'
 import { isCallStripAction } from '@shared/call-strip'
 import { tellOthersLine } from '@shared/meeting'
@@ -230,6 +231,8 @@ let hookChannel: ChannelServer | null = null
 // The box to start a task in, opened by its key from any app.
 const taskBox = new TaskBoxWindow()
 const callNotice = new CallNoticeWindow()
+// Once, ever: one of Togle's keys was pressed in a code editor that uses it too. Change keys, or keep them.
+const keysNotice = new CornerNoticeWindow<KeysOffer>(__dirname, { surface: 'keysnotice', title: 'Togle keys' })
 const callStrip = new CallStripWindow()
 /** While a call is written down and Togle's window is closed, a small strip keeps the call's controls in reach. */
 function refreshCallStrip(): void {
@@ -870,6 +873,16 @@ const showWindow = new ShowWindow()
  * there), that box is put in front again, and the picture goes in, then the words. Esc: nothing goes in.
  */
 async function showPart(): Promise<void> {
+  try {
+    await showPartNow()
+  } finally {
+    // The offer to change keys, when F8 was pressed in a code editor, waits until the picture is done.
+    const offer = afterShow
+    afterShow = undefined
+    offer?.()
+  }
+}
+async function showPartNow(): Promise<void> {
   if (showWindow.open || dictation.active) return
   await dictation.start(false)
   if (dictation.status().phase !== 'recording') return
@@ -914,6 +927,23 @@ const HOTKEYS_OFF_MS = 30_000
 /** A shortcut's keys now: the ones picked in Settings (none: turned off), else its own. */
 const keysOf = (h: (typeof HOTKEYS)[number]): string => getSettings().hotkeys[h.id] ?? h.keys
 
+// F9, F8 and F10 are a code editor's own keys too (its debugger's, in VS Code, Visual Studio and JetBrains). The first
+// time one of them is pressed with such an editor in front, Togle offers once to change its keys; the press still does
+// what it does in Togle. After F8 the offer waits until the picture is done, so it does not sit over it.
+let keysOffered = false
+let afterShow: (() => void) | undefined
+function offerKeys(id: HotkeyId, keys: string): void {
+  if (keysOffered || getSettings().keysOffer.shown || !/^F(8|9|10)$/.test(keys) || callNotice.shown) return
+  const program = (!app.isPackaged && process.env.TOGLE_TEST_FRONT_PROGRAM) || frontProgram()
+  const editor = program ? codeEditorOf(program) : undefined
+  if (!editor) return
+  keysOffered = true
+  void updateSettings({ keysOffer: { shown: true } }).catch((error) => console.warn('[keys]', (error as Error).message))
+  const offer = (): void => keysNotice.show({ key: keys, editor }, 60_000)
+  if (id === 'show') afterShow = offer
+  else offer()
+}
+
 /** Tries keys for a shortcut: whether they're its now (another app, or Windows, may have them). */
 function tryKeys(keys: string, run: () => void): boolean {
   try {
@@ -932,7 +962,11 @@ function registerHotkeys(): void {
   globalShortcut.unregisterAll()
   hotkeyStatus = HOTKEYS.map((h) => {
     const keys = keysOf(h)
-    const ok = !keys || tryKeys(keys, () => h.id === 'dictate' ? dictateShortcut(keys) : h.run())
+    const ok = !keys || tryKeys(keys, () => {
+      offerKeys(h.id, keys)
+      if (h.id === 'dictate') dictateShortcut(keys)
+      else h.run()
+    })
     if (!ok) console.warn(`[hotkeys] ${keys} is taken by another app`)
     return { id: h.id, keys, defaultKeys: h.keys, label: h.label, ok }
   })
@@ -1316,6 +1350,17 @@ function registerIpc(): void {
     if (choice === 'always') void updateSettings({ meetings: { ...getSettings().meetings, apps: { ...getSettings().meetings.apps, [shown.app]: 'always' } } }).then(() => send('settings:changed', getSettings()))
     if (choice === 'write' || choice === 'always') send('hotkey', 'start-call-unseen')
   })
+  // Asked by the corner notices' pages when they load: the first notice can be told before they listen.
+  ipcMain.handle('callnotice:now', (event) => (callNotice.owns(event.sender) ? callNotice.shown : null))
+  ipcMain.handle('keysnotice:now', (event) => (keysNotice.owns(event.sender) ? keysNotice.shown : null))
+  // "Change keys" opens Togle at its keys; "Keep" leaves them. Either way the offer is not made again.
+  ipcMain.on('keysnotice:answer', (event, choice: unknown) => {
+    if (!keysNotice.owns(event.sender)) return
+    keysNotice.show(null)
+    if (choice !== 'change') return
+    openWindow()
+    send('hotkey', 'keys-settings')
+  })
   ipcMain.handle('call:mark', () => ongoing.mark())
 
   ipcMain.handle('calls:list', listCallSessions)
@@ -1408,7 +1453,12 @@ function registerIpc(): void {
     ipcMain.handle('dev:plan-status', (_e, status: UsageStatus) => chatgpt.plan.status(status))
     ipcMain.handle('dev:plan-refused', (_e, body: string) => chatgpt.plan.refused(body))
     // A shortcut pressed, as if from another app (whether its keys are its, aside), and what's copied then.
-    ipcMain.handle('dev:hotkey', (_e, id: HotkeyId) => HOTKEYS.find((h) => h.id === id)?.run())
+    ipcMain.handle('dev:hotkey', (_e, id: HotkeyId) => {
+      const hotkey = HOTKEYS.find((h) => h.id === id)
+      if (!hotkey) return
+      offerKeys(hotkey.id, keysOf(hotkey))
+      return hotkey.run()
+    })
     testClipboard = ''
     ipcMain.handle('dev:clipboard', () => testClipboard)
     // A dictation as if it had been said, for the tray's list of recent ones.
@@ -1679,6 +1729,7 @@ if (hookAt !== -1) {
     taskBox.close()
     callDetector.stop()
     callNotice.close()
+    keysNotice.close()
     callStrip.close()
     // The sound kept to confirm names of a call a day old goes now, whether or not Togle runs again soon.
     confirmSound.sweepOld(CONFIRM_KEEP_MS)

@@ -9,7 +9,12 @@ const HOLD_MS = 700
 export function CallNoticeSurface() {
   const [notice, setNotice] = useState<{ app: CallApp; name: string } | null>(null)
   const [held, setHeld] = useState(true)
-  useEffect(() => api.onCallNotice((next) => setNotice(next)), [])
+  useEffect(() => {
+    const stop = api.onCallNotice((next) => setNotice(next))
+    // The first notice can be told before this page listens: it asks.
+    void api.callNoticeNow().then((now) => { if (now) setNotice(now) }, () => undefined)
+    return stop
+  }, [])
   useEffect(() => {
     if (!notice) return
     setHeld(true)

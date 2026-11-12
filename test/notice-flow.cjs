@@ -193,6 +193,27 @@ async function run() {
   await wait(async () => (await invoke('runners:list')).some((task) => task.key === during.key && task.state === 'idle'), 'the task asked during the call to finish')
   await invoke('session:clear')
 
+  // The first time one of Togle's keys is pressed with a code editor in front, Togle offers once to change its keys.
+  const keysWindow = () => BrowserWindow.getAllWindows().find((win) => win.webContents.getURL().includes('surface=keysnotice'))
+  assert.equal(keysWindow(), undefined, 'no offer while no code editor was in front')
+  process.env.TOGLE_TEST_FRONT_PROGRAM = 'C:\\Program Files\\Microsoft VS Code\\Code.exe'
+  await invoke('dev:hotkey', 'task')
+  await wait(() => keysWindow(), 'the offer')
+  const keys = keysWindow()
+  await wait(() => js(keys, "document.querySelector('.call-notice strong')?.textContent==='F10 is also a key in VS Code'"), 'the offer to say which key, and where')
+  await wait(() => JSON.parse(fs.readFileSync(path.join(profile, 'settings.json'), 'utf8')).keysOffer?.shown === true, 'the offer kept as made, so it is made once')
+  await wait(() => js(keys, "[...document.querySelectorAll('.call-notice button')].every((b) => !b.disabled)"), 'its buttons to wake')
+  const openedForKeys = opened
+  await js(keys, "[...document.querySelectorAll('.call-notice button')].find((b) => b.textContent==='Change keys').click()")
+  await wait(() => opened > openedForKeys, 'Togle to open')
+  await wait(() => js(main, "!!document.querySelector('.settings-one') && !!document.getElementById('settings-keys')"), 'Settings, at the keys')
+  await wait(async () => !(await js(keys, "!!document.querySelector('.call-notice')")), 'the offer to go')
+  // In the editor again: no second offer.
+  await invoke('dev:hotkey', 'task')
+  await sleep(400)
+  assert.equal(await js(keys, "!!document.querySelector('.call-notice')"), false, 'once, ever')
+  delete process.env.TOGLE_TEST_FRONT_PROGRAM
+
   // The task still waits: quitting asks, and says which.
   item('Quit Togle').click()
   await wait(() => js(main, "document.body.innerText.includes('Quit Togle?')"), 'the question')
@@ -207,7 +228,7 @@ async function run() {
       assert.equal(icon.destroyed, true)
       assert.equal(BrowserWindow.getAllWindows().length, 0, 'Quit removes every window, the notice too')
       clearTimeout(timeout)
-      console.log('NOTICE PASS: notice when a task waits, dot on the tray, Allow once held for a moment, finished notice, quiet while Togle is in front, Open, the task box, notices turned off and on, notices waiting during a call, question before quitting')
+      console.log('NOTICE PASS: notice when a task waits, dot on the tray, Allow once held for a moment, finished notice, quiet while Togle is in front, Open, the task box, notices turned off and on, notices waiting during a call, the one-time offer to change keys in a code editor, question before quitting')
     } catch (error) { console.error(error); app.exit(1) }
   })
   item('Quit Togle').click()

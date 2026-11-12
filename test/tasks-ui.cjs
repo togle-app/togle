@@ -666,6 +666,33 @@ async function checkCallNotice(T, agent) {
   ui.window.destroy()
 }
 
+// The one-time offer to change keys, when one of Togle's was pressed in a code editor that uses it too.
+async function checkKeysNotice(T, agent) {
+  const ui = await open(T, agent, 372, 'keysnotice')
+  const emit = value => ui.evaluate("window.togleUITest.emit('onKeysNotice', " + JSON.stringify(value) + ")")
+  assert.equal(await ui.evaluate("document.querySelector('.call-notice')"), null, 'nothing shows until it applies')
+  assert.deepEqual((await ui.calls('keysNoticeNow')).length, 1, 'on loading, it asks what is on show')
+  await emit({ key: 'F9', editor: 'VS Code' })
+  await ui.wait("!!document.querySelector('.call-notice')")
+  assert.equal(await ui.evaluate("document.querySelector('.call-notice strong').textContent"), 'F9 is also a key in VS Code')
+  assert.equal(await ui.evaluate("document.querySelector('.call-notice span').textContent"), "Togle takes it while it runs. Keep it, or change Togle's keys.")
+  assert.deepEqual(await texts(ui, '.call-notice button'), ['Change keys', 'Keep F9'])
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('.call-notice button')].every(button=>button.disabled)"), true, 'held at first, so a click meant for the editor does not answer it')
+  await ui.wait("[...document.querySelectorAll('.call-notice button')].every(button=>!button.disabled)")
+  // At the corner window's own size (call-notice-window.ts), nothing is cut off.
+  ui.window.setContentSize(372, 124)
+  await ui.paint()
+  assert.ok(await ui.evaluate("(() => { const card = document.querySelector('.call-notice'), last = [...card.querySelectorAll('button')].at(-1); return card.scrollHeight <= card.clientHeight + 1 && last.getBoundingClientRect().bottom <= innerHeight && document.documentElement.scrollWidth <= innerWidth })()"), 'it fits the corner window')
+  await ui.capture('keys-notice')
+  await ui.click('.call-notice button', 'Change keys')
+  await ui.click('.call-notice button', 'Keep F9')
+  assert.deepEqual((await ui.calls('answerKeysNotice')).map(call => call.args[0]), ['change', 'keep'])
+  await emit(null)
+  await ui.wait("!document.querySelector('.call-notice')")
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 // The strip at the top of the screen while a call is written down and Togle's window is closed.
 async function checkCallStrip(T, agent) {
   const ui = await open(T, agent, 380, 'callstrip')
@@ -789,11 +816,12 @@ app.whenReady().then(async () => {
     await checkOutsideAsk(T, agent)
     await checkTaskBox(T, agent)
     await checkCallNotice(T, agent)
+    await checkKeysNotice(T, agent)
     await checkCallStrip(T, agent)
     await checkStoppedTasks(T, agent)
     await checkSignedOut(T, agent)
     await checkAgentSettings(T, agent)
-    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box, a signed-out agent and the agents in Settings passed')
+    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box, a signed-out agent, the offer to change keys and the agents in Settings passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

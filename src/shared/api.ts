@@ -205,6 +205,14 @@ export interface TogleApi {
   onCallNotice(cb: (notice: { app: import('./call-apps').CallApp; name: string } | null) => void): Unsubscribe
   /** The answer to that notice: write the call down, not now, or always for this app. */
   answerCallNotice(choice: 'write' | 'later' | 'always'): void
+  /** What the call notice shows now, asked by its page when it loads (the first notice can come before it listens). */
+  callNoticeNow(): Promise<{ app: import('./call-apps').CallApp; name: string } | null>
+  /** The one-time offer to change Togle's keys, when one of them was pressed in a code editor that uses it too. */
+  onKeysNotice(cb: (offer: import('./types').KeysOffer | null) => void): Unsubscribe
+  /** What the keys notice shows now, asked by its page when it loads. */
+  keysNoticeNow(): Promise<import('./types').KeysOffer | null>
+  /** The answer to that offer: open Settings at the keys, or keep them. */
+  answerKeysNotice(choice: 'change' | 'keep'): void
   /** The box opened, with what it was opened with (a saved call, a to-do item, an agent and a folder), or null. */
   onTaskBoxShown(cb: (opening: import('./runner').TaskBoxOpen | null) => void): Unsubscribe
   /** Opens the task box: every way of giving work to an agent does, from a to-do item with its words, or empty. */

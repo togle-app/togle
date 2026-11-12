@@ -79,6 +79,8 @@ export function Shell() {
   useEffect(() => onOpenSettings((at) => { setSettingsAt(at); setView('settings') }), [])
   useEffect(() => api.onHotkey((action) => {
     if (action === 'dictation-settings') openSettings('dictation')
+    // "Change keys" on the one-time offer when a key was pressed in a code editor.
+    if (action === 'keys-settings') openSettings('keys')
     // The call shortcut, and a call app's notice ("Write it down"): a call starts, or the one going on stops.
     if (action === 'toggle-listening' || action === 'start-call-unseen') void (call.listening ? call.stop() : writeDown())
   }), [call, writeDown])

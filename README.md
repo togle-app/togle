@@ -65,6 +65,8 @@ One list for the day, kept as a plain text file on your computer. What your agen
 
 They work from any app. Settings can give each other keys: click it and press the keys you want. Keys that would stop working in every other app are refused with the reason. On most Mac keyboards, F keys need Fn held.
 
+F9, F8 and F10 are also debugger keys in VS Code, Visual Studio and JetBrains IDEs. The first time you press one while one of those editors is in front (on Windows, for now), a notice in the corner offers **Change keys** once; the key still does its job in Togle. The notice never comes back.
+
 ## Your AI plan
 
 Togle has no account and no bill of its own. **Sign in with ChatGPT** (Settings → Accounts → AI plan) uses your ChatGPT plan: what Togle uses counts toward its limit. Without a ChatGPT plan, **Use a key** from Gemini, Grok, Kimi or any OpenAI-compatible service (OpenRouter, Groq, or a model on your computer with Ollama or LM Studio). Togle checks the key by listing the service's models, then uses one model for every job: the key cleans up dictation and writes the notes, as the plan would. The service bills you for it.

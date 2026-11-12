@@ -43,7 +43,7 @@ export function SettingsPage({ settings, stt, at, onChange }: Props) {
   // Opened to fix something: at the part that does, ready to use.
   useEffect(() => {
     if (!at) return
-    const target = document.getElementById(at === 'speech' ? 'settings-speech' : at === 'ai' ? 'settings-accounts' : 'settings-voice')
+    const target = document.getElementById(at === 'speech' ? 'settings-speech' : at === 'ai' ? 'settings-accounts' : at === 'keys' ? 'settings-keys' : 'settings-voice')
     target?.scrollIntoView({ block: 'start' })
     ;(target?.tabIndex === -1 ? target : target?.querySelector<HTMLElement>('h3'))?.focus({ preventScroll: true })
   }, [at])

@@ -4,6 +4,7 @@ import { Icon } from './Icon'
 import { DictationBar } from './DictationBar'
 import { TaskBox } from './TaskBox'
 import { CallNoticeSurface } from './CallNoticeSurface'
+import { KeysNoticeSurface } from './KeysNoticeSurface'
 import { CallStripSurface } from './CallStripSurface'
 import { ShowSurface } from './ShowSurface'
 import { TaskNoticeSurface } from './TaskNoticeSurface'
@@ -74,12 +75,15 @@ const dictationSurface = surface === 'dictation'
 const noticeSurface = surface === 'notice'
 const taskBoxSurface = surface === 'taskbox'
 const callNoticeSurface = surface === 'callnotice'
+const keysNoticeSurface = surface === 'keysnotice'
 const callStripSurface = surface === 'callstrip'
 const showSurface = surface === 'show'
 if (dictationSurface) document.body.classList.add('dictation-surface')
 if (noticeSurface) document.body.classList.add('notice-surface')
 if (taskBoxSurface) document.body.classList.add('taskbox-surface')
 if (callNoticeSurface) document.body.classList.add('notice-surface', 'callnotice-surface')
+// The keys notice looks like the call notice: it has that one's styles.
+if (keysNoticeSurface) document.body.classList.add('notice-surface', 'callnotice-surface', 'keysnotice-surface')
 if (callStripSurface) document.body.classList.add('notice-surface', 'callstrip-surface')
 if (showSurface) document.body.classList.add('show-surface')
 const root = createRoot(document.getElementById('root')!)
@@ -87,6 +91,7 @@ if (dictationSurface) root.render(<DictationBar />)
 else if (noticeSurface) root.render(<TaskNoticeSurface />)
 else if (taskBoxSurface) root.render(<TaskBox />)
 else if (callNoticeSurface) root.render(<CallNoticeSurface />)
+else if (keysNoticeSurface) root.render(<KeysNoticeSurface />)
 else if (callStripSurface) root.render(<CallStripSurface />)
 else if (showSurface) root.render(<ShowSurface />)
 else {

@@ -1,8 +1,8 @@
 // Settings opened from anywhere in the window, at the part that fixes what's wrong: the window listens for it and opens
 // Settings scrolled there.
 
-/** A part of Settings: the AI plan (under Accounts), speech recognition, or voice typing. */
-export type SettingsPart = 'ai' | 'speech' | 'dictation'
+/** A part of Settings: the AI plan (under Accounts), speech recognition, voice typing, or the keys. */
+export type SettingsPart = 'ai' | 'speech' | 'dictation' | 'keys'
 
 const EVENT = 'togle:open-settings'
 

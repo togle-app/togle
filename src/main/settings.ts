@@ -61,6 +61,8 @@ export const DEFAULT_SETTINGS: Settings = {
   meetings: { introSeen: false, confirmNames: true, notice: true, apps: {} },
   // The first minute: once, on a Togle that has never run.
   firstMinute: { done: false },
+  // The offer to change keys a code editor uses too: once, the first time it applies.
+  keysOffer: { shown: false },
   // Agents added in Settings (Codex, Claude Code and Hermes are found by themselves).
   addedAgents: []
 }
