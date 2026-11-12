@@ -410,6 +410,10 @@ export interface TogleApi {
   /** Togle was opened on a task, from a notice or the tray: show it. */
   onShowTask(cb: (key: string) => void): Unsubscribe
   /** The task box was opened: its page is told, to make it ready to type in. */
+  /** What the small strip shows while a call is written down and Togle's window is closed. Null when it is put away. */
+  onCallStrip(cb: (state: import('./call-strip').CallStripState | null) => void): Unsubscribe
+  /** A button of that strip. */
+  callStripAction(action: import('./call-strip').CallStripAction): void
   /** A call started in another app: the notice in the corner offers to write it down. Null when it is put away. */
   onCallNotice(cb: (notice: { app: import('./call-apps').CallApp; name: string } | null) => void): Unsubscribe
   /** The answer to that notice: write the call down, not now, or always for this app. */

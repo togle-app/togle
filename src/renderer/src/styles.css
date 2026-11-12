@@ -3282,3 +3282,11 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .call-notice-buttons { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
 .call-notice-buttons button { padding: 5px 11px; font-size: 12px; }
 .call-notice-buttons .link { padding-left: 2px; padding-right: 2px; }
+
+/* The strip at the top of the screen during a call, with Togle's window closed. */
+.call-strip-bar { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 100vh; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text); font-size: 12px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
+.call-strip-live { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); animation: strip-pulse 1.6s ease-in-out infinite; }
+.call-strip-clock { margin-right: auto; font: 600 12px ui-monospace, 'Cascadia Mono', Consolas, monospace; font-variant-numeric: tabular-nums; }
+.call-strip-bar button { padding: 4px 11px; border-radius: 999px; font-size: 12px; }
+.call-strip-bar button.stop { color: var(--danger); }
+@keyframes strip-pulse { 50% { opacity: 0.35; } }

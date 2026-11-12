@@ -653,6 +653,33 @@ async function checkCallNotice(T, agent) {
   ui.window.destroy()
 }
 
+// The strip at the top of the screen while a call is written down and Togle's window is closed.
+async function checkCallStrip(T, agent) {
+  const ui = await open(T, agent, 380, 'callstrip')
+  const emit = value => ui.evaluate("window.togleUITest.emit('onCallStrip', " + JSON.stringify(value) + ")")
+  const actions = async () => (await ui.calls('callStripAction')).map(call => call.args[0])
+  assert.equal(await ui.evaluate("document.querySelector('.call-strip-bar')"), null, 'nothing shows when no call is written down')
+  await emit({ since: Date.now() - 12 * 60_000 - 41_000, told: false, marks: 0 })
+  await ui.wait("!!document.querySelector('.call-strip-bar')")
+  assert.match(await ui.evaluate("document.querySelector('.call-strip-clock').textContent"), /^12:4[0-9]$/, 'the time into the call')
+  assert.deepEqual(await texts(ui, '.call-strip-bar button'), ['Mark', 'Stop', 'Tell the others'])
+  await ui.capture('call-strip')
+  await ui.click('.call-strip-bar button', 'Mark')
+  await emit({ since: Date.now() - 12 * 60_000, told: false, marks: 1 })
+  await ui.wait("document.querySelector('.call-strip-bar button').textContent==='Mark 1'")
+  await ui.click('.call-strip-bar button', 'Tell the others')
+  assert.deepEqual(await texts(ui, '.call-strip-bar button'), ['Mark 1', 'Stop', 'I told them'], 'after the line is copied, the button says they were told')
+  await ui.click('.call-strip-bar button', 'I told them')
+  await emit({ since: Date.now() - 12 * 60_000, told: true, marks: 1 })
+  await ui.wait("document.querySelectorAll('.call-strip-bar button').length===2")
+  await ui.click('.call-strip-bar button', 'Stop')
+  assert.deepEqual(await actions(), ['mark', 'copy', 'told', 'stop'])
+  await emit(null)
+  await ui.wait("!document.querySelector('.call-strip-bar')")
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 async function checkNarrow(T, agent) {
   const ui = await open(T, agent, 600)
   await ui.click('.workspace-nav button', 'Tasks')
@@ -687,6 +714,7 @@ app.whenReady().then(async () => {
     await checkOutsideAsk(T, agent)
     await checkTaskBox(T, agent)
     await checkCallNotice(T, agent)
+    await checkCallStrip(T, agent)
     await checkAgentSettings(T, agent)
     console.log('Tasks screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box and the settings for coding agents passed')
     clearTimeout(timeout)

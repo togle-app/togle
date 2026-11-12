@@ -21,6 +21,9 @@ import type { ChannelServer } from './channel/server'
 import { NoticeWindow } from './notice-window'
 import { TaskBoxWindow } from './task-box-window'
 import { CallNoticeWindow } from './call-notice-window'
+import { CallStripWindow } from './call-strip-window'
+import { isCallStripAction } from '@shared/call-strip'
+import { tellOthersLine } from '@shared/meeting'
 import { appRunning, CallDetector, readMicrophoneUse } from './call-detect'
 import { callAppName, isCallApp, isCallAppMode, type CallApp } from '@shared/call-apps'
 import { Attention } from './runners/attention'
@@ -265,6 +268,16 @@ let hookChannel: ChannelServer | null = null
 // The box to start a task in, opened by its key from any app.
 const taskBox = new TaskBoxWindow()
 const callNotice = new CallNoticeWindow()
+const callStrip = new CallStripWindow()
+/** While a call is written down and Togle's window is closed, a small strip keeps the call's controls in reach. */
+function refreshCallStrip(): void {
+  const closed = !win || win.isDestroyed() || !win.isVisible() || win.isMinimized()
+  const since = currentSession?.startedAt
+  if (copilot.isListening && closed && since) {
+    const call = copilot.callState()
+    callStrip.show({ since, told: !!call.toldOthers, marks: call.marks?.length ?? 0 })
+  } else callStrip.show(null)
+}
 /** A call started in another app: written down at once, offered in the corner, or left, as the person chose for that app. */
 function callAppStarted(appId: CallApp): void {
   const choice = getSettings().meetings.apps[appId]
@@ -1580,6 +1593,15 @@ function registerIpc(): void {
   ipcMain.on('call:group', (_e, group: boolean) => copilot.setGroup(!!group))
   ipcMain.on('call:told-others', (_e, told: boolean) => copilot.setToldOthers(!!told))
   // The answer to the notice that a call started in another app.
+  // The buttons of the strip that shows while a call is written down and Togle's window is closed.
+  ipcMain.on('callstrip:action', (event, action: unknown) => {
+    if (!callStrip.owns(event.sender) || !isCallStripAction(action) || !copilot.isListening) return
+    if (action === 'mark') copilot.mark()
+    else if (action === 'told') copilot.setToldOthers(true)
+    else if (action === 'copy') clipboard.writeText(tellOthersLine(getSettings().transcription))
+    else send('hotkey', 'start-call-unseen')
+    refreshCallStrip()
+  })
   ipcMain.on('callnotice:answer', (event, choice: unknown) => {
     if (!callNotice.owns(event.sender)) return
     const shown = callNotice.shown
@@ -2196,6 +2218,7 @@ if (hookAt !== -1) {
     void sweepSharedCalls()
     setInterval(() => void sweepConfirmSound(), 3600_000).unref()
     callDetector.start()
+    setInterval(refreshCallStrip, 1000).unref()
     setupMediaAccess()
     registerIpc()
     const runnerTitles = new StoredTitles()
@@ -2294,6 +2317,7 @@ if (hookAt !== -1) {
     taskBox.close()
     callDetector.stop()
     callNotice.close()
+    callStrip.close()
     todo?.dispose()
     void hookChannel?.close()
     microphoneLink.stop()
