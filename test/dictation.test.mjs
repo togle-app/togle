@@ -15,6 +15,19 @@ function fixture(patch = {}) {
   return { job, states, inserted, heard }
 }
 const audio = number => new Float32Array(16000).fill(number)
+test('with no AI to clean them up, the words go in as heard and the bar says why', async () => {
+  const inserted = [], job = new Dictation({
+    target: { capture: async () => ({ token: 'box', label: 'Fixture chat' }), insert: async (token, text) => { inserted.push(text); return { inserted: true } } },
+    speech: () => ({ polishes: false, asHeard: 'Typed as heard. Sign in to your AI plan in Settings to clean it up.', ready: async () => {}, transcribe: async () => 'uh send it today', polish: async text => text }),
+    changed: () => {}, inCall: () => false
+  })
+  await job.start(true); const id = job.status().id
+  job.push(id, audio(1)); job.stop(); await job.finish(id)
+  assert.deepEqual(inserted, ['uh send it today'])
+  assert.equal(job.status().phase, 'done')
+  assert.equal(job.status().message, 'Typed as heard. Sign in to your AI plan in Settings to clean it up.')
+  job.dispose()
+})
 test('releasing F9 preserves multilingual text through cleanup and focused-field insertion', async () => {
   const text = 'Bonjour André. 请检查 Jira。 Привет! مرحباً. Dobar dan.'
   const { job, inserted } = fixture({ transcribe: async () => text, polish: async value => value })
@@ -379,11 +392,30 @@ test('dictation: an old local preference keeps working, and cleanup uses the sam
   assert.equal(await f.speech.transcribe(audio(1), signal), 'heard on this PC'); await f.speech.polish('hello', signal)
   assert.equal(f.requests[0].id, 'claude')
 })
-test('dictation: a Claude account still has to be signed in when cleanup is off', async () => {
-  const f = speechFixture(); f.settings.dictation.polish = false; f.account({ signedIn: false })
-  await assert.rejects(f.speech.ready(), /Sign in with Claude/)
-  assert.equal(f.remote.length, 0)
-  await assert.rejects(f.speech.transcribe(audio(1), new AbortController().signal), /Start dictation again/)
+test('dictation: with no plan signed in, the words are heard on this PC and go in as heard, saying why', async () => {
+  const f = speechFixture(), signal = new AbortController().signal; f.account({ signedIn: false })
+  await f.speech.transcribe(audio(1), signal).then(() => assert.fail('nothing is heard before it is ready'), error => assert.match(error.message, /Start dictation again/))
+  await f.speech.ready()
+  assert.equal(await f.speech.transcribe(audio(1), signal), 'heard on this PC')
+  assert.equal(await f.speech.polish('uh hello there', signal), 'uh hello there')
+  assert.equal(f.requests.length, 0, 'no AI is asked')
+  assert.equal(f.speech.polishes, false)
+  assert.equal(f.speech.asHeard, 'Typed as heard. Sign in to your AI plan in Settings to clean it up.')
+  f.settings.dictation.polish = false; await f.speech.ready()
+  assert.equal(f.speech.asHeard, undefined, 'with cleanup turned off there is nothing to explain')
+})
+test('dictation: without a plan, the key that writes the notes cleans up the words, with its model', async () => {
+  const settings = structuredClone(getSettings()); settings.dictation.polish = true
+  const requests = [], signal = new AbortController().signal
+  const key = { id: 'compat', stream: async (input, options) => { requests.push(input); options.onFinal?.('Hello there.') } }
+  const speech = new DictationSpeech({ settings: () => settings, key: { provider: key, model: 'gemini-flash' },
+    chatgpt: { stream: () => assert.fail('no plan') }, claude: { stream: () => assert.fail('no plan') },
+    chatgptAccount: () => ({ signedIn: false }), claudeAccount: async () => ({ signedIn: false }), remote: async () => 'uh hello there' })
+  await speech.ready()
+  assert.equal(speech.polishes, true); assert.equal(speech.asHeard, undefined)
+  assert.equal(await speech.polish(await speech.transcribe(audio(1), signal), signal), 'Hello there.')
+  assert.equal(requests[0].model, 'gemini-flash')
+  assert.deepEqual(requests[0].tools, [])
 })
 test("dictation: a ChatGPT account's words are heard on this PC, and a settings change cannot reroute active recording", async () => {
   const f = speechFixture(), signal = new AbortController().signal; f.settings.provider = 'chatgpt'; await f.speech.ready(); f.settings.provider = 'claude'
@@ -392,12 +424,14 @@ test("dictation: a ChatGPT account's words are heard on this PC, and a settings 
   f.account({ signedIn: true, email: 'other@example.test' })
   await assert.rejects(f.speech.transcribe(audio(1), signal), /account changed/); await assert.rejects(f.speech.polish('secret', signal), /account changed/)
 })
-test('dictation: API key mode requires choosing a subscription', async () => {
-  const f = speechFixture(); f.settings.claude.auth = 'api-key'
-  await assert.rejects(f.speech.ready(), /subscription account/)
-  assert.equal(f.requests.length, 0); assert.equal(f.remote.length, 0)
+test('dictation: with the AI on an API key and no key given to dictation, the words go in as heard', async () => {
+  const f = speechFixture(), signal = new AbortController().signal; f.settings.claude.auth = 'api-key'
+  await f.speech.ready()
+  assert.equal(await f.speech.polish('raw words', signal), 'raw words')
+  assert.equal(f.requests.length, 0)
   f.settings.dictation.speech = 'claude'; await f.speech.ready()
-  assert.equal(await f.speech.transcribe(audio(1), new AbortController().signal), 'heard on this PC')
+  assert.equal(await f.speech.transcribe(audio(1), signal), 'heard on this PC')
+  assert.equal(await f.speech.polish('raw words', signal), 'Clean words.', 'a subscription picked for dictation cleans up')
 })
 test('dictation: cleanup can be disabled; abort releases a hung backend promptly', async () => {
   const f = speechFixture(); f.settings.dictation.polish = false; await f.speech.ready()

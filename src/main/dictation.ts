@@ -140,7 +140,8 @@ export class Dictation {
     try {
       const result = await this.options.target.insert(job.target.token, text)
       if (this.job !== job) return
-      this.set({ phase: result.inserted ? 'done' : 'ready', outcome: result.inserted ? 'inserted' : undefined, message: result.inserted ? result.message || (polishFailed || job.original ? 'Original words entered' : 'Text entered') : result.message || 'Text ready. The destination changed; copy it where you need it.' })
+      // With no AI to clean the words up, they went in as heard, and the bar says why.
+      this.set({ phase: result.inserted ? 'done' : 'ready', outcome: result.inserted ? 'inserted' : undefined, message: result.inserted ? result.message || job.speech.asHeard || (polishFailed || job.original ? 'Original words entered' : 'Text entered') : result.message || 'Text ready. The destination changed; copy it where you need it.' })
       this.receipt(job, raw, text, result.inserted ? 'inserted' : 'ready')
     } catch { if (this.job === job) { this.set({ phase: 'ready', message: 'Could not confirm insertion. Check your text box before copying.' }); this.receipt(job, raw, text, 'ready') } }
   }

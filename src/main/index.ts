@@ -38,6 +38,7 @@ import { readNoiseReport, shouldSuggest } from '@shared/microphone'
 import { TogleTray } from './tray'
 import { HotkeyPress } from './hotkey-press'
 import { voiceAccountId } from '@shared/dictation'
+import { modelSourceId } from '@shared/model-selection'
 import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import koffi from 'koffi'
@@ -601,6 +602,12 @@ function createDictationSpeech(): DictationSpeech {
   catch { throw new Error('Your voice typing account is unavailable. Choose another in Settings → Voice typing.') }
   settings.provider = entry.kind; settings.claude.auth = 'subscription'; settings.dictation.speech = entry.kind
   const openai = entry.kind === 'chatgpt' ? entry : undefined, anthropic = entry.kind === 'claude' ? entry : undefined
+  // Without a ChatGPT plan signed in, the key the person gave instead (the one that writes the notes) cleans up what
+  // they say too, with the model it uses for quick jobs. With neither, the words go in as heard.
+  const keySource = modelSourceId(getSettings())
+  const key = !settings.dictation.accountId && openai && !openai.auth.status().signedIn && isApiSource(keySource)
+    ? (() => { try { return { provider: apiConnections.pinned(keySource), model: getSettings().ai?.tasks.quick.model } } catch { return undefined } })()
+    : undefined
   const provider = accounts.pinned(entry.metadata.id, false)
   const scopedSpeechWords = speechWords(agents.get(copilot.isListening ? currentSession?.agentId || getSettings().activeAgentId : dictationAgentId || getSettings().activeAgentId).vocabulary)
   const speech = new DictationSpeech({
@@ -609,7 +616,7 @@ function createDictationSpeech(): DictationSpeech {
       const aliases = new Set(scoped.map(item => item.heardAs.toLocaleLowerCase()))
       return { ...vocabulary, words: [...vocabulary.words.filter(item => !aliases.has(item.heardAs.toLocaleLowerCase())), ...scoped] }
     }),
-    settings: () => settings, chatgpt: provider, claude: provider,
+    settings: () => settings, chatgpt: provider, claude: provider, key,
     chatgptAccount: () => openai?.auth.status() ?? { signedIn: false },
     claudeAccount: () => anthropic?.auth.status() ?? Promise.resolve({ signedIn: false }),
     // Every account's dictation is heard by this PC: neither sign-in includes transcription. The account cleans it up,
