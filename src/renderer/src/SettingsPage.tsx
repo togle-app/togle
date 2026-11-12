@@ -107,7 +107,8 @@ function Voice({ settings, stt, save }: { settings: Settings; stt: SttStatus; sa
   const ai = useAI(settings)
   return (
     <Section id="settings-voice" title="Voice">
-      <Row name="Microphone" note={problem || undefined}>
+      {/* Calls stay on the system's microphone: Togle Studio cleans the sound by being that microphone. */}
+      <Row name="Microphone" note={problem || (chosen ? "For talking. Calls use the system's microphone." : undefined)}>
         <select aria-label="Microphone" value={chosen} onChange={(event) => void save({ dictation: { microphoneId: event.target.value } })}>
           <option value="">System default</option>
           {chosen && !microphones.some((device) => device.deviceId === chosen) && <option value={chosen}>Saved microphone (not listed)</option>}
