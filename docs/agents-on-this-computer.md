@@ -14,7 +14,7 @@ Togle lists the tasks of the coding agents on your computer (Claude Code, Codex 
 - **Stop** stops a task. Codex lets a command that was already running finish, so a stopped Codex task shows a second button, **End the running command**. Stop on a Claude Code task ends its session and the command it was running; its conversation is kept, and opening its screen again brings it back. Stop on a Hermes task is Ctrl+C on its screen.
 - What finished in the last day stays in the list; older tasks fold under **Earlier**.
 - A task that runs in a terminal or in an app shows in the list too. For Claude Code, **Take over** ends the program in the terminal and moves the same conversation into the background, with its screen here. Togle asks first. See "Claude Code's own screen" below.
-- A task that stops by itself (a turn that ends with an error, or an agent program that stops) waits for you like a question, and its row says why. When the error means the agent is signed out, the row says so with the command that signs it in again (`claude auth login`, `codex login`, `hermes model`) and **Copy**: run it in a terminal, then reply to go on. The words that count as signed out are in `isSignedOut` in `src/shared/runner.ts`; Claude Code's and Codex's were seen on this computer, Hermes's were not.
+- A task that stops by itself (a turn that ends with an error, or an agent program that stops) waits for you like a question, and its row says why. When the error means the agent is signed out, the row says so with the command that signs it in again (`claude auth login`, `codex login`) and **Copy**: run it in a terminal, then go on. The words that count as signed out are in `isSignedOut` in `src/shared/runner.ts`; Claude Code's and Codex's were seen on this computer. A Hermes task is its own screen, which shows Hermes's errors itself (a model that does not answer, a sign-in that is missing: `hermes model` sets it): Togle does not read them, so its row says Done.
 - With no agent installed, Agents names Claude Code, Codex and Hermes, each with the one line its maker gives to install it and a link to its page. Togle looks for agents the way a terminal would: when one is not found, it adds the PATH saved in the registry (Windows) or the one the login shell sets up (Mac and Linux), so an agent installed while Togle runs shows within a minute. The login shell runs your start-up files, so Togle asks it at most every ten minutes, with no input, and stops it after five seconds; the usual folders (`~/.local/bin`, Homebrew's, `/usr/local/bin`) are checked every time.
 - **See changes**, beside a task's name, lists what differs from the last commit in its folder and shows each file's diff. It is read with git. It shows everything in the folder that differs, which can include changes that did not come from the agent.
 - Quitting Togle while a task it runs has not finished asks first. A Claude Code, Codex or Hermes task goes on: the question names the ones that are working or waiting for you, and says so. Togle finds a Claude Code or Codex task again when it starts; a Hermes task is a session in Hermes's list, which opens again from there. A task of an agent added through ACP is stopped, with the commands it started, when you quit.
@@ -147,6 +147,7 @@ Some limits, as Codex 0.169 (the server) with 0.166 (its screen) has them on Win
 
 - `/new` on the screen starts another thread in the same program. The task in Togle stays with the first.
 - A thread has to have had its first message before it can be joined: a task is started with its words.
+- **End the running command** finds the command by its text among what Codex's server runs, so it also ends an identical command that another thread of the server is running.
 - Mac and Linux were not tried.
 
 ## Hermes's own screen
@@ -163,8 +164,10 @@ A Hermes task opens in Togle as **Hermes's own screen**: `hermes --tui` in a ter
 
 Some limits, as Hermes 0.22.5 has them on Windows:
 
-- Togle hears the title only while the screen is open. After a restart of Togle, a Hermes task is a row in the list, not a task Togle hears.
+- Togle hears the title only while the screen is open. After a restart of Togle, a Hermes task is a row in the list, not a task Togle hears; a to-do line that names the task still finds that row.
 - Hermes's own list does not say which sessions are running.
+- Closing the screen of a Hermes task while its turn works makes the task read Done in Togle, and a notice that it finished may show, though the turn goes on in Hermes.
+- When no Hermes gateway runs, the screen starts one; whether closing the screen ends that gateway, and the turn with it, was not tried.
 - Hermes prints a title cut at 26 characters, so a session taken from its list shows a short title until its screen is opened.
 - Mac and Linux were not tried.
 

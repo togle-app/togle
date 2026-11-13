@@ -20,9 +20,12 @@
 //   that it waits there. Once the screen is closed Togle knows nothing of what the session does.
 import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
+import fs from 'node:fs/promises'
 import os from 'node:os'
+import path from 'node:path'
 import type { TaskInfo } from '@shared/runner'
 import { exists, lines } from './acp'
+import { keepJson } from './keep'
 import { TaskBase } from './task-base'
 import { cleanWords, loadPty, openTerminal, TerminalTask, type TerminalChunk } from './terminal'
 import type { Backend, Detected, ResumeOptions, ScreenSide, StartOptions, TaskHandle, TerminalSide } from './types'
@@ -33,6 +36,11 @@ export interface HermesOptions {
   env?: NodeJS.ProcessEnv
   /** Where what its screens print goes, for the window. Required: a screen whose words are not told shows only what it had printed when it was opened. */
   told: (chunk: TerminalChunk) => void
+  /**
+   * A folder of Togle's own where the name each session was started with, and the id Hermes gave it, are kept between runs: a
+   * to-do line that names a task by its name finds it again when Togle starts. Without one, nothing is kept.
+   */
+  keep?: string
   /** How long the sessions are reused, in milliseconds. */
   cacheMs?: number
   /** How often Hermes's list is looked at for the session of a task just started, in milliseconds. */
@@ -71,23 +79,34 @@ function ageOf(said: string, now: number): number {
   return Number.isNaN(date) ? 0 : date
 }
 
-/** The sessions in what `hermes sessions list` printed: a table whose columns start where its header's words do. */
+/**
+ * The sessions in what `hermes sessions list` printed: a table whose columns start where its header's words do. Hermes prints
+ * one of four, by whether any session listed has a title and whether any has a folder: the first column is the title (or, with
+ * no titles, the start of the first message), then a folder or a preview, the time, perhaps the source, and the id. Hermes pads
+ * a column by characters, so the columns are cut by characters here too: a title with an emoji (two UTF-16 units) moves nothing.
+ */
 export function parseSessionList(output: string, now = Date.now()): StoredRow[] {
   const rows = output.split(/\r?\n/)
-  const head = rows.findIndex((line) => /^\s*Title\s+Workspace\s+Last Active\s+ID\s*$/.test(line))
+  const head = rows.findIndex((line) => /^\s*(Title|Preview)\s+.*\bLast Active\b.*\bID\s*$/.test(line))
   if (head < 0) return []
   const header = rows[head]
   const workspace = header.indexOf('Workspace')
+  const preview = header.indexOf('Preview', 1)
   const active = header.indexOf('Last Active')
+  const source = header.indexOf('Src')
   const id = header.lastIndexOf('ID')
+  // The first column ends where the next one starts, and the time where the source or the id does.
+  const firstEnds = Math.min(...[workspace, preview, active].filter((at) => at > 0))
+  const ageEnds = source > active ? source : id
   const found: StoredRow[] = []
   for (const line of rows.slice(head + 1)) {
     if (!line.trim() || /^[\s─-]+$/.test(line) || /more not shown/i.test(line)) continue
-    const key = line.slice(id).trim().split(/\s+/)[0] ?? ''
+    const cells = Array.from(line)
+    const key = cells.slice(id).join('').trim().split(/\s+/)[0] ?? ''
     // A row whose id is cut or missing is not one.
-    if (!key || line.length <= id) continue
-    const place = line.slice(workspace, active).trim()
-    found.push({ id: key, title: line.slice(0, workspace).trim(), workspace: place === '—' ? '' : place, updatedAt: ageOf(line.slice(active, id), now) })
+    if (!key || cells.length <= id) continue
+    const place = workspace > 0 ? cells.slice(workspace, active).join('').trim() : ''
+    found.push({ id: key, title: cells.slice(0, firstEnds).join('').trim(), workspace: place === '—' ? '' : place, updatedAt: ageOf(cells.slice(active, ageEnds).join(''), now) })
   }
   return found
 }
@@ -311,17 +330,22 @@ class HermesTask extends TaskBase implements ScreenSide {
     const once = this.markedOnce
     this.markedOnce = null
     once?.()
+    // The session is in Hermes's list from the turn's first words: a look when the turn begins finds it, however long the screen
+    // took to start and however many looks that used up.
+    if (!this.real) this.searches = Math.min(this.searches, 6)
     if (marker === 'busy') {
       this.sawBusy = true
       this.turnOpen = true
       this.waitingFor = undefined
       this.stopped = false
       this.setBase('working')
+      this.search()
     } else if (marker === 'waiting') {
       this.sawBusy = true
       this.turnOpen = true
       this.waitingFor = 'approval or an answer'
       this.setBase('waiting')
+      this.search()
     } else {
       this.waitingFor = undefined
       // A task started with words is at work from the start: the idle screen that shows first is not its end.
@@ -386,6 +410,13 @@ class HermesTask extends TaskBase implements ScreenSide {
   }
 }
 
+const NAMES = 'names.json'
+/** The most names that are remembered. */
+const KEEP_NAMES = 200
+/** The name Togle gives a session it starts, which is also the id of its task. */
+const STARTED_NAME = /^togle-[0-9a-f]{8}$/
+const SESSION_WORD = /^[\w][\w.:-]{0,200}$/
+
 export class HermesBackend implements Backend {
   readonly runner = 'hermes' as const
   readonly screens = true
@@ -393,6 +424,9 @@ export class HermesBackend implements Backend {
   private cache: { at: number; rows: StoredRow[] } | null = null
   private closed = false
   private resolved?: Promise<TaskContext>
+  /** The name each session Togle started was started with, and the id Hermes gave it. */
+  private readonly names = new Map<string, string>()
+  private loaded?: Promise<void>
 
   constructor(private readonly options: HermesOptions) {}
 
@@ -442,16 +476,19 @@ export class HermesBackend implements Backend {
   }
 
   async list(): Promise<TaskInfo[]> {
+    await this.ready()
     const live = [...this.tasks].filter((task) => task.id)
     // Asking Hermes for its list starts a Python program each time: it is asked again after a while, or when something changed.
     if (!this.cache || Date.now() - this.cache.at > (this.options.cacheMs ?? 20_000)) {
       this.cache = { at: Date.now(), rows: await this.stored().catch(() => [] as StoredRow[]) }
     }
     const mine = new Set(live.map((task) => task.real).filter((id): id is string => !!id))
+    // A session Togle started is listed under the name it was started with, as its task was: a to-do line that names the task finds it.
+    const startedAs = new Map([...this.names].map(([name, id]) => [id, name]))
     const found: TaskInfo[] = this.cache.rows
       // A session that a task of Togle's runs is that task, and not a second row.
       .filter((row) => !mine.has(row.id))
-      .map((row) => ({ id: row.id, runner: 'hermes', title: row.title || row.workspace || 'Hermes task', folder: '', state: 'idle', updatedAt: row.updatedAt }))
+      .map((row) => ({ id: startedAs.get(row.id) ?? row.id, runner: 'hermes', title: row.title || row.workspace || 'Hermes task', folder: '', state: 'idle', updatedAt: row.updatedAt }))
     for (const task of live) {
       found.push({ id: task.id as string, runner: 'hermes', title: task.title || 'Hermes task', folder: task.folder, state: task.state, updatedAt: Date.now(), job: task.job, ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}) })
     }
@@ -477,6 +514,36 @@ export class HermesBackend implements Backend {
     }
     task.real = row.id
     this.cache = null
+    await this.remember(task.id, row.id)
+  }
+
+  // ---- What is kept between runs ----
+
+  private ready(): Promise<void> {
+    this.loaded ??= (async () => {
+      if (!this.options.keep) return
+      try {
+        const saved = JSON.parse(await fs.readFile(path.join(this.options.keep, NAMES), 'utf8')) as { names?: unknown }
+        for (const item of Array.isArray(saved.names) ? (saved.names as unknown[]) : []) {
+          const { name, id } = (item ?? {}) as { name?: unknown; id?: unknown }
+          if (typeof name === 'string' && typeof id === 'string' && STARTED_NAME.test(name) && SESSION_WORD.test(id)) this.names.set(name, id)
+        }
+      } catch {
+        // Nothing was kept yet, or what was kept cannot be read: Togle starts without it.
+      }
+    })()
+    return this.loaded
+  }
+
+  private async remember(name: string, id: string): Promise<void> {
+    await this.ready()
+    this.names.delete(name)
+    this.names.set(name, id)
+    // The oldest are let go of when there are many.
+    for (const old of [...this.names.keys()].slice(0, Math.max(0, this.names.size - KEEP_NAMES))) this.names.delete(old)
+    // A write that fails is only not kept: after a restart the task is listed under the id Hermes gave it.
+    const keep = this.options.keep
+    if (keep) await keepJson(path.join(keep, NAMES), { names: [...this.names].map(([kept, session]) => ({ name: kept, id: session })) })
   }
 
   // ---- Starting and opening ----
@@ -502,16 +569,26 @@ export class HermesBackend implements Backend {
   async resume(id: string, options: ResumeOptions = {}): Promise<TaskHandle> {
     if (this.closed) throw new Error('Hermes is closed.')
     // A session id or name is handed to Hermes as a word of its command: one that could be read as a flag is not one.
-    if (!/^[\w][\w.:-]{0,200}$/.test(id)) throw new Error('That is not a session Hermes knows.')
+    if (!SESSION_WORD.test(id)) throw new Error('That is not a session Hermes knows.')
     const context = await this.context()
-    const known = [...this.tasks].find((task) => task.job === id || task.id === id)
-    if (known) {
-      await known.show()
-      return known
+    await this.ready()
+    // A session Togle started is listed under the name it was started with, and that name opens the session Hermes gave it.
+    const session = this.names.get(id) ?? id
+    const find = (): HermesTask | undefined => [...this.tasks].find((task) => task.job === id || task.id === id || task.real === session)
+    let known = find()
+    if (!known) {
+      const stored = (await this.stored().catch(() => [] as StoredRow[])).find((row) => row.id === session)
+      // Another open of the same session may have finished while the list was read: one session, one task, one screen.
+      known = find()
+      if (!known) return this.opened(context, id, session, stored?.title || 'Hermes task', options)
     }
-    const stored = (await this.stored().catch(() => [] as StoredRow[])).find((row) => row.id === id)
-    const task = new HermesTask(context, id, stored?.title || 'Hermes task', options.folder ?? '')
-    task.real = id
+    await known.show()
+    return known
+  }
+
+  private async opened(context: TaskContext, id: string, session: string, title: string, options: ResumeOptions): Promise<HermesTask> {
+    const task = new HermesTask(context, id, title, options.folder ?? '')
+    task.real = session
     this.tasks.add(task)
     try {
       await task.show()

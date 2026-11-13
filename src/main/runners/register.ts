@@ -47,7 +47,7 @@ export interface RunnerDeps {
   backends?: Backend[]
   /** A folder of Togle's own where what Claude Code's tasks need to go on without Togle is kept: see ClaudeOptions.keep. */
   keep?: string
-  /** A folder of Togle's own where Codex keeps what its tasks need to go on without Togle (a folder of its own name in it). */
+  /** A folder of Togle's own where Codex and Hermes keep what their tasks need between runs (a folder of each one's name in it). */
   keepIn?: string
   /** The agents the person added (any that speaks ACP), and keeping a changed list. */
   added?(): AddedAgent[]
@@ -77,7 +77,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
       ...(deps.backends ?? [
         new CodexBackend({ version: deps.version, told, ...(deps.keepIn ? { keep: path.join(deps.keepIn, 'codex') } : {}) }),
         new ClaudeBackend({ told, ...(deps.keep ? { keep: deps.keep } : {}) }),
-        new HermesBackend({ told })
+        new HermesBackend({ told, ...(deps.keepIn ? { keep: path.join(deps.keepIn, 'hermes') } : {}) })
       ]),
       ...(deps.added?.() ?? []).map((agent) => addedBackend(agent, deps.version, told))
     ],

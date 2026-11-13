@@ -325,16 +325,18 @@ function SignedOut({ task }: { task: TaskView }) {
   const copy = (): void => {
     if (task.fix) void navigator.clipboard.writeText(task.fix).then(() => setCopied(true), () => undefined)
   }
+  // A task that is the agent's own screen has no reply box: the person goes on typing on the screen.
+  const goOn = task.screen ? 'type on its screen to go on' : 'reply here to go on'
   return (
     <div className="task-banner signed-out" role="note">
       <span>
         {agentOf(task)} is signed out.{' '}
         {task.fix ? (
           <>
-            Run <code>{task.fix}</code> in a terminal, then reply here to go on.
+            Run <code>{task.fix}</code> in a terminal, then {goOn}.
           </>
         ) : (
-          'Sign it in as its own instructions say, then reply here to go on.'
+          `Sign it in as its own instructions say, then ${goOn}.`
         )}
       </span>
       {task.fix && (

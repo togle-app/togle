@@ -89,6 +89,31 @@ test('the list Hermes prints is read by where its columns start, whatever its ro
   assert.deepEqual(T.parseSessionList(''), [])
 })
 
+test('the list is read in each of the four tables Hermes prints, and an emoji in a title moves no column', () => {
+  const now = Date.parse('2026-11-13T12:00:00Z')
+  // Hermes pads a column by characters, not by UTF-16 units: so does this.
+  const cell = (text, width) => text + ' '.repeat(Math.max(0, width - Array.from(text).length))
+  const table = (columns, rows) => [columns.map(([name, width]) => cell(name, width)).join(' ').trimEnd(), '─'.repeat(100), ...rows.map((row) => columns.map(([, width], at) => cell(row[at], width)).join(' ').trimEnd())].join('\n')
+  const summary = (text) => T.parseSessionList(text, now).map((row) => [row.id, row.title, row.workspace])
+
+  // Some session has a title and some has a folder.
+  const both = table([['Title', 28], ['Workspace', 18], ['Last Active', 13], ['ID', 0]], [['🚀 Launch plan', 'site', '3h ago', 'local-aaa'], ['Plain', '—', 'just now', 'local-bbb']])
+  assert.deepEqual(summary(both), [['local-aaa', '🚀 Launch plan', 'site'], ['local-bbb', 'Plain', '']])
+  assert.equal(T.parseSessionList(both, now)[0].updatedAt, now - 3 * 3_600_000, 'the time is not moved by the emoji either')
+
+  // Some session has a title and none has a folder: a session that failed its first turn can be all there is.
+  const noFolder = table([['Title', 32], ['Preview', 40], ['Last Active', 13], ['ID', 0]], [['togle-1a2b3c4d', 'Reply with only the word ok.', 'just now', 'local-ccc'], ['Fix the redirect', 'Fix the redirect in the router', '2d ago', 'local-ddd']])
+  assert.deepEqual(summary(noFolder), [['local-ccc', 'togle-1a2b3c4d', ''], ['local-ddd', 'Fix the redirect', '']])
+
+  // No session has a title: the first column is the start of the first message.
+  const noTitle = table([['Preview', 38], ['Workspace', 18], ['Last Active', 13], ['Src', 16], ['ID', 0]], [['Start of a message', 'site', '1h ago', 'cli', 'local-eee']])
+  assert.deepEqual(summary(noTitle), [['local-eee', 'Start of a message', 'site']])
+  assert.equal(T.parseSessionList(noTitle, now)[0].updatedAt, now - 3_600_000)
+  const bare = table([['Preview', 50], ['Last Active', 13], ['Src', 16], ['ID', 0]], [['What is the time', '5m ago', 'telegram', 'local-fff']])
+  assert.deepEqual(summary(bare), [['local-fff', 'What is the time', '']])
+  assert.equal(T.parseSessionList(bare, now)[0].updatedAt, now - 5 * 60_000)
+})
+
 test('a window title tells whether the screen works, waits for the person, or is idle', () => {
   assert.equal(T.markerOf('⏳ togle-1234 · claude-sonnet-5 · …\\work'), 'busy')
   assert.equal(T.markerOf('⚠ model · folder'), 'waiting')
@@ -205,6 +230,44 @@ test('a name Hermes already has is tried again with a number, so that no name of
   }
 })
 
+test('a task Togle started is listed under the name it was started with after Togle starts again, and that name opens its session', { timeout: 30_000 }, async () => {
+  const home = scratch()
+  const keep = scratch()
+  const first = hermes({ home, backend: { keep } })
+  let name
+  let session
+  try {
+    const task = await first.start({ folder: scratch(), prompt: 'say ok', title: 'Fix the redirect' })
+    name = task.id
+    await until(() => task.screen.job.startsWith('local-'), 'the session to be found')
+    session = task.screen.job
+  } finally {
+    await first.close()
+  }
+  // A new Togle: a new backend over the same sessions and the same folder of its own.
+  const second = hermes({ home, backend: { keep } })
+  try {
+    const listed = await second.list()
+    assert.equal(listed.length, 1)
+    assert.equal(listed[0].id, name, 'the key a to-do line holds is the one the task had when it was started')
+    assert.equal(listed[0].title, 'Fix the redirect')
+    const task = await second.resume(name)
+    assert.equal(task.id, name)
+    assert.equal(task.screen.job, session, 'the name opens the session Hermes gave it')
+    await until(() => second.started().length === 2, 'the second screen to start')
+    assert.deepEqual(second.started().at(-1), ['--tui', '--resume', session])
+  } finally {
+    await second.close()
+  }
+  // Without a folder of its own to keep names in, the session is listed under the id Hermes gave it.
+  const third = hermes({ home })
+  try {
+    assert.equal((await third.list())[0].id, session)
+  } finally {
+    await third.close()
+  }
+})
+
 // ---- The screen ----
 
 test('the screen can be closed and opened again: the session goes on, and is opened by the id Hermes gave it', { timeout: 30_000 }, async () => {
@@ -264,6 +327,21 @@ test('opening a session that is listed resumes it by its id, and one Togle runs 
     await until(() => backend.started().length === 2, 'the second screen to start')
     await new Promise((resolve) => setTimeout(resolve, 300))
     assert.equal(backend.started().length, 2, 'one screen for each time it was opened, no more')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('two quick opens of one session make one task and one screen', { timeout: 30_000 }, async () => {
+  const home = scratch()
+  seed(home, [{ id: 'local-once', title: 'Once', workspace: 'site', source: 'local', updatedAt: Date.now() - 3_600_000 }])
+  const backend = hermes({ home })
+  try {
+    const [first, second] = await Promise.all([backend.resume('local-once'), backend.resume('local-once')])
+    assert.equal(first, second, 'the same task')
+    await until(() => backend.started().length >= 1, 'the screen to start')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    assert.equal(backend.started().length, 1, 'one screen')
   } finally {
     await backend.close()
   }

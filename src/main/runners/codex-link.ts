@@ -75,8 +75,18 @@ export class WsRpcPeer implements RpcPeer {
     })
     this.socket = new WebSocket('ws://localhost/', { createConnection: () => pipe as never, perMessageDeflate: false, handshakeTimeout: OPEN_MS })
     this.opened = new Promise<void>((resolve, reject) => {
-      this.socket.once('open', () => resolve())
-      this.socket.once('error', (error) => reject(new RpcError(this.whyNot(error), -32000)))
+      // The pipe has no timeout of its own (see above), so `ws` cannot time the handshake out: a server that never answers the
+      // upgrade is given up on here.
+      const late = setTimeout(() => reject(new RpcError('Codex’s shared server did not answer.', -32000)), OPEN_MS)
+      late.unref?.()
+      this.socket.once('open', () => {
+        clearTimeout(late)
+        resolve()
+      })
+      this.socket.once('error', (error) => {
+        clearTimeout(late)
+        reject(new RpcError(this.whyNot(error), -32000))
+      })
     })
     // A rejection nobody waits for (the link closed before anyone looked) is not an error of Togle's.
     this.opened.catch(() => undefined)

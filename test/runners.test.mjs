@@ -310,6 +310,27 @@ test('Stop ends the turn and refuses what waits, and the command already running
   }
 })
 
+test('a turn that begins after Stop is a new one: the task works again and ends as any other', { timeout: 30_000 }, async () => {
+  const backend = codex()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'say ok' })
+    await until(() => task.state === 'idle', 'the first turn to end')
+    task.turnStarted({ id: 'turn-a' })
+    await task.stop()
+    assert.equal(task.state, 'stopped')
+    // The turn Stop interrupted can be told as started after Stop was pressed: that is not a new turn.
+    task.turnStarted({ id: 'turn-a' })
+    assert.equal(task.state, 'stopped')
+    // What the server says when the person types on the screen again.
+    task.turnStarted({ id: 'turn-b' })
+    assert.equal(task.state, 'working')
+    task.turnCompleted({ id: 'turn-b', status: 'completed' })
+    assert.equal(task.state, 'idle', 'not stopped for good')
+  } finally {
+    await backend.close()
+  }
+})
+
 test('Stop with a request open refuses it, so the agent cannot be answered afterwards', { timeout: 30_000 }, async () => {
   const backend = codex()
   try {
