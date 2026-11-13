@@ -24,7 +24,7 @@ import type { TaskState } from '@shared/runner'
 import type { HookTarget, HookVerdict } from './claude-hooks'
 import { requestOf, verdictOf } from './claude-requests'
 import { rec, text } from './jsonrpc'
-import { cleanWords, loadPty, openTerminal, TerminalTask, type TerminalChunk } from './terminal'
+import { cleanWords, loadPty, openTerminal, refuseCommand, TerminalTask, type TerminalChunk } from './terminal'
 import { TaskBase } from './task-base'
 import type { ScreenSide, TerminalSide } from './types'
 
@@ -354,10 +354,21 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
 
   // ---- What the person does ----
 
-  /** Words typed into the screen as one line, without Enter: the person presses it. */
+  /**
+   * A reply from the cards view. Claude Code takes words on its screen only, so the screen is opened out of sight when it is
+   * closed, and the words are typed in with Enter once the turn has ended: typed while it asks or works, they would answer
+   * its question, or be taken as something else. A reply that starts as a command of its own is refused (see `submit`).
+   */
   async send(words: string): Promise<void> {
-    if (!this.screenTask) throw new Error('Open its screen first.')
-    await this.screenTask.send(words)
+    if (this.over) throw new Error('That task is over.')
+    if (this.state === 'working' || this.state === 'waiting' || this.waitingFor) throw new Error('It is working. Reply when it has finished.')
+    refuseCommand(words)
+    if (!this.screenTask) await this.show()
+    const screen = this.screenTask
+    if (!screen) throw new Error(this.closed ?? 'Its screen could not be opened.')
+    await screen.settled()
+    await screen.submit(words)
+    this.began()
   }
 
   /** Ends the session and the command it runs. Its conversation is kept: opening its screen brings it back. */

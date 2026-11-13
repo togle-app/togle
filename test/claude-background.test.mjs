@@ -420,6 +420,52 @@ test('the screen closes and opens again, a new one each time, and the task goes 
   }
 })
 
+test('a reply from the cards view is typed in with Enter, and opens a closed screen out of sight', { timeout: 40_000 }, async () => {
+  const { backend, home, text } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Replies' })
+    const key = `claude:${task.id}`
+    await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
+    await task.send('first reply')
+    await until(() => text(key).includes('fine, first reply'), 'the reply to be answered')
+    assert.equal(task.state, 'working', 'it works from the reply, before the list says so')
+    // A second task, whose screen is closed: the reply opens it again.
+    const other = await backend.start({ folder: scratch(), prompt: '', title: 'Closed' })
+    const otherKey = `claude:${other.id}`
+    await until(() => other.terminal.read().text.includes('fake claude ready'), 'the second screen to be connected')
+    await other.screen.hide()
+    assert.equal(other.terminal, undefined)
+    const pid = job(home, other.screen.job).pid
+    await other.send('while closed')
+    assert.ok(other.terminal, 'the reply opened its screen')
+    assert.equal(job(home, other.screen.job).pid, pid, 'the same session')
+    await until(() => text(otherKey).includes('fine, while closed'), 'the reply to be answered on the screen that opened')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a reply is refused while the session works or asks, and when it is a command of the agent’s own', { timeout: 40_000 }, async () => {
+  const { backend, text } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Refused' })
+    const key = `claude:${task.id}`
+    await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
+    await assert.rejects(() => task.send('/model'), /command is typed on the agent/)
+    await assert.rejects(() => task.send('!ls'), /command is typed on the agent/)
+    type(task, 'question')
+    await until(() => task.pending.length === 1, 'the question to be asked')
+    await assert.rejects(() => task.send('red'), /Reply when it has finished/, 'a line typed then would answer the question on its screen')
+    task.reply(task.pending[0].id, 'red')
+    await until(() => task.pending.length === 0, 'the question to be answered')
+    await until(() => task.state === 'idle', 'the turn to end', 20_000)
+    await task.send('now')
+    await until(() => text(key).includes('fine, now'), 'the words to be typed and answered')
+  } finally {
+    await backend.close()
+  }
+})
+
 test('a screen opened in another window closes this one, which says so, and the task stays', { timeout: 40_000 }, async () => {
   const { backend, home } = claude()
   try {

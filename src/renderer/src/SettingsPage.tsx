@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import type { SettingsPatch } from '@shared/api'
 import type { AIProfile, ApiConnection, LocalModelId, LocalSpeechState, ModelOption, Settings, SttStatus, SubscriptionAccount } from '@shared/types'
 import type { RunnerStatus } from '@shared/runner'
@@ -59,7 +59,7 @@ export function SettingsPage({ settings, stt, at, onChange }: Props) {
           <Keys />
           <Voice settings={settings} stt={stt} save={save} />
           <Meetings settings={settings} save={save} />
-          <Agents />
+          <Agents settings={settings} save={save} />
           <Accounts settings={settings} save={save} />
           <Devices />
         </div>
@@ -275,7 +275,7 @@ function RememberedVoices({ settings, save }: { settings: Settings; save: (patch
 const agentLetter = (agent: RunnerStatus): string => (agent.runner === 'codex' ? 'X' : agent.name.trim().charAt(0).toUpperCase() || '?')
 
 /** The coding agents Togle found on this computer, and the ones the person added: any agent that speaks ACP. */
-function Agents() {
+function Agents({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
   const [found, setFound] = useState<RunnerStatus[] | null>(null)
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState('')
@@ -285,18 +285,40 @@ function Agents() {
     void api.runnerStatus().then((list) => { if (current) setFound(list) }, () => { if (current) setFound([]) })
     return () => { current = false }
   }, [])
-  const remove = async (agent: RunnerStatus): Promise<void> => {
-    setBusy(agent.runner); setError('')
-    try { setFound(await api.removeCodingAgent(agent.runner)) } catch (failure) { setError(errorText(failure)) } finally { setBusy('') }
+  // An agent Togle finds by itself is asked about before it is taken off the lists; one the person added is forgotten at once.
+  const [confirming, setConfirming] = useState('')
+  const change = async (agent: RunnerStatus, work: () => Promise<RunnerStatus[]>): Promise<void> => {
+    setBusy(agent.runner); setError(''); setConfirming('')
+    try { setFound(await work()) } catch (failure) { setError(errorText(failure)) } finally { setBusy('') }
   }
+  const remove = (agent: RunnerStatus): Promise<void> => change(agent, () => api.removeCodingAgent(agent.runner))
+  const restore = (agent: RunnerStatus): Promise<void> => change(agent, () => api.restoreCodingAgent(agent.runner))
   return (
     <Section id="settings-agents" title="Agents">
       {found === null ? <Row label={false} name="Looking…" /> : !found.length ? <Row label={false} name="No agent found" /> : found.map((agent) => (
-        <Row key={agent.runner} label={false} name={<span className="agent-name"><span className="av" aria-hidden="true">{agentLetter(agent)}</span><span className="agent-label">{agent.name}</span></span>}>
-          <span className={`setting-value ${agent.installed ? 'found' : ''}`}>{agent.installed ? (agent.added ? 'Added' : 'Found') : 'Not found'}</span>
-          {agent.added && <button className="ghost small" aria-label={`Remove ${agent.name}`} disabled={!!busy} onClick={() => void remove(agent)}>{busy === agent.runner ? 'Removing…' : 'Remove'}</button>}
-        </Row>
+        <Fragment key={agent.runner}>
+          <Row label={false} name={<span className="agent-name"><span className="av" aria-hidden="true">{agentLetter(agent)}</span><span className="agent-label">{agent.name}</span></span>}>
+            <span className={`setting-value ${agent.installed ? 'found' : ''}`}>{agent.removed ? 'Removed' : agent.installed ? (agent.added ? 'Added' : 'Found') : 'Not found'}</span>
+            {agent.removed
+              ? <button className="ghost small" aria-label={`Add back ${agent.name}`} disabled={!!busy} onClick={() => void restore(agent)}>{busy === agent.runner ? 'Adding…' : 'Add back'}</button>
+              : <button className="ghost small" aria-label={`Remove ${agent.name}`} disabled={!!busy} onClick={() => { if (agent.added) void remove(agent); else setConfirming(agent.runner) }}>{busy === agent.runner ? 'Removing…' : 'Remove'}</button>}
+          </Row>
+          {confirming === agent.runner && (
+            <div className="setting-detail" role="group" aria-label={`Remove ${agent.name} from Togle?`}>
+              <p className="hint">Togle stops showing {agent.name}’s tasks. They keep running in {agent.name}, which stays installed, and you can add it back here.</p>
+              <div className="row">
+                <button className="primary small" onClick={() => void remove(agent)}>Remove</button>
+                <button className="ghost small" onClick={() => setConfirming('')}>Keep</button>
+              </div>
+            </div>
+          )}
+        </Fragment>
       ))}
+      <Row label={false} name="Tasks open in">
+        <div className="segmented" role="radiogroup" aria-label="Tasks open in">
+          {(['session', 'cards'] as const).map((view) => <button key={view} type="button" role="radio" aria-checked={settings.tasks.view === view} className={settings.tasks.view === view ? 'on' : ''} title={view === 'session' ? 'The agent’s own screen. A switch on a task changes it for that task.' : 'What it said last, a card for what it asks, and a reply box. A switch on a task changes it for that task.'} onClick={() => void save({ tasks: { view } })}>{view === 'session' ? 'Session' : 'Cards'}</button>)}
+        </div>
+      </Row>
       {adding ? <AddAgent onAdded={(list) => { setFound(list); setAdding(false) }} onCancel={() => setAdding(false)} /> : (
         <div className="setting add-row"><button className="small" title="Any other agent: one that speaks ACP, or any that runs in a terminal" onClick={() => { setError(''); setAdding(true) }}>Add an agent</button></div>
       )}

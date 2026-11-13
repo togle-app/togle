@@ -71,6 +71,12 @@ export function addedAgentProblem(name: unknown, command: unknown): string | und
   return undefined
 }
 
+/** The agents the person took off Togle's lists that a settings file holds: only agents Togle knows by name, each once. */
+export function hiddenAgentsFrom(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.filter((id): id is string => typeof id === 'string' && id in KNOWN_AGENTS))]
+}
+
 /** The added agents a settings file holds, each checked: what is not one is left out. */
 export function addedAgentsFrom(value: unknown): AddedAgent[] {
   if (!Array.isArray(value)) return []
@@ -121,6 +127,8 @@ export interface RunnerStatus {
   version?: string
   /** One the person added, which they can remove. */
   added?: boolean
+  /** An agent Togle knows that the person took off its lists: Settings lists it so that it can be added back. */
+  removed?: boolean
 }
 
 /** One line of what happened in a task, for the window to show. */
@@ -291,6 +299,43 @@ export interface StartRequest {
   title?: string
   /** The to-do item the task is for. Without one, the task goes on the to-do list as an item of its own. */
   todo?: TodoRef
+  /**
+   * The task asks before every command and every change, whatever its agent's own settings say, as far as its agent lets Togle
+   * make it ask (Claude Code and Codex do; Hermes keeps its own approvals). Only ever stricter: a task of an agent that
+   * follows the person's own settings does so unless this is true.
+   */
+  asks?: boolean
+}
+
+/** The agent tasks connected to a call, and when each was last sent what was said. */
+export interface CallAgents {
+  /** The tasks, by key, in the order they were connected. */
+  keys: string[]
+  /** When what was said was last sent to each, in milliseconds. */
+  sent: Record<string, number>
+}
+
+/** A call given to agents: running tasks that are told where it is saved, and perhaps a new task started with it. */
+export interface GiveCall {
+  /** The call, by its key (the one going on or about to start, or a saved one). */
+  call: string
+  /** Running tasks, by key. */
+  tasks: string[]
+  /** A new task to start with the call, besides. It needs words. */
+  start?: { runner: RunnerKind; folder: string }
+  /** What they are asked to do with it. A new task needs it; a running one may do without. */
+  prompt: string
+  /** The tasks given the call stay connected to it, so that Send finds them again. */
+  connect?: boolean
+}
+
+/** What giving a call did for one task: it was sent, or why it was not. */
+export interface GiveResult {
+  key: string
+  ok: boolean
+  problem?: string
+  /** For the new task the call started: its title, to say what was started. */
+  title?: string
 }
 
 /**

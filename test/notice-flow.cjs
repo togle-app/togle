@@ -144,6 +144,15 @@ async function run() {
   await wait(() => icon.tooltip.includes('1 task waiting for you'), 'the tray to say so')
   await sleep(400)
   assert.equal(await js(notice, "!!document.querySelector('.task-notice')"), false, 'no notice while Togle itself is in front')
+  // Only the main window can say which screen it shows: another window's word changes nothing.
+  await js(notice, "window.togle.taskSessionShown('hermes:elsewhere')")
+  await sleep(400)
+  assert.equal(await js(notice, "!!document.querySelector('.task-notice')"), false, 'a message from another window changes nothing')
+  // An agent's own screen on screen has no card over it, so what it asks is said in a notice all the same, though Togle is in front.
+  await js(main, "window.togle.taskSessionShown('hermes:session')")
+  await wait(() => js(notice, "document.querySelector('.task-notice-head strong')?.textContent==='Second task'"), 'the notice over a screen that is shown, though Togle is in front')
+  await js(main, "window.togle.taskSessionShown(null)")
+  await wait(async () => !(await js(notice, "!!document.querySelector('.task-notice')")), 'the notice to go once no screen is shown')
   main.isFocused = () => false
   main.emit('blur')
   await wait(() => js(notice, "document.querySelector('.task-notice-head strong')?.textContent==='Second task'"), 'the notice, once Togle went behind')

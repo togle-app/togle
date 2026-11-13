@@ -170,9 +170,9 @@ export function Shell() {
           {view === 'todo' && settings?.firstMinute?.done && <Todo onOpenTask={openTask} onOpenCall={openMeeting} />}
           {view === 'agents' && <Tasks focus={taskFocus} />}
           {view === 'meetings' && settings && (live && call.listening
-            ? <LiveCall settings={settings} title={call.title} since={call.since} transcript={call.transcript} flags={call.flags} inputs={call.inputs} levels={call.levels}
+            ? <LiveCall settings={settings} title={call.title} since={call.since} transcript={call.transcript} flags={call.flags} inputs={call.inputs} levels={call.levels} callKey={call.callKey}
                 onMark={() => void api.markCall().catch(() => undefined)} onStop={() => void call.stop()} onReconnect={() => void call.reconnect()} onFirstCallSeen={() => void changeSettings({ meetings: { ...settings.meetings, introSeen: true } })} />
-            : <div className="settings meetings-page"><MeetingsPage agents={[]} liveId={call.listening ? call.callKey : undefined} onOpenLive={showLive} onWriteDown={() => void writeDown()} focus={meetingFocus} home={meetingsHome} noise={call.noise && !call.listening ? { callId: call.callKey, finding: call.noise } : undefined} microphone={microphone} /></div>)}
+            : <div className="settings meetings-page"><MeetingsPage agents={[]} callKey={call.callKey} liveId={call.listening ? call.callKey : undefined} onOpenLive={showLive} onWriteDown={() => void writeDown()} focus={meetingFocus} home={meetingsHome} noise={call.noise && !call.listening ? { callId: call.callKey, finding: call.noise } : undefined} microphone={microphone} /></div>)}
           {view === 'settings' && settings && <SettingsPage settings={settings} stt={stt} at={settingsAt} onChange={setSettings} />}
         </main>
       </div>

@@ -66,6 +66,34 @@ test('settings take only what they have, each of its kind, and hubs survive a re
   assert.deepEqual((await loadSettings()).hubs, ['acme/agents'])
 })
 
+test('a task opens as its agent’s own screen unless Settings say cards, and nothing else is a view', async () => {
+  const file = path.join(work, 'settings.json')
+  rmSync(file, { force: true })
+  assert.equal((await loadSettings()).tasks.view, 'session', 'a new Togle opens tasks as the agent’s own screen')
+  assert.equal((await updateSettings({ tasks: { view: 'cards' } })).tasks.view, 'cards')
+  assert.deepEqual(getSettings().tasks, { notices: true, finished: true, view: 'cards' }, 'the notices keep what they were')
+  assert.equal((await loadSettings()).tasks.view, 'cards', 'and it is kept')
+  assert.equal((await updateSettings({ tasks: { view: 'sideways' } })).tasks.view, 'session', 'a word that is not a view is the default')
+  assert.equal((await updateSettings({ tasks: { view: 12 } })).tasks.view, 'session')
+  writeFileSync(file, JSON.stringify({ activeAgentId: 'work', tasks: { notices: false, finished: true } }))
+  assert.deepEqual((await loadSettings()).tasks, { notices: false, finished: true, view: 'session' }, 'settings saved before it keep their notices and open tasks as screens')
+  rmSync(file, { force: true })
+  await loadSettings()
+})
+
+test('only agents Togle knows by name can be on the list of removed ones, each once, and it is kept', async () => {
+  const file = path.join(work, 'settings.json')
+  rmSync(file, { force: true })
+  assert.deepEqual((await loadSettings()).hiddenAgents, [])
+  assert.deepEqual((await updateSettings({ hiddenAgents: ['claude', 'claude', 'acp-goose', 3, 'hermes'] })).hiddenAgents, ['claude', 'hermes'])
+  assert.deepEqual((await loadSettings()).hiddenAgents, ['claude', 'hermes'], 'kept')
+  assert.deepEqual((await updateSettings({ hiddenAgents: 'claude' })).hiddenAgents, ['claude', 'hermes'], 'a word is not a list')
+  writeFileSync(file, JSON.stringify({ activeAgentId: 'work', hiddenAgents: ['codex', '../x', { id: 'claude' }] }))
+  assert.deepEqual((await loadSettings()).hiddenAgents, ['codex'], 'a hand-edited file is read for what it can be')
+  rmSync(file, { force: true })
+  await loadSettings()
+})
+
 test('the first minute is for a Togle that has never run', async () => {
   const file = path.join(work, 'settings.json')
   rmSync(file, { force: true })

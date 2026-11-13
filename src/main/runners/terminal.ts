@@ -64,6 +64,14 @@ export const cleanWords = (text: string): string =>
 const oneLine = (text: string): string => cleanWords(text).replace(/\s*[\r\n]+\s*/g, ' ').replace(/\t/g, ' ').trim()
 
 /**
+ * A reply sent to a screen that nobody looks at is only words: one that starts as a command of the agent's own ("/", "!") would
+ * ask things there, on a screen the person does not see. Says so, in words, for the person to read.
+ */
+export function refuseCommand(text: string): void {
+  if (/^[/!]/.test(oneLine(text))) throw new Error('A command is typed on the agent’s screen. Pick Session, and type it there.')
+}
+
+/**
  * One argument for a Windows command line, quoted the way programs read their arguments back (the C runtime's rules),
  * whatever it holds: quotes, spaces, backslashes. node-pty's own quoting leaves an argument that starts and ends with a
  * quote unquoted, which splits words like `"Fix it" --yolo` into several arguments.
@@ -202,6 +210,8 @@ export class TerminalTask extends TaskBase implements TerminalSide {
   private ending = false
   private closing = false
   private stoppedAt = 0
+  /** When it last printed anything. */
+  private lastPrinted = 0
   words?: string
 
   constructor(
@@ -242,6 +252,7 @@ export class TerminalTask extends TaskBase implements TerminalSide {
   }
 
   private printedMore(data: string): void {
+    this.lastPrinted = Date.now()
     this.output = (this.output + data).slice(-KEEP)
     if (!this.unsent) this.unsentAt = this.printed
     this.printed += data.length
@@ -313,6 +324,32 @@ export class TerminalTask extends TaskBase implements TerminalSide {
   /** Words from elsewhere in Togle (a reply) are typed in as one line, without Enter: the person presses it. */
   async send(text: string): Promise<void> {
     this.write(oneLine(text))
+  }
+
+  /**
+   * Resolves once the program has drawn its screen: it printed something, and then nothing for `quietMs`. Gives up after `maxMs`
+   * (a program that keeps printing, or never does), so that what waits is typed in all the same.
+   */
+  async settled(quietMs = 700, maxMs = 8_000): Promise<void> {
+    const began = Date.now()
+    while (!this.ended && Date.now() - began < maxMs) {
+      if (this.printed > 0 && Date.now() - this.lastPrinted >= quietMs) return
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  }
+
+  /**
+   * A reply sent from a view that has no screen on it: the words as one line, and Enter, as the person would on the screen.
+   * A line that starts as a command of the agent's own ("/", "!") is not sent: it asks things on the screen that nobody is looking at.
+   */
+  async submit(text: string): Promise<void> {
+    const line = oneLine(text)
+    if (!line) return
+    refuseCommand(line)
+    this.write(line)
+    // Enter a moment after the words: a program that takes a burst of keys as pasted text would hold the Enter in it.
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    this.write('\r')
   }
 
   /** The first press: Ctrl+C, as in any terminal. The agent decides what that stops. */

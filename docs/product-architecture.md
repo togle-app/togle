@@ -26,7 +26,7 @@ The call is saved as it goes (`call-file.ts`), encrypted, so a crash or a restar
 
 - **Who spoke?** (`shared/confirm-names.ts`) asks about the voices it isn't sure of, with a short clip of each. The clips are the only sound Togle keeps of a call (`confirm-sound.ts`, encrypted), and they are deleted once the names are answered or skipped, or the next day at the latest.
 - **Notes**: `meeting-notes.ts` sends the transcript, the marks and the person's own notes to their AI and keeps the notes it writes; `call-titles.ts` names the call the same way. Nothing goes to an AI during the call.
-- **Give to an agent** writes the call as a plain text file in `shared-calls`, for a coding agent to read; it goes with the call, or after 14 days.
+- **Agents on a call** (`call-agents.ts`): which agent tasks are connected to which call is a plain file of task keys and times (`call-agents.json`), kept under the call's key, which exists before the call starts. **Send what was said** and **Give to an agent** write the call as a plain text file in `shared-calls` (as it stands then, each time) and tell each running task where it is in one fixed line (`callMessage`); a new task starts with the same line and asks before it runs anything (`asks`, for Claude Code and Codex). It goes with the call, or after 14 days.
 
 ## Agents
 

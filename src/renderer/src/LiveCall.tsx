@@ -4,6 +4,7 @@ import { markedLineIds, speakerLabel } from '@shared/meeting'
 import { intoCall } from './CallTranscript'
 import type { CaptureInputs } from './audio/capture'
 import { FirstCallNotice, TellOthers } from './TellOthers'
+import { CallAgentsRow } from './CallAgents'
 
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -28,6 +29,8 @@ interface Props {
   transcript: TranscriptEntry[]
   flags: { toldOthers: number; marks: number[] }
   inputs: CaptureInputs
+  /** The call's key: the agents connected to it are kept under it. */
+  callKey: string
   /** How loud each side is now: read by the meters themselves, a few times a second. */
   levels: () => Partial<Record<'me' | 'them', number>>
   onMark: () => void
@@ -40,7 +43,7 @@ interface Props {
  * A call being written down: its words as people speak, who said them (a name with a question mark is a guess, to
  * confirm or change), the line to tell the others until it is ticked, Mark and Stop.
  */
-export function LiveCall({ settings, title, since, transcript, flags, inputs, levels, onMark, onStop, onReconnect, onFirstCallSeen }: Props) {
+export function LiveCall({ settings, title, since, transcript, flags, inputs, callKey, levels, onMark, onStop, onReconnect, onFirstCallSeen }: Props) {
   const [partials, setPartials] = useState<PartialTranscript[]>([])
   const finished = useRef(new Set<string>())
   useEffect(() => {
@@ -104,6 +107,7 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, le
         <span className="person-chip ok">You</span>
         {people.map((line) => <PersonChip key={line.voiceId} line={line} />)}
       </div>
+      {callKey && <CallAgentsRow call={callKey} live />}
       <div className="live-lines" ref={lines} onScroll={(event) => { const box = event.currentTarget; atEnd.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40 }}>
         {!transcript.length && !partials.length && <p className="hint">Listening… The words appear as people speak.</p>}
         {transcript.map((line) => <LiveLine key={line.id} line={line} since={since} marked={marked.has(line.id)} />)}

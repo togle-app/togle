@@ -26,7 +26,7 @@ import type { NoiseReport, TogleMicrophoneStatus } from './microphone'
 import type { MicrophoneLinkPage } from './microphone-link'
 import type { CloseWarning } from './close-warning'
 import type { TodoList, TodoRef } from './todo'
-import type { Changes, Decision, RunnerStatus, StartRequest, TaskDetail, TaskNotice, TaskView } from './runner'
+import type { CallAgents, Changes, Decision, GiveCall, GiveResult, RunnerStatus, StartRequest, TaskDetail, TaskNotice, TaskView } from './runner'
 
 export type Unsubscribe = () => void
 
@@ -108,8 +108,15 @@ export interface TogleApi {
   searchCalls(query: string): Promise<import('./types').CallSearchHit[]>
   /** What calls left for the person's day: names to confirm, notes that are ready, and the to-dos in them that are theirs. */
   meetingOffers(): Promise<{ calls: import('./call-todo').CallOffer[]; items: import('./call-todo').TodoOffer[] }>
-  /** A finished call given to a coding agent: opens the task box with the call attached as a text file. */
-  giveCallToAgent(id: string): Promise<void>
+  /** The agent tasks connected to a call (the one going on or about to start, or a saved one), and when each was last sent it. */
+  callAgents(call: string): Promise<CallAgents>
+  /** Connects tasks to a call, or takes them off it: the list as it should be. */
+  setCallAgents(call: string, keys: string[]): Promise<CallAgents>
+  /**
+   * Gives a call to agents: the call is written as a text file as it stands, each running task is told where it is in one line,
+   * and a new task can start with it. Says what each got, or why not.
+   */
+  giveCall(request: GiveCall): Promise<GiveResult[]>
   callSession(id: string): Promise<CallSession | null>
   renameCallSession(id: string, title: string): Promise<CallSession>
   deleteCallSession(id: string): Promise<void>
@@ -171,8 +178,13 @@ export interface TogleApi {
   typeTerminalWords(key: string): Promise<void>
   /** What a terminal of Togle's own printed, as it comes: `at` is where the part starts among all it printed. */
   onTerminalData(cb: (chunk: { key: string; at: number; data: string; screen?: string }) => void): Unsubscribe
-  /** Removes an agent the person added. */
+  /**
+   * Removes an agent from Togle's lists: one the person added is forgotten; one Togle finds by itself stays installed, its
+   * tasks go on in it, and it can be added back.
+   */
   removeCodingAgent(id: string): Promise<RunnerStatus[]>
+  /** Adds back an agent Togle finds by itself that was removed from its lists. */
+  restoreCodingAgent(id: string): Promise<RunnerStatus[]>
   /** Every agent task on this PC in one list: waiting for the person first, then working, then the rest. */
   runnerTasks(): Promise<TaskView[]>
   /** One task with what happened in it, as far as Togle ran it. */
@@ -236,6 +248,8 @@ export interface TogleApi {
   dismissTaskNotice(id: string): void
   /** Togle was opened on a task, from a notice or the tray: show it. */
   onShowTask(cb: (key: string) => void): Unsubscribe
+  /** The task whose agent screen the window shows now (null: none). No card shows what it asks, so a notice still comes over it. */
+  taskSessionShown(key: string | null): void
   /** What the small strip shows while a call is written down and Togle's window is closed. Null when it is put away. */
   onCallStrip(cb: (state: import('./call-strip').CallStripState | null) => void): Unsubscribe
   /** A button of that strip. */

@@ -1,7 +1,7 @@
 // What the window can ask of the agents' tasks: each a message from the window to the hub, and one back when
 // something changed (the window then asks again for what it shows).
 import path from 'node:path'
-import { addedAgentProblem, agentIdOf, KNOWN_AGENTS, runsInTerminal, type AddedAgent, type RunnerKind, type StartRequest, type TaskView } from '@shared/runner'
+import { addedAgentProblem, agentIdOf, KNOWN_AGENTS, runsInTerminal, type AddedAgent, type RunnerKind, type RunnerStatus, type StartRequest, type TaskView } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
 import { AcpBackend, commandWords, whereIs } from './acp'
 import { ClaudeBackend } from './claude'
@@ -52,6 +52,9 @@ export interface RunnerDeps {
   /** The agents the person added (any that speaks ACP), and keeping a changed list. */
   added?(): AddedAgent[]
   saveAdded?(agents: AddedAgent[]): Promise<void>
+  /** The agents Togle finds by itself that the person took off its lists, and keeping a changed list. */
+  hidden?(): string[]
+  saveHidden?(ids: string[]): Promise<void>
   /** A task was started, from the window, the task box or the togle command (see HubOptions.started). */
   started?(task: TaskView, request: StartRequest): void
 }
@@ -72,13 +75,20 @@ function word(value: unknown, what: string): string {
 export function registerRunners(deps: RunnerDeps): RunnerHub {
   // What a terminal of Togle's own prints goes to the window as it comes.
   const told = (chunk: TerminalChunk): void => deps.send('runners:terminal-data', chunk)
+  // The agents Togle finds by itself, one by its id: what is started again when one is added back.
+  const known = (runner: string): Backend | undefined =>
+    runner === 'codex'
+      ? new CodexBackend({ version: deps.version, told, ...(deps.keepIn ? { keep: path.join(deps.keepIn, 'codex') } : {}) })
+      : runner === 'claude'
+        ? new ClaudeBackend({ told, ...(deps.keep ? { keep: deps.keep } : {}) })
+        : runner === 'hermes'
+          ? new HermesBackend({ told, ...(deps.keepIn ? { keep: path.join(deps.keepIn, 'hermes') } : {}) })
+          : undefined
+  const hidden = (): string[] => deps.hidden?.() ?? []
   const hub = new RunnerHub({
     backends: [
-      ...(deps.backends ?? [
-        new CodexBackend({ version: deps.version, told, ...(deps.keepIn ? { keep: path.join(deps.keepIn, 'codex') } : {}) }),
-        new ClaudeBackend({ told, ...(deps.keep ? { keep: deps.keep } : {}) }),
-        new HermesBackend({ told, ...(deps.keepIn ? { keep: path.join(deps.keepIn, 'hermes') } : {}) })
-      ]),
+      // The ones the person took off Togle's lists are not started.
+      ...(deps.backends ?? Object.keys(KNOWN_AGENTS).filter((runner) => !hidden().includes(runner)).map((runner) => known(runner) as Backend)),
       ...(deps.added?.() ?? []).map((agent) => addedBackend(agent, deps.version, told))
     ],
     changed: () => {
@@ -94,7 +104,12 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   // Tasks that went on while Togle was closed are Togle's own again, with what they ask.
   void hub.restore()
   const { handle } = deps
-  handle('runners:status', () => hub.status())
+  // What Togle works with, and the agents it finds that were taken off its lists, so that Settings can add them back.
+  const statusOf = async (): Promise<RunnerStatus[]> => [
+    ...(await hub.status()),
+    ...hidden().filter((runner) => runner in KNOWN_AGENTS && !hub.has(runner)).map((runner): RunnerStatus => ({ runner, name: KNOWN_AGENTS[runner], installed: false, removed: true }))
+  ]
+  handle('runners:status', () => statusOf())
   handle('runners:list', () => hub.list())
   handle('runners:detail', (key) => hub.detail(word(key, 'The task')))
   handle('runners:changes', (key) => hub.changes(word(key, 'The task')))
@@ -103,7 +118,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     const runner = given.runner as RunnerKind
     if (typeof runner !== 'string' || !hub.has(runner)) throw new Error('Pick an agent.')
     const todo = todoOf(given.todo)
-    return hub.start({ runner, folder: word(given.folder, 'The folder'), prompt: word(given.prompt, 'The task'), title: typeof given.title === 'string' ? given.title : undefined, ...(todo ? { todo } : {}) })
+    return hub.start({ runner, folder: word(given.folder, 'The folder'), prompt: word(given.prompt, 'The task'), title: typeof given.title === 'string' ? given.title : undefined, ...(todo ? { todo } : {}), ...(given.asks === true ? { asks: true } : {}) })
   })
   handle('runners:open', (key) => hub.open(word(key, 'The task')))
   handle('runners:take-over', (key) => hub.takeOver(word(key, 'The task')))
@@ -142,14 +157,32 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     const agent: AddedAgent = { id, name: given, command: (command as string).trim() }
     await deps.saveAdded?.([...added, agent])
     hub.addBackend(addedBackend(agent, deps.version, told))
-    return hub.status()
+    return statusOf()
   })
+  // Remove: an agent the person added is forgotten. One Togle finds by itself is taken off its lists: it stays installed, its
+  // tasks go on in it, and Settings can add it back.
   handle('runners:remove-agent', async (id) => {
     const added = deps.added?.() ?? []
-    if (!added.some((agent) => agent.id === id)) throw new Error('Only an agent you added can be removed.')
+    if (typeof id === 'string' && id in KNOWN_AGENTS) {
+      if (!hub.has(id)) throw new Error(`${KNOWN_AGENTS[id]} is not on Togle’s lists.`)
+      await deps.saveHidden?.([...hidden().filter((one) => one !== id), id])
+      await hub.removeBackend(id)
+      return statusOf()
+    }
+    if (!added.some((agent) => agent.id === id)) throw new Error('That agent is not on Togle’s lists.')
     await deps.saveAdded?.(added.filter((agent) => agent.id !== id))
     await hub.removeBackend(id as string)
-    return hub.status()
+    return statusOf()
+  })
+  handle('runners:restore-agent', async (id) => {
+    if (typeof id !== 'string' || !(id in KNOWN_AGENTS)) throw new Error('Togle finds only Claude Code, Codex and Hermes by itself.')
+    if (hub.has(id)) return statusOf()
+    const backend = deps.backends ? deps.backends.find((one) => one.runner === id) : known(id)
+    if (!backend) throw new Error(`${KNOWN_AGENTS[id]} is not set up in this version of Togle.`)
+    await deps.saveHidden?.(hidden().filter((one) => one !== id))
+    // Its tasks that went on while it was off the lists are Togle's own again.
+    hub.addBackend(backend, true)
+    return statusOf()
   })
   return hub
 }

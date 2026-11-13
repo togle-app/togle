@@ -422,6 +422,8 @@ export interface Settings {
     notices: boolean
     /** One as well when a task finishes or stops with an error. */
     finished: boolean
+    /** Which view a task opens in (a switch in its header changes it for that task): its agent's own screen, or the cards and a reply box. */
+    view: 'session' | 'cards'
   }
   /** Writing calls down. */
   meetings: {
@@ -440,6 +442,8 @@ export interface Settings {
   keysOffer: { shown: boolean }
   /** Agents the person added in Settings: any that speaks ACP, by the command that starts it. */
   addedAgents: import('./runner').AddedAgent[]
+  /** Agents Togle finds by itself that the person took off its lists (Settings → Agents → Remove). They stay installed. */
+  hiddenAgents: string[]
 }
 
 export interface AuthStatus {

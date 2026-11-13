@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Agent, CallSearchHit, CallSession, CallSessionSummary } from '@shared/types'
 import { namesToConfirm } from '@shared/confirm-names'
+import { CallAgentsRow, GivePanel } from './CallAgents'
 import { CallNotes } from './CallNotes'
 import { callLength, CallTranscript } from './CallTranscript'
 import { confirmOpen, ConfirmNames } from './ConfirmNames'
@@ -46,6 +47,8 @@ export function meetingDot(call: CallSessionSummary, now = Date.now()): 'work' |
 
 interface Props {
   agents: Agent[]
+  /** The key of the call going on now, or of the one that starts next: the agents connected to it are kept under it. */
+  callKey?: string
   /** The call going on now, if any. */
   liveId?: string
   onOpenLive: () => void
@@ -67,7 +70,7 @@ type Point = { x: number; y: number }
  * looks in what was said. A call opens to who spoke while names wait, then to its notes and its transcript, and can be
  * given to an agent or shared. A right click on a call renames or deletes it.
  */
-export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus, noise, microphone, home }: Props) {
+export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown, focus, noise, microphone, home }: Props) {
   const [calls, setCalls] = useState<CallSessionSummary[] | null>(null)
   const [openId, setOpenId] = useState<string>()
   const [openTab, setOpenTab] = useState<'notes' | 'transcript'>('notes')
@@ -115,6 +118,7 @@ export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus, n
         <input className="history-search" aria-label="Search what was said" placeholder="Search what was said" value={query} onChange={event => setQuery(event.target.value)} />
         <button className="primary" disabled={!!liveId} title={liveId ? 'A call is being written down' : 'Start writing down a call now'} onClick={onWriteDown}>Write down now</button>
       </div>
+      {callKey && !liveId && <CallAgentsRow call={callKey} live={false} />}
       {deleting && (
         <div className="notice ask" role="alert">
           <span>Delete “{meetingTitle(deleting)}”, its notes and its transcript, from this computer? This can’t be undone.</span>
@@ -190,6 +194,12 @@ function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDelet
   const [menu, setMenu] = useState<Point | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [copied, setCopied] = useState(false)
+  // Giving the call to agents: the list that does it, the agents already on the call, and what giving did.
+  const [giving, setGiving] = useState(false)
+  const [given, setGiven] = useState('')
+  const [connected, setConnected] = useState<string[]>([])
+  useEffect(() => { setGiving(false); setGiven('') }, [id])
+  useEffect(() => { void api.callAgents(id).then(found => setConnected(found?.keys ?? []), () => undefined) }, [id, giving])
   const selected = useRef(id)
   selected.current = id
   const load = useCallback(() => { void api.callSession(id).then(found => { if (selected.current === id) { setRecord(found); if (!found) setError('This call is no longer available.') } }).catch(failure => setError(errorText(failure))) }, [id])
@@ -238,9 +248,11 @@ function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDelet
               { label: copied ? 'Copied' : 'Copy the notes', disabled: busy || !record.summary, keepOpen: false, onSelect: () => void navigator.clipboard.writeText(record.summary).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }, failure => setError(errorText(failure))) },
               { label: 'Save as a file', disabled: busy, onSelect: () => void run(async () => { await api.exportCallSession(record.id) }) }
             ]} />
-            <button className="primary" disabled={busy || !ended} title={ended ? 'Start a task for a coding agent with this call attached' : 'End the call first'} onClick={() => void run(() => api.giveCallToAgent(record.id))}>Give to an agent</button>
+            <button className="primary" disabled={busy || !ended} title={ended ? 'Give this call to a new agent task, or to agents that are running' : 'End the call first'} aria-expanded={giving} onClick={() => { setGiven(''); setGiving(!giving) }}>Give to an agent</button>
           </div>
         </div>
+        {giving && <GivePanel call={record.id} mode="give" connected={connected} onClose={() => setGiving(false)} onGiven={(_results, line) => setGiven(line)} />}
+        {given && <p className="hint" role="status">{given}</p>}
         {menu && <CallMenu at={menu} label={`${meetingTitle(record)}: rename or delete`} onClose={() => setMenu(null)} items={[
           { label: 'Rename', onSelect: () => { setTitle(record.title); setEditing(true) } },
           { label: 'Delete call', danger: true, onSelect: () => setDeleting(true) }

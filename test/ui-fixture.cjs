@@ -203,7 +203,20 @@ module.exports = function install(fixture) {
     const has = text => words.every(word => text.toLowerCase().includes(word))
     return clone(sessions.filter(session => session.transcript.some(line => has(line.text))).map(session => ({ id: session.id, title: session.title, startedAt: session.startedAt, lines: session.transcript.filter(line => has(line.text)).slice(0, 3).map(line => ({ at: line.at, who: line.voiceName || 'Them', text: line.text })) })))
   }
-  api.giveCallToAgent = async id => { record('giveCallToAgent', [id]) }
+  // Agents on a call, in memory: the tasks connected to each call, and what giving a call to agents answered.
+  const callAgentLists = new Map()
+  api.callAgents = async call => { record('callAgents', [call]); return clone(callAgentLists.get(call) ?? { keys: [], sent: {} }) }
+  api.setCallAgents = async (call, keys) => { record('setCallAgents', [call, keys]); const next = { keys: [...new Set(keys)], sent: {} }; callAgentLists.set(call, next); return clone(next) }
+  api.giveCall = async request => {
+    record('giveCall', [request])
+    const results = request.tasks.map(key => (fixture.giveFails?.[key] ? { key, ok: false, problem: fixture.giveFails[key] } : { key, ok: true }))
+    if (request.start) results.push({ key: request.start.runner + ':newcall', ok: true, title: request.prompt.slice(0, 40) })
+    const list = callAgentLists.get(request.call) ?? { keys: [], sent: {} }
+    if (request.connect) list.keys = [...new Set([...list.keys, ...results.filter(result => result.ok).map(result => result.key)])]
+    for (const result of results) if (result.ok && list.keys.includes(result.key)) list.sent[result.key] = Date.now()
+    callAgentLists.set(request.call, list)
+    return clone(results)
+  }
   api.confirmFinish = async id => { record('confirmFinish', [id]); const session = needSession(id); session.confirm.closed = Date.now(); emit('onCallSessions', { id }); return clone(session) }
   api.mergeCallSpeakers = async (id, from, into) => {
     record('mergeCallSpeakers', [id, from, into]); const session = needSession(id); combine(session.transcript, from, into)
@@ -257,10 +270,13 @@ module.exports = function install(fixture) {
   const runnerChanged = () => emit('onRunnersChanged')
   // Agents added in Settings, in memory: any that speaks ACP, by name and command.
   const addedAgents = []
-  const knownAgents = () => fixture.scenario === 'tasks' ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []
+  // Agents Togle finds by itself that were taken off its lists (Remove): listed as removed, so that they can be added back.
+  const removedKnown = new Set()
+  const knownAgents = () => (['tasks', 'confirm-names'].includes(fixture.scenario) ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []).map(agent => removedKnown.has(agent.runner) ? { runner: agent.runner, name: agent.name, installed: false, removed: true } : agent)
   api.runnerStatus = async () => [...knownAgents(), ...clone(addedAgents)]
   api.addCodingAgent = async (name, command, how) => { record('addCodingAgent', [name, command, how]); addedAgents.push({ runner: (how === 'terminal' ? 'term-' : 'acp-') + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, installed: true, added: true }); return api.runnerStatus() }
-  api.removeCodingAgent = async id => { record('removeCodingAgent', [id]); addedAgents.splice(addedAgents.findIndex(agent => agent.runner === id), 1); return api.runnerStatus() }
+  api.removeCodingAgent = async id => { record('removeCodingAgent', [id]); if (['claude', 'codex', 'hermes'].includes(id)) removedKnown.add(id); else addedAgents.splice(addedAgents.findIndex(agent => agent.runner === id), 1); return api.runnerStatus() }
+  api.restoreCodingAgent = async id => { record('restoreCodingAgent', [id]); removedKnown.delete(id); return api.runnerStatus() }
   // Reach (Togle Studio), when a check asks for it: this computer, a MacBook and a server whose task waits on a command.
   if (fixture.reach) {
     let reach = {
@@ -433,6 +449,8 @@ module.exports = function install(fixture) {
     terminalTask: (props, printed) => { const added = task(props.key, { mine: true, state: 'working', terminal: true, line: 'Working…', ...props }); runnerTasks.push(added); terminals.set(added.key, { text: printed, end: printed.length }); runnerChanged() },
     // A task Togle runs stops: by the person's Stop, or by itself (an error, or its agent signed out: `extra`).
     stopTask: (key, state, line, extra) => { const found = runnerFind(key); found.state = state; found.line = line; found.pending = []; Object.assign(found, extra ?? {}); runnerChanged() },
+    // A task that cannot be sent a call: what giving it the call answers.
+    giveFails: (key, problem) => { fixture.giveFails = { ...(fixture.giveFails ?? {}), [key]: problem } },
     // What the window is told of Claude Code's connection to Togle, changed by hand.
     failNextTask: () => { failTask = true },
     microphone: status => { microphone = clone(status); microphoneChanged() },

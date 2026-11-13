@@ -4,7 +4,7 @@ import { readJson, writeJson } from './storage'
 import { validateAIProfile } from '@shared/preferences'
 import { MICROPHONE_DEFAULTS } from '@shared/microphone'
 import { mergedVoiceAccount, type OldVoiceAccounts } from '@shared/speech'
-import { addedAgentsFrom } from '@shared/runner'
+import { addedAgentsFrom, hiddenAgentsFrom } from '@shared/runner'
 import { holdsByDefault } from './typing-way'
 
 const FILE = 'settings.json'
@@ -56,8 +56,9 @@ export const DEFAULT_SETTINGS: Settings = {
   hubs: [],
   // Shortcuts given other keys (or turned off): here so that loading keeps them.
   hotkeys: {},
-  // A task that waits is told in a notice, and one that finished too, until turned off in Settings → Coding agents.
-  tasks: { notices: true, finished: true },
+  // A task that waits is told in a notice, and one that finished too, until turned off in Settings → Coding agents. A task
+  // opens as its agent's own screen (Session) until Settings says Cards.
+  tasks: { notices: true, finished: true, view: 'session' },
   // Said once, before the first call is written down.
   meetings: { introSeen: false, confirmNames: true, notice: true, apps: {} },
   // The first minute: once, on a Togle that has never run.
@@ -65,7 +66,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // The offer to change keys a code editor uses too: once, the first time it applies.
   keysOffer: { shown: false },
   // Agents added in Settings (Codex, Claude Code and Hermes are found by themselves).
-  addedAgents: []
+  addedAgents: [],
+  // Agents found by themselves that the person removed from Togle's lists.
+  hiddenAgents: []
 }
 
 let current: Settings = DEFAULT_SETTINGS
@@ -117,6 +120,11 @@ function merge(base: Settings, patch: SettingsPatch): Settings {
       next[key] = { ...prev, ...Object.fromEntries(Object.entries(value).filter(([k, v]) => v !== undefined && fits(v, group[k]))) }
     } else next[key] = value
   }
+  // A task opens as its agent's own screen or as cards: any other word is the default.
+  const tasks = next.tasks as Settings['tasks']
+  if (tasks.view !== 'session' && tasks.view !== 'cards') next.tasks = { ...tasks, view: 'session' }
+  // Only agents Togle knows by name can be taken off its lists, each once.
+  next.hiddenAgents = hiddenAgentsFrom(next.hiddenAgents)
   // What hears a side of a call is this PC or a speech API. Neither sign-in includes transcription (the ChatGPT plan's
   // isn't part of Sign in with ChatGPT; Claude's speech isn't open to other apps), so a side saved or sent as either,
   // or as anything else, is heard by this PC.

@@ -31,7 +31,8 @@ import { callAppName, isCallApp, isCallAppMode, type CallApp } from '@shared/cal
 import { Attention } from './runners/attention'
 import type { RunnerHub } from './runners/hub'
 import type { Backend } from './runners/types'
-import type { StartRequest, TaskBoxOpen, TaskView } from '@shared/runner'
+import type { GiveCall, GiveResult, StartRequest, TaskBoxOpen, TaskView } from '@shared/runner'
+import { CallAgentStore, agentKeysFrom, callKey, callMessage } from './call-agents'
 import type { TodoFile } from './todo'
 import { registerTodo } from './todo-register'
 import { registerRunners } from './runners/register'
@@ -363,6 +364,8 @@ const callFile = new CallFile(() => {
   }
 })
 ongoing.onChange = () => callFile.changed()
+// The agent tasks connected to each call (call-agents.ts): task keys and times, kept in a plain file.
+const callAgentStore = new CallAgentStore()
 const voiceMemory = new VoiceMemory(VOICE_MODEL.sha256, () => send('voices:people-changed', undefined))
 const voices = new VoiceTracker((segment, voice, person) => ongoing.identifyVoice(segment, voice, person), status => send('voices:status', status), {
   memory: voiceMemory, enabled: () => getSettings().assist.rememberVoices === true,
@@ -507,6 +510,11 @@ async function setVoiceBar(visible: boolean): Promise<void> {
 function mainWindowActive(): boolean {
   return !!win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused()
 }
+/**
+ * The task whose agent screen the window shows. The screen has no card over it, so what it asks is not said anywhere else:
+ * while one is on screen, a notice comes even though Togle's window is in front.
+ */
+let sessionShown: string | null = null
 /** Tells the person what waits for them: a small notice while Togle's window is not in front, and a dot on the tray. */
 // A task that finished while a call was written down: said once the call is over.
 let finishedDuringCall: ReturnType<Attention['look']>['finished'][number] | undefined
@@ -522,7 +530,7 @@ function refreshNotices(): void {
   }
   const finishedNews = look.finished.length ? look.finished[look.finished.length - 1] : finishedDuringCall
   finishedDuringCall = undefined
-  if (mainWindowActive()) { noticeWindow.show(null); return }
+  if (mainWindowActive() && !sessionShown) { noticeWindow.show(null); return }
   // Settings → Coding agents can turn either notice off; the tray's dot stays.
   const { notices, finished } = getSettings().tasks
   const first = notices ? look.notices[0] : undefined
@@ -811,6 +819,8 @@ function createWindow(): void {
   let savedForClose = false
   win.webContents.on('did-start-loading', () => {
     if (pageLoads++) restoredFrom = undefined
+    // A page that loads again (or crashed) shows no screen until it says so: it cannot have said it no longer does.
+    if (sessionShown) { sessionShown = null; refreshNotices() }
   })
   win.on('unresponsive', () => (pageDown = true))
   win.on('responsive', () => (pageDown = false))
@@ -1452,18 +1462,52 @@ function registerIpc(): void {
     return { calls: calls.slice(0, 6), items: items.slice(0, 12) }
   })
   ipcMain.handle('calls:search', (_e, query: unknown) => callSessions.search(typeof query === 'string' ? query.slice(0, 200) : ''))
-  // A finished call given to a coding agent: written as a plain text file, and the task box opens with it attached.
-  ipcMain.handle('calls:give', async (_e, id: string) => {
-    const record = await getCallSession(id)
-    if (!record) throw new Error('This call is no longer available.')
-    if (record.status === 'live') throw new Error('End the call first.')
+  // Agents on a call: the tasks connected to it, before it starts, while it goes on, and after.
+  ipcMain.handle('calls:agents', (_e, call: unknown) => callAgentStore.get(callKey(call)))
+  ipcMain.handle('calls:set-agents', (_e, call: unknown, keys: unknown) => callAgentStore.set(callKey(call), keys))
+  // A call given to agents: written as a plain text file as it stands now (only the person can read it: it holds what other
+  // people said), and each running task is told where it is in one line, with the person's own words and never what was said.
+  // A new task, when asked for, starts with the same line and asks before it runs anything.
+  ipcMain.handle('calls:give', async (_e, request: unknown): Promise<GiveResult[]> => {
+    const given = (request ?? {}) as Partial<GiveCall>
+    const call = callKey(given.call)
+    const tasks = agentKeysFrom(given.tasks)
+    const words = typeof given.prompt === 'string' ? Array.from(given.prompt).filter(letter => letter.charCodeAt(0) >= 32 || letter === '\n').join('').trim().slice(0, 4000) : ''
+    const start = given.start && typeof given.start.runner === 'string' && typeof given.start.folder === 'string' ? { runner: given.start.runner, folder: given.start.folder } : undefined
+    if (!tasks.length && !start) throw new Error('Pick an agent.')
+    if (start && !words) throw new Error('Say what the new task is to do with the call.')
+    if (!runners) throw new Error('The agents are not ready yet.')
+    const live = call === currentCallKey && ongoing.isListening
+    // A call going on is written as it is now: what is waiting to be saved is saved first, and what was said since is in the file.
+    if (live) await callFile.flush().catch(() => undefined)
+    const stored = await getCallSession(call)
+    if (!stored) throw new Error(live ? 'Nothing has been said in this call yet.' : 'This call is no longer available.')
+    const said = live ? ongoing.callState().transcript : stored.transcript
+    const record = said.length ? { ...stored, transcript: said } : stored
+    if (!record.transcript.length && !record.summary) throw new Error('Nothing has been said in this call yet.')
     const folder = path.join(app.getPath('userData'), SHARED_CALLS)
     await fs.mkdir(folder, { recursive: true })
-    const file = path.join(folder, record.id + '.md')
-    // Only the person can read it: it holds what other people said.
+    const file = path.join(folder, call + '.md')
     await fs.writeFile(file, callForAgent(record), { encoding: 'utf8', mode: 0o600 })
-    const title = Array.from(record.title).filter(letter => letter.charCodeAt(0) >= 32).join('').trim().slice(0, 140)
-    taskBox.show({ attach: { title: title || 'A call', path: file } })
+    const message = callMessage(words, file, live)
+    const results: GiveResult[] = []
+    for (const key of tasks) {
+      try { await runners.send(key, message); results.push({ key, ok: true }) }
+      catch (error) { results.push({ key, ok: false, problem: (error as Error).message }) }
+    }
+    if (start) {
+      try {
+        const view = await runners.start({ runner: start.runner, folder: start.folder, prompt: message, asks: true })
+        results.push({ key: view.key, ok: true, title: view.title })
+      } catch (error) { results.push({ key: `${start.runner}:`, ok: false, problem: (error as Error).message }) }
+    }
+    const ok = results.filter(result => result.ok).map(result => result.key)
+    if (ok.length) {
+      const connected = callAgentStore.get(call).keys
+      if (given.connect) await callAgentStore.set(call, [...connected, ...ok.filter(key => !connected.includes(key))])
+      await callAgentStore.sentTo(call, ok)
+    }
+    return results
   })
   ipcMain.handle('calls:get', (_e, id: string) => getCallSession(id))
   ipcMain.handle('calls:notes-generate', async (_e, id: string, template: MeetingNoteTemplate, revision?: string) => {
@@ -1492,6 +1536,7 @@ function registerIpc(): void {
     await callSessions.remove(id)
     await confirmSound.remove(id)
     await fs.rm(path.join(app.getPath('userData'), SHARED_CALLS, record.id + '.md'), { force: true }).catch(() => undefined)
+    await callAgentStore.forget(record.id).catch(() => undefined)
   })
   ipcMain.handle('calls:export', async (_e, id: string) => {
     const record = await getCallSession(id)
@@ -1565,6 +1610,14 @@ function registerIpc(): void {
     if (!noticeWindow.owns(event.sender) || typeof id !== 'string') return
     attention.dismiss(id)
     noticeWindow.show(null)
+    refreshNotices()
+  })
+  // Which agent screen the window shows, told by the window itself.
+  ipcMain.on('tasks:session-shown', (event, key: unknown) => {
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return
+    const next = typeof key === 'string' && key ? key : null
+    if (next === sessionShown) return
+    sessionShown = next
     refreshNotices()
   })
   // F8 Show's overlay: the frozen screen it shows, and the picture or the cancel it gives back.
@@ -1698,7 +1751,7 @@ if (process.argv.includes('--togle-hook')) {
     registerIpc()
     const runnerTitles = new StoredTitles()
     const runnerRecords = new StoredRecords()
-    await Promise.all([runnerTitles.load(), runnerRecords.load()])
+    await Promise.all([runnerTitles.load(), runnerRecords.load(), callAgentStore.load()])
     // A test run can stand in for the agents with programs of its own. A packaged Togle never looks.
     const standIns = !app.isPackaged && process.env.TOGLE_TEST_RUNNERS ? await (require(process.env.TOGLE_TEST_RUNNERS) as { backends(): Promise<Backend[]> }).backends() : undefined
     todo = registerTodo({
@@ -1727,6 +1780,9 @@ if (process.argv.includes('--togle-hook')) {
       // Agents added in Settings: kept with the other settings.
       added: () => getSettings().addedAgents,
       saveAdded: async (agents) => { await updateSettings({ addedAgents: agents }) },
+      // Agents found by themselves that the person took off the lists.
+      hidden: () => getSettings().hiddenAgents,
+      saveHidden: async (ids) => { await updateSettings({ hiddenAgents: ids }) },
       // A task in a terminal of Togle's own is seen and answered only there: Togle opens on it.
       started: (task, request) => { void putOnTodo(task, request); if (task.terminal) showTask(task.key) }
     })

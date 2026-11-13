@@ -44,6 +44,53 @@ const SLASH_LIST_HEIGHT = 208
 const REMOTE = 'remote:'
 const remoteKey = (device: string, key: string): string => `${REMOTE}${device}:${key}`
 
+/** A task is shown as its agent's own screen (Session), or as what it said last, a card for what it asks and a reply box (Cards). */
+type View = 'cards' | 'session'
+const VIEWS = 'togle.taskviews'
+/** The view picked for each task, kept in the page between runs. */
+const readViews = (): Record<string, View> => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(VIEWS) ?? '{}') as Record<string, unknown>
+    return Object.fromEntries(Object.entries(stored).filter((entry): entry is [string, View] => entry[1] === 'cards' || entry[1] === 'session'))
+  } catch {
+    return {}
+  }
+}
+const keepViews = (views: Record<string, View>): void => {
+  try {
+    localStorage.setItem(VIEWS, JSON.stringify(Object.fromEntries(Object.entries(views).slice(-200))))
+  } catch {
+    // Not kept: each task opens in the view Settings says.
+  }
+}
+
+/** Which view each task is shown in: the one picked for it, else the one Settings says tasks open in. */
+function useTaskViews(): { of: (key: string) => View; pick: (key: string, view: View) => void } {
+  const [opens, setOpens] = useState<View>('session')
+  const [picked, setPicked] = useState<Record<string, View>>(readViews)
+  useEffect(() => {
+    let live = true
+    const take = (settings: { tasks?: { view?: unknown } } | undefined): void => {
+      if (live) setOpens(settings?.tasks?.view === 'cards' ? 'cards' : 'session')
+    }
+    void api.getSettings().then(take, () => undefined)
+    const off = api.onSettingsChanged(take)
+    return () => {
+      live = false
+      off()
+    }
+  }, [])
+  return {
+    of: (key) => picked[key] ?? opens,
+    pick: (key, view) =>
+      setPicked((previous) => {
+        const next = { ...previous, [key]: view }
+        keepViews(next)
+        return next
+      })
+  }
+}
+
 /** The tasks the person's other devices share (Reach, part of Togle Studio), kept current. */
 function useRemoteTasks(): DeviceTasks[] {
   const reach = useReach()
@@ -77,6 +124,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   // A task handed back: the line that goes on in the person's own terminal, shown where the task was.
   const [handedBack, setHandedBack] = useState<{ key: string; command: string; folder: string }>()
   const remote = useRemoteTasks()
+  const views = useTaskViews()
   const selectedNow = useRef(selected)
   selectedNow.current = selected
 
@@ -113,6 +161,14 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
     void refresh()
   }, [selected, refresh])
 
+  // The window says which agent screen it shows (one with no card over it), so that a notice still comes over it.
+  const sessionKey = detail && !seeing && detail.task.mine && detail.task.terminal && (!detail.task.screen || views.of(detail.task.key) === 'session') ? detail.task.key : null
+  useEffect(() => {
+    api.taskSessionShown(sessionKey)
+  }, [sessionKey])
+  // Away from the Tasks screen, none is shown. (Not on every change of the task: a pick of another screen would flash the notice away.)
+  useEffect(() => () => api.taskSessionShown(null), [])
+
   // Opened on a task from outside: it is the one shown.
   useEffect(() => {
     if (!focus?.key) return
@@ -134,6 +190,20 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
     },
     [refresh]
   )
+
+  // Opened from a notice that says an agent waits on its own screen (Hermes has no card for what it asks): the screen is what shows,
+  // once for each time the task is asked for from outside, so that a pick of Cards afterwards stays.
+  const showedSession = useRef(0)
+  useEffect(() => {
+    if (!focus?.key || showedSession.current === focus.seq) return
+    const task = tasks.find((item) => item.key === focus.key)
+    if (!task) return
+    showedSession.current = focus.seq
+    if (task.mine && task.screen && task.waitingFor && !task.pending.length) {
+      if (views.of(task.key) !== 'session') views.pick(task.key, 'session')
+      if (!task.terminal) void act(() => api.openRunnerTask(task.key))
+    }
+  }, [focus?.key, focus?.seq, tasks, views, act])
 
   const installed = status.filter((s) => s.installed)
   // One list, as the design has it: what waits for you comes first (a task Togle runs that stopped waits for a reply too),
@@ -167,7 +237,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
             New task
           </button>
         </div>
-        {loaded && !installed.length && <NoAgents />}
+        {loaded && !installed.length && (status.some((agent) => agent.removed) ? <p className="empty">No agent is on Togle’s lists. Add one back in Settings.</p> : <NoAgents />)}
         {!!shown.length && <div className="task-list" role="list">{shown.map((task) => row(task))}</div>}
         {!!earlier.length && (
           <div className="task-earlier">
@@ -235,6 +305,12 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
             onStop={() => act(() => api.stopRunnerTask(detail.task.key))}
             onEndCommands={() => act(() => api.endRunnerCommands(detail.task.key))}
             onOpen={() => act(() => api.openRunnerTask(detail.task.key))}
+            view={views.of(detail.task.key)}
+            onView={(view) => {
+              views.pick(detail.task.key, view)
+              // Session is the agent's own screen: picking it opens the screen when it is closed.
+              if (view === 'session' && detail.task.mine && detail.task.screen && !detail.task.terminal) void act(() => api.openRunnerTask(detail.task.key))
+            }}
             onTakeOver={() => act(() => api.takeOverRunnerTask(detail.task.key))}
             takeOverAsked={takingOver === detail.task.key}
             onHandBack={() => act(async () => setHandedBack({ key: detail.task.key, ...(await api.handBackRunnerTask(detail.task.key)) }))}
@@ -325,8 +401,8 @@ function SignedOut({ task }: { task: TaskView }) {
   const copy = (): void => {
     if (task.fix) void navigator.clipboard.writeText(task.fix).then(() => setCopied(true), () => undefined)
   }
-  // A task that is the agent's own screen has no reply box: the person goes on typing on the screen.
-  const goOn = task.screen ? 'type on its screen to go on' : 'reply here to go on'
+  // A task that is the agent's own screen is replied to on its card view or typed to on its screen.
+  const goOn = task.screen ? 'reply here or on its screen to go on' : 'reply here to go on'
   return (
     <div className="task-banner signed-out" role="note">
       <span>
@@ -359,6 +435,9 @@ interface PanelProps {
   onStop: () => void
   onEndCommands: () => void
   onOpen: () => void
+  /** The view the task is shown in, and a pick of the other. */
+  view: View
+  onView: (view: View) => void
   onTakeOver: () => void
   /** Take over was pressed on the task's row: the question that confirms it shows at once. */
   takeOverAsked: boolean
@@ -367,9 +446,13 @@ interface PanelProps {
   handedBack?: { command: string; folder: string }
 }
 
-function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, onTakeOver, takeOverAsked, onHandBack, handedBack }: PanelProps) {
+function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack }: PanelProps) {
   const { task, log } = detail
   const talkKey = useHotkeys().find((key) => key.id === 'dictate')?.keys || 'F9'
+  // A task whose agent has a screen Togle can show is seen in two views; any other task has the one it has.
+  const twoViews = task.mine && !!task.screen
+  // The agent's own screen is on screen: no card over it and no reply box, because what it asks is answered on it.
+  const sessionShown = task.terminal && (!task.screen || view === 'session')
   const [text, setText] = useState('')
   const [confirmTakeOver, setConfirmTakeOver] = useState(takeOverAsked)
   useEffect(() => { if (takeOverAsked) setConfirmTakeOver(true) }, [takeOverAsked])
@@ -397,7 +480,12 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
   // after "/model ". What the agent offers is asked when the task opens, and again when a "/" starts the reply.
   const [offers, setOffers] = useState<TaskOffers>(NO_OFFERS)
   const slashed = text.startsWith('/')
-  const answers = task.mine && !task.terminal
+  // Session picked and its screen is closed: what waits is answered on a card until the screen is opened.
+  const closedSession = task.mine && !!task.screen && view === 'session' && !task.terminal
+  const cardsView = !sessionShown && !closedSession
+  const answers = task.mine && cardsView
+  // An agent that can only be written to on its screen takes words when its turn has ended; Codex takes them while it works too.
+  const holdsReply = !!task.screen && task.runner !== 'codex' && (task.state === 'working' || task.state === 'waiting' || !!task.waitingFor) && !task.pending.some((request) => request.kind === 'question')
   useEffect(() => {
     if (!answers) { setOffers(NO_OFFERS); return }
     let live = true
@@ -494,6 +582,15 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
             )}
           </span>
         )}
+        {twoViews && (
+          <span className="segmented view-switch" role="group" aria-label="View">
+            {(['cards', 'session'] as const).map((name) => (
+              <button key={name} type="button" className={view === name ? 'on' : ''} aria-pressed={view === name} onClick={() => onView(name)} title={name === 'cards' ? 'What the agent said last, a card for what it asks, and a reply box.' : 'The agent’s own screen.'}>
+                {name === 'cards' ? 'Cards' : 'Session'}
+              </button>
+            ))}
+          </span>
+        )}
       </div>
 
       {task.mine && task.signedOut && <SignedOut task={task} />}
@@ -543,17 +640,12 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
         </div>
       )}
 
-      {task.terminal ? (
+      {sessionShown ? (
+        // The agent's own screen, with no card over it and no reply box: what it asks is answered on it, and a notice still comes.
+        <TerminalPanel task={task} onEnd={onEndCommands} />
+      ) : closedSession ? (
         <>
-          {/* On the agent's own screen a command that waits is shown above it, to answer here or on the screen. */}
-          {task.screen && task.pending.map((request) => (
-            <RequestCard key={request.id} request={request} screen onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
-          ))}
-          <TerminalPanel task={task} onEnd={onEndCommands} />
-        </>
-      ) : task.mine && task.screen ? (
-        <>
-          {/* The task goes on with its screen closed: what waits is answered here, or on the screen once it is opened. */}
+          {/* Session is picked and its screen is closed: what waits is answered here, or on the screen once it is opened. */}
           {task.pending.map((request) => (
             <RequestCard key={request.id} request={request} onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
           ))}
@@ -570,7 +662,7 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
       ) : (
       <>
       <div className="task-log" role="log" aria-label="What happened">
-        {log.length === 0 && task.mine && <p className="hint">Nothing yet.</p>}
+        {log.length === 0 && task.mine && <p className="hint">{task.screen ? 'Nothing said yet. Pick Session to see its screen.' : 'Nothing yet.'}</p>}
         {log.length === 0 && !task.mine && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
         {/* Where it stands first: what the agent said last. Its steps and the conversation fold under one line. */}
         {latest && <div className="task-agent task-latest"><Markdown text={latest.text} /></div>}
@@ -588,6 +680,17 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
       {task.pending.map((request) => (
         <RequestCard key={request.id} request={request} onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
       ))}
+
+      {/* An agent that asks on its own screen (Hermes) has no card here: it says so, and the session is one press away. */}
+      {task.mine && task.screen && task.waitingFor && !task.pending.length && (
+        <div className="task-banner" role="note">
+          <span>It waits on its screen: {task.waitingFor}.</span>
+          <button className="primary small" onClick={() => onView('session')}>
+            Open the session
+          </button>
+        </div>
+      )}
+      {task.mine && task.screen && !task.terminal && task.screenClosed && <p className="hint">{task.screenClosed}</p>}
 
       {task.mine && (
         <div className="task-reply-place" ref={replyPlace}>
@@ -609,8 +712,8 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
             </div>
           )}
           <form className="task-reply" onSubmit={send}>
-            <input value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={'Reply, or hold ' + talkKey + ' and talk'} aria-label="Reply to the agent" type={question?.questions?.[0]?.secret ? 'password' : 'text'} role="combobox" aria-autocomplete="list" aria-expanded={!!listed} aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
-            <button className="small" disabled={!text.trim()}>
+            <input value={text} disabled={holdsReply} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={holdsReply ? 'Reply when it has finished' : 'Reply, or hold ' + talkKey + ' and talk'} aria-label="Reply to the agent" type={question?.questions?.[0]?.secret ? 'password' : 'text'} role="combobox" aria-autocomplete="list" aria-expanded={!!listed} aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
+            <button className="small" disabled={holdsReply || !text.trim()}>
               Send
             </button>
           </form>
@@ -684,7 +787,7 @@ function LogLine({ entry }: { entry: LogEntry }) {
   }
 }
 
-function RequestCard({ request, screen, onAllow, onAlways, onRefuse, onReply }: { request: ViewRequest; /** Over the agent's own screen, which asks too: the person may answer on it. */ screen?: boolean; onAllow: () => void; onAlways: () => void; onRefuse: () => void; onReply: (text: string) => void }) {
+function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { request: ViewRequest; onAllow: () => void; onAlways: () => void; onRefuse: () => void; onReply: (text: string) => void }) {
   if (request.kind === 'question') {
     const questions = request.questions ?? []
     return (
@@ -733,7 +836,6 @@ function RequestCard({ request, screen, onAllow, onAlways, onRefuse, onReply }: 
       </div>
       {/* What always reaches, in the agent's terms; never for a command that looks dangerous. */}
       {request.always && !request.danger && (<button className="task-always" onClick={onAlways}>{request.always}</button>)}
-      {screen && <span className="hint">Or answer on the screen below. Either one is enough.</span>}
     </section>
   )
 }

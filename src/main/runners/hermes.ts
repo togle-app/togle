@@ -27,7 +27,7 @@ import type { TaskInfo } from '@shared/runner'
 import { exists, lines } from './acp'
 import { keepJson } from './keep'
 import { TaskBase } from './task-base'
-import { cleanWords, loadPty, openTerminal, TerminalTask, type TerminalChunk } from './terminal'
+import { cleanWords, loadPty, openTerminal, refuseCommand, TerminalTask, type TerminalChunk } from './terminal'
 import type { Backend, Detected, ResumeOptions, ScreenSide, StartOptions, TaskHandle, TerminalSide } from './types'
 
 export interface HermesOptions {
@@ -45,6 +45,8 @@ export interface HermesOptions {
   cacheMs?: number
   /** How often Hermes's list is looked at for the session of a task just started, in milliseconds. */
   findMs?: number
+  /** How long a reply typed on its screen waits to see Hermes take it (its window title goes to busy), in milliseconds. */
+  takeMs?: number
 }
 
 /** The program that starts Hermes, or null when it is not on this computer. `TOGLE_HERMES_PATH` names it by hand. */
@@ -192,6 +194,8 @@ interface TaskContext {
   find(task: HermesTask): Promise<void>
   /** How long to wait between two looks for the session of a task just started, in milliseconds. */
   findMs: number
+  /** How long a reply waits to see Hermes take it, in milliseconds. */
+  takeMs: number
 }
 
 class HermesTask extends TaskBase implements ScreenSide {
@@ -203,6 +207,8 @@ class HermesTask extends TaskBase implements ScreenSide {
   private turnOpen = false
   private holdUntil = 0
   private stopped = false
+  /** How many times the screen's window title said a turn works or waits: a reply typed in is taken when it grows. */
+  private busyMarks = 0
   /** Told when the screen next shows a marker: what Stop waits for on a screen it had to open. */
   private markedOnce: (() => void) | null = null
   private searches = 0
@@ -337,6 +343,7 @@ class HermesTask extends TaskBase implements ScreenSide {
     const changed = marker !== this.lastMarker
     this.lastMarker = marker
     if (changed && !this.real) this.searches = Math.min(this.searches, 6)
+    if (marker === 'busy' || marker === 'waiting') this.busyMarks++
     if (marker === 'busy') {
       this.sawBusy = true
       this.turnOpen = true
@@ -377,10 +384,47 @@ class HermesTask extends TaskBase implements ScreenSide {
 
   // ---- What the person does ----
 
-  /** Words typed into the screen as one line, without Enter: the person presses it. */
+  /**
+   * A reply from the cards view. Hermes takes words on its screen only, so the screen is opened out of sight when it is closed,
+   * and the words are typed in with Enter once its turn has ended (typed while it asks, they would answer the question). A reply
+   * that starts as a command of its own is refused (see `submit`).
+   */
   async send(words: string): Promise<void> {
-    if (!this.screenTask) throw new Error('Open its screen first.')
-    this.screenTask.write(cleanWords(words).replace(/\s*[\r\n]+\s*/g, ' ').trim())
+    if (this.state === 'working' || this.state === 'waiting' || this.waitingFor) throw new Error('It is working. Reply when it has finished.')
+    refuseCommand(words)
+    if (!this.screenTask) await this.show()
+    const screen = this.screenTask
+    if (!screen) throw new Error(this.closed ?? 'Its screen could not be opened.')
+    // A screen that was just opened loads the session before it takes words, with long pauses between what it prints: it is given
+    // a longer quiet than a program that draws at once.
+    await screen.settled(1_500, 20_000)
+    const before = this.busyMarks
+    await screen.submit(words)
+    // At work from now: the idle screen that shows first is not the end of this turn.
+    this.sawBusy = false
+    this.turnOpen = false
+    this.holdUntil = Date.now() + BEGIN_MS
+    this.stopped = false
+    this.setBase('working')
+    // Hermes sets its window title to busy when a turn starts. A reply it did not take (its prompt was not ready for Enter) is
+    // pressed again, twice at most, and told in words when it is still not taken: its words are on its screen.
+    for (let press = 0; !(await this.took(before)); press++) {
+      if (press >= 2) {
+        this.holdUntil = 0
+        if (this.screenTask === screen) this.setBase(this.stopped ? 'stopped' : 'idle')
+        throw new Error('Hermes did not take the reply. Its words are on its screen: pick Session and press Enter there.')
+      }
+      screen.write('\r')
+    }
+  }
+
+  /** Whether a turn began since `before`: the window title went to busy. Waits a while for it to. */
+  private async took(before: number): Promise<boolean> {
+    for (let waited = 0; waited < this.context.takeMs; waited += 50) {
+      if (this.busyMarks > before) return true
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    return this.busyMarks > before
   }
 
   /**
@@ -450,7 +494,8 @@ export class HermesBackend implements Backend {
         this.cache = null
       },
       find: (task) => this.locate(task),
-      findMs: this.options.findMs ?? 3_000
+      findMs: this.options.findMs ?? 3_000,
+      takeMs: this.options.takeMs ?? 5_000
     }))
     this.resolved.catch(() => {
       this.resolved = undefined

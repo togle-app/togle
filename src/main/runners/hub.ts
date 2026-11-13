@@ -137,20 +137,34 @@ export class RunnerHub {
     return this.options.backends.some((backend) => backend.runner === runner)
   }
 
-  /** An agent the person added: Togle works with it from now on. */
-  addBackend(backend: Backend): void {
+  /**
+   * An agent the person added, or one they took off Togle's lists and added back: Togle works with it from now on. With
+   * `restore`, the tasks of the agent that went on meanwhile are Togle's own again.
+   */
+  addBackend(backend: Backend, restore = false): void {
     if (this.disposed || this.has(backend.runner)) return
     this.options.backends.push(backend)
     this.found = null
     this.fresh()
+    if (restore) void this.restoreOf(backend)
   }
 
-  /** An agent the person removed: its program is closed; tasks of it that Togle runs end with it. */
+  /**
+   * An agent the person removed: its program is closed. An agent Togle finds by itself stays installed and its tasks go on in it, so
+   * the tasks of it that Togle runs are let go of, with only their screens closed, and are off the list. A task of an agent the person
+   * added ends with it, and stays in the list as stopped.
+   */
   async removeBackend(runner: RunnerKind): Promise<void> {
     const at = this.options.backends.findIndex((backend) => backend.runner === runner)
     if (at < 0) return
     const [backend] = this.options.backends.splice(at, 1)
     this.found = null
+    for (const [key, owned] of [...this.owned]) {
+      if (owned.handle.runner !== runner || !(runner in KNOWN_AGENTS)) continue
+      this.owned.delete(key)
+      owned.off()
+      await owned.handle.close().catch(() => undefined)
+    }
     await backend.close().catch(() => undefined)
     this.fresh()
   }
@@ -172,7 +186,8 @@ export class RunnerHub {
     const title = request.title?.trim().slice(0, 120) || taskName(prompt)
     // A task of an agent that has its own screen follows the person's own settings there, as in their terminal; any other
     // task started here asks before every command and every edit.
-    const handle = await backend.start({ folder: request.folder, prompt, title, asks: !backend.screens })
+    // A task asks every time unless its agent's screen follows the person's own settings; a request can only make it stricter.
+    const handle = await backend.start({ folder: request.folder, prompt, title, asks: request.asks === true || !backend.screens })
     const owned = await this.adopt(handle, prompt)
     this.options.titles?.set(owned.key, title)
     this.fresh()

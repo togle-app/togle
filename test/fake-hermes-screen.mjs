@@ -12,7 +12,8 @@
 //   "ask"      waits on the person (⚠) until a line is typed, then goes on
 //   "sleep"    works until Ctrl+C
 //   "fail"     the turn fails at once; the session is kept with no folder, as Hermes does when its model fails
-// FAKE_HERMES_HELD makes `--resume` refuse, as Hermes does when another window holds the session; FAKE_HERMES_ARGS names a file
+// FAKE_HERMES_FIRST_ENTER_IGNORED: a typed line is kept in the input at its first Enter and taken at the second (a screen not ready for
+// Enter yet); FAKE_HERMES_DEAF: a typed line is never taken. FAKE_HERMES_HELD makes `--resume` refuse, as Hermes does when another window holds the session; FAKE_HERMES_ARGS names a file
 // that gets the arguments each screen was started with.
 import { randomBytes } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -108,6 +109,7 @@ function screen() {
   const folder = path.basename(dir)
   const title = (marker) => process.stdout.write(`\x1b]0;${marker} ${name ? `${name} · ` : ''}fake-model · ${folder}\x07`)
   let busy = false
+  let ignored = false
   let waiting = null
   let sleeping = null
   const keep = (workspace = folder) => {
@@ -171,6 +173,12 @@ function screen() {
         if (typed === '/exit') process.exit(0)
         if (waiting) waiting()
         else if (typed && !busy) {
+          if (process.env.FAKE_HERMES_DEAF) continue
+          if (process.env.FAKE_HERMES_FIRST_ENTER_IGNORED && !ignored) {
+            ignored = true
+            line = typed
+            continue
+          }
           words = typed
           turn(typed)
         }

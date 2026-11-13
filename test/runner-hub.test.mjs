@@ -734,6 +734,13 @@ test('a task of an agent with its own screen is started following the person\u20
     assert.equal(claude.started[0].options.asks, false)
     assert.equal(codex.started[0].options.asks, true)
     assert.deepEqual([view.mine, view.terminal, view.screen, view.job], [true, true, true, 'abc12345'])
+    // A request can make a task of such an agent ask too (a task started with a call does), and can only make it stricter.
+    await hub.start({ runner: 'claude', folder: scratch(), prompt: 'Write up the call', asks: true })
+    await hub.start({ runner: 'claude', folder: scratch(), prompt: 'Write up the call again', asks: false })
+    await hub.start({ runner: 'codex', folder: scratch(), prompt: 'Write up the call', asks: false })
+    assert.equal(claude.started[1].options.asks, true, 'asked to ask: it asks')
+    assert.equal(claude.started[2].options.asks, false, 'not asked to: it follows the person’s own settings')
+    assert.equal(codex.started[1].options.asks, true, 'a request cannot loosen what asks every time')
   } finally {
     await hub.dispose()
   }
@@ -1149,7 +1156,7 @@ test('an added agent: its command read in words, its id from its name, and only 
   assert.deepEqual(T.addedAgentsFrom('nope'), [])
 })
 
-test('agents the person adds are checked, saved, worked with, and removed; the ones Togle knows cannot be', async () => {
+test('agents the person adds are checked, saved, worked with, and removed', async () => {
   const handlers = new Map()
   let saved = [{ id: 'acp-goose', name: 'Goose', command: 'goose acp' }]
   const claude = new FakeBackend('claude')
@@ -1178,11 +1185,63 @@ test('agents the person adds are checked, saved, worked with, and removed; the o
     await assert.rejects(handlers.get('runners:add-agent')('', 'agent'), /Give the agent a name/)
     // Starting a task asks for an agent Togle works with.
     assert.throws(() => handlers.get('runners:start')({ runner: 'acp-nope', folder: 'x', prompt: 'y' }), /Pick an agent/)
-    await assert.rejects(handlers.get('runners:remove-agent')('claude'), /Only an agent you added/)
+    await assert.rejects(handlers.get('runners:remove-agent')('acp-nope'), /not on Togle’s lists/)
     status = await handlers.get('runners:remove-agent')('acp-goose')
     assert.deepEqual(saved.map((agent) => agent.id), ['acp-gemini-cli', 'acp-gemini-cli-2'])
     assert.ok(!status.some((agent) => agent.runner === 'acp-goose'))
     assert.equal(hub.has('acp-goose'), false)
+  } finally {
+    await hub.dispose()
+  }
+})
+
+test('an agent Togle finds by itself can be taken off its lists, stays listed as removed, and is added back with its tasks', async () => {
+  assert.deepEqual(T.hiddenAgentsFrom(['claude', 'claude', 'acp-goose', 'hermes', 3, null]), ['claude', 'hermes'], 'each agent Togle knows, once')
+  assert.deepEqual(T.hiddenAgentsFrom('nope'), [])
+  const handlers = new Map()
+  let hidden = []
+  // A task that went on in Claude Code while Togle was closed: Togle's own when it starts, and again when the agent is added back.
+  const kept = new FakeTask('claude', 'kept', 'Went on meanwhile', process.cwd())
+  const claude = new FakeBackend('claude', { tasks: [info('claude', 'a', 'Fix the login redirect', 'idle', 300)], restored: [kept] })
+  const codex = new FakeBackend('codex', { tasks: [info('codex', 'c', 'Write the release notes', 'working', 200)] })
+  const hub = T.registerRunners({
+    handle: (channel, listener) => handlers.set(channel, listener),
+    send: () => {},
+    titles: memoryTitles(),
+    pickFolder: async () => null,
+    version: '9.9.9',
+    backends: [claude, codex],
+    hidden: () => hidden,
+    saveHidden: async (ids) => { hidden = ids }
+  })
+  try {
+    // A task Togle runs for it, which goes on in the agent when it is taken off the lists.
+    const started = await hub.start({ runner: 'claude', folder: process.cwd(), prompt: 'Say hi', title: 'Mine' })
+    assert.ok((await hub.list()).some((task) => task.key === started.key))
+    assert.equal((await hub.list()).find((task) => task.key === 'claude:kept')?.mine, true, 'the task that went on is Togle’s own')
+    let status = await handlers.get('runners:remove-agent')('claude')
+    assert.deepEqual(hidden, ['claude'], 'kept, so that the next start does not bring it back')
+    assert.equal(hub.has('claude'), false)
+    assert.deepEqual(status.map((agent) => [agent.runner, !!agent.removed, agent.installed]), [['codex', false, true], ['claude', true, false]], 'listed as removed, so that Settings can add it back')
+    const tasks = await hub.list()
+    assert.deepEqual(tasks.map((task) => task.runner), ['codex'], 'its tasks are off the list, the ones Togle ran for it too')
+    assert.equal(claude.closedBackend, true, 'its program is closed')
+    await assert.rejects(handlers.get('runners:remove-agent')('claude'), /is not on Togle’s lists/)
+    assert.throws(() => handlers.get('runners:start')({ runner: 'claude', folder: 'x', prompt: 'y' }), /Pick an agent/, 'and it cannot be started')
+    // Added back: its tasks are listed again, and what went on meanwhile is Togle's own again.
+    status = await handlers.get('runners:restore-agent')('claude')
+    assert.deepEqual(hidden, [])
+    assert.equal(hub.has('claude'), true)
+    assert.deepEqual(status.map((agent) => [agent.runner, !!agent.removed]), [['codex', false], ['claude', false]])
+    assert.ok((await hub.list()).some((task) => task.runner === 'claude' && task.title === 'Fix the login redirect'))
+    await until(async () => (await hub.list()).find((task) => task.key === 'claude:kept')?.mine === true, 'the task that went on meanwhile to be Togle’s own again')
+    await assert.rejects(handlers.get('runners:restore-agent')('acp-goose'), /only Claude Code, Codex and Hermes/)
+    // Two at once, and one that is not found: still only agents Togle knows.
+    await handlers.get('runners:remove-agent')('codex')
+    await handlers.get('runners:remove-agent')('claude')
+    assert.deepEqual(hidden.sort(), ['claude', 'codex'])
+    status = await handlers.get('runners:status')()
+    assert.deepEqual(status.map((agent) => [agent.runner, !!agent.removed]).sort(), [['claude', true], ['codex', true]])
   } finally {
     await hub.dispose()
   }

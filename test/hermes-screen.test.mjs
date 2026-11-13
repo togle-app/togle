@@ -199,6 +199,70 @@ test('Stop is Ctrl+C on the screen, and what it ends is the turn', { timeout: 30
   }
 })
 
+test('a reply from the cards view opens a closed screen out of sight and is typed in with Enter once the turn has ended', { timeout: 40_000 }, async () => {
+  const backend = hermes()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'say ok' })
+    const events = watch(task)
+    await until(() => events.some((e) => e.type === 'turn-ended') && task.screen.job.startsWith('local-'), 'the first turn to end, and its session to be found')
+    await task.screen.hide()
+    assert.equal(task.terminal, undefined, 'its screen is closed')
+    await task.send('say again')
+    assert.equal(task.screen.open, true, 'the reply opened the screen')
+    assert.equal(task.state, 'working', 'it works from the reply, before its screen says so')
+    await until(() => events.filter((e) => e.type === 'turn-ended').length === 2, 'the second turn to end')
+    assert.equal(task.state, 'idle')
+    assert.match(backend.text(task), /RESUMED/, 'it was the session opened again, not a new one')
+    // On a screen that is already open it is typed in at once.
+    await task.send('say a third time')
+    await until(() => events.filter((e) => e.type === 'turn-ended').length === 3, 'the third turn to end')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a reply Hermes did not take at the first Enter is pressed again, and one it never takes is told in words', { timeout: 40_000 }, async () => {
+  const slow = hermes({ env: { FAKE_HERMES_FIRST_ENTER_IGNORED: '1' }, backend: { takeMs: 400 } })
+  try {
+    const task = await slow.start({ folder: scratch(), prompt: 'say ok' })
+    const events = watch(task)
+    await until(() => events.some((e) => e.type === 'turn-ended') && task.screen.job.startsWith('local-'), 'the first turn to end')
+    await task.send('say again')
+    await until(() => events.filter((e) => e.type === 'turn-ended').length === 2, 'the second turn to end: the Enter was pressed again')
+  } finally {
+    await slow.close()
+  }
+  const deaf = hermes({ env: { FAKE_HERMES_DEAF: '1' }, backend: { takeMs: 150 } })
+  try {
+    const task = await deaf.start({ folder: scratch(), prompt: 'say ok' })
+    const events = watch(task)
+    await until(() => events.some((e) => e.type === 'turn-ended') && task.screen.job.startsWith('local-'), 'the first turn to end')
+    await assert.rejects(() => task.send('say again'), /Hermes did not take the reply\. Its words are on its screen/)
+    assert.equal(task.state, 'idle', 'it is not shown as working for a turn that did not begin')
+    assert.equal(events.filter((e) => e.type === 'turn-ended').length, 1)
+  } finally {
+    await deaf.close()
+  }
+})
+
+test('a reply is refused while the agent works or waits, and when it is a command of the agent’s own', { timeout: 30_000 }, async () => {
+  const backend = hermes()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'sleep' })
+    await until(() => backend.text(task).includes('sleeping'), 'the turn to be at work')
+    await assert.rejects(() => task.send('hello'), /Reply when it has finished/)
+    await task.stop()
+    await until(() => task.state === 'stopped', 'the turn to end')
+    await assert.rejects(() => task.send('/model'), /command is typed on the agent/)
+    await assert.rejects(() => task.send('!ls'), /command is typed on the agent/)
+    const asking = await backend.start({ folder: scratch(), prompt: 'ask' })
+    await until(() => asking.state === 'waiting', 'the second task to wait')
+    await assert.rejects(() => asking.send('y'), /Reply when it has finished/, 'a line typed then would answer its question')
+  } finally {
+    await backend.close()
+  }
+})
+
 test('a turn that fails at once leaves the task idle, the screen says what Hermes said, and the session Hermes kept with no folder is found and named', { timeout: 30_000 }, async () => {
   const backend = hermes()
   try {

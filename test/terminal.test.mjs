@@ -90,6 +90,31 @@ test('without {task} the words wait, and are typed in on the person\'s click, wi
   }
 })
 
+test('a reply to a screen nobody looks at waits for it to be drawn, is typed as one line with Enter, and is never a command of the agent’s own', async () => {
+  const told = []
+  const backend = new T.TerminalBackend({ runner: 'term-fake', name: 'Fake', command: command() }, (chunk) => told.push(chunk))
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'Start' })
+    // Before anything is drawn it waits (up to its limit); once the prompt is there and quiet, it is settled.
+    const began = Date.now()
+    await task.settled(300, 10_000)
+    assert.ok(plain(task.read().text).includes('ready>'), 'settled once the program had drawn its prompt')
+    assert.ok(Date.now() - began >= 250, 'and had been quiet for a while')
+    await task.submit('two\nlines\twith a tab')
+    await until(() => plain(task.read().text).includes('heard: two lines with a tab'), 'the reply to be heard as one line, with Enter')
+    assert.throws(() => T.refuseCommand('/model'), /command is typed on the agent/)
+    assert.throws(() => T.refuseCommand('  !ls'), /command is typed on the agent/)
+    assert.doesNotThrow(() => T.refuseCommand('run the tests / and the linter'))
+    await assert.rejects(() => task.submit('/clear'), /command is typed on the agent/)
+    // A program that never draws anything does not hold the reply for ever.
+    const quiet = await backend.start({ folder: scratch(), prompt: 'Quiet' })
+    await quiet.close()
+    await quiet.settled(300, 400)
+  } finally {
+    await backend.close()
+  }
+})
+
 test('Stop is Ctrl+C, and End it ends the agent: either way the task is stopped, not an error', async () => {
   const { hub } = hubWith()
   try {
