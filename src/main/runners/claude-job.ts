@@ -1,0 +1,378 @@
+// A Claude Code task that runs in the background, and its screen. Claude Code can run a session with no window of its own
+// (`claude --bg`) and open its screen in any terminal when someone looks (`claude attach <id>`): the session goes on when
+// the screen is closed, and when Togle quits. Togle runs the session this way, so a task opens as the agent's own screen,
+// as in a terminal, and is not lost with the window.
+//
+// What trying Claude Code 2.1.323 on Windows showed, which this follows:
+// - `claude agents --json --all` lists each session with the id its other commands take (`id`: eight characters, not the
+//   session's own id), its program (`pid`, gone once it is stopped), its `status` (idle, busy, waiting) and what it waits
+//   for. `state` alone says "blocked" for a session that only waits for its first message. Its `sessionId` changes when
+//   the person empties the conversation ("/clear"); `id` does not.
+// - A screen is a client of the session: `claude attach <id>` in a pseudo-terminal. Killing it leaves the session running.
+//   A session has one screen at a time: a second one ends the first ("Session opened in another window"). Esc on the screen
+//   interrupts the turn, as in any terminal.
+// - A session that was stopped (`claude stop <id>`, which ends the command it was running too) comes back with `claude
+//   attach <id>`, the same session and conversation, with what it was given at its start, the hook included.
+// - The same hook as for any session (claude-hooks.ts) works here. The program posts a request, shows its own question at
+//   the same time, and acts on whichever answer comes first. An answer on the screen does NOT end the request: Claude Code
+//   keeps the hook's connection open. What shows it is `claude agents`: the status is "waiting" while the question is up and
+//   "busy" about a second after it was answered.
+// - The person's own settings apply (their permission mode, their rules): nothing is forced, so Togle hears only what
+//   Claude Code asks. A person whose Claude Code never asks sees no card.
+import type { IPty } from 'node-pty'
+import type { TaskState } from '@shared/runner'
+import type { HookTarget, HookVerdict } from './claude-hooks'
+import { requestOf, verdictOf } from './claude-requests'
+import { rec, text } from './jsonrpc'
+import { cleanWords, loadPty, openTerminal, TerminalTask, type TerminalChunk } from './terminal'
+import { TaskBase } from './task-base'
+import type { ScreenSide, TerminalSide } from './types'
+
+/** A session as `claude agents --json` lists it: one running in a terminal, or one in the background. */
+export interface AgentRow {
+  /** What `attach`, `stop` and `logs` take: only a session in the background has one. */
+  id?: string
+  sessionId?: string
+  cwd?: string
+  kind?: string
+  status?: string
+  state?: string
+  pid?: number
+  name?: string
+  waitingFor?: string
+  startedAt?: number
+}
+
+/** A session in the background. */
+export type JobRow = AgentRow & { id: string }
+
+/** Whether a row is a session in the background, which has the id its screen is opened with. */
+export const isJob = (row: AgentRow): row is JobRow => row.kind === 'background' && !!row.id
+
+/** A row as Claude Code gives it: the fields Togle uses, as they are. */
+export function rowOf(told: Record<string, unknown>): AgentRow {
+  const pid = typeof told.pid === 'number' && told.pid > 0 ? told.pid : undefined
+  return {
+    ...(text(told.id) ? { id: text(told.id) } : {}),
+    ...(text(told.sessionId) ? { sessionId: text(told.sessionId) } : {}),
+    ...(text(told.cwd) ? { cwd: text(told.cwd) } : {}),
+    ...(text(told.kind) ? { kind: text(told.kind) } : {}),
+    ...(text(told.status) ? { status: text(told.status) } : {}),
+    ...(text(told.state) ? { state: text(told.state) } : {}),
+    ...(pid ? { pid } : {}),
+    ...(text(told.name) ? { name: text(told.name) } : {}),
+    ...(text(told.waitingFor) ? { waitingFor: text(told.waitingFor) } : {}),
+    ...(typeof told.startedAt === 'number' ? { startedAt: told.startedAt } : {})
+  }
+}
+
+/**
+ * What a background session is doing, by its program and then its status: with a program, `busy` is working, `waiting` is
+ * waiting for the person and anything else is idle (`state` says "blocked" for a session that waits for its first message,
+ * and "working" a moment after an interrupt). Without a program the session is stopped: by the person (`stopped`), or
+ * because it failed.
+ */
+export function stateOfJob(row: AgentRow, stopped = false): TaskState {
+  if (typeof row.pid !== 'number') return row.state === 'failed' ? 'failed' : stopped || row.state === 'stopped' ? 'stopped' : 'idle'
+  if (row.status === 'busy') return 'working'
+  if (row.status === 'waiting') return 'waiting'
+  return 'idle'
+}
+
+/** What marks a Claude Code a person started from inside Claude Code: with it, the new program would not save its conversation. */
+const NESTED = /^(CLAUDECODE|CLAUDE_CODE_CHILD_SESSION|CLAUDE_CODE_MESSAGING_.*)$/
+
+const MODE_FLAGS = new Set(['--model', '--permission-mode', '--effort'])
+
+/**
+ * The flags a Claude Code was started with that decide what it does: its model, effort and permission mode, and the
+ * flag that skips permission checks. The session that replaces it is started with them, so that it goes on the same way.
+ * Read from the command line it ran under; only a plain value is taken (`opus`, `plan`, `sonnet[1m]`).
+ */
+export function carriedFlags(command: string): string[] {
+  const words = (command.match(/"[^"]*"|\S+/g) ?? []).map((word) => word.replace(/^"|"$/g, ''))
+  const carried: string[] = []
+  for (let at = 0; at < words.length; at++) {
+    const [name, inline] = words[at].split(/=(.*)/s)
+    if (words[at] === '--dangerously-skip-permissions') carried.push(words[at])
+    else if (MODE_FLAGS.has(name)) {
+      const value = inline ?? words[++at]
+      if (value && /^[\w.:[\]-]+$/.test(value)) carried.push(name, value)
+    }
+  }
+  return carried
+}
+
+/** The environment Claude Code is run in: this computer's, as a terminal gives it, without the marks of a Claude Code inside Claude Code. */
+export function claudeEnv(base: NodeJS.ProcessEnv): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(base)) if (value !== undefined && !NESTED.test(key) && key !== 'ELECTRON_RUN_AS_NODE') env[key] = value
+  return env
+}
+
+/** The environment of a screen: the same, for a terminal. */
+export function screenEnv(base: NodeJS.ProcessEnv): Record<string, string> {
+  return { ...claudeEnv(base), TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+}
+
+/** One screen: `claude attach` in a terminal of Togle's own. It is over with its program, and the session goes on. */
+export class AttachScreen extends TerminalTask {
+  constructor(id: string, title: string, folder: string, term: IPty, told: (chunk: TerminalChunk) => void, gone: () => void, readonly screenId: string) {
+    super('claude', id, title, folder, 'Claude Code', term, undefined, told, gone)
+  }
+
+  protected override get tag(): string {
+    return this.screenId
+  }
+}
+
+/** What a job asks of the backend that runs Claude Code. */
+export interface JobContext {
+  /** What starts Claude Code, before its flags. */
+  command: string[]
+  env: NodeJS.ProcessEnv
+  /** Where what a screen prints goes, for the window. */
+  told: (chunk: TerminalChunk) => void
+  /** Runs `claude <args>` in the folder, and says what it printed. */
+  run(args: string[], cwd: string): Promise<{ ok: boolean; text: string }>
+  /** Something changed: the sessions are looked at soon. */
+  look(): void
+  /** What the session said last, in words: for the notice that its turn ended. Empty when there is nothing. */
+  said(session: string): Promise<string>
+  /** The session is gone for good. */
+  over(job: ClaudeJob): void
+}
+
+/** How long a task started with words is shown as working before the list can say it is not: the program takes a moment to begin. */
+const BEGIN_MS = 6_000
+
+const NOTICED_ELSEWHERE = /opened in another window/i
+
+export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
+  readonly runner = 'claude' as const
+  private current: string
+  private row?: JobRow
+  /** What the list last said it was. */
+  private last: TaskState = 'idle'
+  private settling = false
+  private screenTask: AttachScreen | null = null
+  private screens = 0
+  private requests = 0
+  private sawWaiting = false
+  private stopped = false
+  private over = false
+  private holdWorkingUntil = 0
+  closed: string | undefined
+  waitingFor: string | undefined
+
+  /**
+   * `job` is the id Claude Code gives the session; `id` the session it was first known by, which is the task's own id
+   * from then on (the session changes with "/clear", and the job does not). `key` names its hook address, when Togle gave it one.
+   */
+  constructor(private readonly context: JobContext, readonly job: string, id: string, title: string, folder: string, readonly key?: string) {
+    super()
+    this.id = id
+    this.current = id
+    this.title = title
+    this.folder = folder
+  }
+
+  get screen(): ScreenSide {
+    return this
+  }
+
+  get terminal(): TerminalSide | undefined {
+    return this.screenTask ?? undefined
+  }
+
+  get pid(): number | null {
+    return this.row?.pid ?? null
+  }
+
+  get open(): boolean {
+    return this.screenTask !== null
+  }
+
+  get screenId(): string | undefined {
+    return this.screenTask?.screenId
+  }
+
+  get line(): string {
+    return `claude attach ${this.job}`
+  }
+
+  /** The session it is in now. Every request says which: the person may clear the conversation or pick another. */
+  session(): string {
+    return this.current
+  }
+
+  /** The list says what the session is doing: its state, what it waits for, and which session it is in. */
+  seen(row: JobRow | undefined): void {
+    if (this.over) return
+    if (!row) {
+      void this.lost()
+      return
+    }
+    this.row = row
+    if (row.sessionId && row.sessionId !== this.current) {
+      // The person emptied the conversation: the program goes on in another session, and the task goes on with it.
+      this.current = row.sessionId
+      this.emit({ type: 'cleared' })
+    }
+    const alive = typeof row.pid === 'number'
+    if (alive) this.stopped = false
+    const waiting = alive && row.status === 'waiting'
+    // A request that waits goes once the program says it waits no more, after it did: it was answered on the screen.
+    if (this.pending.length) {
+      if (waiting) this.sawWaiting = true
+      else if (this.sawWaiting) this.cancelRequests()
+    }
+    // Waiting with no request of Togle's own (it came while Togle was not running, or it is not one the hook tells of): the
+    // task says what it waits for, and it is answered on its screen.
+    this.waitingFor = waiting && !this.pending.length ? row.waitingFor || 'something' : undefined
+    if (row.status === 'busy') this.holdWorkingUntil = 0
+    const next = stateOfJob(row, this.stopped)
+    if (next === 'idle' && Date.now() < this.holdWorkingUntil) return
+    // A turn that ended is told with what Claude Code said last, before the task is done: the notice shows those words.
+    if (next === 'idle' && (this.last === 'working' || this.last === 'waiting')) {
+      if (this.settling) return
+      this.settling = true
+      void this.context
+        .said(this.current)
+        .then(
+          (words) => {
+            if (words) this.emit({ type: 'message', text: words })
+          },
+          () => undefined
+        )
+        .finally(() => {
+          this.settling = false
+          if (!this.over) this.set(this.row ? stateOfJob(this.row, this.stopped) : next)
+        })
+      return
+    }
+    this.set(next)
+  }
+
+  private set(next: TaskState): void {
+    this.last = next
+    this.setBase(next)
+  }
+
+  /** The task was started with words: it works from now, before the list shows it. */
+  began(): void {
+    this.holdWorkingUntil = Date.now() + BEGIN_MS
+    this.set('working')
+  }
+
+  /** The row is gone (removed with `claude rm`): the task is over. */
+  private async lost(): Promise<void> {
+    if (this.over) return
+    this.over = true
+    this.cancelRequests()
+    await this.hide()
+    this.emit({ type: 'ended', reason: 'closed' })
+    this.context.over(this)
+  }
+
+  async permission(event: Record<string, unknown>, gone: AbortSignal): Promise<HookVerdict> {
+    const session = text(event.session_id)
+    if (session) this.current = session
+    // Claude Code shows one question at a time and posts a request as its question is shown: one that comes now means the
+    // one before it is over, answered on the screen, and not yet noticed.
+    this.cancelRequests()
+    const id = `claude-${++this.requests}`
+    const { request, rule } = requestOf(id, event, this.folder)
+    gone.addEventListener('abort', () => this.dropRequest(id, 'cancelled'), { once: true })
+    const asked = this.ask(request)
+    // Its own wait for the program to say it waits, from the start: what was seen of the one before does not count.
+    this.sawWaiting = false
+    // A turn that is asked about is a turn at work: its end is told, however quickly the list sees it.
+    if (this.last === 'idle') this.last = 'working'
+    this.context.look()
+    const answer = await asked
+    // Dropped (answered on the screen, the task stopped, Togle quit): Claude Code has its answer or decides on its own screen.
+    if (answer.kind === 'cancelled') return null
+    return verdictOf(answer, request, rule, rec(event.tool_input)).verdict
+  }
+
+  // ---- The screen ----
+
+  async show(): Promise<void> {
+    if (this.screenTask || this.over) return
+    const pty = await loadPty()
+    if (!pty) {
+      this.closed = 'Togle cannot open a terminal on this computer.'
+      throw new Error(`${this.closed} The task goes on: ${this.line} opens it in your own terminal.`)
+    }
+    this.closed = undefined
+    const task: AttachScreen = new AttachScreen(
+      this.id ?? this.job,
+      this.title,
+      this.folder,
+      openTerminal(pty, this.context.command[0], [...this.context.command.slice(1), 'attach', this.job], this.folder, screenEnv(this.context.env)),
+      this.context.told,
+      () => this.screenEnded(task),
+      `${this.job}-${++this.screens}`
+    )
+    this.screenTask = task
+    this.emit({ type: 'screen', shown: true })
+    this.context.look()
+  }
+
+  async hide(): Promise<void> {
+    const task = this.screenTask
+    if (!task) return
+    this.screenTask = null
+    this.emit({ type: 'screen', shown: false })
+    await task.close()
+  }
+
+  /** The program of a screen ended: closed here, taken by another window, or the session could not be opened. */
+  private screenEnded(task: AttachScreen): void {
+    if (this.screenTask !== task) return
+    this.screenTask = null
+    const said = cleanWords(task.read().text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    if (said.some((line) => NOTICED_ELSEWHERE.test(line))) this.closed = 'It is open in another window.'
+    // A screen that could not open prints a line or two and ends ("Settings file not found"); one the person closed had
+    // printed all of Claude Code's own.
+    else if (said.length > 0 && said.length <= 6) this.closed = said.at(-1)?.slice(0, 200)
+    this.emit({ type: 'screen', shown: false })
+    this.context.look()
+  }
+
+  // ---- What the person does ----
+
+  /** Words typed into the screen as one line, without Enter: the person presses it. */
+  async send(words: string): Promise<void> {
+    if (!this.screenTask) throw new Error('Open its screen first.')
+    await this.screenTask.send(words)
+  }
+
+  /** Ends the session and the command it runs. Its conversation is kept: opening its screen brings it back. */
+  async stop(): Promise<void> {
+    this.stopped = true
+    this.cancelRequests()
+    const out = await this.context.run(['stop', this.job], this.folder)
+    // Not stopped, and still running as far as Togle knows: it was not done, and the person is told.
+    if (!out.ok && this.pid !== null) {
+      this.stopped = false
+      throw new Error(`Claude Code could not stop it: ${out.text.split(/\r?\n/)[0] ?? 'no reason given'}`)
+    }
+    // Its screen is a client of the session that is gone: it closes, and opening the screen again brings the session back.
+    await this.hide()
+    this.set('stopped')
+    this.context.look()
+  }
+
+  /** Stop ends the commands the session runs as well, so there is nothing left for a second press. */
+  async endCommands(): Promise<number> {
+    return 0
+  }
+
+  /** Lets go of the screen and of what waits. The session goes on, and Togle hears it again when it asks. */
+  async close(): Promise<void> {
+    this.cancelRequests()
+    await this.hide()
+  }
+}

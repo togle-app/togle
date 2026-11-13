@@ -309,7 +309,7 @@ function HandedBack({ command, folder }: { command: string; folder: string }) {
   return (
     <div className="task-banner handed-back" role="note">
       <span>
-        Handed back. To go on in your terminal, run <code>{command}</code> in <code>{folder}</code>.
+        To open it in your terminal, run <code>{command}</code> in <code>{folder}</code>.
       </span>
       <button className="small" onClick={() => void navigator.clipboard.writeText(command).then(() => setCopied(true), () => undefined)}>
         {copied ? 'Copied' : 'Copy'}
@@ -461,7 +461,7 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
         </div>
         <div className="task-actions">
           {task.mine && task.screen && (
-            <button className="small" onClick={onHandBack} title="Ends it here and gives you the line to go on in your own terminal">
+            <button className="small" onClick={onHandBack} title="Closes its screen here and gives you the line to open it in your own terminal. The task goes on.">
               Hand back
             </button>
           )}
@@ -490,14 +490,14 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
 
       {task.mine && task.signedOut && <SignedOut task={task} />}
 
-      {!task.mine && handedBack && <HandedBack command={handedBack.command} folder={handedBack.folder} />}
+      {handedBack && !task.terminal && <HandedBack command={handedBack.command} folder={handedBack.folder} />}
 
       {!task.mine && (
         <div className="task-banner" role="note">
           {takesOver(task) ? (
             confirmTakeOver ? (
               <>
-                <span>This ends the {agentOf(task)} running in its terminal and opens the same conversation here, as its own screen.</span>
+                <span>This ends the {agentOf(task)} running in its terminal and moves the same conversation into the background, with its screen here.</span>
                 <span className="row">
                   <button className="primary small" onClick={onTakeOver}>
                     End it and take over
@@ -509,12 +509,19 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
               </>
             ) : (
               <>
-                <span>It runs in a terminal. Take over opens it here as the agent's own screen, so you can answer it here too.</span>
+                <span>It runs in a terminal. Take over moves it into the background and opens its screen here, so you can answer it here too.</span>
                 <button className="small" onClick={() => setConfirmTakeOver(true)}>
                   Take over
                 </button>
               </>
             )
+          ) : task.job ? (
+            <>
+              <span>It runs in the background{task.waitingFor ? `, and waits: ${task.waitingFor}` : ''}. Open its screen here to see it and answer it.</span>
+              <button className="primary small" onClick={onOpen}>
+                Open here
+              </button>
+            </>
           ) : task.pid ? (
             <span>It runs in its own window, where it is answered.</span>
           ) : (
@@ -535,6 +542,22 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
             <RequestCard key={request.id} request={request} screen onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
           ))}
           <TerminalPanel task={task} onEnd={onEndCommands} />
+        </>
+      ) : task.mine && task.screen ? (
+        <>
+          {/* The task goes on with its screen closed: what waits is answered here, or on the screen once it is opened. */}
+          {task.pending.map((request) => (
+            <RequestCard key={request.id} request={request} onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
+          ))}
+          <div className="task-banner screen-closed" role="note">
+            <span>
+              {task.screenClosed ?? 'Its screen is closed, and the task goes on.'}
+              {task.waitingFor && !task.pending.length ? ` It waits on its screen: ${task.waitingFor}.` : ''}
+            </span>
+            <button className="primary small" onClick={onOpen}>
+              Open the screen
+            </button>
+          </div>
         </>
       ) : (
       <>
@@ -620,7 +643,7 @@ function TerminalPanel({ task, onEnd }: { task: TaskView; onEnd: () => void }) {
           </button>
         </div>
       )}
-      <TerminalView taskKey={task.key} />
+      <TerminalView taskKey={task.key} screenId={task.screenId} />
     </div>
   )
 }

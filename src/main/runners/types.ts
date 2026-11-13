@@ -9,7 +9,10 @@ export interface StartOptions {
   prompt: string
   /** What it is called in the list; the agent's own name for it when left out. */
   title?: string
-  /** Whether every command asks the person first. On for a task that starts from another device or from a call. */
+  /**
+   * Whether every command asks the person first, whatever the agent's own settings say. Off for an agent whose screen
+   * follows the person's own settings (Claude Code); on for a task that starts from another device.
+   */
   asks?: boolean
 }
 
@@ -17,9 +20,9 @@ export interface ResumeOptions {
   asks?: boolean
   /** The folder the task worked in (as `list` told). Claude Code finds a session from there. */
   folder?: string
-  /** The agent's own screen, in a terminal of Togle's own, instead of a conversation Togle shows. Only Claude Code has one. */
-  screen?: boolean
-  /** With a screen: the flags the program was started with that decide what it does (its model, effort, permission mode), so that it opens the same way. */
+  /** The id its agent gave a task that runs in the background (`TaskInfo.job`): that task is opened, not started again. */
+  job?: string
+  /** With a task that is not in the background yet: the flags its program was started with that decide what it does (its model, effort, permission mode), so that it goes on the same way. */
   flags?: string[]
 }
 
@@ -44,14 +47,29 @@ export interface TerminalSide {
 }
 
 /**
- * A task that is the agent's own screen in a terminal of Togle's own, and which Togle also hears: what the agent asks
- * reaches Togle as a request, and it is answered there or on the screen.
+ * A task that runs in the background, whose screen is the agent's own, opened in a terminal of Togle's own when the
+ * person looks at it. Togle also hears it: what the agent asks reaches Togle as a request, and it is answered there or on
+ * the screen. Closing the screen, or quitting Togle, does not stop the task.
  */
 export interface ScreenSide {
-  /** The program's id on this computer, while it runs. */
+  /** The id of the program that runs the task, while it runs. */
   readonly pid: number | null
   /** The session it is in now: the person can change it on the screen (a cleared conversation is another session). */
   session(): string
+  /** The id its agent gives the task, to open it, stop it and list it. */
+  readonly job: string
+  /** Whether its screen is open in a terminal of Togle's own. */
+  readonly open: boolean
+  /** Which screen is open: each new one starts afresh. */
+  readonly screenId: string | undefined
+  /** Why the screen is closed, when it closed by itself: opened in another window, or could not open. */
+  readonly closed: string | undefined
+  /** Opens the screen here. A screen open in another window is closed by it, as the agent has one at a time. */
+  show(): Promise<void>
+  /** Closes the screen here. The task goes on. */
+  hide(): Promise<void>
+  /** The line that opens the screen in the person's own terminal. */
+  readonly line: string
 }
 
 /** One task Togle is running: it can be watched, answered, stopped and talked to. */
@@ -78,10 +96,12 @@ export interface TaskHandle {
   endCommands(): Promise<number>
   /** Lets go of the task. It stays on this computer and can be picked up again. */
   close(): Promise<void>
-  /** Present for a task that runs in a terminal of Togle's own. */
+  /** Present for a task that runs in a terminal of Togle's own, while that terminal is open. */
   readonly terminal?: TerminalSide
-  /** Present for such a task when it is the agent's own screen that Togle hears too (Claude Code). */
+  /** Present for a task that runs in the background and has the agent's own screen, which Togle hears too (Claude Code). */
   readonly screen?: ScreenSide
+  /** What a task waits for in its agent's own screen when Togle has no request of its own for it ("permission prompt"). */
+  readonly waitingFor?: string
   /** The commands and models its agent told it has for this task, so far. Left out by an agent that tells none. */
   offers?(): TaskOffers
 }
@@ -90,14 +110,21 @@ export interface Backend {
   readonly runner: RunnerKind
   /** Its name as the person reads it, for an agent Togle does not know by name (one added in Settings). */
   readonly name?: string
+  /** Its tasks run in the background and open as the agent's own screen, following the person's own settings (Claude Code). */
+  readonly screens?: boolean
   detect(): Promise<Detected>
   /** The tasks this agent has on this computer, newest first. */
   list(): Promise<TaskInfo[]>
   start(options: StartOptions): Promise<TaskHandle>
   /** Picks up a task that was started earlier, here or in the agent's own app. */
   resume(id: string, options?: ResumeOptions): Promise<TaskHandle>
+  /**
+   * Picks up the tasks Togle ran before and that went on without it, and hands each to `adopt` as it appears: now, and later
+   * whenever one of them asks something. Only for an agent whose tasks outlive Togle.
+   */
+  restore?(adopt: (task: TaskHandle) => void): Promise<void>
   /** Why the agent's own screen cannot be opened here, in words, or nothing when it can: asked before a program is ended for it. */
   screenProblem?(id: string): Promise<string | undefined>
-  /** Stops using the agent's program. Tasks stay as they are. */
+  /** Stops using the agent's program. Tasks that run in the background go on. */
   close(): Promise<void>
 }

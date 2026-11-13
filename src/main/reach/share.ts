@@ -58,7 +58,9 @@ export function shareTask(task: TaskView): RemoteTask {
       ...(request.danger ? { danger: request.danger } : {})
     })),
     mine: task.mine,
-    ...(task.terminal ? { terminal: true } : {}),
+    // A task in the background (Claude Code) is refused and stopped from here like any other, whether its screen is open on
+    // that computer or not: the mark is for a terminal Togle only watches.
+    ...(task.terminal && !task.screen ? { terminal: true } : {}),
     commandsRunning: task.commandsRunning,
     updatedAt: task.updatedAt
   }

@@ -309,18 +309,28 @@ module.exports = function install(fixture) {
     emit('onTodoChanged')
     return clone(runnerView(started))
   }
-  api.openRunnerTask = async key => { record('openRunnerTask', [key]); const found = runnerFind(key); found.mine = true; runnerChanged(); return clone(runnerView(found)) }
-  // Take over makes the agent's own screen in Togle: a terminal Togle also hears, that waits for a message. Hand back lets go of it.
+  // A task in the background has the agent's own screen: opening a task whose screen is closed opens it again, a new screen.
+  api.openRunnerTask = async key => {
+    record('openRunnerTask', [key]); const found = runnerFind(key); found.mine = true
+    if (found.screen && !found.terminal) {
+      found.terminal = true; found.screenId = '3f2a9c1e-' + ++found.screens; delete found.screenClosed
+      const printed = 'Claude Code v2.1.323\r\n> '
+      terminals.set(key, { text: printed, end: printed.length })
+    }
+    runnerChanged(); return clone(runnerView(found))
+  }
+  // Take over moves the conversation into the background and makes the agent's own screen in Togle: a terminal Togle also hears,
+  // that waits for a message. Hand back closes the screen: the task goes on.
   api.takeOverRunnerTask = async key => {
     record('takeOverRunnerTask', [key]); const found = runnerFind(key)
-    Object.assign(found, { mine: true, terminal: true, screen: true, state: 'idle', line: '' }); delete found.pid
+    Object.assign(found, { mine: true, terminal: true, screen: true, job: '3f2a9c1e', screens: 1, screenId: '3f2a9c1e-1', state: 'idle', line: '' }); delete found.pid
     const printed = 'Claude Code v2.1.323\r\n> '
     terminals.set(key, { text: printed, end: printed.length }); runnerChanged(); return clone(runnerView(found))
   }
   api.handBackRunnerTask = async key => {
     record('handBackRunnerTask', [key]); const found = runnerFind(key)
-    Object.assign(found, { mine: false, state: 'idle' }); delete found.terminal; delete found.screen; found.pending = []; runnerChanged()
-    return { command: 'claude --resume 3f2a9c1e-7b64-4d0a-9d55-0a1b2c3d4e5f', folder: found.folder }
+    delete found.terminal; delete found.screenId; runnerChanged()
+    return { command: 'claude attach 3f2a9c1e', folder: found.folder }
   }
   api.sendToRunnerTask = async (key, text) => { record('sendToRunnerTask', [key, text]); const found = runnerFind(key); found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged() }
   api.answerRunnerTask = async (key, requestId, decision) => {

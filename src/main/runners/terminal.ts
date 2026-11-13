@@ -17,6 +17,8 @@ export interface TerminalChunk {
   key: string
   at: number
   data: string
+  /** Which screen printed it, for a task that opens a new screen each time (one that runs in the background). */
+  screen?: string
 }
 
 /** An added agent that runs in a terminal: its name, and the command that starts it, with {task} where its words go. */
@@ -229,6 +231,11 @@ export class TerminalTask extends TaskBase implements TerminalSide {
     return this
   }
 
+  /** Names this terminal among those a task opens one after the other, so that the window takes only the one it shows. */
+  protected get tag(): string | undefined {
+    return undefined
+  }
+
   /** The program's id on this computer, while it runs: what tells its row in the agent's own list as this task. */
   get program(): number | null {
     return this.ended ? null : (this.term.pid ?? null)
@@ -246,7 +253,7 @@ export class TerminalTask extends TaskBase implements TerminalSide {
     clearTimeout(this.timer)
     this.timer = undefined
     if (!this.unsent || !this.id) return
-    const chunk = { key: `${this.runner}:${this.id}`, at: this.unsentAt, data: this.unsent }
+    const chunk: TerminalChunk = { key: `${this.runner}:${this.id}`, at: this.unsentAt, data: this.unsent, ...(this.tag ? { screen: this.tag } : {}) }
     this.unsent = ''
     this.told(chunk)
   }

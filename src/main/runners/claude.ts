@@ -1,48 +1,28 @@
-// Claude Code on this computer. Togle starts `claude` as a program of its own, in the folder of the task, and talks to
-// it in Claude Code's own streaming format (`--input-format stream-json --output-format stream-json`): one JSON line per
-// message each way. It never touches Claude Code's sign-in: the program is the one the person installed and signed in.
+// Claude Code on this computer. Togle runs each task as one of Claude Code's own background sessions (`claude --bg`) and
+// opens its screen when someone looks at it (`claude attach`, in a terminal of Togle's own): the person has the program
+// they know, with its keys, its commands and its questions, and the task goes on when the screen is closed and when Togle
+// quits. It never touches Claude Code's sign-in: the program is the one the person installed and signed in. What each
+// command does is in claude-job.ts, and how Togle hears what a session asks is in claude-hooks.ts.
 //
-// What trying it on Windows (Claude Code 2.1.322) showed, which this follows:
-// - Permission requests are answered through a hook that posts each one to a port on this computer (claude-hooks.ts).
-// - An interrupt (`control_request`) ends the turn and the command that is running, so Stop needs no second press.
-// - A reply goes into the same running program. `--resume <id>` in a new program continues the same session.
-// - A resumed program may first report an empty result for a background task that finished meanwhile; it is not the
-//   end of the turn Togle asked for, which is the first result after something was said.
-//
-// Commands of Claude Code's own ("/model", typed as a reply), tried the same way with 2.1.323:
-// - It runs them in this mode too, and tells a program which it has: asked with a control request (`initialize`), it
-//   answers with its commands (name, description, what may follow) and its models, without asking a model anything.
-// - A command answers as an `assistant` line whose model is `<synthetic>`, then a `result` that cost nothing.
-// - "/clear" prints `conversation_reset`, a new `system init` with ANOTHER session id, and an empty result. "/compact"
-//   prints `compact_boundary`, what it printed as a `user` line (`<local-command-stdout>`), and an empty result. Neither
-//   prints an `assistant` line, so the result that follows such a line is the end of the turn all the same.
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+// Opened by what the list says of it, never by guessing:
+// - a session in the background, running or stopped: its screen is opened (`attach` brings a stopped one back);
+// - one the person has open in a terminal of their own: Togle ends that program first (the hub does) and goes on with the
+//   same conversation in the background, as the same session;
+// - one only kept on disk: the same, with `--bg --resume`.
+// A conversation has one program at a time: when Claude Code says it "started a copy", Togle ends the copy and fails the
+// open in words, and never goes on with a second session under the same task.
+import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createInterface } from 'node:readline'
-import type { AgentCommand, AgentModel, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
-import { claudeHasSession, claudeSessions } from './claude-sessions'
-import { HookServer, type HookTarget, type HookVerdict } from './claude-hooks'
-import { oneLine, requestOf, verdictOf } from './claude-requests'
-import { ClaudeScreenTask, screenEnv } from './claude-screen'
-import { list, rec, text } from './jsonrpc'
-import { TaskBase } from './task-base'
-import { loadPty, openTerminal, type TerminalChunk } from './terminal'
+import type { TaskInfo } from '@shared/runner'
+import { claudeHasSession, claudeLastSaid, claudeSessions } from './claude-sessions'
+import { HookServer, type HookTarget } from './claude-hooks'
+import { ClaudeJob, claudeEnv, isJob, rowOf, stateOfJob, type AgentRow, type JobContext, type JobRow } from './claude-job'
+import { oneLine } from './claude-requests'
+import { list, rec } from './jsonrpc'
+import { loadPty, type TerminalChunk } from './terminal'
 import type { Backend, Detected, ResumeOptions, StartOptions, TaskHandle } from './types'
-
-/** A session Claude Code has running (`claude agents --json`). */
-export interface LiveSession {
-  sessionId?: string
-  cwd?: string
-  kind?: string
-  status?: string
-  state?: string
-  pid?: number
-  name?: string
-  waitingFor?: string
-  startedAt?: number
-}
 
 /** A session Claude Code kept on this computer. */
 export interface StoredSession {
@@ -56,26 +36,39 @@ export interface ClaudeOptions {
   /** What starts Claude Code, before its flags. Found on this computer when left out. */
   command?: string[]
   env?: NodeJS.ProcessEnv
-  /** The sessions it has running. `claude agents --json --all` when left out. */
-  live?: () => Promise<LiveSession[]>
+  /** The sessions it lists: `claude agents --json --all` when left out. */
+  live?: () => Promise<AgentRow[]>
   /** The sessions it kept, as files under ~/.claude/projects. Read from there when left out. */
   stored?: () => Promise<StoredSession[]>
   /** Where what its screens print goes, for the window. */
   told?: (chunk: TerminalChunk) => void
+  /**
+   * A folder of Togle's own, where the address Claude Code posts to, each task's settings file and the list of tasks stay
+   * between runs: tasks that went on while Togle was closed are heard again. Without one, nothing is kept.
+   */
+  keep?: string
+  /** What a session said last: read from its file when left out. */
+  said?: (session: string) => Promise<string>
+  /** How often the sessions are looked at, in milliseconds: while one works, waits or is shown, and otherwise. */
+  every?: { busy: number; idle: number }
 }
 
-const lines = (file: string, args: string[]): Promise<string[]> =>
+const exec = (file: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number }): Promise<{ ok: boolean; text: string; out: string }> =>
   new Promise((resolve) => {
-    execFile(file, args, { windowsHide: true, timeout: 15_000, maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => resolve(error ? [] : stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)))
+    execFile(file, args, { windowsHide: true, timeout: options.timeout ?? 15_000, maxBuffer: 16 * 1024 * 1024, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.env ? { env: options.env } : {}) }, (error, stdout, stderr) =>
+      resolve({ ok: !error, text: `${stdout}${stderr}`.trim(), out: String(stdout) })
+    )
   })
 
 const exists = (file: string): Promise<boolean> => fs.access(file).then(() => true, () => false)
+
+const firstLine = (text: string): string => text.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? ''
 
 /** The program that starts Claude Code, or null when it is not on this computer. `TOGLE_CLAUDE_PATH` names it by hand. */
 export async function findClaude(): Promise<string | null> {
   const forced = process.env.TOGLE_CLAUDE_PATH
   if (forced && (await exists(forced))) return forced
-  const found = await lines(process.platform === 'win32' ? 'where' : 'which', ['claude'])
+  const found = (await exec(process.platform === 'win32' ? 'where' : 'which', ['claude'], {})).out.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
   if (process.platform !== 'win32') return found[0] ?? null
   const exe = found.find((file) => /\.exe$/i.test(file))
   if (exe) return exe
@@ -87,350 +80,65 @@ export async function findClaude(): Promise<string | null> {
   return null
 }
 
-const stateOfLive = (session: LiveSession): TaskState => {
-  switch (session.state) {
-    case 'working':
-      return 'working'
-    case 'blocked':
-      return 'waiting'
-    case 'failed':
-      return 'failed'
-    case 'stopped':
-      return 'stopped'
-    case 'done':
-      return 'idle'
-    default:
-      break
-  }
-  if (session.status === 'waiting') return 'waiting'
-  if (session.status === 'busy') return 'working'
-  return 'idle'
-}
-
-async function liveSessions(command: string[]): Promise<LiveSession[]> {
-  const out = (await lines(command[0], [...command.slice(1), 'agents', '--json', '--all'])).join('\n')
-  try {
-    return list(JSON.parse(out) as unknown).map(rec) as LiveSession[]
-  } catch {
-    return []
-  }
-}
-
 async function storedSessions(): Promise<StoredSession[]> {
   return (await claudeSessions(100)).map((session) => ({ id: session.id, title: session.title, cwd: session.cwd ?? '', updatedAt: session.updatedAt }))
 }
 
-interface Context {
-  command: string[]
-  env: NodeJS.ProcessEnv | undefined
-  hooks: HookServer
+/** A task Togle ran and that goes on without it: what is needed to hear it and to open it again. */
+interface Known {
+  /** The id its screen is opened with. */
+  job: string
+  /** The session it was first known by: the task's own id. */
+  id: string
+  /** Its hook address, when Togle gave it one. */
+  key?: string
+  folder: string
+  title: string
+  asks: boolean
 }
 
-/** The request that asks Claude Code what it offers, by the id its answer comes back with. */
-const OFFERS = 'togle-offers'
-/** How many of the last things Claude Code said are remembered by their id. */
-const HEARD_KEPT = 600
-/** The colors a terminal would show what a command printed in. */
-const COLORS = new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g')
+const KNOWN = 'jobs.json'
+/** The most words a task is started with: a Windows command line holds about 32,000 characters. */
+const MOST_WORDS = 20_000
+const BACKGROUNDED = /backgrounded\s+·\s+([0-9a-f]{8})/
+const COPY = /started a copy as ([0-9a-f]{8})/
 
-/** A command as Claude Code told it, or nothing when it has no name or is one Claude Code keeps for itself ("__…"). */
-function commandOf(told: Record<string, unknown>): AgentCommand[] {
-  const name = text(told.name).replace(/^\//, '')
-  if (!name || name.startsWith('__')) return []
-  const hint = text(told.argumentHint).trim()
-  return [{ name, description: oneLine(text(told.description), 200), ...(hint ? { hint: oneLine(hint, 120) } : {}) }]
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
 }
 
-/** A model as Claude Code told it: what follows "/model", its name, and what it is for. */
-function modelOf(told: Record<string, unknown>): AgentModel[] {
-  const id = text(told.value)
-  return id ? [{ id, name: text(told.displayName) || id, description: oneLine(text(told.description), 120) }] : []
-}
-
-class ClaudeTask extends TaskBase implements HookTarget {
-  readonly runner = 'claude' as const
-  /** The session Claude Code is in now: another than `id` once the person emptied the conversation ("/clear"). */
-  session: string | null = null
-  /** This program picked up a session that was there (`--resume`). */
-  private resumed = false
-  /** How many of its turns have ended. */
-  private turns = 0
-  /** When the last message was sent to it. */
-  private sentAt = 0
-  /** The ids of what Claude Code said lately, to know what it tells again. */
-  private readonly heard = new Set<string>()
-  /** What Claude Code told it offers for the reply box. */
-  private commandList: AgentCommand[] = []
-  private modelList: AgentModel[] = []
-  private proc: ChildProcessWithoutNullStreams | null = null
-  private hook: { key: string; settings: string } | null = null
-  private alive = false
-  private closing = false
-  private stopped = false
-  /** Messages sent whose turn has not ended. */
-  private open = 0
-  /** Whether Claude Code has said or done anything since the last message was sent. */
-  private active = false
-  private requests = 0
-  private interrupts = 0
-  private readonly errors: string[] = []
-  /** Commands in flight: tool use id to the command. */
-  private readonly commands = new Map<string, string>()
-  /** Commands the person refused. */
-  private readonly refused = new Set<string>()
-  private exit: Promise<void> = Promise.resolve()
-
-  constructor(private readonly context: Context) {
-    super()
-  }
-
-  async launch(folder: string, resume: string | null, asks: boolean, name: string | null): Promise<void> {
-    this.folder = folder
-    this.hook = await this.context.hooks.attach(this, asks)
-    const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default', '--settings', this.hook.settings]
-    if (resume) args.push('--resume', resume)
-    if (name) args.push('--name', name)
-    const proc = spawn(this.context.command[0], [...this.context.command.slice(1), ...args], { cwd: folder, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: this.context.env ?? process.env })
-    this.proc = proc
-    this.alive = true
-    const started = new Promise<void>((resolve, reject) => {
-      proc.once('spawn', () => resolve())
-      proc.once('error', reject)
-    })
-    this.exit = new Promise<void>((resolve) => {
-      proc.on('error', (error) => {
-        this.errors.push(error.message)
-        this.ended(null)
-        resolve()
-      })
-      proc.on('exit', (code) => {
-        this.ended(code)
-        resolve()
-      })
-    })
-    createInterface({ input: proc.stdout }).on('line', (line) => this.line(line))
-    proc.stderr.on('data', (chunk: Buffer) => {
-      this.errors.push(String(chunk))
-      if (this.errors.length > 20) this.errors.shift()
-    })
-    proc.stdin.on('error', () => undefined)
-    if (resume) {
-      this.id = resume
-      this.session = resume
-      this.resumed = true
-    }
-    // A program that cannot be started fails the start, and not the first thing said to it.
-    try {
-      await started
-    } catch (error) {
-      throw new Error(`Claude Code could not be started${error instanceof Error ? `: ${error.message}` : '.'}`, { cause: error })
-    }
-    // What the reply box lists when "/" is typed: asked once, and answered without a model.
-    this.write({ type: 'control_request', request_id: OFFERS, request: { subtype: 'initialize' } })
-  }
-
-  /** The commands and models Claude Code told it has: its own names and words for them. */
-  offers(): TaskOffers {
-    return { commands: this.commandList, models: this.modelList }
-  }
-
-  private ended(code: number | null): void {
-    if (!this.alive) return
-    this.alive = false
-    if (this.hook) void this.context.hooks.detach(this.hook.key, this.hook.settings)
-    this.cancelRequests()
-    if (this.closing) {
-      this.emit({ type: 'ended', reason: 'closed' })
-      return
-    }
-    const why = this.errors.join('').trim().split('\n').pop()
-    this.setBase('failed')
-    this.emit({ type: 'error', message: `Claude Code stopped${code ? ` (${code})` : ''}${why ? `: ${why}` : '.'}` })
-    this.emit({ type: 'ended', reason: 'crashed' })
-  }
-
-  private write(message: Record<string, unknown>): void {
-    try {
-      this.proc?.stdin.write(`${JSON.stringify(message)}\n`)
-    } catch {
-      // The program is gone: its exit settles the task.
-    }
-  }
-
-  async send(message: string): Promise<void> {
-    if (!this.alive) throw new Error('Claude Code is not running.')
-    this.stopped = false
-    this.sentAt = Date.now()
-    this.open++
-    this.write({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: message }] } })
-    this.setBase('working')
-  }
-
-  async stop(): Promise<void> {
-    this.stopped = true
-    this.cancelRequests()
-    if (this.alive && this.open) this.write({ type: 'control_request', request_id: `togle-${++this.interrupts}`, request: { subtype: 'interrupt' } })
-    this.setBase('stopped')
-  }
-
-  /** Claude Code's interrupt ends the command that is running, so there is nothing left for a second press. */
-  async endCommands(): Promise<number> {
-    return 0
-  }
-
-  async close(): Promise<void> {
-    this.closing = true
-    this.cancelRequests()
-    if (!this.alive) return
-    try {
-      this.proc?.stdin.end()
-    } catch {
-      // already closed
-    }
-    const timer = setTimeout(() => this.proc?.kill(), 3_000)
-    timer.unref()
-    await this.exit
-    clearTimeout(timer)
-  }
-
-  // ---- What Claude Code says ----
-
-  private line(raw: string): void {
-    let message: Record<string, unknown>
-    try {
-      message = rec(JSON.parse(raw))
-    } catch {
-      return
-    }
-    switch (text(message.type)) {
-      case 'system':
-        if (message.subtype === 'init') this.sessionTold(message)
-        // "/compact" is done: the turn's result follows without a word from the model.
-        else if (message.subtype === 'compact_boundary') this.active = true
-        break
-      case 'conversation_reset':
-        // "/clear": Claude Code goes on in a new, empty session. Nothing else comes before the turn's result.
-        this.active = true
-        this.emit({ type: 'cleared' })
-        break
-      case 'control_response':
-        this.offersTold(rec(message.response))
-        break
-      case 'assistant': {
-        // After "/compact" Claude Code tells again the last things that were said and done, each under the id it had:
-        // what was heard once is not heard twice.
-        const uuid = text(message.uuid)
-        if (message.isReplay === true || (uuid && this.heard.has(uuid))) break
-        if (uuid) {
-          this.heard.add(uuid)
-          if (this.heard.size > HEARD_KEPT) this.heard.delete(this.heard.values().next().value as string)
-        }
-        this.active = true
-        for (const block of list(rec(message.message).content).map(rec)) {
-          if (block.type === 'text' && text(block.text).trim()) this.emit({ type: 'message', text: text(block.text) })
-          else if (block.type === 'tool_use') this.toolStarted(block)
-        }
-        break
-      }
-      case 'user': {
-        const content = rec(message.message).content
-        if (typeof content === 'string') this.printed(content, text(message.timestamp))
-        else for (const block of list(content).map(rec)) if (block.type === 'tool_result') this.toolFinished(block)
-        break
-      }
-      case 'result':
-        this.result(message)
-        break
-      default:
-        break
-    }
-  }
-
-  /** The session Claude Code is in. The task keeps the id it was first known by: after "/clear" the session is another. */
-  private sessionTold(message: Record<string, unknown>): void {
-    const session = text(message.session_id)
-    if (!session) return
-    this.id ||= session
-    this.session = session
-  }
-
-  /** The answer to what Claude Code offers. Only its commands and models are kept: the rest of it is not Togle's. */
-  private offersTold(response: Record<string, unknown>): void {
-    if (text(response.request_id) !== OFFERS || response.subtype !== 'success') return
-    const told = rec(response.response)
-    this.commandList = list(told.commands).map(rec).flatMap(commandOf)
-    this.modelList = list(told.models).map(rec).flatMap(modelOf)
-  }
-
-  /**
-   * What a command of Claude Code's own printed ("/compact" prints "Compacted"), shown as what the agent said. Only a
-   * line that is nothing but that (the summary "/compact" keeps may quote what an earlier command printed), and only
-   * one written since the last message was sent: after compacting, Claude Code tells again what earlier commands
-   * printed, with the time they printed it.
-   */
-  private printed(content: string, written: string): void {
-    const words = /^\s*<local-command-stdout>([\s\S]*)<\/local-command-stdout>\s*$/.exec(content)?.[1]?.replace(COLORS, '').trim()
-    if (!words) return
-    const at = Date.parse(written)
-    if (Number.isFinite(at) && at < this.sentAt - 2_000) return
-    this.active = true
-    this.emit({ type: 'message', text: words })
-  }
-
-  private toolStarted(block: Record<string, unknown>): void {
-    const command = text(rec(block.input).command)
-    if (!command) return
-    this.commands.set(text(block.id), command)
-    this.emit({ type: 'command', command, status: 'started', exitCode: null })
-  }
-
-  private toolFinished(block: Record<string, unknown>): void {
-    const id = text(block.tool_use_id)
-    const command = this.commands.get(id)
-    if (!command) return
-    this.commands.delete(id)
-    const refused = this.refused.delete(command)
-    this.emit({ type: 'command', command, status: refused ? 'declined' : block.is_error === true ? 'failed' : 'finished', exitCode: null })
-  }
-
-  private result(message: Record<string, unknown>): void {
-    const subtype = text(message.subtype)
-    const error = message.is_error === true || (subtype !== 'success' && subtype !== 'error_during_execution')
-    // In a program that picked a session up and has not ended a turn yet, a result with nothing before it is not the end
-    // of what was asked: see the note at the top. Anywhere else it is: a command of Claude Code's own that printed nothing.
-    const stale = this.resumed && this.turns === 0 && !this.active && !error && subtype === 'success'
-    if (this.open === 0 || stale) return
-    this.open--
-    this.turns++
-    if (this.open === 0) this.active = false
-    const interrupted = this.stopped && subtype === 'error_during_execution'
-    const failed = !interrupted && (error || subtype === 'error_during_execution')
-    const why = failed ? text(message.result) || subtype || 'The turn failed.' : null
-    this.emit({ type: 'turn-ended', outcome: interrupted ? 'interrupted' : failed ? 'failed' : 'completed', error: why })
-    if (why) this.emit({ type: 'error', message: why })
-    if (this.open === 0) this.setBase(this.stopped ? 'stopped' : 'idle')
-  }
-
-  // ---- A permission request, from the hook ----
-
-  async permission(event: Record<string, unknown>, gone: AbortSignal): Promise<HookVerdict> {
-    const id = `claude-${++this.requests}`
-    const { request, rule } = requestOf(id, event, this.folder)
-    gone.addEventListener('abort', () => this.dropRequest(id, 'cancelled'), { once: true })
-    const { verdict, refused } = verdictOf(await this.ask(request), request, rule, rec(event.tool_input))
-    if (refused) this.refused.add(refused)
-    return verdict
-  }
+/** The words for a start Claude Code refused, in the person's terms. */
+function refusal(text: string, folder: string): string {
+  if (/workspace not trusted/i.test(text)) return `Claude Code has not been opened in ${folder} yet, and it asks once whether to trust a folder. Run claude there, say yes, and start the task again.`
+  const said = firstLine(text.replace(/^error:\s*/i, ''))
+  return `Claude Code could not start the task in the background${said ? `: ${said.slice(0, 200)}` : '.'}`
 }
 
 export class ClaudeBackend implements Backend {
   readonly runner = 'claude' as const
-  private readonly hooks = new HookServer()
-  private readonly tasks = new Set<ClaudeTask>()
-  /** The ones that are Claude Code's own screen, in a terminal of Togle's own. */
-  private readonly screens = new Set<ClaudeScreenTask>()
+  readonly screens = true
+  private readonly hooks: HookServer
+  /** The tasks being run: by the id its screen is opened with. */
+  private readonly jobs = new Map<string, ClaudeJob>()
+  private readonly known = new Map<string, Known>()
+  private adopt?: (task: TaskHandle) => void
+  private rowsAt: { at: number; rows: AgentRow[] } | null = null
+  private asking: Promise<AgentRow[]> | null = null
+  private timer: NodeJS.Timeout | null = null
+  private soon: NodeJS.Timeout | null = null
+  private closed = false
+  private loaded?: Promise<void>
+  private resolved?: Promise<JobContext>
+  private background?: Promise<string | undefined>
 
-  constructor(private readonly options: ClaudeOptions = {}) {}
+  constructor(private readonly options: ClaudeOptions = {}) {
+    this.hooks = new HookServer(options.keep)
+  }
 
   private async command(): Promise<string[]> {
     if (this.options.command?.length) return this.options.command
@@ -439,115 +147,388 @@ export class ClaudeBackend implements Backend {
     return [found]
   }
 
+  private context(): Promise<JobContext> {
+    this.resolved ??= this.command().then((command) => ({
+      command,
+      env: this.options.env ?? process.env,
+      told: this.options.told ?? (() => undefined),
+      run: (args, cwd) => this.run(command, args, cwd),
+      look: () => this.look(),
+      said: (session) => (this.options.said ?? claudeLastSaid)(session),
+      over: (job) => void this.finished(job)
+    }))
+    this.resolved.catch(() => { this.resolved = undefined })
+    return this.resolved
+  }
+
+  private async run(command: string[], args: string[], cwd: string): Promise<{ ok: boolean; text: string }> {
+    const { ok, text } = await exec(command[0], [...command.slice(1), ...args], { cwd, env: claudeEnv(this.options.env ?? process.env), timeout: 60_000 })
+    return { ok, text }
+  }
+
   async detect(): Promise<Detected> {
     const command = this.options.command?.length ? this.options.command : [await findClaude()].filter((found): found is string => !!found)
     if (!command.length) return { installed: false }
-    const version = (await lines(command[0], [...command.slice(1), '--version']))[0]
+    const version = firstLine((await exec(command[0], [...command.slice(1), '--version'], { env: claudeEnv(this.options.env ?? process.env) })).out)
     return { installed: true, command: command[0], ...(version ? { version } : {}) }
   }
 
+  /** Why Claude Code cannot run a task in the background here, in words, or nothing when it can. */
+  private cannotRunInBackground(): Promise<string | undefined> {
+    this.background ??= (async () => {
+      const command = await this.command()
+      const help = await exec(command[0], [...command.slice(1), '--help'], { env: claudeEnv(this.options.env ?? process.env) })
+      return !help.ok || /--bg\b/.test(help.text) ? undefined : 'This version of Claude Code cannot run a task in the background. Update it, and Togle will use it.'
+    })()
+    return this.background
+  }
+
+  // ---- What Claude Code lists ----
+
+  /** The sessions as Claude Code lists them. Asked at most once at a time, and reused for `maxAge` milliseconds. */
+  private async rows(maxAge = 0): Promise<AgentRow[]> {
+    if (this.rowsAt && Date.now() - this.rowsAt.at <= maxAge) return this.rowsAt.rows
+    this.asking ??= (async () => {
+      try {
+        let rows: AgentRow[]
+        if (this.options.live) rows = await this.options.live()
+        else {
+          const command = await this.command()
+          const out = await exec(command[0], [...command.slice(1), 'agents', '--json', '--all'], { env: claudeEnv(this.options.env ?? process.env) })
+          if (!out.ok) throw new Error(firstLine(out.text) || 'Claude Code did not list its sessions.')
+          rows = list(JSON.parse(out.out) as unknown).map(rec).map(rowOf)
+        }
+        this.rowsAt = { at: Date.now(), rows }
+        return rows
+      } finally {
+        this.asking = null
+      }
+    })()
+    return this.asking
+  }
+
   async list(): Promise<TaskInfo[]> {
-    const live = await (this.options.live ? this.options.live() : this.command().then(liveSessions)).catch(() => [] as LiveSession[])
+    await this.ready()
+    const rows = await this.rows(1_500).catch(() => [] as AgentRow[])
     const stored = await (this.options.stored ?? storedSessions)().catch(() => [] as StoredSession[])
     const found = new Map<string, TaskInfo>()
     for (const session of stored) found.set(session.id, { id: session.id, runner: 'claude', title: session.title, folder: session.cwd, state: 'idle', updatedAt: session.updatedAt })
-    for (const session of live) {
-      if (!session.sessionId) continue
-      const before = found.get(session.sessionId)
-      found.set(session.sessionId, {
-        id: session.sessionId,
+    for (const row of rows) {
+      if (!row.sessionId) continue
+      const before = found.get(row.sessionId)
+      const job = isJob(row)
+      // Claude Code names a session it resumed by its id, which is no name.
+      const named = row.name && row.name !== row.id && !/^[0-9a-f]{8}$/.test(row.name) ? row.name : ''
+      found.set(row.sessionId, {
+        id: row.sessionId,
         runner: 'claude',
-        title: before?.title || session.name || path.basename(session.cwd ?? '') || 'Claude Code task',
-        folder: session.cwd ?? before?.folder ?? '',
-        state: stateOfLive(session),
-        updatedAt: before?.updatedAt ?? session.startedAt ?? 0,
-        ...(session.pid ? { pid: session.pid } : {}),
-        ...(session.waitingFor ? { waitingFor: session.waitingFor } : {})
+        title: before?.title || (job ? this.known.get(row.id)?.title : '') || named || path.basename(row.cwd ?? '') || 'Claude Code task',
+        folder: row.cwd ?? before?.folder ?? '',
+        state: stateOfJob(row),
+        updatedAt: before?.updatedAt ?? row.startedAt ?? 0,
+        // A task in the background has no program of its own to take over: its screen is opened.
+        ...(row.pid && !job ? { pid: row.pid } : {}),
+        ...(job ? { job: row.id } : {}),
+        ...(row.status === 'waiting' && row.waitingFor ? { waitingFor: row.waitingFor } : {})
       })
     }
-    for (const task of this.tasks) {
+    for (const task of this.jobs.values()) {
       if (!task.id) continue
       // After "/clear" Claude Code keeps the task in another session: that one is this task, and not a second row.
-      if (task.session && task.session !== task.id) found.delete(task.session)
+      if (task.session() !== task.id) found.delete(task.session())
       const before = found.get(task.id)
-      found.set(task.id, { id: task.id, runner: 'claude', title: task.title || before?.title || 'Claude Code task', folder: task.folder || before?.folder || '', state: task.state, updatedAt: Date.now() })
+      found.set(task.id, { id: task.id, runner: 'claude', title: task.title || before?.title || 'Claude Code task', folder: task.folder || before?.folder || '', state: task.state, updatedAt: before?.updatedAt ?? Date.now(), job: task.job, ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}) })
     }
     return [...found.values()].sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
+  // ---- Starting and opening ----
+
   async start(options: StartOptions): Promise<TaskHandle> {
-    const task = await this.launch(options.folder, null, options.asks ?? false, options.title ?? null)
-    task.title = options.title ?? oneLine(options.prompt)
-    await task.send(options.prompt)
+    const problem = await this.cannotRunInBackground()
+    if (problem) throw new Error(problem)
+    // The words go in the command that starts it, and a command line is only so long.
+    if (options.prompt.length > MOST_WORDS) throw new Error('That is too long to start a task with. Put the words in a file, and ask the task to read it.')
+    await this.ready()
+    const context = await this.context()
+    const asks = options.asks ?? false
+    const title = options.title ?? oneLine(options.prompt)
+    const hook = await this.hooks.attach(this.waiting(), asks)
+    let job: string
+    try {
+      job = (await this.backgrounded(context, ['--bg', '--settings', hook.settings, ...(title ? [`--name=${title}`] : []), ...(options.prompt ? ['--', options.prompt] : [])], options.folder)).job
+    } catch (error) {
+      await this.hooks.forget(hook.key)
+      throw error
+    }
+    const row = await this.appears(job)
+    const task = this.make(context, row, { key: hook.key, title, folder: options.folder })
+    this.hooks.retarget(hook.key, task)
+    await this.remember({ job, id: task.id as string, key: hook.key, folder: options.folder, title, asks })
+    if (options.prompt) task.began()
+    // A screen that cannot open does not undo the task: it goes on, and its screen says why it is closed.
+    await task.show().catch(() => undefined)
     return task
   }
 
+  async resume(id: string, options: ResumeOptions = {}): Promise<TaskHandle> {
+    await this.ready()
+    const context = await this.context()
+    const rows = await this.rows(0)
+    // What the list says decides how it opens: a session in the background has its screen opened, whatever its state.
+    const row = rows.filter(isJob).find((candidate) => (options.job ? candidate.id === options.job : candidate.sessionId === id))
+    if (options.job && !row) throw new Error('That task is gone.')
+    let task = row ? this.jobs.get(row.id) : undefined
+    if (row && !task) task = this.take(context, row, options.folder)
+    task ??= await this.begin(context, rows, id, options)
+    await task.show()
+    return task
+  }
+
+  /**
+   * Why Claude Code's own screen cannot be opened for a session here, in words, or nothing when it can: asked before a
+   * program the person is using is ended for it.
+   */
   async screenProblem(id: string): Promise<string | undefined> {
+    const problem = await this.cannotRunInBackground().catch(() => undefined)
+    if (problem) return problem
     if (!(await loadPty())) return 'Togle cannot open a terminal on this computer, so the Claude Code in its terminal was left as it is.'
     // A session that has had no message has no conversation to open: it was left as it is, and can be used where it is.
     const kept = this.options.stored ? (await this.options.stored().catch(() => [])).some((session) => session.id === id) : await claudeHasSession(id)
     return kept ? undefined : 'This Claude Code has not had a message yet, so there is no conversation to open here. It was left as it is.'
   }
 
-  async resume(id: string, options: ResumeOptions = {}): Promise<TaskHandle> {
-    const known = (await this.list()).find((task) => task.id === id)
-    const folder = options.folder ?? known?.folder ?? os.homedir()
-    if (options.screen) return this.openScreen(id, folder, known?.title ?? '', options.flags ?? [])
-    const task = await this.launch(folder, id, options.asks ?? false, null)
-    task.title = known?.title ?? ''
-    return task
-  }
-
-  /**
-   * Claude Code's own screen on a session, in a terminal of Togle's own. Nothing is forced on it (no permission mode, no
-   * rule that asks): the person's own settings apply, and Togle hears what Claude Code asks through the same hook.
-   */
-  private async openScreen(id: string, folder: string, title: string, flags: string[]): Promise<ClaudeScreenTask> {
-    const pty = await loadPty()
-    if (!pty) throw new Error('Togle cannot open a terminal on this computer.')
-    const command = await this.command()
-    let task: ClaudeScreenTask | undefined
-    // The hook is made before the program, and the task after it: what is posted in between is the task's once it is there.
-    const { key, settings } = await this.hooks.attach({ permission: (event, gone) => (task ? task.permission(event, gone) : Promise.resolve(null)), news: (what, event) => task?.news(what, event) }, false, true)
+  /** A session that is not in the background yet goes there, as the same session. */
+  private async begin(context: JobContext, rows: AgentRow[], id: string, options: ResumeOptions): Promise<ClaudeJob> {
+    const problem = await this.cannotRunInBackground()
+    if (problem) throw new Error(problem)
+    const open = rows.find((row) => row.sessionId === id && row.kind !== 'background' && row.pid)
+    if (open?.pid && alive(open.pid)) throw new Error('It is still open in a terminal. End that Claude Code first: a conversation goes on in one program at a time.')
+    const info = (await this.list()).find((task) => task.id === id)
+    const folder = options.folder ?? info?.folder ?? os.homedir()
+    const hook = await this.hooks.attach(this.waiting(), false)
+    let started: { job: string; copy: boolean }
     try {
-      const term = openTerminal(pty, command[0], [...command.slice(1), ...flags, '--resume', id, '--settings', settings], folder, screenEnv(this.options.env ?? process.env))
-      task = new ClaudeScreenTask(
-        id,
-        title,
-        folder,
-        term,
-        this.options.told ?? (() => undefined),
-        () => {
-          if (task) this.screens.delete(task)
-          void this.hooks.detach(key, settings)
-        },
-        () => (this.options.live ? this.options.live() : liveSessions(command))
-      )
+      started = await this.backgrounded(context, ['--bg', '--resume', id, '--settings', hook.settings, ...(options.flags ?? [])], folder)
     } catch (error) {
-      await this.hooks.detach(key, settings)
-      throw new Error(`Claude Code could not be started${error instanceof Error ? `: ${error.message}` : '.'}`, { cause: error })
-    }
-    this.screens.add(task)
-    return task
-  }
-
-  private async launch(folder: string, resume: string | null, asks: boolean, name: string | null): Promise<ClaudeTask> {
-    const task = new ClaudeTask({ command: await this.command(), env: this.options.env, hooks: this.hooks })
-    task.on((event) => {
-      if (event.type === 'ended') this.tasks.delete(task)
-    })
-    this.tasks.add(task)
-    try {
-      await task.launch(folder, resume, asks, name)
-    } catch (error) {
-      this.tasks.delete(task)
+      await this.hooks.forget(hook.key)
       throw error
     }
+    // The same session, or none: a second session under the one task would split the conversation in two.
+    const copied = async (): Promise<never> => {
+      await this.discard(context, started.job, folder)
+      await this.hooks.forget(hook.key)
+      throw new Error('Claude Code started a copy of that conversation instead of going on with it, so the copy was ended and nothing was changed.')
+    }
+    if (started.copy) return copied()
+    const row = await this.appears(started.job)
+    if (row.sessionId !== id) return copied()
+    const title = info?.title ?? ''
+    const task = this.make(context, row, { key: hook.key, title, folder })
+    this.hooks.retarget(hook.key, task)
+    await this.remember({ job: started.job, id, key: hook.key, folder, title, asks: false })
     return task
   }
 
+  /** Runs `claude --bg ...` and says which session it made. Claude Code's refusal is told in words. */
+  private async backgrounded(context: JobContext, args: string[], folder: string): Promise<{ job: string; copy: boolean }> {
+    const out = await context.run(args, folder)
+    const job = BACKGROUNDED.exec(out.text)?.[1]
+    if (!out.ok || !job) throw new Error(refusal(out.text, folder))
+    const copy = COPY.exec(out.text)?.[1]
+    return { job: copy ?? job, copy: !!copy }
+  }
+
+  /** A session Claude Code started appears in its list a moment later. */
+  private async appears(job: string): Promise<JobRow & { sessionId: string }> {
+    for (let waited = 0; waited < 20_000; waited += 300) {
+      const row = (await this.rows(0).catch(() => [] as AgentRow[])).filter(isJob).find((candidate) => candidate.id === job)
+      if (row?.sessionId) return { ...row, sessionId: row.sessionId }
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    }
+    throw new Error('Claude Code started the task, but it did not show in its list. Open the Agents list again in a moment.')
+  }
+
+  private async discard(context: JobContext, job: string, folder: string): Promise<void> {
+    await context.run(['stop', job], folder)
+    await new Promise((resolve) => setTimeout(resolve, 1_500))
+    await context.run(['rm', job], folder)
+  }
+
+  // ---- Tasks ----
+
+  /** The task a hook key is for, found when something asks: a session that went on while Togle was closed, or was opened again. */
+  private slot(job: string): HookTarget {
+    return {
+      permission: async (event, gone) => {
+        const task = await this.hearing(job)
+        return task ? task.permission(event, gone) : null
+      }
+    }
+  }
+
+  /** For a key made before its task is: nothing is decided until the task is there. */
+  private waiting(): HookTarget {
+    return { permission: () => Promise.resolve(null) }
+  }
+
+  private async hearing(job: string): Promise<ClaudeJob | undefined> {
+    const have = this.jobs.get(job)
+    if (have) return have
+    const row = (await this.rows(0).catch(() => [] as AgentRow[])).filter(isJob).find((candidate) => candidate.id === job)
+    if (!row) return undefined
+    const task = this.take(await this.context(), row)
+    this.adopt?.(task)
+    return task
+  }
+
+  /** A session in the background that Togle takes up: one it ran before, or one the person started themselves (which has no hook to hear it by). */
+  private take(context: JobContext, row: JobRow, folder?: string): ClaudeJob {
+    const known = this.known.get(row.id)
+    const named = row.name && row.name !== row.id && !/^[0-9a-f]{8}$/.test(row.name) ? row.name : ''
+    return this.make(context, row, { key: known?.key, title: known?.title || named || path.basename(row.cwd ?? folder ?? '') || 'Claude Code task', folder: row.cwd ?? known?.folder ?? folder ?? os.homedir(), id: known?.id })
+  }
+
+  private make(context: JobContext, row: JobRow, task: { key?: string; title: string; folder: string; id?: string }): ClaudeJob {
+    const job = new ClaudeJob(context, row.id, task.id ?? row.sessionId ?? row.id, task.title, task.folder, task.key)
+    this.jobs.set(row.id, job)
+    job.seen(row)
+    this.ticking()
+    return job
+  }
+
+  /** Picks up the tasks Togle ran before and that went on without it, and listens for the ones that ask later. */
+  async restore(adopt: (task: TaskHandle) => void): Promise<void> {
+    this.adopt = adopt
+    await this.ready()
+    let rows: AgentRow[]
+    try {
+      rows = await this.rows(0)
+    } catch {
+      // Claude Code could not list its sessions now: what Togle knows of them is kept.
+      return
+    }
+    const context = await this.context().catch(() => undefined)
+    if (!context) return
+    for (const known of [...this.known.values()]) {
+      const row = rows.filter(isJob).find((candidate) => candidate.id === known.job)
+      if (!row) {
+        await this.dismiss(known)
+        continue
+      }
+      // The same address, its settings file written again: a session that comes back from a stop reads it once more.
+      if (known.key) await this.hooks.attach(this.slot(known.job), known.asks, known.key)
+      if (row.pid) adopt(this.take(context, row))
+    }
+    this.ticking()
+  }
+
+  // ---- Looking at the sessions ----
+
+  private ticking(): void {
+    if (this.timer || this.closed) return
+    const busy = [...this.jobs.values()].some((job) => job.state === 'working' || job.state === 'waiting' || job.open)
+    const every = this.options.every ?? { busy: 1_500, idle: 5_000 }
+    this.timer = setTimeout(() => {
+      this.timer = null
+      void this.tick()
+    }, busy ? every.busy : every.idle)
+    this.timer.unref?.()
+  }
+
+  /** Something changed: the sessions are looked at in a moment, and not once for each change. */
+  private look(): void {
+    if (this.soon || this.closed) return
+    this.soon = setTimeout(() => {
+      this.soon = null
+      void this.tick()
+    }, 150)
+    this.soon.unref?.()
+  }
+
+  private async tick(): Promise<void> {
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+    if (this.closed) return
+    try {
+      const rows = (await this.rows(0)).filter(isJob)
+      for (const task of [...this.jobs.values()]) task.seen(rows.find((row) => row.id === task.job))
+      // A task of Togle's that came back to life (the person opened it in their own terminal) is Togle's again.
+      for (const known of this.known.values()) {
+        const row = rows.find((candidate) => candidate.id === known.job)
+        if (row?.pid && !this.jobs.has(known.job)) {
+          const task = this.take(await this.context(), row)
+          this.adopt?.(task)
+        }
+      }
+    } catch {
+      // The list could not be asked now: the next look tries again, and nothing is taken for gone.
+    }
+    if (this.jobs.size || this.known.size) this.ticking()
+  }
+
+  // ---- What is kept between runs ----
+
+  private ready(): Promise<void> {
+    this.loaded ??= (async () => {
+      if (!this.options.keep) return
+      try {
+        const saved = rec(JSON.parse(await fs.readFile(path.join(this.options.keep, KNOWN), 'utf8')) as unknown)
+        for (const item of list(saved.jobs).map(rec)) {
+          const job = typeof item.job === 'string' ? item.job : ''
+          const id = typeof item.id === 'string' ? item.id : ''
+          if (!/^[0-9a-f]{8}$/.test(job) || !id) continue
+          this.known.set(job, { job, id, ...(typeof item.key === 'string' && /^[0-9a-f]{16}$/.test(item.key) ? { key: item.key } : {}), folder: typeof item.folder === 'string' ? item.folder : '', title: typeof item.title === 'string' ? item.title : '', asks: item.asks === true })
+        }
+      } catch {
+        // Nothing was kept yet, or what was kept cannot be read: Togle starts without it.
+      }
+    })()
+    return this.loaded
+  }
+
+  private async remember(known: Known): Promise<void> {
+    this.known.set(known.job, known)
+    await this.save()
+  }
+
+  private async save(): Promise<void> {
+    const keep = this.options.keep
+    if (!keep) return
+    const file = path.join(keep, KNOWN)
+    const temp = `${file}.${process.pid}.tmp`
+    try {
+      await fs.mkdir(keep, { recursive: true })
+      await fs.writeFile(temp, JSON.stringify({ jobs: [...this.known.values()] }), { mode: 0o600 })
+      await fs.rename(temp, file)
+    } catch {
+      // Not kept this time: the task goes on, and is found again from Claude Code's own list.
+      await fs.rm(temp, { force: true }).catch(() => undefined)
+    }
+  }
+
+  /** The session is gone for good (removed with `claude rm`): nothing of it is kept. */
+  private async dismiss(known: Known): Promise<void> {
+    this.known.delete(known.job)
+    if (known.key) await this.hooks.forget(known.key)
+    await this.save()
+  }
+
+  private async finished(job: ClaudeJob): Promise<void> {
+    this.jobs.delete(job.job)
+    const known = this.known.get(job.job)
+    if (known) await this.dismiss(known)
+  }
+
+  /** Stops using Claude Code. The tasks go on in the background: only their screens close here, and what waits is left to their own screens. */
   async close(): Promise<void> {
-    await Promise.all([...this.tasks, ...this.screens].map((task) => task.close()))
+    this.closed = true
+    for (const timer of [this.timer, this.soon]) if (timer) clearTimeout(timer)
+    this.timer = null
+    this.soon = null
+    await Promise.all([...this.jobs.values()].map((task) => task.close()))
     await this.hooks.close()
   }
 }

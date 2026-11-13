@@ -170,7 +170,7 @@ export interface TogleApi {
   /** Types the task's words into its terminal, without Enter. */
   typeTerminalWords(key: string): Promise<void>
   /** What a terminal of Togle's own printed, as it comes: `at` is where the part starts among all it printed. */
-  onTerminalData(cb: (chunk: { key: string; at: number; data: string }) => void): Unsubscribe
+  onTerminalData(cb: (chunk: { key: string; at: number; data: string; screen?: string }) => void): Unsubscribe
   /** Removes an agent the person added. */
   removeCodingAgent(id: string): Promise<RunnerStatus[]>
   /** Every agent task on this PC in one list: waiting for the person first, then working, then the rest. */

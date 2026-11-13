@@ -319,6 +319,40 @@ export async function claudeHasSession(id: string): Promise<boolean> {
   return false
 }
 
+// Where each session's file was found, so that what a session said last is not looked for among all of them each time.
+const sessionFiles = new Map<string, string>()
+
+/**
+ * What Claude Code said last in a session, in words: the text of the last answer it wrote (not a tool it used), for the
+ * notice that a task finished. Read from the end of the session's file, with keys and passwords taken out. Empty when it
+ * has said nothing, or the file is not there.
+ */
+export async function claudeLastSaid(id: string): Promise<string> {
+  let file = sessionFiles.get(id)
+  if (file && !(await fs.stat(file).then((stat) => stat.size > 0, () => false))) file = undefined
+  if (!file) {
+    for (const home of await claudeHomes()) {
+      file = (await filesIn(path.join(home, 'projects'), 1, /\.jsonl$/i)).find((candidate) => path.basename(candidate, '.jsonl') === id)
+      if (file) break
+    }
+    if (!file) return ''
+    sessionFiles.set(id, file)
+  }
+  const size = (await fs.stat(file).catch(() => null))?.size ?? 0
+  for (const bytes of TAIL_BYTES) {
+    const tail = await readEnd(file, size, 'tail', bytes).catch(() => null)
+    if (!tail) return ''
+    for (const line of tail.lines.slice().reverse()) {
+      const r = parse(line)
+      if (!r || r.type !== 'assistant' || r.isSidechain || !isObject(r.message)) continue
+      const words = textOf(r.message.content).trim()
+      if (words) return withoutSecrets(words).slice(0, 2000)
+    }
+    if (bytes >= size) break
+  }
+  return ''
+}
+
 /**
  * Claude Code's sessions on this PC, newest first (the newest `limit`). One session in two folders (a copy of ~/.claude
  * kept beside it) is listed once: the copy written in last.

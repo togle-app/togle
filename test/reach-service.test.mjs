@@ -26,6 +26,15 @@ class Tasks {
     }, {
       key: 'claude:s9', id: 's9', runner: 'claude', agent: 'Claude Code', title: 'Fix the login redirect', folder: '/work/website', state: 'working',
       updatedAt: Date.now(), mine: false, commandsRunning: false, line: 'Working', pending: []
+    }, {
+      // A task in the background with the agent's own screen (Claude Code): its screen is open in Togle on that computer.
+      key: 'claude:bg1', id: 'bg1', runner: 'claude', agent: 'Claude Code', title: 'Rebuild the pricing page', folder: '/work/website', state: 'waiting',
+      updatedAt: Date.now(), mine: true, commandsRunning: false, line: 'Wants to run npm run migrate', terminal: true, screen: true, job: 'abc12345',
+      pending: [{ id: 'r2', kind: 'command', command: 'npm run migrate', offersAlways: false }]
+    }, {
+      // An agent without a protocol, run in a terminal of Togle's own: Togle only watches it.
+      key: 'term-aider:t1', id: 't1', runner: 'term-aider', agent: 'Aider', title: 'Rename the module', folder: '/work/api-server', state: 'working',
+      updatedAt: Date.now(), mine: true, commandsRunning: false, line: 'Working', terminal: true, pending: []
     }]
   }
   async list() { return structuredClone(this.tasks) }
@@ -136,6 +145,21 @@ test('a computer’s tasks reach the other computer, never the server; Refuse an
   await assert.rejects(laptop.act(pcId, { what: 'stop', task: 'codex:t1' }), /doesn’t take answers from other devices/)
   await pc.setActOnThis(true)
   assert.equal(pcTasks.done.length, 2, 'nothing else was done')
+})
+
+test('a task in the background is refused and stopped from another device like any other, its screen open or not; a terminal Togle only watches is not', async () => {
+  pc.tasksChanged()
+  const remote = await until(() => laptop.remoteTasks().find((item) => item.name === 'Windows PC' && item.tasks.some((task) => task.key === 'claude:bg1')), 'the task in the background on the laptop')
+  assert.equal(remote.tasks.find((item) => item.key === 'claude:bg1').terminal, undefined, 'it is not marked as a terminal that is only watched')
+  assert.equal(remote.tasks.find((item) => item.key === 'term-aider:t1').terminal, true)
+  const pcId = pc.state().me.device
+  await laptop.act(pcId, { what: 'refuse', task: 'claude:bg1', request: 'r2' })
+  assert.deepEqual(pcTasks.done.at(-1), ['answer', 'claude:bg1', 'r2', 'refuse'])
+  await laptop.act(pcId, { what: 'stop', task: 'claude:bg1' })
+  assert.deepEqual(pcTasks.done.at(-1), ['stop', 'claude:bg1'])
+  const before = pcTasks.done.length
+  await assert.rejects(laptop.act(pcId, { what: 'stop', task: 'term-aider:t1' }), /runs in a terminal. It is answered only at its own computer/)
+  assert.equal(pcTasks.done.length, before, 'what Togle only watches is left alone')
 })
 
 test('a removed device is let go at once, and the others stop listing it', async () => {

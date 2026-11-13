@@ -573,7 +573,10 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     const task = (await tasks.list()).find((item) => item.key === act.task)
     if (!task) return answer(false, 'That task is gone.')
     if (!task.mine) return answer(false, 'Togle doesn’t run that task, so it is answered where it runs.')
-    if (task.terminal) return answer(false, 'That task runs in a terminal. It is answered only at its own computer.')
+    // A task in a terminal of Togle's own that Togle does not hear is answered only there. One that runs in the background
+    // (Claude Code), with a screen or not, is refused and stopped like any other: through what Claude Code asks, and through
+    // its own command to stop a session. No device ever types into its screen: a key could answer "1. Yes".
+    if (task.terminal && !task.screen) return answer(false, 'That task runs in a terminal. It is answered only at its own computer.')
     try {
       let what: string
       if (act.what === 'refuse') {

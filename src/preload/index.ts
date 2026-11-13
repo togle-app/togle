@@ -113,7 +113,7 @@ const api: TogleApi = {
   terminalWrite: (key, data) => ipcRenderer.invoke('runners:terminal-write', key, data),
   terminalResize: (key, cols, rows) => ipcRenderer.invoke('runners:terminal-resize', key, cols, rows),
   typeTerminalWords: (key) => ipcRenderer.invoke('runners:terminal-words', key),
-  onTerminalData: cb => subscribe('runners:terminal-data', chunk => cb(chunk as { key: string; at: number; data: string })),
+  onTerminalData: cb => subscribe('runners:terminal-data', chunk => cb(chunk as { key: string; at: number; data: string; screen?: string })),
   removeCodingAgent: (id) => ipcRenderer.invoke('runners:remove-agent', id),
   runnerChanges: key => ipcRenderer.invoke('runners:changes', key),
   runnerTasks: () => ipcRenderer.invoke('runners:list'),
@@ -187,9 +187,10 @@ const api: TogleApi = {
   minimize: () => ipcRenderer.send('window:minimize'),
   close: (confirmed) => ipcRenderer.send('window:close', confirmed),
   pageFailed: () => ipcRenderer.send('window:page-failed'),
-  onConfirmClose: (cb) => subscribe<{ call?: boolean; tasks?: unknown } | undefined>('window:confirm-close', warning => cb({
+  onConfirmClose: (cb) => subscribe<{ call?: boolean; tasks?: unknown; goesOn?: unknown } | undefined>('window:confirm-close', warning => cb({
     call: warning?.call !== false,
-    tasks: Array.isArray(warning?.tasks) ? warning.tasks.filter((task): task is string => typeof task === 'string') : []
+    tasks: Array.isArray(warning?.tasks) ? warning.tasks.filter((task): task is string => typeof task === 'string') : [],
+    goesOn: Array.isArray(warning?.goesOn) ? warning.goesOn.filter((task): task is string => typeof task === 'string') : []
   }))
 }
 

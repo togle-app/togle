@@ -536,9 +536,9 @@ function showTask(key: string): void {
   openWindow()
   send('tasks:show', key)
 }
-/** What quitting would stop: a call or dictation, and the tasks Togle runs that have not finished. */
+/** What quitting would stop: a call or dictation, and the tasks Togle runs that have not finished; and what would go on without Togle. */
 function closeWarning(): CloseWarning {
-  return { call: ongoing.isListening || dictation.active, tasks: runners?.busy().map(task => task.title) ?? [] }
+  return { call: ongoing.isListening || dictation.active, tasks: runners?.busy().map(task => task.title) ?? [], goesOn: runners?.keepsGoing().map(task => task.title) ?? [] }
 }
 // Updates: the latest release, checked against the release key before anything is installed (updates.ts). A test run
 // can give a key and a release list of its own.
@@ -565,7 +565,7 @@ async function requestQuit(confirmed = false): Promise<void> {
   if (quitting) return
   if (!confirmed && !pageDown && !pageFailed) {
     const warning = closeWarning()
-    if (warning.call || warning.tasks.length) { openWindow(); send('window:confirm-close', warning); return }
+    if (warning.call || warning.tasks.length || warning.goesOn?.length) { openWindow(); send('window:confirm-close', warning); return }
   }
   quitting = true; closeConfirmed = true
   dictation.dispose(); voices.stop()
@@ -828,7 +828,7 @@ function createWindow(): void {
     }
     if (!closeConfirmed && !pageDown && !pageFailed) {
       const warning = closeWarning()
-      if (ongoing.isListening || warning.tasks.length) {
+      if (ongoing.isListening || warning.tasks.length || warning.goesOn?.length) {
         e.preventDefault()
         win?.show()
         send('window:confirm-close', warning)
@@ -1710,6 +1710,8 @@ if (process.argv.includes('--togle-hook')) {
     void todo.watch()
     runners = registerRunners({
       backends: standIns,
+      // What Claude Code's tasks need to go on while Togle is closed: its address, each task's settings and the list of tasks.
+      keep: path.join(app.getPath('userData'), 'claude'),
       handle: (channel, listener) => ipcMain.handle(channel, (_event, ...args) => listener(...args)),
       send,
       titles: runnerTitles,

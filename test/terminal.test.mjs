@@ -48,7 +48,10 @@ test('an agent without ACP runs in a terminal of its own, with the task\'s words
     // What the person types reaches it, and what it prints comes back, to the window as well, in order.
     hub.terminalWrite(view.key, 'hello\r')
     await until(() => plain(hub.terminalRead(view.key).text).includes('heard: hello'), 'the answer')
-    const sent = told.filter((chunk) => chunk.key === view.key)
+    // What it printed goes to the window a moment later (in one piece): wait for the last part before comparing.
+    const sentOf = () => told.filter((chunk) => chunk.key === view.key)
+    await until(() => sentOf().length > 0 && sentOf().at(-1).at + sentOf().at(-1).data.length === hub.terminalRead(view.key).end, 'the last part to be sent to the window')
+    const sent = sentOf()
     assert.ok(sent.length > 0)
     for (let n = 1; n < sent.length; n++) assert.equal(sent[n].at, sent[n - 1].at + sent[n - 1].data.length, 'each part starts where the last ended')
     const { text, end } = hub.terminalRead(view.key)

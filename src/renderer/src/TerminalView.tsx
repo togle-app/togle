@@ -5,15 +5,15 @@ import '@xterm/xterm/css/xterm.css'
 
 const api = window.togle
 
-// The tasks whose terminal was shown here before: what they printed then had its questions to the terminal answered.
+// The terminals shown here before: what they printed then had its questions to the terminal answered.
 const shownBefore = new Set<string>()
 
 /**
- * The terminal a task runs in when its agent has no ACP, inside Togle: what the agent prints, and the person's keys sent
- * to it, as in any terminal. It starts from what was printed so far, then follows; a part it already has is not written
- * twice.
+ * The terminal a task runs in, inside Togle: what the agent prints, and the person's keys sent to it, as in any terminal.
+ * It starts from what was printed so far, then follows; a part it already has is not written twice. A task that opens a
+ * new screen each time (one in the background) names it with `screenId`: what another screen prints is not taken.
  */
-export function TerminalView({ taskKey }: { taskKey: string }) {
+export function TerminalView({ taskKey, screenId }: { taskKey: string; screenId?: string }) {
   const host = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const element = host.current
@@ -37,6 +37,7 @@ export function TerminalView({ taskKey }: { taskKey: string }) {
     }
     const stop = api.onTerminalData((chunk) => {
       if (chunk.key !== taskKey) return
+      if (screenId && chunk.screen && chunk.screen !== screenId) return
       if (end < 0) early.push(chunk)
       else write(chunk.at, chunk.data)
     })
@@ -44,8 +45,9 @@ export function TerminalView({ taskKey }: { taskKey: string }) {
     // An agent asks the terminal things as it prints (where the cursor is, what kind of terminal it is), and the terminal
     // answers as keys. Shown again, what it printed is not answered again: those answers would reach it as typed keys.
     // Shown the first time, it is: the agent may still wait for them.
-    const again = shownBefore.has(taskKey)
-    shownBefore.add(taskKey)
+    const shown = `${taskKey}#${screenId ?? ''}`
+    const again = shownBefore.has(shown)
+    shownBefore.add(shown)
     let replaying = false
     void api.terminalRead(taskKey).then(
       (printed) => {
@@ -81,6 +83,6 @@ export function TerminalView({ taskKey }: { taskKey: string }) {
       observer.disconnect()
       term.dispose()
     }
-  }, [taskKey])
+  }, [taskKey, screenId])
   return <div className="terminal-view" ref={host} role="group" aria-label="The agent's terminal" />
 }

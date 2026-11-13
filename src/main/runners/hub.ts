@@ -5,9 +5,8 @@ import { promises as fs } from 'node:fs'
 import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Changes, type Decision, type LogEntry, type RunnerKind, type RunnerStatus, type StartRequest, type TaskAttention, type TaskDetail, type TaskEvent, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
 import { changesIn } from './changes'
-import { carriedFlags } from './claude-screen'
+import { carriedFlags } from './claude-job'
 import { endTree, listProcesses } from './process-tree'
-import { cleanWords } from './terminal'
 import type { Backend, Detected, TaskHandle } from './types'
 
 /** The agents Togle knows by name; an added agent is named by its backend. */
@@ -69,8 +68,6 @@ interface Owned {
 }
 
 const LOG_LIMIT = 400
-// How long Take over waits to see that the screen it opened stays open.
-const SETTLE_MS = 1_200
 const keyOf = (runner: RunnerKind, id: string): string => `${runner}:${id}`
 const short = (value: string, longest = 90): string => {
   const line = value.replace(/\s+/g, ' ').trim()
@@ -125,13 +122,7 @@ export class RunnerHub {
 
   async list(): Promise<TaskView[]> {
     const views = new Map<string, TaskView>()
-    // On a screen of Togle's own the person can clear the conversation or pick another: the agent then lists the same
-    // program under another session. That row is this screen, and not a task to take over (which would end the screen).
-    const screens = new Set([...this.owned.values()].flatMap((owned) => owned.handle.screen?.pid ?? []))
-    for (const info of await this.infos()) {
-      if (info.pid && screens.has(info.pid) && !this.owned.has(keyOf(info.runner, info.id))) continue
-      views.set(keyOf(info.runner, info.id), this.viewOfInfo(info))
-    }
+    for (const info of await this.infos()) views.set(keyOf(info.runner, info.id), this.viewOfInfo(info))
     for (const owned of this.owned.values()) views.set(owned.key, this.viewOfOwned(owned, views.get(owned.key)))
     return [...views.values()].map((view) => ({ ...view, agent: this.nameOf(view.runner) })).sort(order)
   }
@@ -179,8 +170,9 @@ export class RunnerHub {
     // Named by the person's words (their first line), never by an agent's stand-in like "Codex task" or by what is added
     // after the words (where a saved call is).
     const title = request.title?.trim().slice(0, 120) || taskName(prompt)
-    // A task started here always asks before a command or an edit.
-    const handle = await backend.start({ folder: request.folder, prompt, title, asks: true })
+    // A task of an agent that has its own screen follows the person's own settings there, as in their terminal; any other
+    // task started here asks before every command and every edit.
+    const handle = await backend.start({ folder: request.folder, prompt, title, asks: !backend.screens })
     const owned = await this.adopt(handle, prompt)
     this.options.titles?.set(owned.key, title)
     this.fresh()
@@ -190,38 +182,47 @@ export class RunnerHub {
   }
 
   /**
-   * Picks up a task that was started earlier, so it can be answered and replied to here. As the agent's own screen when
-   * `screen` says so (the person's own settings apply on it), else as a conversation Togle shows, which asks before every command.
+   * Picks up a task that was started earlier, so it can be answered here. For an agent with its own screen (Claude Code),
+   * that is its screen, opened here: a task in the background is opened by the id the agent gave it, and a session that is
+   * not in the background yet goes there, with `flags` (the ones its program was started with). For any other agent, a
+   * conversation Togle shows, which asks before every command.
    */
-  async open(key: string, screen = false, flags: string[] = []): Promise<TaskView> {
+  async open(key: string, flags: string[] = []): Promise<TaskView> {
     const known = this.owned.get(key)
-    if (known) return this.viewOfOwned(known, undefined)
+    if (known) {
+      // A task in the background whose screen is closed: opening it opens the screen.
+      await known.handle.screen?.show()
+      this.fresh()
+      return this.viewOfOwned(known, undefined)
+    }
     const info = (await this.infos()).find((task) => keyOf(task.runner, task.id) === key)
     if (!info) throw new Error('That task is gone.')
-    const handle = await this.backend(info.runner).resume(info.id, screen ? { folder: info.folder, screen: true, ...(flags.length ? { flags } : {}) } : { asks: true, folder: info.folder })
+    const backend = this.backend(info.runner)
+    const handle = await backend.resume(info.id, backend.screens ? { folder: info.folder, ...(info.job ? { job: info.job } : {}), ...(flags.length ? { flags } : {}) } : { asks: true, folder: info.folder })
     const owned = await this.adopt(handle)
     this.fresh()
     return this.viewOfOwned(owned, this.viewOfInfo(info))
   }
 
   /**
-   * Lets go of a task that is the agent's own screen in Togle, and says how to go on in a terminal: the program ends
-   * (the conversation is kept), so that the person goes on in one place. The session is the one the screen is in now.
+   * Closes the screen of a task in the background here, and says how to open it in a terminal of the person's own. The
+   * task goes on: a conversation has one screen at a time, and the next one to open it takes it.
    */
   async handBack(key: string): Promise<{ command: string; folder: string }> {
     const owned = this.mine(key)
     const screen = owned.handle.screen
     if (!screen) throw new Error('Only a task that is the agent’s own screen can be handed back.')
-    const command = `claude --resume ${screen.session()}`
+    const command = screen.line
     const folder = owned.handle.folder
-    await this.close(key)
+    await screen.hide()
+    this.fresh()
     return { command, folder }
   }
 
   /**
-   * Takes a task over from the program that runs it in a terminal: that program is ended (the conversation is kept)
-   * and Togle picks the task up, as the agent's own screen: the same screen the person had, here. Only for Claude Code,
-   * and only for the program that was listed for it.
+   * Takes a task over from the program that runs it in a terminal: that program is ended (the conversation is kept) and the
+   * same conversation goes on in the background, with its screen here: the same screen the person had. Only for Claude
+   * Code, and only for the program that was listed for it.
    */
   async takeOver(key: string): Promise<TaskView> {
     this.cache = null
@@ -234,7 +235,7 @@ export class RunnerHub {
     if (problem) throw new Error(problem)
     const program = (await listProcesses()).find((proc) => proc.pid === info.pid)
     if (!program || !/claude/i.test(program.command)) throw new Error('That program is not Claude Code any more, so it was left alone.')
-    // The program is started again the way the person started it: its model, effort and permission mode.
+    // The conversation goes on the way the person started it: its model, effort and permission mode.
     const flags = carriedFlags(program.command)
     await endTree(info.pid)
     for (let waited = 0; waited < 5_000; waited += 200) {
@@ -242,16 +243,12 @@ export class RunnerHub {
       await new Promise((resolve) => setTimeout(resolve, 200))
     }
     this.cache = null
-    const view = await this.open(key, true, flags)
-    // A screen that stops as soon as it opens (Claude Code could not resume the session, or could not start) is told here,
-    // in words: the person's own program is ended by now, and the conversation is saved.
-    const handle = this.owned.get(key)?.handle
-    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
-    if (handle && !this.owned.has(key)) {
-      const said = cleanWords(handle.terminal?.read().text ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1)
-      throw new Error(`Claude Code stopped as soon as it opened here${said ? `: ${said.slice(0, 160)}` : ''}. The conversation is saved: go on in your terminal with claude --resume ${info.id}`)
+    try {
+      return await this.open(key, flags)
+    } catch (error) {
+      // The person's own program is ended by now, and the conversation is saved: how to go on is told with what went wrong.
+      throw new Error(`${(error as Error).message} The conversation is saved: go on in your terminal with claude --resume ${info.id}`, { cause: error })
     }
-    return view
   }
 
   async send(key: string, text: string): Promise<void> {
@@ -328,10 +325,15 @@ export class RunnerHub {
     return side
   }
 
-  /** Lets go of a task Togle runs. It stays on this computer. */
+  /** Lets go of a task Togle runs. It stays on this computer. A task in the background goes on, and Togle goes on hearing it: only its screen closes. */
   async close(key: string): Promise<void> {
     const owned = this.owned.get(key)
     if (!owned) return
+    if (owned.handle.screen) {
+      await owned.handle.screen.hide()
+      this.fresh()
+      return
+    }
     this.owned.delete(key)
     owned.off()
     await owned.handle.close()
@@ -357,8 +359,33 @@ export class RunnerHub {
   /** The tasks Togle runs that would stop in the middle if Togle quit now: working, or waiting for the person. */
   busy(): { key: string; title: string; waiting: boolean }[] {
     return [...this.owned.values()]
-      .filter(({ handle }) => handle.state === 'working' || handle.state === 'waiting')
+      .filter(({ handle }) => !handle.screen && (handle.state === 'working' || handle.state === 'waiting'))
       .map(({ key, handle }) => ({ key, title: this.titleOf(key, handle.title), waiting: handle.state === 'waiting' }))
+  }
+
+  /** The tasks in the background that are working or waiting for the person, and that go on if Togle quits. */
+  keepsGoing(): { key: string; title: string; waiting: boolean }[] {
+    return [...this.owned.values()]
+      .filter(({ handle }) => handle.screen && (handle.state === 'working' || handle.state === 'waiting'))
+      .map(({ key, handle }) => ({ key, title: this.titleOf(key, handle.title), waiting: handle.state === 'waiting' }))
+  }
+
+  /**
+   * Takes up the tasks that went on while Togle was closed, for the agents whose tasks outlive it. Each is Togle's own
+   * again, with what it asks; one that asks later is taken up then.
+   */
+  async restore(): Promise<void> {
+    await Promise.all(this.options.backends.map((backend) => this.restoreOf(backend)))
+  }
+
+  private async restoreOf(backend: Backend): Promise<void> {
+    try {
+      await backend.restore?.((handle) => {
+        void this.adopt(handle).then(() => this.fresh(), () => undefined)
+      })
+    } catch {
+      // An agent that cannot say what it kept now leaves the list as it is.
+    }
   }
 
   /** Lets go of every task and ends the agents' programs. Asked twice, it is done once. */
@@ -372,9 +399,10 @@ export class RunnerHub {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     const owned = [...this.owned.values()]
-    // A task still at work is stopped as the Stop button stops it. Closing the agent's program is not enough: Claude
-    // Code and Hermes leave the command they were running behind, running with nobody watching.
-    await Promise.all(owned.filter(({ handle }) => handle.state === 'working' || handle.state === 'waiting').map((task) => this.stopForQuit(task)))
+    // A task still at work is stopped as the Stop button stops it. Closing the agent's program is not enough: Hermes
+    // leaves the command it was running behind, running with nobody watching. A task in the background goes on: only its
+    // screen closes.
+    await Promise.all(owned.filter(({ handle }) => !handle.screen && (handle.state === 'working' || handle.state === 'waiting')).map((task) => this.stopForQuit(task)))
     this.owned.clear()
     await Promise.all(owned.map(async (task) => { task.off(); await task.handle.close().catch(() => undefined) }))
     await Promise.all(this.options.backends.map((backend) => backend.close().catch(() => undefined)))
@@ -451,8 +479,9 @@ export class RunnerHub {
     if (before) return before
     const owned: Owned = { key, handle, log: [], running: 0, updatedAt: Date.now(), off: () => undefined }
     this.owned.set(key, owned)
-    // Kept for an agent that cannot list its tasks, to pick them up again; a task in a terminal ends with its program.
-    if (!handle.terminal) this.options.records?.add({ runner: handle.runner, id: handle.id, title: this.titleOf(key, handle.title), folder: handle.folder, at: Date.now() })
+    // Kept for an agent that cannot list its tasks, to pick them up again; a task in a terminal ends with its program, and
+    // one in the background is listed by its agent.
+    if (!handle.terminal && !handle.screen) this.options.records?.add({ runner: handle.runner, id: handle.id, title: this.titleOf(key, handle.title), folder: handle.folder, at: Date.now() })
     // What the agent said while it started comes after the words it was given, though it is heard all at once below.
     if (first) this.log(owned, 'you', first)
     owned.off = handle.on((event) => {
@@ -548,7 +577,8 @@ export class RunnerHub {
 
   private viewOfInfo(info: TaskInfo): TaskView {
     const key = keyOf(info.runner, info.id)
-    const line = info.waitingFor ? `Waiting in its own window: ${info.waitingFor}` : info.state === 'working' ? 'Working in its own window' : ''
+    const where = info.job ? 'in the background' : 'in its own window'
+    const line = info.waitingFor ? `Waiting ${where}: ${info.waitingFor}` : info.state === 'working' ? `Working ${where}` : ''
     return { ...info, key, title: this.titleOf(key, info.title), mine: false, line, pending: [], commandsRunning: false }
   }
 
@@ -570,7 +600,9 @@ export class RunnerHub {
         ? `${this.nameOf(handle.runner)} is signed out.`
         : why
           ? short(why, 160)
-          : lastCommand
+          : handle.waitingFor
+            ? `Waiting on its screen: ${handle.waitingFor}`
+            : lastCommand
             ? `Running ${short(lastCommand.text, 70)}`
             : handle.state === 'working'
               ? 'Working…'
@@ -592,7 +624,8 @@ export class RunnerHub {
       ...(signedOut ? { signedOut: true } : {}),
       ...(fix ? { fix } : {}),
       ...(handle.terminal ? { terminal: true, ...(handle.terminal.words ? { words: handle.terminal.words } : {}) } : {}),
-      ...(handle.screen ? { screen: true } : {})
+      ...(handle.waitingFor ? { waitingFor: handle.waitingFor } : {}),
+      ...(handle.screen ? { screen: true, job: handle.screen.job, ...(handle.screen.screenId ? { screenId: handle.screen.screenId } : {}), ...(handle.screen.closed ? { screenClosed: handle.screen.closed } : {}) } : {})
     }
   }
 }

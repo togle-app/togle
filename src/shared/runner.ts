@@ -99,10 +99,15 @@ export interface TaskInfo {
   state: TaskState
   /** When it last changed, in milliseconds. */
   updatedAt: number
-  /** The program running it on this computer, when one is: what ends it, so Togle can take the task over. */
+  /** The program running it on this computer, when one is, in a terminal of its own: what ends it, so Togle can take the task over. */
   pid?: number
   /** What a task running in another program waits for there ("permission prompt"). */
   waitingFor?: string
+  /**
+   * A task that runs in the background (Claude Code's own background sessions): the id its agent opens its screen with.
+   * It goes on without any window, so there is no program to take over: its screen is opened.
+   */
+  job?: string
 }
 
 /** The agents Togle can work with, and whether each is on this computer. */
@@ -179,8 +184,16 @@ export interface TaskView extends TaskInfo {
   terminal?: boolean
   /** In such a task, the words it was given that its command had no place for: they wait to be typed in. */
   words?: string
-  /** It is the agent's own screen, and Togle hears what the agent asks: a command that waits is shown above it, to answer there or on the screen. */
+  /**
+   * It is a task whose screen is the agent's own, and Togle hears what the agent asks: a command that waits is shown above
+   * the screen, to answer there or on the screen. The task runs in the background: with `terminal` too, its screen is open
+   * in Togle; without, it is closed (or open in the person's own terminal) and the task goes on.
+   */
   screen?: boolean
+  /** Which screen is open: a new one starts the window's terminal afresh. */
+  screenId?: string
+  /** Why the screen is closed, when it closed by itself (it was opened in another window, or could not open). */
+  screenClosed?: string
 }
 
 /**
@@ -387,4 +400,6 @@ export type TaskEvent =
   | { type: 'error'; message: string }
   // The agent emptied the conversation ("/clear"): what was said before is not part of the task any more.
   | { type: 'cleared' }
+  // The screen of a task that runs in the background was opened or closed here.
+  | { type: 'screen'; shown: boolean }
   | { type: 'ended'; reason: 'closed' | 'crashed' }

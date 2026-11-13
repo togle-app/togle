@@ -44,6 +44,8 @@ export interface RunnerDeps {
   version: string
   /** The agents to work with: Codex, Claude Code and Hermes when left out. */
   backends?: Backend[]
+  /** A folder of Togle's own where what Claude Code's tasks need to go on without Togle is kept: see ClaudeOptions.keep. */
+  keep?: string
   /** The agents the person added (any that speaks ACP), and keeping a changed list. */
   added?(): AddedAgent[]
   saveAdded?(agents: AddedAgent[]): Promise<void>
@@ -69,7 +71,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   const told = (chunk: TerminalChunk): void => deps.send('runners:terminal-data', chunk)
   const hub = new RunnerHub({
     backends: [
-      ...(deps.backends ?? [new CodexBackend({ version: deps.version }), new ClaudeBackend({ told }), new HermesBackend({ version: deps.version })]),
+      ...(deps.backends ?? [new CodexBackend({ version: deps.version }), new ClaudeBackend({ told, ...(deps.keep ? { keep: deps.keep } : {}) }), new HermesBackend({ version: deps.version })]),
       ...(deps.added?.() ?? []).map((agent) => addedBackend(agent, deps.version, told))
     ],
     changed: () => {
@@ -82,6 +84,8 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     // The agents on this computer, looked for as the person's terminal would; stand-ins are not looked for.
     ...(deps.backends ? {} : { widenPath: widenSearchPath })
   })
+  // Tasks that went on while Togle was closed are Togle's own again, with what they ask.
+  void hub.restore()
   const { handle } = deps
   handle('runners:status', () => hub.status())
   handle('runners:list', () => hub.list())
