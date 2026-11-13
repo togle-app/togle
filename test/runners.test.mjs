@@ -750,7 +750,7 @@ test('a model picked from the list Hermes gave is switched to as ACP has it, and
     // A model the agent refuses: the turn ends with its reason, and the task goes on.
     await task.send('/model openrouter:kimi-k3')
     await until(() => ended().length === 3, 'the refusal')
-    assert.deepEqual([ended().at(-1).outcome, ended().at(-1).error], ['failed', 'No provider can serve kimi-k3.'])
+    assert.deepEqual([ended().at(-1).outcome, ended().at(-1).error], ['failed', 'Hermes did not switch to openrouter:kimi-k3: model resolution failed.'], 'which model, and the reason Hermes gave beside its bare error')
     assert.equal(task.state, 'idle')
     assert.equal(said().length, 2, 'nothing is said of a model it did not switch to')
     // Other words after "/model" are the agent's own to read, as they are.

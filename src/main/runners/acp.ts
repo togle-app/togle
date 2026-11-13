@@ -166,11 +166,19 @@ class AcpTask extends TaskBase {
       refused = error ?? new Error('The model was not switched.')
     }
     if (this.dead) return
-    if (refused) {
-      this.turnFailed(refused)
+    this.open = Math.max(0, this.open - 1)
+    if (refused && !this.stopped) {
+      // Hermes 0.22 refuses with a bare "Internal error" and the reason as a code beside it ("model_resolution_failed"):
+      // the person is told which model was not switched to, and that reason.
+      const told = refused instanceof RpcError ? refused : null
+      const bare = !told || /^(internal error|invalid params|invalid request)\.?$/i.test(told.message.trim())
+      const reason = bare ? text(rec(told?.data).details).replace(/_/g, ' ') || 'it gave no reason' : told.message.replace(/\.$/, '')
+      const why = `${this.server.name} did not switch to ${id}: ${reason}.`
+      this.emit({ type: 'error', message: why })
+      this.emit({ type: 'turn-ended', outcome: 'failed', error: why, fault: told?.message ?? String(refused) })
+      if (!this.open) this.setBase('idle')
       return
     }
-    this.open = Math.max(0, this.open - 1)
     if (this.stopped) {
       if (!this.open) this.setBase('stopped')
       return

@@ -136,9 +136,10 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       return reply({})
     case 'session/set_model': {
       calls({ method, ...params })
-      // The protocol's own switch: "provider:model" names both. One model no provider serves is refused, with why.
+      // The protocol's own switch: "provider:model" names both. One model cannot be found, and is refused as Hermes
+      // 0.22.5 refuses: a bare "Internal error", with the reason as a code beside it.
       const [provider, name] = String(params.modelId).split(':')
-      if (name === 'kimi-k3') return out({ id, error: { code: -32602, message: 'No provider can serve kimi-k3.' } })
+      if (name === 'kimi-k3') return out({ id, error: { code: -32603, message: 'Internal error', data: { details: 'model_resolution_failed' } } })
       const session = sessions.get(params.sessionId)
       if (session) Object.assign(session, { provider, model: name })
       return reply({})
