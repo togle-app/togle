@@ -381,6 +381,100 @@ test('Claude Code starts in the task folder with a hook of its own, and answers 
   }
 })
 
+test('Claude Code tells the commands and models it has, in its own words, and nothing else it tells is kept', { timeout: 30_000 }, async () => {
+  const backend = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'say ok', asks: true })
+    await until(() => task.offers().commands.length, 'what it offers')
+    const offers = task.offers()
+    assert.deepEqual(offers.commands.map((command) => command.name), ['model', 'compact', 'clear'], 'a name it keeps for itself is left out')
+    assert.deepEqual(offers.commands[0], { name: 'model', description: 'Set the AI model for Claude Code', hint: '<model>' })
+    assert.deepEqual(offers.commands[2], { name: 'clear', description: 'Start a new session with empty context' }, 'no hint where it gave none')
+    assert.deepEqual(offers.models, [
+      { id: 'default', name: 'Default (recommended)', description: 'Fable 5.2' },
+      { id: 'haiku', name: 'Haiku 5.5', description: 'Fastest for quick answers' }
+    ])
+    assert.ok(!JSON.stringify(offers).includes('example.com'), 'the account it also told is not kept')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a command of its own that Claude Code is sent as a reply is answered in its words, and ends the turn', { timeout: 30_000 }, async () => {
+  const backend = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'say ok', asks: true })
+    const events = watch(task)
+    const ended = () => events.filter((e) => e.type === 'turn-ended').length
+    const said = () => events.filter((e) => e.type === 'message').map((e) => e.text)
+    await until(() => ended() === 1, 'the first turn to end')
+    await task.send('/model')
+    await until(() => ended() === 2, 'the command to end')
+    await task.send('/model haiku')
+    await until(() => ended() === 3, 'the switch to end')
+    assert.deepEqual(said().slice(1), ['Current model: `Sonnet 5.5`', 'Set model to `haiku` for this session only'])
+    assert.equal(task.state, 'idle')
+    // One that prints as a command prints, with no word from a model, and one that prints nothing at all.
+    await task.send('/compact')
+    await until(() => ended() === 4, 'compacting to end')
+    assert.equal(said().at(-1), 'Compacted', 'what it printed, without a terminal’s colors')
+    assert.equal(said().length, 4, 'the summary it keeps for itself is not shown as words')
+    await task.send('/quiet')
+    await until(() => ended() === 5, 'a command that prints nothing to end')
+    assert.equal(task.state, 'idle')
+    assert.equal(said().length, 4)
+  } finally {
+    await backend.close()
+  }
+})
+
+test('"/clear" empties the conversation: the task keeps its id, and the session it goes on in is not a second task', { timeout: 30_000 }, async () => {
+  const dir = scratch()
+  let later = null
+  const backend = claude({}, { stored: async () => (later ? [{ id: later, title: 'say ok', cwd: dir, updatedAt: 9 }] : []) })
+  try {
+    const task = await backend.start({ folder: dir, prompt: 'say ok', title: 'Port the settings screen', asks: true })
+    const events = watch(task)
+    const ended = () => events.filter((e) => e.type === 'turn-ended').length
+    await until(() => ended() === 1, 'the first turn to end')
+    const id = task.id
+    await task.send('/clear')
+    await until(() => ended() === 2, 'the clearing to end')
+    assert.ok(events.some((e) => e.type === 'cleared'), 'it tells that the conversation was emptied')
+    assert.equal(task.state, 'idle')
+    assert.equal(task.id, id, 'the task is known by the id it had')
+    assert.equal(task.session, `${id}-cleared`, 'and Claude Code goes on in another session')
+    later = task.session
+    const listed = await backend.list()
+    assert.deepEqual(listed.map((t) => [t.id, t.title]), [[id, 'Port the settings screen']], 'one row, not two')
+    await task.send('say ok')
+    await until(() => ended() === 3, 'a reply after it to be answered')
+    assert.equal(events.filter((e) => e.type === 'message').at(-1).text, 'ok')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a task picked up again whose first reply is a command still ends its turn, past the stale result', { timeout: 30_000 }, async () => {
+  const dir = scratch()
+  for (const command of ['/model', '/clear', '/compact']) {
+    const backend = claude({}, { stored: async () => [{ id: 'session-old', title: 'Fix the login redirect', cwd: dir, updatedAt: 5 }] })
+    try {
+      const task = await backend.resume('session-old', { asks: true })
+      const events = watch(task)
+      await task.send(command)
+      await until(() => events.some((e) => e.type === 'turn-ended'), `${command} to end`)
+      assert.equal(events.filter((e) => e.type === 'turn-ended').length, 1, command)
+      assert.equal(task.state, 'idle', command)
+      await task.send('say ok')
+      await until(() => events.filter((e) => e.type === 'turn-ended').length === 2, `a reply after ${command}`)
+      assert.equal(events.filter((e) => e.type === 'message').at(-1).text, 'ok', command)
+    } finally {
+      await backend.close()
+    }
+  }
+})
+
 test('a Claude Code command waits as a request, and what the person answers reaches the agent', { timeout: 30_000 }, async () => {
   const backend = claude()
   try {
@@ -619,6 +713,18 @@ test('Hermes starts a task, keeps the name given, asks in its asking mode, and e
     assert.deepEqual([made[1].modelId, made[2].modeId], ['openai-codex:gpt-6.1-sol', 'default'])
     await task.send('say ok')
     await until(() => events.filter((e) => e.type === 'turn-ended').length === 2, 'the next turn to end')
+    // What it offers for the reply box: the commands it told as news of the session, and the models that came with it.
+    await until(() => task.offers().commands.length, 'the commands it told')
+    assert.deepEqual(task.offers(), {
+      commands: [
+        { name: 'model', description: 'Show current model and provider, or switch models', hint: 'model name to switch to' },
+        { name: 'version', description: 'Show Hermes version' }
+      ],
+      models: [
+        { id: 'openai-codex:gpt-6.1-sol', name: 'gpt-6.1-sol', description: '' },
+        { id: 'openrouter:kimi-k3', name: 'kimi-k3', description: 'A second one' }
+      ]
+    })
   } finally {
     await backend.close()
   }

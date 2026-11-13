@@ -1,6 +1,6 @@
 // What the rest of the app can do with a coding agent, whichever agent it is. One backend per agent implements it:
 // see its tasks, start one, answer what it waits for, stop it, and pick it up again later.
-import type { Decision, PendingRequest, RunnerKind, TaskEvent, TaskInfo, TaskState } from '@shared/runner'
+import type { Decision, PendingRequest, RunnerKind, TaskEvent, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
 
 export interface StartOptions {
   /** The folder the task works in. */
@@ -65,6 +65,8 @@ export interface TaskHandle {
   close(): Promise<void>
   /** Present for a task that runs in a terminal of Togle's own. */
   readonly terminal?: TerminalSide
+  /** The commands and models its agent told it has for this task, so far. Left out by an agent that tells none. */
+  offers?(): TaskOffers
 }
 
 export interface Backend {

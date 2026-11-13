@@ -21,6 +21,27 @@ Togle lists the tasks of the coding agents on your computer (Claude Code, Codex 
 
 Hermes asks about a command only when its own settings say to. With its approvals turned off, it never asks, and there is nothing to answer.
 
+## The agent's own commands
+
+Type `/` in the reply box of a task Togle runs, and the agent's own commands open over the box, each with what it does in the agent's own words. Togle keeps no list of its own: it shows what the agent tells it.
+
+- Go on typing to narrow the list: the commands whose name starts with the letters come first, and when none does, the ones that hold them anywhere (a plugin's `supabase:…`).
+- The arrow keys move, **Enter** or a click sends the command as it is (the agent says what it needs), **Tab** completes its name so you can type what follows it, and **Esc** closes the list.
+- `/model` lists the agent's models. Picking one sends `/model` with it.
+- The answer shows as what the agent said. A command that the agent does not know goes to its model as ordinary words.
+
+What each agent tells:
+
+- **Claude Code** tells its commands and its models when asked, without asking a model anything: the built-in ones, and your skills and plugins. The ones that only work on its own terminal screen (`/resume`, `/login`, `/permissions`, `/help` and others) are not among them. `/model` switches the model "for this session only", as Claude Code says.
+- **Hermes**, and an agent added that speaks ACP, tell the commands they have for a session, and Hermes the models it can switch to.
+- **Codex** tells none, so nothing is listed, and a `/` there is a word like any other.
+- A task in a terminal of Togle's own is the agent's real program: its commands work there as they always do.
+
+Two of Claude Code's commands do more than answer:
+
+- `/clear` empties the conversation, as it empties the terminal's screen. The task stays the same one, with nothing said in it. Claude Code keeps the earlier conversation on disk as a session of its own; once Togle has been closed and opened again, that one and the one after the clearing show as two tasks.
+- `/compact` takes a minute or more, with the task working meanwhile, and ends with "Compacted".
+
 ## Notices
 
 When a task waits and Togle is not in front, a small notice appears in the corner of the screen with the task, the command in full, **Allow once**, **Refuse** and **Open**. It does not take the keyboard, and it is kept out of screen shares and recordings.

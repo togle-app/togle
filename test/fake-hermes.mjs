@@ -106,7 +106,10 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       const session = { id: `s${nextSession++}`, cwd: params.cwd }
       sessions.set(session.id, session)
       calls({ method, cwd: params.cwd })
-      return reply({ sessionId: session.id, modes: modes() })
+      // As Hermes 0.22 does: the models a session can be switched to come with the session, its commands as news of it.
+      reply({ sessionId: session.id, modes: modes(), models: { availableModels: [{ modelId: 'openai-codex:gpt-6.1-sol', name: 'gpt-6.1-sol' }, { modelId: 'openrouter:kimi-k3', name: 'kimi-k3', description: 'A second one' }], currentModelId: 'openai-codex:gpt-6.1-sol' } })
+      update(session.id, { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'model', description: 'Show current model and provider, or switch models', input: { hint: 'model name to switch to' } }, { name: 'version', description: 'Show Hermes version' }] })
+      return undefined
     }
     case 'session/resume':
     case 'session/load': {

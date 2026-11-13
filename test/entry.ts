@@ -87,7 +87,7 @@ export { CallDetector, browsersIn, callAppsIn, macBrowserOf, parseBrowserWindows
 export { fourCharCode } from '../src/main/mac-audio-processes'
 export { callSitesIn } from '../src/shared/call-apps'
 export { RECENT_DICTATIONS, recentLabel, withRecent } from '../src/main/recent-dictations'
-export { AGENT_INSTALLS, changedFiles, isSignedOut, needsYou, SIGN_IN_COMMANDS, stepsLine } from '../src/shared/runner'
+export { AGENT_INSTALLS, changedFiles, isSignedOut, needsYou, SIGN_IN_COMMANDS, slashList, stepsLine } from '../src/shared/runner'
 export { mergedPath, outputOf, pathFolders, savedPathFolders, shellPath } from '../src/main/runners/search-path'
 export { codeEditorOf, frontEditor, frontProgram, linuxEditorOf, lsappinfoBundle, macEditorOf, xpropActiveWindow, xpropClasses } from '../src/main/front-program'
 export { AcpBackend, commandWords, whereIs } from '../src/main/runners/acp'

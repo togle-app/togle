@@ -2,7 +2,7 @@
 // backends (codex.ts, claude.ts) know how to talk to their agent; this joins them: the tasks they keep on this computer,
 // the ones Togle runs (with what happened in each, so the window can show it), and the actions on a task by its key.
 import { promises as fs } from 'node:fs'
-import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Changes, type Decision, type LogEntry, type RunnerKind, type RunnerStatus, type StartRequest, type TaskAttention, type TaskDetail, type TaskEvent, type TaskInfo, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
+import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Changes, type Decision, type LogEntry, type RunnerKind, type RunnerStatus, type StartRequest, type TaskAttention, type TaskDetail, type TaskEvent, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
 import { changesIn } from './changes'
 import { endTree, listProcesses } from './process-tree'
@@ -239,6 +239,11 @@ export class RunnerHub {
     this.mine(key).handle.reply(requestId, text)
   }
 
+  /** What the reply box of a task lists when "/" is typed: its agent's own commands and models. None for a task Togle does not run. */
+  offers(key: string): TaskOffers {
+    return this.owned.get(key)?.handle.offers?.() ?? { commands: [], models: [] }
+  }
+
   async stop(key: string): Promise<void> {
     const owned = this.mine(key)
     await owned.handle.stop()
@@ -462,6 +467,13 @@ export class RunnerHub {
       case 'error':
         this.log(owned, 'note', event.message)
         owned.justSaid = event.message
+        break
+      case 'cleared':
+        // The agent emptied the conversation, as its own terminal would empty the screen: the task goes on from nothing.
+        owned.log.length = 0
+        owned.running = 0
+        owned.problem = undefined
+        owned.fault = undefined
         break
       case 'ended':
         if (event.reason === 'crashed') owned.crash = justSaid ?? 'The agent program stopped.'

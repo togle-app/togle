@@ -279,6 +279,65 @@ class FailingBackend extends FakeBackend {
   }
 }
 
+test('a task tells what its agent offers for the reply box, and a cleared conversation starts its log again', async () => {
+  const claude = new FakeBackend('claude')
+  const { hub } = hubOf([claude])
+  try {
+    const view = await hub.start({ runner: 'claude', folder: scratch(), prompt: 'Fix the login redirect' })
+    const task = claude.started[0]
+    assert.deepEqual(hub.offers(view.key), { commands: [], models: [] }, 'an agent that tells none offers none')
+    task.offers = () => ({ commands: [{ name: 'model', description: 'Set the AI model', hint: '<model>' }], models: [{ id: 'haiku', name: 'Haiku 5.5', description: 'Fastest' }] })
+    assert.deepEqual(hub.offers(view.key).commands.map((command) => command.name), ['model'])
+    assert.deepEqual(hub.offers('claude:nope'), { commands: [], models: [] }, 'and a task Togle does not run offers none')
+    task.say('The redirect is fixed.')
+    task.done()
+    await hub.send(view.key, '/clear')
+    assert.deepEqual((await hub.detail(view.key)).log.map((e) => e.text), ['Fix the login redirect', 'The redirect is fixed.', '/clear'])
+    task.emit({ type: 'cleared' })
+    task.done()
+    const detail = await hub.detail(view.key)
+    assert.deepEqual(detail.log, [], 'what was said before is gone, as from the agent’s own screen')
+    assert.deepEqual([detail.task.key, detail.task.state, detail.task.title], [view.key, 'idle', 'Fix the login redirect'], 'the task is the same one')
+    await hub.send(view.key, 'Now the logout')
+    assert.deepEqual((await hub.detail(view.key)).log.map((e) => e.text), ['Now the logout'])
+  } finally {
+    await hub.dispose()
+  }
+})
+
+test('the reply box lists commands by the start of their name, then by any part of it, and models after "/model"', () => {
+  const offers = {
+    commands: [
+      { name: 'model', description: 'Set the AI model' },
+      { name: 'context', description: 'Show current context usage' },
+      { name: 'config', description: 'Set a setting by key', hint: 'key=value' },
+      { name: 'design-consent', description: 'Allow design sync' },
+      { name: 'supabase:supabase-postgres', description: 'Postgres best practices' }
+    ],
+    models: [
+      { id: 'default', name: 'Default (recommended)', description: 'Fable 5.2' },
+      { id: 'haiku', name: 'Haiku 5.5', description: 'Fastest for quick answers' }
+    ]
+  }
+  const names = (text) => T.slashList(text, offers)?.items.map((item) => item.name) ?? null
+  assert.deepEqual(names('/'), ['config', 'context', 'design-consent', 'model', 'supabase:supabase-postgres'], 'all of them, by name')
+  assert.deepEqual(names('/con'), ['config', 'context'], 'those that start with it, and not one that only holds it')
+  assert.deepEqual(names('/CON'), ['config', 'context'])
+  assert.deepEqual(names('/post'), ['supabase:supabase-postgres'], 'none starts with it: the one that holds it')
+  assert.equal(names('/nothing-like-it'), null)
+  assert.equal(names('con'), null, 'only after a slash')
+  assert.equal(names(' /con'), null, 'and only at the very start')
+  assert.equal(names('/config key'), null, 'what follows a name is the person’s to type')
+  assert.equal(T.slashList('/model ', offers).kind, 'models')
+  assert.deepEqual(names('/model '), ['Default (recommended)', 'Haiku 5.5'])
+  assert.deepEqual(names('/model hai'), ['Haiku 5.5'])
+  assert.deepEqual(names('/model fable'), null, 'a model is found by its id and its name, not by what it is for')
+  assert.equal(names('/model haiku please'), null)
+  assert.equal(T.slashList('/model ', { ...offers, models: [] }), null, 'no models told: nothing to list')
+  assert.equal(T.slashList('/model ', { commands: offers.commands.slice(1), models: offers.models }), null, 'and none for an agent that has no "/model"')
+  assert.equal(T.slashList('/', { commands: [], models: [] }), null)
+})
+
 test('a turn that ends with an error stops the task and says why, and signed out, names what signs the agent in', async () => {
   // The words are what each agent said when it was signed out on this computer (Claude Code 2.1.322, Codex 0.166.0).
   const claude = new FailingBackend('claude', 'Not logged in · Please run /login')

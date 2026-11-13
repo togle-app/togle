@@ -11,7 +11,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { PendingRequest, TaskInfo } from '@shared/runner'
+import type { AgentCommand, AgentModel, PendingRequest, TaskInfo, TaskOffers } from '@shared/runner'
 import { type Id, JsonRpcPeer, RpcError, list, rec, text } from './jsonrpc'
 import { TaskBase } from './task-base'
 import type { Backend, Detected, ResumeOptions, StartOptions, TaskHandle } from './types'
@@ -106,6 +106,9 @@ class AcpTask extends TaskBase {
   private dead = false
   /** While a session is loaded, what the agent replays of its past is not news. */
   replaying = false
+  /** The commands the agent told it has for this session, and the models it can switch it to. */
+  private commandList: AgentCommand[] = []
+  private modelList: AgentModel[] = []
 
   constructor(
     private readonly server: AcpServer,
@@ -189,7 +192,29 @@ class AcpTask extends TaskBase {
     if (!this.open) this.setBase(this.stopped ? 'stopped' : 'idle')
   }
 
+  /** What the agent offers for the reply box: its own commands, and its models when it has a "/model" for them. */
+  offers(): TaskOffers {
+    return { commands: this.commandList, models: this.modelList }
+  }
+
+  /** The models a session can be switched to, as the agent told them when the session was started or picked up. */
+  modelsTold(models: Record<string, unknown>): void {
+    this.modelList = list(models.availableModels).map(rec).flatMap((model): AgentModel[] => {
+      const id = text(model.modelId)
+      return id ? [{ id, name: text(model.name) || id, description: oneLine(text(model.description), 120) }] : []
+    })
+  }
+
   update(update: Record<string, unknown>): void {
+    // The agent's commands are told as news of the session, also while its past is replayed.
+    if (text(update.sessionUpdate) === 'available_commands_update') {
+      this.commandList = list(update.availableCommands).map(rec).flatMap((command): AgentCommand[] => {
+        const name = text(command.name).replace(/^\//, '')
+        const hint = text(rec(command.input).hint).trim()
+        return name ? [{ name, description: oneLine(text(command.description), 200), ...(hint ? { hint: oneLine(hint, 120) } : {}) }] : []
+      })
+      return
+    }
     if (this.replaying) return
     switch (text(update.sessionUpdate)) {
       case 'agent_message_chunk':
@@ -275,6 +300,8 @@ class AcpTask extends TaskBase {
 
 class AcpServer {
   readonly tasks = new Map<string, AcpTask>()
+  /** What was told of a session before its task was there to hear it: its commands. */
+  readonly early = new Map<string, Record<string, unknown>>()
   readonly peer: JsonRpcPeer
   /** Whether the agent can pick a session up with `session/resume` (else `session/load` does). */
   resumes = false
@@ -323,7 +350,15 @@ class AcpServer {
 
   private notified(method: string, params: Record<string, unknown>): void {
     if (method !== 'session/update') return
-    this.tasks.get(text(params.sessionId))?.update(rec(params.update))
+    const id = text(params.sessionId)
+    const update = rec(params.update)
+    const task = this.tasks.get(id)
+    if (task) task.update(update)
+    // A new session's commands can be told before the answer that names the session has been read: kept for it.
+    else if (id && text(update.sessionUpdate) === 'available_commands_update') {
+      if (this.early.size > 50) this.early.clear()
+      this.early.set(id, update)
+    }
   }
 
   private closed(): void {
@@ -407,6 +442,12 @@ export class AcpBackend implements Backend {
     server.tasks.set(task.id ?? '', task)
     const id = task.id ?? ''
     const modes = list(rec(session.modes).availableModes).map((mode) => text(rec(mode).id))
+    task.modelsTold(rec(session.models))
+    const early = server.early.get(id)
+    if (early) {
+      server.early.delete(id)
+      task.update(early)
+    }
     if (this.options.model) await server.peer.request('session/set_model', { sessionId: id, modelId: this.options.model }, 30_000)
     // Asking is the mode ACP agents call default; their own settings may still never ask.
     if (asks && modes.includes('default') && text(rec(session.modes).currentModeId) !== 'default') await server.peer.request('session/set_mode', { sessionId: id, modeId: 'default' }, 30_000).catch(() => undefined)

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, stepsLine, type LogEntry, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, stepsLine, type LogEntry, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
 import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
 import { Changes } from './Changes'
 import { useReach } from './Devices'
@@ -36,6 +36,9 @@ function ago(at: number, now: number): string {
 }
 
 const isDetail = (value: unknown): value is TaskDetail => typeof value === 'object' && value !== null && 'task' in value && 'log' in value
+const NO_OFFERS: TaskOffers = { commands: [], models: [] }
+// The tallest the list of an agent's commands gets, in pixels: about seven rows, and the rest scrolls.
+const SLASH_LIST_HEIGHT = 208
 
 // A task on another of the person's devices is picked by its device and its key there.
 const REMOTE = 'remote:'
@@ -355,13 +358,72 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
   const steps = stepsLine(log)
   // A question the agent asks is answered from the reply box; anything else typed there goes to the task.
   const question = task.pending.find((request) => request.kind === 'question')
-  const send = (event: FormEvent): void => {
-    event.preventDefault()
-    const message = text.trim()
-    if (!message) return
+  const say = (message: string): void => {
     if (question) onReply(question.id, message)
     else onSend(message)
     setText('')
+  }
+  const send = (event: FormEvent): void => {
+    event.preventDefault()
+    const message = text.trim()
+    if (message) say(message)
+  }
+  // The agent's own commands, listed over the reply box while a "/" and the start of a name are typed, and its models
+  // after "/model ". What the agent offers is asked when the task opens, and again when a "/" starts the reply.
+  const [offers, setOffers] = useState<TaskOffers>(NO_OFFERS)
+  const slashed = text.startsWith('/')
+  const answers = task.mine && !task.terminal
+  useEffect(() => {
+    if (!answers) { setOffers(NO_OFFERS); return }
+    let live = true
+    void api.runnerOffers(task.key).then((told) => { if (live && told?.commands) setOffers(told) }, () => undefined)
+    return () => { live = false }
+  }, [task.key, answers, slashed])
+  const [picked, setPicked] = useState(0)
+  // Esc closes the list until what is typed changes.
+  const [closed, setClosed] = useState(false)
+  useEffect(() => { setPicked(0); setClosed(false) }, [text])
+  const listed = !question && !closed ? slashList(text, offers) : null
+  const at = listed ? Math.min(picked, listed.items.length - 1) : 0
+  const pickedRow = useRef<HTMLButtonElement>(null)
+  useEffect(() => { pickedRow.current?.scrollIntoView?.({ block: 'nearest' }) }, [at, listed?.kind])
+  // Where the list has room: over the reply box, up to the task's state line; under the box when that is too little.
+  const replyPlace = useRef<HTMLDivElement>(null)
+  const [room, setRoom] = useState({ under: false, height: SLASH_LIST_HEIGHT })
+  const rows = listed?.items.length ?? 0
+  useLayoutEffect(() => {
+    const place = replyPlace.current
+    if (!rows || !place) return
+    const box = place.getBoundingClientRect()
+    const top = place.closest('.task-panel')?.querySelector('.task-status')?.getBoundingClientRect().bottom ?? 0
+    const above = box.top - top - 8
+    const below = window.innerHeight - box.bottom - 12
+    const needed = Math.min(SLASH_LIST_HEIGHT, rows * 28 + 10)
+    const under = above < needed && below > above
+    setRoom({ under, height: Math.max(56, Math.min(SLASH_LIST_HEIGHT, under ? below : above)) })
+  }, [rows])
+  /** Enter on a listed row, or a click: a command is sent as it is, "/model" lists the models, a model is switched to. */
+  const choose = (row: number): void => {
+    if (!listed) return
+    if (listed.kind === 'models') {
+      const model = listed.items[row]
+      if (model) say(`/model ${model.id}`)
+      return
+    }
+    const command = listed.items[row]
+    if (!command) return
+    if (command.name === 'model' && offers.models.length) setText('/model ')
+    else say(`/${command.name}`)
+  }
+  const keyed = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (!listed) return
+    const count = listed.items.length
+    if (event.key === 'ArrowDown') { event.preventDefault(); setPicked((at + 1) % count) }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); setPicked((at + count - 1) % count) }
+    else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setClosed(true) }
+    // Tab completes the name, to go on typing what follows it.
+    else if (event.key === 'Tab') { event.preventDefault(); setText(listed.kind === 'models' ? `/model ${listed.items[at].id}` : `/${listed.items[at].name} `) }
+    else if (event.key === 'Enter') { event.preventDefault(); choose(at) }
   }
   return (
     <div className="task-panel">
@@ -462,12 +524,31 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
       ))}
 
       {task.mine && (
-        <form className="task-reply" onSubmit={send}>
-          <input value={text} onChange={(event) => setText(event.target.value)} placeholder={'Reply, or hold ' + talkKey + ' and talk'} aria-label="Reply to the agent" type={question?.questions?.[0]?.secret ? 'password' : 'text'} />
-          <button className="small" disabled={!text.trim()}>
-            Send
-          </button>
-        </form>
+        <div className="task-reply-place" ref={replyPlace}>
+          {listed && (
+            <div className={room.under ? 'slash-list under' : 'slash-list'} style={{ maxHeight: room.height }} id="slash-list" role="listbox" aria-label={listed.kind === 'models' ? `${agentOf(task)}'s models` : `${agentOf(task)}'s commands`}>
+              {listed.kind === 'models'
+                ? listed.items.map((model, row) => (
+                    <button type="button" role="option" id={`slash-${row}`} aria-selected={row === at} className={row === at ? 'on' : ''} ref={row === at ? pickedRow : undefined} key={model.id} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setPicked(row)} onClick={() => choose(row)}>
+                      <b>{model.name}</b>
+                      <small>{model.description}</small>
+                    </button>
+                  ))
+                : listed.items.map((command, row) => (
+                    <button type="button" role="option" id={`slash-${row}`} aria-selected={row === at} className={row === at ? 'on' : ''} ref={row === at ? pickedRow : undefined} key={command.name} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setPicked(row)} onClick={() => choose(row)}>
+                      <b>/{command.name}{command.hint && <span> {command.hint}</span>}</b>
+                      <small>{command.description}</small>
+                    </button>
+                  ))}
+            </div>
+          )}
+          <form className="task-reply" onSubmit={send}>
+            <input value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={'Reply, or hold ' + talkKey + ' and talk'} aria-label="Reply to the agent" type={question?.questions?.[0]?.secret ? 'password' : 'text'} role="combobox" aria-autocomplete="list" aria-expanded={!!listed} aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
+            <button className="small" disabled={!text.trim()}>
+              Send
+            </button>
+          </form>
+        </div>
       )}
       </>
       )}

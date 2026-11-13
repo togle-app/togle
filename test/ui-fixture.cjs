@@ -319,6 +319,29 @@ module.exports = function install(fixture) {
     runnerChanged()
   }
   api.replyRunnerTask = async (key, requestId, text) => { record('replyRunnerTask', [key, requestId, text]); runnerFind(key).pending = []; runnerChanged() }
+  // What an agent offers for the reply box, in the words Claude Code 2.1.323 tells them; Codex tells none.
+  api.runnerOffers = async key => {
+    record('runnerOffers', [key])
+    if (!key.startsWith('claude:')) return { commands: [], models: [] }
+    return {
+      commands: [
+        { name: 'code-review', description: 'Review the current diff, or a PR number/branch/path target, for correctness bugs', hint: '[low|medium|high|xhigh|max] [--fix] [--comment] [<pr#>|<branch>|<path>]' },
+        { name: 'supabase:supabase', description: '(supabase) Use when doing ANY task involving Supabase.' },
+        { name: 'clear', description: 'Start a new session with empty context; previous session stays on disk (resumable with /resume)', hint: '[name]' },
+        { name: 'compact', description: 'Free up context by summarizing the conversation so far', hint: '<optional custom summarization instructions>' },
+        { name: 'config', description: 'Set a setting by key', hint: 'key=value' },
+        { name: 'context', description: 'Show current context usage' },
+        { name: 'model', description: 'Set the AI model for Claude Code', hint: '<model>' }
+      ],
+      models: [
+        { id: 'default', name: 'Default (recommended)', description: 'Fable 5.2' },
+        { id: 'opus', name: 'Opus 5.5', description: 'For complex work and everyday tasks' },
+        { id: 'fable', name: 'Fable 5.2', description: 'For your toughest challenges' },
+        { id: 'sonnet', name: 'Sonnet 5.5', description: 'Most efficient for simpler tasks' },
+        { id: 'haiku', name: 'Haiku 5.5', description: 'Fastest for quick answers' }
+      ]
+    }
+  }
   api.stopRunnerTask = async key => { record('stopRunnerTask', [key]); const found = runnerFind(key); found.state = 'stopped'; found.pending = []; found.line = ''; if (found.runner === 'codex') found.commandsRunning = true; runnerChanged() }
   api.endRunnerCommands = async key => { record('endRunnerCommands', [key]); runnerFind(key).commandsRunning = false; runnerChanged(); return 1 }
   api.closeRunnerTask = async key => { record('closeRunnerTask', [key]); runnerFind(key).mine = false; runnerChanged() }

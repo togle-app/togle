@@ -8,12 +8,20 @@
 // - A reply goes into the same running program. `--resume <id>` in a new program continues the same session.
 // - A resumed program may first report an empty result for a background task that finished meanwhile; it is not the
 //   end of the turn Togle asked for, which is the first result after something was said.
+//
+// Commands of Claude Code's own ("/model", typed as a reply), tried the same way with 2.1.323:
+// - It runs them in this mode too, and tells a program which it has: asked with a control request (`initialize`), it
+//   answers with its commands (name, description, what may follow) and its models, without asking a model anything.
+// - A command answers as an `assistant` line whose model is `<synthetic>`, then a `result` that cost nothing.
+// - "/clear" prints `conversation_reset`, a new `system init` with ANOTHER session id, and an empty result. "/compact"
+//   prints `compact_boundary`, what it printed as a `user` line (`<local-command-stdout>`), and an empty result. Neither
+//   prints an `assistant` line, so the result that follows such a line is the end of the turn all the same.
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
-import type { AgentQuestion, PendingRequest, TaskInfo, TaskState } from '@shared/runner'
+import type { AgentCommand, AgentModel, AgentQuestion, PendingRequest, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
 import { claudeSessions } from './claude-sessions'
 import { HookServer, type HookTarget, type HookVerdict } from './claude-hooks'
 import { list, rec, text } from './jsonrpc'
@@ -124,8 +132,42 @@ interface Context {
   hooks: HookServer
 }
 
+/** The request that asks Claude Code what it offers, by the id its answer comes back with. */
+const OFFERS = 'togle-offers'
+/** How many of the last things Claude Code said are remembered by their id. */
+const HEARD_KEPT = 600
+/** The colors a terminal would show what a command printed in. */
+const COLORS = new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g')
+
+/** A command as Claude Code told it, or nothing when it has no name or is one Claude Code keeps for itself ("__…"). */
+function commandOf(told: Record<string, unknown>): AgentCommand[] {
+  const name = text(told.name).replace(/^\//, '')
+  if (!name || name.startsWith('__')) return []
+  const hint = text(told.argumentHint).trim()
+  return [{ name, description: oneLine(text(told.description), 200), ...(hint ? { hint: oneLine(hint, 120) } : {}) }]
+}
+
+/** A model as Claude Code told it: what follows "/model", its name, and what it is for. */
+function modelOf(told: Record<string, unknown>): AgentModel[] {
+  const id = text(told.value)
+  return id ? [{ id, name: text(told.displayName) || id, description: oneLine(text(told.description), 120) }] : []
+}
+
 class ClaudeTask extends TaskBase implements HookTarget {
   readonly runner = 'claude' as const
+  /** The session Claude Code is in now: another than `id` once the person emptied the conversation ("/clear"). */
+  session: string | null = null
+  /** This program picked up a session that was there (`--resume`). */
+  private resumed = false
+  /** How many of its turns have ended. */
+  private turns = 0
+  /** When the last message was sent to it. */
+  private sentAt = 0
+  /** The ids of what Claude Code said lately, to know what it tells again. */
+  private readonly heard = new Set<string>()
+  /** What Claude Code told it offers for the reply box. */
+  private commandList: AgentCommand[] = []
+  private modelList: AgentModel[] = []
   private proc: ChildProcessWithoutNullStreams | null = null
   private hook: { key: string; settings: string } | null = null
   private alive = false
@@ -180,13 +222,24 @@ class ClaudeTask extends TaskBase implements HookTarget {
       if (this.errors.length > 20) this.errors.shift()
     })
     proc.stdin.on('error', () => undefined)
-    if (resume) this.id = resume
+    if (resume) {
+      this.id = resume
+      this.session = resume
+      this.resumed = true
+    }
     // A program that cannot be started fails the start, and not the first thing said to it.
     try {
       await started
     } catch (error) {
       throw new Error(`Claude Code could not be started${error instanceof Error ? `: ${error.message}` : '.'}`, { cause: error })
     }
+    // What the reply box lists when "/" is typed: asked once, and answered without a model.
+    this.write({ type: 'control_request', request_id: OFFERS, request: { subtype: 'initialize' } })
+  }
+
+  /** The commands and models Claude Code told it has: its own names and words for them. */
+  offers(): TaskOffers {
+    return { commands: this.commandList, models: this.modelList }
   }
 
   private ended(code: number | null): void {
@@ -215,6 +268,7 @@ class ClaudeTask extends TaskBase implements HookTarget {
   async send(message: string): Promise<void> {
     if (!this.alive) throw new Error('Claude Code is not running.')
     this.stopped = false
+    this.sentAt = Date.now()
     this.open++
     this.write({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: message }] } })
     this.setBase('working')
@@ -258,24 +312,77 @@ class ClaudeTask extends TaskBase implements HookTarget {
     }
     switch (text(message.type)) {
       case 'system':
-        if (message.subtype === 'init') this.id = text(message.session_id) || this.id
+        if (message.subtype === 'init') this.sessionTold(message)
+        // "/compact" is done: the turn's result follows without a word from the model.
+        else if (message.subtype === 'compact_boundary') this.active = true
         break
-      case 'assistant':
+      case 'conversation_reset':
+        // "/clear": Claude Code goes on in a new, empty session. Nothing else comes before the turn's result.
+        this.active = true
+        this.emit({ type: 'cleared' })
+        break
+      case 'control_response':
+        this.offersTold(rec(message.response))
+        break
+      case 'assistant': {
+        // After "/compact" Claude Code tells again the last things that were said and done, each under the id it had:
+        // what was heard once is not heard twice.
+        const uuid = text(message.uuid)
+        if (message.isReplay === true || (uuid && this.heard.has(uuid))) break
+        if (uuid) {
+          this.heard.add(uuid)
+          if (this.heard.size > HEARD_KEPT) this.heard.delete(this.heard.values().next().value as string)
+        }
         this.active = true
         for (const block of list(rec(message.message).content).map(rec)) {
           if (block.type === 'text' && text(block.text).trim()) this.emit({ type: 'message', text: text(block.text) })
           else if (block.type === 'tool_use') this.toolStarted(block)
         }
         break
-      case 'user':
-        for (const block of list(rec(message.message).content).map(rec)) if (block.type === 'tool_result') this.toolFinished(block)
+      }
+      case 'user': {
+        const content = rec(message.message).content
+        if (typeof content === 'string') this.printed(content, text(message.timestamp))
+        else for (const block of list(content).map(rec)) if (block.type === 'tool_result') this.toolFinished(block)
         break
+      }
       case 'result':
         this.result(message)
         break
       default:
         break
     }
+  }
+
+  /** The session Claude Code is in. The task keeps the id it was first known by: after "/clear" the session is another. */
+  private sessionTold(message: Record<string, unknown>): void {
+    const session = text(message.session_id)
+    if (!session) return
+    this.id ||= session
+    this.session = session
+  }
+
+  /** The answer to what Claude Code offers. Only its commands and models are kept: the rest of it is not Togle's. */
+  private offersTold(response: Record<string, unknown>): void {
+    if (text(response.request_id) !== OFFERS || response.subtype !== 'success') return
+    const told = rec(response.response)
+    this.commandList = list(told.commands).map(rec).flatMap(commandOf)
+    this.modelList = list(told.models).map(rec).flatMap(modelOf)
+  }
+
+  /**
+   * What a command of Claude Code's own printed ("/compact" prints "Compacted"), shown as what the agent said. Only a
+   * line that is nothing but that (the summary "/compact" keeps may quote what an earlier command printed), and only
+   * one written since the last message was sent: after compacting, Claude Code tells again what earlier commands
+   * printed, with the time they printed it.
+   */
+  private printed(content: string, written: string): void {
+    const words = /^\s*<local-command-stdout>([\s\S]*)<\/local-command-stdout>\s*$/.exec(content)?.[1]?.replace(COLORS, '').trim()
+    if (!words) return
+    const at = Date.parse(written)
+    if (Number.isFinite(at) && at < this.sentAt - 2_000) return
+    this.active = true
+    this.emit({ type: 'message', text: words })
   }
 
   private toolStarted(block: Record<string, unknown>): void {
@@ -297,9 +404,12 @@ class ClaudeTask extends TaskBase implements HookTarget {
   private result(message: Record<string, unknown>): void {
     const subtype = text(message.subtype)
     const error = message.is_error === true || (subtype !== 'success' && subtype !== 'error_during_execution')
-    // A result with nothing before it is not the end of what was asked: see the note at the top.
-    if (this.open === 0 || (!this.active && !error && subtype === 'success')) return
+    // In a program that picked a session up and has not ended a turn yet, a result with nothing before it is not the end
+    // of what was asked: see the note at the top. Anywhere else it is: a command of Claude Code's own that printed nothing.
+    const stale = this.resumed && this.turns === 0 && !this.active && !error && subtype === 'success'
+    if (this.open === 0 || stale) return
     this.open--
+    this.turns++
     if (this.open === 0) this.active = false
     const interrupted = this.stopped && subtype === 'error_during_execution'
     const failed = !interrupted && (error || subtype === 'error_during_execution')
@@ -423,6 +533,8 @@ export class ClaudeBackend implements Backend {
     }
     for (const task of this.tasks) {
       if (!task.id) continue
+      // After "/clear" Claude Code keeps the task in another session: that one is this task, and not a second row.
+      if (task.session && task.session !== task.id) found.delete(task.session)
       const before = found.get(task.id)
       found.set(task.id, { id: task.id, runner: 'claude', title: task.title || before?.title || 'Claude Code task', folder: task.folder || before?.folder || '', state: task.state, updatedAt: Date.now() })
     }

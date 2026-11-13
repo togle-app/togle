@@ -6,7 +6,12 @@
 //   "ask"            asks a question with the AskUserQuestion tool
 //   "fail"           ends the turn with an error
 //   "sleep"          starts a long command; an interrupt control request ends it and the turn
+//   "/model [name]"  a command of its own: answers in words no model wrote
+//   "/clear"         goes on in a new session, and says only that the conversation was reset
+//   "/compact"       prints "Compacted" as a command's output, with no word from a model
+//   "/quiet"         a command that prints nothing at all
 // On --resume the first message is answered after a stale empty result, as a resumed Claude Code can do.
+// Asked what it offers (the `initialize` control request), it tells its commands and models, and an account.
 // FAKE_ARGS_FILE and FAKE_SETTINGS_COPY name files that get the arguments and the settings it was started with.
 import { spawn } from 'node:child_process'
 import { copyFileSync, readFileSync, writeFileSync } from 'node:fs'
@@ -24,11 +29,14 @@ const settings = settingsFile ? JSON.parse(readFileSync(settingsFile, 'utf8')) :
 if (process.env.FAKE_ARGS_FILE) writeFileSync(process.env.FAKE_ARGS_FILE, JSON.stringify({ argv, cwd: process.cwd() }))
 if (process.env.FAKE_SETTINGS_COPY && settingsFile) copyFileSync(settingsFile, process.env.FAKE_SETTINGS_COPY)
 const hookUrl = settings.hooks?.PermissionRequest?.[0]?.hooks?.[0]?.url
-const sessionId = resume ?? `session-${Math.random().toString(36).slice(2, 8)}`
+let sessionId = resume ?? `session-${Math.random().toString(36).slice(2, 8)}`
 const out = (message) => process.stdout.write(`${JSON.stringify(message)}\n`)
 let first = true
 let running = null
 let toolCounter = 0
+// What a command of its own answered last, and how many things it said: each has an id of its own.
+let lastAnswer = null
+let said = 0
 
 async function permission(tool_name, tool_input) {
   const controller = new AbortController()
@@ -49,7 +57,7 @@ async function permission(tool_name, tool_input) {
   return JSON.parse(body).hookSpecificOutput.decision
 }
 
-const assistant = (content) => out({ type: 'assistant', message: { role: 'assistant', content }, session_id: sessionId })
+const assistant = (content) => out({ type: 'assistant', message: { role: 'assistant', content }, session_id: sessionId, uuid: `said-${++said}` })
 const toolResult = (id, text, isError = false) => out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text, is_error: isError }] }, session_id: sessionId })
 const result = (extra = {}) => out({ type: 'result', subtype: 'success', is_error: false, result: '', session_id: sessionId, ...extra })
 
@@ -67,6 +75,35 @@ async function turn(prompt) {
       return { id, decision: null }
     }
   }
+  // Its own commands, as Claude Code 2.1.323 answers them in this mode: no model is asked, and the result costs nothing.
+  const synthetic = (text) => {
+    lastAnswer = { type: 'assistant', message: { role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text }] }, session_id: sessionId, uuid: `said-${++said}` }
+    out(lastAnswer)
+  }
+  const model = /^\/model(?: (\S+))?$/.exec(prompt)
+  if (model) {
+    synthetic(model[1] ? `Set model to \`${model[1]}\` for this session only` : 'Current model: `Sonnet 5.5`')
+    return result({ num_turns: 0 })
+  }
+  if (prompt === '/clear') {
+    out({ type: 'conversation_reset', new_conversation_id: 'conversation-2', trigger: 'clear', session_id: sessionId })
+    sessionId = `${sessionId}-cleared`
+    out({ type: 'system', subtype: 'init', session_id: sessionId, cwd: process.cwd(), permissionMode: 'default' })
+    return result({ num_turns: 0 })
+  }
+  if (prompt === '/compact') {
+    out({ type: 'system', subtype: 'status', status: 'compacting', session_id: sessionId })
+    out({ type: 'system', subtype: 'compact_boundary', session_id: sessionId })
+    // The summary it keeps for itself, which quotes what an earlier command printed.
+    out({ type: 'user', message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context.\nThe person ran /model: <local-command-stdout>Current model: `Sonnet 5.5`</local-command-stdout>' }, session_id: sessionId })
+    // What was said last before compacting is told again, under the id it had.
+    if (lastAnswer) out(lastAnswer)
+    // What an earlier command printed, told again with the time it printed it; then what this one prints.
+    out({ type: 'user', message: { role: 'user', content: '<local-command-stdout>Current model: `Sonnet 5.5`</local-command-stdout>' }, session_id: sessionId, timestamp: new Date(Date.now() - 60_000).toISOString(), isReplay: true })
+    out({ type: 'user', message: { role: 'user', content: '<local-command-stdout>\u001b[2mCompacted \u001b[22m</local-command-stdout>' }, session_id: sessionId, timestamp: new Date().toISOString(), isReplay: true })
+    return result({ num_turns: 0 })
+  }
+  if (prompt === '/quiet') return result({ num_turns: 0 })
   const run = /^run (\S+)/.exec(prompt)
   const write = /^edit (\S+)/.exec(prompt)
   if (run || write) {
@@ -109,7 +146,22 @@ let queue = Promise.resolve()
 createInterface({ input: process.stdin }).on('line', (line) => {
   const message = JSON.parse(line)
   if (message.type === 'control_request') {
-    out({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: { still_queued: [] } } })
+    const told = message.request?.subtype === 'initialize'
+      ? {
+          commands: [
+            { name: 'model', description: 'Set the AI model for Claude Code', argumentHint: '<model>', builtin: true },
+            { name: 'compact', description: 'Free up context by summarizing the conversation so far', argumentHint: '<optional custom summarization instructions>', builtin: true },
+            { name: 'clear', description: 'Start a new session with empty context', argumentHint: '', builtin: true },
+            { name: '__internal', description: 'Not for a person', argumentHint: '' }
+          ],
+          models: [
+            { value: 'default', displayName: 'Default (recommended)', description: 'Fable 5.2' },
+            { value: 'haiku', displayName: 'Haiku 5.5', description: 'Fastest for quick answers' }
+          ],
+          account: { email: 'someone@example.com' }
+        }
+      : { still_queued: [] }
+    out({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: told } })
     if (message.request?.subtype === 'interrupt' && running) {
       running.interrupted = true
       running.child?.kill()

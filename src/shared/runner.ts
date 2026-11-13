@@ -216,6 +216,55 @@ export interface TaskDetail {
   log: LogEntry[]
 }
 
+/** A command an agent has for a task ("/model"), in the agent's own words: Togle only lists what the agent tells it. */
+export interface AgentCommand {
+  /** Without the slash: "model". */
+  name: string
+  description: string
+  /** What may follow the name, as the agent hints it: "<model>". */
+  hint?: string
+}
+
+/** A model an agent can switch a task to, as the agent names it. */
+export interface AgentModel {
+  /** What follows "/model". */
+  id: string
+  name: string
+  description: string
+}
+
+/** What a task's agent offers in the reply box when the person types "/". */
+export interface TaskOffers {
+  commands: AgentCommand[]
+  models: AgentModel[]
+}
+
+/** What the reply box lists for the words in it. */
+export type SlashList = { kind: 'commands'; items: AgentCommand[] } | { kind: 'models'; items: AgentModel[] }
+
+const sameStart = (value: string, typed: string): boolean => value.toLowerCase().startsWith(typed)
+const byName = <T extends { name: string }>(a: T, b: T): number => a.name.localeCompare(b.name)
+
+/**
+ * What to list for the words in a task's reply box, or null when there is nothing to: the agent's commands while a
+ * "/" and the start of a name are all that is typed, and its models once "/model " is. Commands whose name starts with
+ * what is typed come first; when none does, the ones that hold it anywhere (a plugin's "supabase:…").
+ */
+export function slashList(text: string, offers: TaskOffers): SlashList | null {
+  const model = /^\/model\s+(\S*)$/i.exec(text)
+  if (model && offers.models.length && offers.commands.some((command) => command.name === 'model')) {
+    const typed = model[1].toLowerCase()
+    const items = offers.models.filter((item) => item.id.toLowerCase().includes(typed) || item.name.toLowerCase().includes(typed))
+    return items.length ? { kind: 'models', items } : null
+  }
+  const command = /^\/(\S*)$/.exec(text)
+  if (!command) return null
+  const typed = command[1].toLowerCase()
+  const starts = offers.commands.filter((item) => sameStart(item.name, typed))
+  const items = (starts.length ? starts : offers.commands.filter((item) => item.name.toLowerCase().includes(typed))).slice().sort(byName)
+  return items.length ? { kind: 'commands', items } : null
+}
+
 /** What the person types to start a task. */
 export interface StartRequest {
   runner: RunnerKind
@@ -334,4 +383,6 @@ export type TaskEvent =
   // said went wrong, apart from those words (the agent's words never decide that it is signed out).
   | { type: 'turn-ended'; outcome: 'completed' | 'interrupted' | 'failed'; error: string | null; fault?: string }
   | { type: 'error'; message: string }
+  // The agent emptied the conversation ("/clear"): what was said before is not part of the task any more.
+  | { type: 'cleared' }
   | { type: 'ended'; reason: 'closed' | 'crashed' }

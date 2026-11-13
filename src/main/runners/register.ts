@@ -99,6 +99,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   handle('runners:send', (key, text) => hub.send(word(key, 'The task'), typeof text === 'string' ? text : ''))
   handle('runners:answer', (key, requestId, decision) => hub.answer(word(key, 'The task'), word(requestId, 'The request'), decision as 'allow-once' | 'allow-always' | 'refuse'))
   handle('runners:reply', (key, requestId, text) => hub.reply(word(key, 'The task'), word(requestId, 'The request'), typeof text === 'string' ? text : ''))
+  handle('runners:offers', (key) => hub.offers(word(key, 'The task')))
   handle('runners:stop', (key) => hub.stop(word(key, 'The task')))
   handle('runners:end-commands', (key) => hub.endCommands(word(key, 'The task')))
   handle('runners:close', (key) => hub.close(word(key, 'The task')))

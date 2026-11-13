@@ -189,6 +189,8 @@ export interface TogleApi {
   /** Allows or refuses one command or edit a task waits to do. Allowing is once only. */
   answerRunnerTask(key: string, requestId: string, decision: Decision): Promise<void>
   replyRunnerTask(key: string, requestId: string, text: string): Promise<void>
+  /** What a task's reply box lists when "/" is typed: its agent's own commands and models. */
+  runnerOffers(key: string): Promise<import('./runner').TaskOffers>
   /** The first press: the task starts nothing new. */
   stopRunnerTask(key: string): Promise<void>
   /** The second press: ends the commands a stopped task still has running. How many. */
