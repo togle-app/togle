@@ -37,7 +37,7 @@ type NodePty = typeof import('node-pty')
 let nodePty: Promise<NodePty | null> | undefined
 
 /** node-pty, loaded when a terminal is first needed: a computer where it cannot load still runs the rest of Togle. */
-function loadPty(): Promise<NodePty | null> {
+export function loadPty(): Promise<NodePty | null> {
   nodePty ??= import('node-pty').then(
     (module) => ((module as { default?: NodePty }).default ?? module) as NodePty,
     (error: Error) => {
@@ -149,6 +149,14 @@ function quietPipes(term: IPty): void {
   inside?._conoutSocketWorker?._worker?.on?.('error', () => undefined)
 }
 
+/** A program started in a terminal of Togle's own, 120 by 32 until the window says how big it is. `file` must be a program, not a shim. */
+export function openTerminal(pty: NodePty, file: string, args: string[], cwd: string, env: Record<string, string>): IPty {
+  const size = { name: 'xterm-256color', cols: 120, rows: 32, cwd, env }
+  const term = process.platform === 'win32' ? pty.spawn(file, args.map(windowsArg).join(' '), size) : pty.spawn(file, args, size)
+  quietPipes(term)
+  return term
+}
+
 /**
  * On Windows, node-pty (1.1.0) keeps the console host, a worker and two pipes after the program in its terminal ended,
  * and its own kill starts a helper process that fails once the program is gone. They are let go here instead: the
@@ -174,8 +182,14 @@ function release(term: IPty): void {
   later.unref?.()
 }
 
-class TerminalTask extends TaskBase implements TerminalSide {
+export class TerminalTask extends TaskBase implements TerminalSide {
   readonly runner: RunnerKind
+  /**
+   * Whether the task is over for the hub when its program ends, however it ends: the agent keeps the conversation, and
+   * the hub lets the task go, so the agent's own list shows it again. An agent that lives only in Togle's terminal keeps
+   * its task, which says what it printed.
+   */
+  protected releases = false
   private output = ''
   private printed = 0
   // Printed and not sent to the window yet, and where that starts.
@@ -215,6 +229,11 @@ class TerminalTask extends TaskBase implements TerminalSide {
     return this
   }
 
+  /** The program's id on this computer, while it runs: what tells its row in the agent's own list as this task. */
+  get program(): number | null {
+    return this.ended ? null : (this.term.pid ?? null)
+  }
+
   private printedMore(data: string): void {
     this.output = (this.output + data).slice(-KEEP)
     if (!this.unsent) this.unsentAt = this.printed
@@ -249,9 +268,11 @@ class TerminalTask extends TaskBase implements TerminalSide {
     if (Date.now() - this.stoppedAt < STOP_COUNTS_MS) {
       this.emit({ type: 'turn-ended', outcome: 'interrupted', error: null })
       this.setBase('stopped')
+      if (this.releases) this.emit({ type: 'ended', reason: 'closed' })
     } else if (code === 0 && !signal) {
       this.emit({ type: 'turn-ended', outcome: 'completed', error: null })
       this.setBase('idle')
+      if (this.releases) this.emit({ type: 'ended', reason: 'closed' })
     } else {
       this.setBase('failed')
       this.emit({ type: 'error', message: signal ? `${this.name} stopped (signal ${signal}).` : `${this.name} stopped (exit code ${code}).` })

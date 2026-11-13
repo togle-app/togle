@@ -236,6 +236,7 @@ module.exports = function install(fixture) {
   api.installLocalSpeech = async models => { record('installLocalSpeech', models); local = { ...local, installed: models }; emit('onLocalSpeech', clone(local)); emit('onSttStatus', { state: 'ready' }); return clone(local) }
   // The coding agents' tasks (the Tasks screen), in memory so that a test can answer, stop and start them.
   const hour = 3600000
+  // (`terminals` is further down: Take over writes into it when it is called, long after both exist.)
   const task = (key, props) => ({ key, runner: key.split(':')[0], id: key.split(':')[1], folder: 'C:\\work\\site', state: 'idle', updatedAt: Date.now(), mine: false, line: '', pending: [], commandsRunning: false, log: [], ...props })
   const runnerTasks = fixture.scenario !== 'tasks' ? [] : [
     task('codex:t1', { title: 'Add the status column', folder: 'C:\\work\\api-server', state: 'waiting', updatedAt: Date.now() - 60000, mine: true, line: 'Wants to run npm run migrate',
@@ -309,7 +310,18 @@ module.exports = function install(fixture) {
     return clone(runnerView(started))
   }
   api.openRunnerTask = async key => { record('openRunnerTask', [key]); const found = runnerFind(key); found.mine = true; runnerChanged(); return clone(runnerView(found)) }
-  api.takeOverRunnerTask = async key => { record('takeOverRunnerTask', [key]); const found = runnerFind(key); found.mine = true; delete found.pid; found.line = ''; runnerChanged(); return clone(runnerView(found)) }
+  // Take over makes the agent's own screen in Togle: a terminal Togle also hears, that waits for a message. Hand back lets go of it.
+  api.takeOverRunnerTask = async key => {
+    record('takeOverRunnerTask', [key]); const found = runnerFind(key)
+    Object.assign(found, { mine: true, terminal: true, screen: true, state: 'idle', line: '' }); delete found.pid
+    const printed = 'Claude Code v2.1.323\r\n> '
+    terminals.set(key, { text: printed, end: printed.length }); runnerChanged(); return clone(runnerView(found))
+  }
+  api.handBackRunnerTask = async key => {
+    record('handBackRunnerTask', [key]); const found = runnerFind(key)
+    Object.assign(found, { mine: false, state: 'idle' }); delete found.terminal; delete found.screen; found.pending = []; runnerChanged()
+    return { command: 'claude --resume 3f2a9c1e-7b64-4d0a-9d55-0a1b2c3d4e5f', folder: found.folder }
+  }
   api.sendToRunnerTask = async (key, text) => { record('sendToRunnerTask', [key, text]); const found = runnerFind(key); found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged() }
   api.answerRunnerTask = async (key, requestId, decision) => {
     record('answerRunnerTask', [key, requestId, decision]); const found = runnerFind(key)

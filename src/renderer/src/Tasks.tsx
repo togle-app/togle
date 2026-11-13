@@ -74,6 +74,8 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   const [showEarlier, setShowEarlier] = useState(false)
   // Take over pressed on a row: the task opens with the question that confirms it.
   const [takingOver, setTakingOver] = useState<string>()
+  // A task handed back: the line that goes on in the person's own terminal, shown where the task was.
+  const [handedBack, setHandedBack] = useState<{ key: string; command: string; folder: string }>()
   const remote = useRemoteTasks()
   const selectedNow = useRef(selected)
   selectedNow.current = selected
@@ -235,6 +237,8 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
             onOpen={() => act(() => api.openRunnerTask(detail.task.key))}
             onTakeOver={() => act(() => api.takeOverRunnerTask(detail.task.key))}
             takeOverAsked={takingOver === detail.task.key}
+            onHandBack={() => act(async () => setHandedBack({ key: detail.task.key, ...(await api.handBackRunnerTask(detail.task.key)) }))}
+            handedBack={handedBack?.key === detail.task.key ? handedBack : undefined}
           />
         ) : (
           <div className="tasks-empty">
@@ -299,6 +303,21 @@ function TaskRow({ task, now, old, selected, onSelect, onTakeOver }: { task: Tas
   )
 }
 
+/** After Hand back: the line that goes on in the person's own terminal, to run in the folder the task worked in. */
+function HandedBack({ command, folder }: { command: string; folder: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="task-banner handed-back" role="note">
+      <span>
+        Handed back. To go on in your terminal, run <code>{command}</code> in <code>{folder}</code>.
+      </span>
+      <button className="small" onClick={() => void navigator.clipboard.writeText(command).then(() => setCopied(true), () => undefined)}>
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  )
+}
+
 /** A task whose agent is signed out: the command that signs it in, to run in a terminal. A reply then goes on. */
 function SignedOut({ task }: { task: TaskView }) {
   const [copied, setCopied] = useState(false)
@@ -340,9 +359,12 @@ interface PanelProps {
   onTakeOver: () => void
   /** Take over was pressed on the task's row: the question that confirms it shows at once. */
   takeOverAsked: boolean
+  onHandBack: () => void
+  /** The task was just handed back: the line that goes on in the person's own terminal. */
+  handedBack?: { command: string; folder: string }
 }
 
-function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, onTakeOver, takeOverAsked }: PanelProps) {
+function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, onTakeOver, takeOverAsked, onHandBack, handedBack }: PanelProps) {
   const { task, log } = detail
   const talkKey = useHotkeys().find((key) => key.id === 'dictate')?.keys || 'F9'
   const [text, setText] = useState('')
@@ -438,7 +460,12 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
           </h2>
         </div>
         <div className="task-actions">
-          {task.mine && running && <button className="small" onClick={onStop}>Stop</button>}
+          {task.mine && task.screen && (
+            <button className="small" onClick={onHandBack} title="Ends it here and gives you the line to go on in your own terminal">
+              Hand back
+            </button>
+          )}
+          {task.mine && running && !task.screen && <button className="small" onClick={onStop}>Stop</button>}
           {task.mine && task.commandsRunning && task.state === 'stopped' && (
             <button className="small" onClick={onEndCommands} title="Stop ended the agent's turn. The command it started is still running.">
               End the running command
@@ -463,12 +490,14 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
 
       {task.mine && task.signedOut && <SignedOut task={task} />}
 
+      {!task.mine && handedBack && <HandedBack command={handedBack.command} folder={handedBack.folder} />}
+
       {!task.mine && (
         <div className="task-banner" role="note">
           {takesOver(task) ? (
             confirmTakeOver ? (
               <>
-                <span>This ends the {agentOf(task)} running in its terminal. The conversation is kept and goes on here.</span>
+                <span>This ends the {agentOf(task)} running in its terminal and opens the same conversation here, as its own screen.</span>
                 <span className="row">
                   <button className="primary small" onClick={onTakeOver}>
                     End it and take over
@@ -480,7 +509,7 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
               </>
             ) : (
               <>
-                <span>It runs in a terminal. Take over moves it into Togle so you can answer it here.</span>
+                <span>It runs in a terminal. Take over opens it here as the agent's own screen, so you can answer it here too.</span>
                 <button className="small" onClick={() => setConfirmTakeOver(true)}>
                   Take over
                 </button>
@@ -500,7 +529,13 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
       )}
 
       {task.terminal ? (
-        <TerminalPanel task={task} onEnd={onEndCommands} />
+        <>
+          {/* On the agent's own screen a command that waits is shown above it, to answer here or on the screen. */}
+          {task.screen && task.pending.map((request) => (
+            <RequestCard key={request.id} request={request} screen onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
+          ))}
+          <TerminalPanel task={task} onEnd={onEndCommands} />
+        </>
       ) : (
       <>
       <div className="task-log" role="log" aria-label="What happened">
@@ -564,14 +599,17 @@ function TerminalPanel({ task, onEnd }: { task: TaskView; onEnd: () => void }) {
   const running = task.state === 'working' || task.state === 'waiting'
   return (
     <div className="task-terminal">
-      <div className="task-banner" role="note">
-        <span>{running ? `${agentOf(task)} runs in this terminal. It asks here, and you answer here, as in any terminal.` : `${agentOf(task)} has ended. What it printed stays here.`}</span>
-        {running && task.mine && (
-          <button className="small" onClick={onEnd} title="Ends the agent and what it started">
-            End it
-          </button>
-        )}
-      </div>
+      {/* The agent's own screen needs no words about itself: it is the screen the person knows. */}
+      {!task.screen && (
+        <div className="task-banner" role="note">
+          <span>{running ? `${agentOf(task)} runs in this terminal. It asks here, and you answer here, as in any terminal.` : `${agentOf(task)} has ended. What it printed stays here.`}</span>
+          {running && task.mine && (
+            <button className="small" onClick={onEnd} title="Ends the agent and what it started">
+              End it
+            </button>
+          )}
+        </div>
+      )}
       {running && task.words && (
         <div className="task-banner task-words" role="note">
           <span>
@@ -615,7 +653,7 @@ function LogLine({ entry }: { entry: LogEntry }) {
   }
 }
 
-function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { request: ViewRequest; onAllow: () => void; onAlways: () => void; onRefuse: () => void; onReply: (text: string) => void }) {
+function RequestCard({ request, screen, onAllow, onAlways, onRefuse, onReply }: { request: ViewRequest; /** Over the agent's own screen, which asks too: the person may answer on it. */ screen?: boolean; onAllow: () => void; onAlways: () => void; onRefuse: () => void; onReply: (text: string) => void }) {
   if (request.kind === 'question') {
     const questions = request.questions ?? []
     return (
@@ -664,6 +702,7 @@ function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { reques
       </div>
       {/* What always reaches, in the agent's terms; never for a command that looks dangerous. */}
       {request.always && !request.danger && (<button className="task-always" onClick={onAlways}>{request.always}</button>)}
+      {screen && <span className="hint">Or answer on the screen below. Either one is enough.</span>}
     </section>
   )
 }

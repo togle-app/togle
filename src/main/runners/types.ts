@@ -17,6 +17,10 @@ export interface ResumeOptions {
   asks?: boolean
   /** The folder the task worked in (as `list` told). Claude Code finds a session from there. */
   folder?: string
+  /** The agent's own screen, in a terminal of Togle's own, instead of a conversation Togle shows. Only Claude Code has one. */
+  screen?: boolean
+  /** With a screen: the flags the program was started with that decide what it does (its model, effort, permission mode), so that it opens the same way. */
+  flags?: string[]
 }
 
 export interface Detected {
@@ -37,6 +41,17 @@ export interface TerminalSide {
   readonly words?: string
   /** Types those words into it, without pressing Enter: the person does, once the agent is ready for them. */
   typeWords(): void
+}
+
+/**
+ * A task that is the agent's own screen in a terminal of Togle's own, and which Togle also hears: what the agent asks
+ * reaches Togle as a request, and it is answered there or on the screen.
+ */
+export interface ScreenSide {
+  /** The program's id on this computer, while it runs. */
+  readonly pid: number | null
+  /** The session it is in now: the person can change it on the screen (a cleared conversation is another session). */
+  session(): string
 }
 
 /** One task Togle is running: it can be watched, answered, stopped and talked to. */
@@ -65,6 +80,8 @@ export interface TaskHandle {
   close(): Promise<void>
   /** Present for a task that runs in a terminal of Togle's own. */
   readonly terminal?: TerminalSide
+  /** Present for such a task when it is the agent's own screen that Togle hears too (Claude Code). */
+  readonly screen?: ScreenSide
   /** The commands and models its agent told it has for this task, so far. Left out by an agent that tells none. */
   offers?(): TaskOffers
 }
@@ -79,6 +96,8 @@ export interface Backend {
   start(options: StartOptions): Promise<TaskHandle>
   /** Picks up a task that was started earlier, here or in the agent's own app. */
   resume(id: string, options?: ResumeOptions): Promise<TaskHandle>
+  /** Why the agent's own screen cannot be opened here, in words, or nothing when it can: asked before a program is ended for it. */
+  screenProblem?(id: string): Promise<string | undefined>
   /** Stops using the agent's program. Tasks stay as they are. */
   close(): Promise<void>
 }

@@ -21,11 +21,14 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
-import type { AgentCommand, AgentModel, AgentQuestion, PendingRequest, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
-import { claudeSessions } from './claude-sessions'
+import type { AgentCommand, AgentModel, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
+import { claudeHasSession, claudeSessions } from './claude-sessions'
 import { HookServer, type HookTarget, type HookVerdict } from './claude-hooks'
+import { oneLine, requestOf, verdictOf } from './claude-requests'
+import { ClaudeScreenTask, screenEnv } from './claude-screen'
 import { list, rec, text } from './jsonrpc'
 import { TaskBase } from './task-base'
+import { loadPty, openTerminal, type TerminalChunk } from './terminal'
 import type { Backend, Detected, ResumeOptions, StartOptions, TaskHandle } from './types'
 
 /** A session Claude Code has running (`claude agents --json`). */
@@ -57,6 +60,8 @@ export interface ClaudeOptions {
   live?: () => Promise<LiveSession[]>
   /** The sessions it kept, as files under ~/.claude/projects. Read from there when left out. */
   stored?: () => Promise<StoredSession[]>
+  /** Where what its screens print goes, for the window. */
+  told?: (chunk: TerminalChunk) => void
 }
 
 const lines = (file: string, args: string[]): Promise<string[]> =>
@@ -81,8 +86,6 @@ export async function findClaude(): Promise<string | null> {
   }
   return null
 }
-
-const oneLine = (value: string, longest = 90): string => value.replace(/\s+/g, ' ').trim().slice(0, longest)
 
 const stateOfLive = (session: LiveSession): TaskState => {
   switch (session.state) {
@@ -115,15 +118,6 @@ async function liveSessions(command: string[]): Promise<LiveSession[]> {
 
 async function storedSessions(): Promise<StoredSession[]> {
   return (await claudeSessions(100)).map((session) => ({ id: session.id, title: session.title, cwd: session.cwd ?? '', updatedAt: session.updatedAt }))
-}
-
-// What a tool is, for the person reading a request.
-const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
-const summary = (tool: string, input: Record<string, unknown>): string => {
-  if (typeof input.command === 'string') return input.command
-  if (typeof input.url === 'string') return `${tool} ${input.url}`
-  if (typeof input.pattern === 'string') return `${tool} ${input.pattern}`
-  return oneLine(`${tool} ${JSON.stringify(input)}`, 200)
 }
 
 interface Context {
@@ -178,8 +172,6 @@ class ClaudeTask extends TaskBase implements HookTarget {
   /** Whether Claude Code has said or done anything since the last message was sent. */
   private active = false
   private requests = 0
-  /** The one rule Claude Code suggested for a request, kept when "always" was offered: the answer gives it back. */
-  private readonly rules = new Map<string, Record<string, unknown>>()
   private interrupts = 0
   private readonly errors: string[] = []
   /** Commands in flight: tool use id to the command. */
@@ -422,79 +414,21 @@ class ClaudeTask extends TaskBase implements HookTarget {
   // ---- A permission request, from the hook ----
 
   async permission(event: Record<string, unknown>, gone: AbortSignal): Promise<HookVerdict> {
-    const tool = text(event.tool_name)
-    const input = rec(event.tool_input)
     const id = `claude-${++this.requests}`
-    const request = this.describe(id, tool, input, event)
+    const { request, rule } = requestOf(id, event, this.folder)
     gone.addEventListener('abort', () => this.dropRequest(id, 'cancelled'), { once: true })
-    const answer = await this.ask(request)
-    if (answer.kind === 'text' && request.kind === 'question') {
-      // Every question of the tool gets the words: one at a time is what a person usually asks.
-      return { behavior: 'allow', updatedInput: { ...input, answers: Object.fromEntries((request.questions ?? []).map((q) => [q.text, answer.text])) } }
-    }
-    const rule = this.rules.get(id)
-    this.rules.delete(id)
-    // Always: Claude Code saves the very rule it suggested, where it said it would, and asks no more for what it matches.
-    if (answer.kind === 'decision' && answer.decision === 'allow-always' && rule) return { behavior: 'allow', updatedPermissions: [rule] }
-    if (answer.kind === 'decision' && answer.decision !== 'refuse') return { behavior: 'allow' }
-    if (answer.kind === 'cancelled') return { behavior: 'deny', message: 'The task was stopped.' }
-    if (request.command) this.refused.add(request.command)
-    return { behavior: 'deny', message: 'The person refused this in Togle.' }
+    const { verdict, refused } = verdictOf(await this.ask(request), request, rule, rec(event.tool_input))
+    if (refused) this.refused.add(refused)
+    return verdict
   }
-
-  private describe(id: string, tool: string, input: Record<string, unknown>, event: Record<string, unknown>): PendingRequest {
-    const offersAlways = list(event.permission_suggestions).length > 0
-    const folder = text(event.cwd) || this.folder
-    if (tool === 'AskUserQuestion') {
-      const questions: AgentQuestion[] = list(input.questions).map(rec).map((q, at) => ({
-        id: String(at),
-        text: text(q.question) || text(q.header),
-        options: list(q.options).map((option) => text(rec(option).label)).filter(Boolean),
-        free: true,
-        secret: false
-      }))
-      return { id, kind: 'question', questions, offersAlways: false }
-    }
-    if (EDITS.has(tool)) {
-      const file = text(input.file_path) || text(input.notebook_path)
-      return { id, kind: 'edit', folder, files: file ? [file] : [], offersAlways }
-    }
-    const command = summary(tool, input)
-    const always = alwaysRule(tool, command, folder, event)
-    if (always) this.rules.set(id, always.rule)
-    return { id, kind: 'command', command, raw: command, folder, offersAlways, ...(always ? { always: always.words } : {}) }
-  }
-}
-
-/** Where Claude Code saves a rule, as the words on the button say it. */
-const REACH: Record<string, (folder: string) => string> = {
-  session: () => 'for the rest of this task',
-  localSettings: (folder) => 'in ' + folder,
-  projectSettings: (folder) => 'in ' + folder,
-  userSettings: () => 'everywhere'
-}
-
-/**
- * The rule "always" would keep, when Claude Code suggested one: an allow rule for this tool only, saved where Claude
- * Code says (this task, this project, or everywhere). Anything else it may suggest (a change of permission mode, more
- * folders) is never offered here.
- */
-function alwaysRule(tool: string, command: string, folder: string, event: Record<string, unknown>): { rule: Record<string, unknown>; words: string } | undefined {
-  for (const suggestion of list(event.permission_suggestions).map(rec)) {
-    const rules = list(suggestion.rules).map(rec)
-    const reach = REACH[text(suggestion.destination)]
-    if (text(suggestion.type) !== 'addRules' || text(suggestion.behavior) !== 'allow' || !reach || !rules.length || !rules.every((rule) => text(rule.toolName) === tool && text(rule.ruleContent))) continue
-    const what = rules.length === 1 && text(rules[0].ruleContent) === command ? 'this command' : rules.map((rule) => text(rule.ruleContent)).join(', ')
-    const name = folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
-    return { rule: suggestion, words: 'Always allow ' + what + ' ' + reach(name) }
-  }
-  return undefined
 }
 
 export class ClaudeBackend implements Backend {
   readonly runner = 'claude' as const
   private readonly hooks = new HookServer()
   private readonly tasks = new Set<ClaudeTask>()
+  /** The ones that are Claude Code's own screen, in a terminal of Togle's own. */
+  private readonly screens = new Set<ClaudeScreenTask>()
 
   constructor(private readonly options: ClaudeOptions = {}) {}
 
@@ -548,10 +482,52 @@ export class ClaudeBackend implements Backend {
     return task
   }
 
+  async screenProblem(id: string): Promise<string | undefined> {
+    if (!(await loadPty())) return 'Togle cannot open a terminal on this computer, so the Claude Code in its terminal was left as it is.'
+    // A session that has had no message has no conversation to open: it was left as it is, and can be used where it is.
+    const kept = this.options.stored ? (await this.options.stored().catch(() => [])).some((session) => session.id === id) : await claudeHasSession(id)
+    return kept ? undefined : 'This Claude Code has not had a message yet, so there is no conversation to open here. It was left as it is.'
+  }
+
   async resume(id: string, options: ResumeOptions = {}): Promise<TaskHandle> {
     const known = (await this.list()).find((task) => task.id === id)
-    const task = await this.launch(options.folder ?? known?.folder ?? os.homedir(), id, options.asks ?? false, null)
+    const folder = options.folder ?? known?.folder ?? os.homedir()
+    if (options.screen) return this.openScreen(id, folder, known?.title ?? '', options.flags ?? [])
+    const task = await this.launch(folder, id, options.asks ?? false, null)
     task.title = known?.title ?? ''
+    return task
+  }
+
+  /**
+   * Claude Code's own screen on a session, in a terminal of Togle's own. Nothing is forced on it (no permission mode, no
+   * rule that asks): the person's own settings apply, and Togle hears what Claude Code asks through the same hook.
+   */
+  private async openScreen(id: string, folder: string, title: string, flags: string[]): Promise<ClaudeScreenTask> {
+    const pty = await loadPty()
+    if (!pty) throw new Error('Togle cannot open a terminal on this computer.')
+    const command = await this.command()
+    let task: ClaudeScreenTask | undefined
+    // The hook is made before the program, and the task after it: what is posted in between is the task's once it is there.
+    const { key, settings } = await this.hooks.attach({ permission: (event, gone) => (task ? task.permission(event, gone) : Promise.resolve(null)), news: (what, event) => task?.news(what, event) }, false, true)
+    try {
+      const term = openTerminal(pty, command[0], [...command.slice(1), ...flags, '--resume', id, '--settings', settings], folder, screenEnv(this.options.env ?? process.env))
+      task = new ClaudeScreenTask(
+        id,
+        title,
+        folder,
+        term,
+        this.options.told ?? (() => undefined),
+        () => {
+          if (task) this.screens.delete(task)
+          void this.hooks.detach(key, settings)
+        },
+        () => (this.options.live ? this.options.live() : liveSessions(command))
+      )
+    } catch (error) {
+      await this.hooks.detach(key, settings)
+      throw new Error(`Claude Code could not be started${error instanceof Error ? `: ${error.message}` : '.'}`, { cause: error })
+    }
+    this.screens.add(task)
     return task
   }
 
@@ -571,7 +547,7 @@ export class ClaudeBackend implements Backend {
   }
 
   async close(): Promise<void> {
-    await Promise.all([...this.tasks].map((task) => task.close()))
+    await Promise.all([...this.tasks, ...this.screens].map((task) => task.close()))
     await this.hooks.close()
   }
 }

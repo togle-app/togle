@@ -305,6 +305,21 @@ export async function claudeHomes(): Promise<string[]> {
 }
 
 /**
+ * Whether Claude Code has kept a conversation under this session id. A session that has had no message has none, and
+ * cannot be resumed: `claude --resume` stops at once.
+ */
+export async function claudeHasSession(id: string): Promise<boolean> {
+  for (const home of await claudeHomes()) {
+    for (const file of await filesIn(path.join(home, 'projects'), 1, /\.jsonl$/i)) {
+      if (path.basename(file, path.extname(file)) !== id) continue
+      const stat = await fs.stat(file).catch(() => null)
+      if (stat && stat.size > 0) return true
+    }
+  }
+  return false
+}
+
+/**
  * Claude Code's sessions on this PC, newest first (the newest `limit`). One session in two folders (a copy of ~/.claude
  * kept beside it) is listed once: the copy written in last.
  */

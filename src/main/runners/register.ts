@@ -69,7 +69,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   const told = (chunk: TerminalChunk): void => deps.send('runners:terminal-data', chunk)
   const hub = new RunnerHub({
     backends: [
-      ...(deps.backends ?? [new CodexBackend({ version: deps.version }), new ClaudeBackend(), new HermesBackend({ version: deps.version })]),
+      ...(deps.backends ?? [new CodexBackend({ version: deps.version }), new ClaudeBackend({ told }), new HermesBackend({ version: deps.version })]),
       ...(deps.added?.() ?? []).map((agent) => addedBackend(agent, deps.version, told))
     ],
     changed: () => {
@@ -99,6 +99,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   handle('runners:send', (key, text) => hub.send(word(key, 'The task'), typeof text === 'string' ? text : ''))
   handle('runners:answer', (key, requestId, decision) => hub.answer(word(key, 'The task'), word(requestId, 'The request'), decision as 'allow-once' | 'allow-always' | 'refuse'))
   handle('runners:reply', (key, requestId, text) => hub.reply(word(key, 'The task'), word(requestId, 'The request'), typeof text === 'string' ? text : ''))
+  handle('runners:hand-back', (key) => hub.handBack(word(key, 'The task')))
   handle('runners:offers', (key) => hub.offers(word(key, 'The task')))
   handle('runners:stop', (key) => hub.stop(word(key, 'The task')))
   handle('runners:end-commands', (key) => hub.endCommands(word(key, 'The task')))

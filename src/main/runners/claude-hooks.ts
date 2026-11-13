@@ -15,13 +15,20 @@ import { rec } from './jsonrpc'
 /** What Togle answers a permission request with. `null`: no decision, and Claude Code's own prompt decides. */
 export type HookVerdict = { behavior: 'allow'; updatedInput?: Record<string, unknown>; updatedPermissions?: Record<string, unknown>[] } | { behavior: 'deny'; message: string } | null
 
+/** What else a task may hear of the Claude Code it runs: a message was sent to it (`prompt`), or it finished its turn (`stop`). */
+export type HookNews = 'prompt' | 'stop'
+
 /** A task that hears its own requests. */
 export interface HookTarget {
   /** One permission request. `gone` is aborted when Claude Code stops waiting for the answer. */
   permission(event: Record<string, unknown>, gone: AbortSignal): Promise<HookVerdict>
+  /** News of the turn, for a task that asked for it (see `attach`): what Claude Code posts, as it posts it. */
+  news?(what: HookNews, event: Record<string, unknown>): void
 }
 
 const WAIT_SECONDS = 3_600
+// News is told at once and needs no answer: Claude Code does not wait long for it.
+const NEWS_SECONDS = 10
 const MAX_BODY = 4 * 1024 * 1024
 
 export class HookServer {
@@ -34,17 +41,21 @@ export class HookServer {
   /**
    * The settings file Claude Code is started with (`--settings`) so it asks this task's address about permission.
    * With `asks`, every command, edit and write asks, whatever the person's own allow rules say (an ask rule wins over
-   * an allow rule), so the task stops at each one and Togle can show it.
+   * an allow rule), so the task stops at each one and Togle can show it. With `news`, Claude Code also tells when a
+   * message was sent to it and when it finished its turn: for a task that is its own screen, which never ends by itself.
    */
-  async attach(target: HookTarget, asks: boolean): Promise<{ key: string; settings: string }> {
+  async attach(target: HookTarget, asks: boolean, news = false): Promise<{ key: string; settings: string }> {
     const port = await this.listen()
     const key = randomBytes(8).toString('hex')
     this.targets.set(key, target)
     this.folder ??= await fs.mkdtemp(path.join(os.tmpdir(), 'togle-hooks-'))
     const settings = path.join(this.folder, `${key}.json`)
-    const url = `http://127.0.0.1:${port}/hook/${this.secret}/${key}/permission`
+    const at = (what: string): string => `http://127.0.0.1:${port}/hook/${this.secret}/${key}/${what}`
     const content = {
-      hooks: { PermissionRequest: [{ hooks: [{ type: 'http', url, timeout: WAIT_SECONDS }] }] },
+      hooks: {
+        PermissionRequest: [{ hooks: [{ type: 'http', url: at('permission'), timeout: WAIT_SECONDS }] }],
+        ...(news ? { UserPromptSubmit: [{ hooks: [{ type: 'http', url: at('prompt'), timeout: NEWS_SECONDS }] }], Stop: [{ hooks: [{ type: 'http', url: at('stop'), timeout: NEWS_SECONDS }] }] } : {})
+      },
       ...(asks ? { permissions: { ask: ['Bash', 'PowerShell', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'] } } : {})
     }
     await fs.writeFile(settings, JSON.stringify(content), { mode: 0o600 })
@@ -80,8 +91,8 @@ export class HookServer {
 
   private async handle(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> {
     const parts = (req.url ?? '').split('/').filter(Boolean)
-    // /hook/<secret>/<task>/permission
-    if (req.method !== 'POST' || parts.length !== 4 || parts[0] !== 'hook' || parts[1] !== this.secret || parts[3] !== 'permission') {
+    // /hook/<secret>/<task>/permission, or /prompt or /stop for news of the turn
+    if (req.method !== 'POST' || parts.length !== 4 || parts[0] !== 'hook' || parts[1] !== this.secret || !['permission', 'prompt', 'stop'].includes(parts[3])) {
       res.statusCode = 404
       res.end()
       return
@@ -108,6 +119,16 @@ export class HookServer {
       event = rec(JSON.parse(Buffer.concat(chunks).toString('utf8')))
     } catch {
       res.statusCode = 400
+      res.end()
+      return
+    }
+    if (parts[3] !== 'permission') {
+      try {
+        target.news?.(parts[3] as HookNews, event)
+      } catch {
+        // News that cannot be used does not hold Claude Code up.
+      }
+      res.statusCode = 200
       res.end()
       return
     }

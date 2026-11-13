@@ -176,6 +176,15 @@ class FakeBackend {
     const info = this.tasks.find((t) => t.id === id)
     const task = new FakeTask(this.runner, id, info?.title ?? '', options?.folder ?? info?.folder ?? '')
     task.resumeOptions = options
+    // The agent's own screen: a terminal that Togle also hears, in the session the person has moved to.
+    if (options?.screen) {
+      task.sessionNow = id
+      task.screen = { pid: this.screenPid ?? 7777, session: () => task.sessionNow }
+      const printed = this.screenEnds ? `\u001b[31mNo conversation found with session ID: ${id}\u001b[0m\r\n` : ''
+      task.terminal = { read: () => ({ text: printed, end: printed.length }), write: () => undefined, resize: () => undefined }
+      // A screen whose program stops as soon as it opens.
+      if (this.screenEnds) setTimeout(() => task.emit({ type: 'ended', reason: 'crashed' }), 60)
+    }
     this.resumed.push(task)
     return task
   }
@@ -653,6 +662,125 @@ test('taking over ends the terminal program that runs a task, and only if it is 
   } finally {
     terminal.kill()
     other.kill()
+  }
+})
+
+test('taking over a Claude Code task opens the agent\u2019s own screen, and the same program listed under another session is not a second task', { timeout: 30_000 }, async () => {
+  const terminal = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', '--', 'claude-terminal-session'], { stdio: 'ignore', windowsHide: true })
+  try {
+    const claude = new FakeBackend('claude', { tasks: [info('claude', 'live', 'In a terminal', 'working', 10, { pid: terminal.pid })] })
+    claude.screenPid = 7777
+    const { hub } = hubOf([claude])
+    try {
+      const view = await hub.takeOver('claude:live')
+      assert.deepEqual(claude.resumed[0].resumeOptions, { folder: 'C:\\work\\live', screen: true }, 'the person\u2019s own settings apply on it: nothing is asked for')
+      assert.deepEqual([view.mine, view.terminal, view.screen], [true, true, true])
+      // The person cleared the conversation on the screen: the agent lists that program under a new session. That row is the screen.
+      claude.tasks.push(info('claude', 'live-2', 'Say only', 'working', 20, { pid: 7777 }))
+      claude.tasks.push(info('claude', 'elsewhere', 'Another program', 'working', 5, { pid: 8888 }))
+      const keys = (await hub.list()).map((t) => t.key).sort()
+      assert.deepEqual(keys, ['claude:elsewhere', 'claude:live'], 'one row for the screen, and other programs stay')
+      // Handed back: the program ends, and the line names the session the screen was in.
+      claude.resumed[0].sessionNow = 'live-2'
+      assert.deepEqual(await hub.handBack('claude:live'), { command: 'claude --resume live-2', folder: 'C:\\work\\live' })
+      assert.equal(claude.resumed[0].closed, true)
+      assert.equal((await hub.list()).find((t) => t.key === 'claude:live').mine, false, 'it is the agent\u2019s own task again')
+      await assert.rejects(hub.handBack('claude:live'), /not running that task/)
+      // A conversation Togle shows is not a screen: there is nothing to hand back.
+      const started = await hub.start({ runner: 'claude', folder: scratch(), prompt: 'Say hi' })
+      await assert.rejects(hub.handBack(started.key), /own screen/)
+    } finally {
+      await hub.dispose()
+    }
+  } finally {
+    terminal.kill()
+  }
+})
+
+test('a screen takes the model and mode the terminal program was started with, and nothing else it was given', { timeout: 30_000 }, async () => {
+  const terminal = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', '--', 'claude-terminal-session', '--model', 'opus', '--permission-mode', 'plan', '--add-dir', 'C:\\elsewhere'], { stdio: 'ignore', windowsHide: true })
+  try {
+    const claude = new FakeBackend('claude', { tasks: [info('claude', 'live', 'In a terminal', 'working', 10, { pid: terminal.pid })] })
+    const { hub } = hubOf([claude])
+    try {
+      await hub.takeOver('claude:live')
+      assert.deepEqual(claude.resumed[0].resumeOptions, { folder: 'C:\\work\\live', screen: true, flags: ['--model', 'opus', '--permission-mode', 'plan'] })
+    } finally {
+      await hub.dispose()
+    }
+  } finally {
+    terminal.kill()
+  }
+})
+
+test('a screen that stops as soon as it opens is told in words, with what it printed and the way on in the terminal', { timeout: 30_000 }, async () => {
+  const terminal = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', '--', 'claude-terminal-session'], { stdio: 'ignore', windowsHide: true })
+  try {
+    const claude = new FakeBackend('claude', { tasks: [info('claude', 'live', 'In a terminal', 'working', 10, { pid: terminal.pid })] })
+    claude.screenEnds = true
+    const { hub } = hubOf([claude])
+    try {
+      await assert.rejects(hub.takeOver('claude:live'), /Claude Code stopped as soon as it opened here: No conversation found with session ID: live\. The conversation is saved: go on in your terminal with claude --resume live$/)
+      assert.equal((await hub.list()).find((t) => t.key === 'claude:live').mine, false, 'the task is not left as a dead screen')
+    } finally {
+      await hub.dispose()
+    }
+  } finally {
+    terminal.kill()
+  }
+})
+
+test('a terminal program is not ended for a screen that cannot open', { timeout: 30_000 }, async () => {
+  const terminal = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', '--', 'claude-terminal-session'], { stdio: 'ignore', windowsHide: true })
+  try {
+    const claude = new FakeBackend('claude', { tasks: [info('claude', 'live', 'In a terminal', 'working', 10, { pid: terminal.pid })] })
+    claude.screenProblem = async () => 'Togle cannot open a terminal on this computer, so the Claude Code in its terminal was left as it is.'
+    const { hub } = hubOf([claude])
+    try {
+      await assert.rejects(hub.takeOver('claude:live'), /cannot open a terminal/)
+      assert.equal(alive(terminal.pid), true, 'the program the person is using is left alone')
+      assert.equal(claude.resumed.length, 0)
+    } finally {
+      await hub.dispose()
+    }
+  } finally {
+    terminal.kill()
+  }
+})
+
+test('a screen that ends is let go, so the agent\u2019s own list shows the task again; a conversation that ends stays', async () => {
+  const claude = new FakeBackend('claude', { tasks: [info('claude', 'old', 'Earlier work', 'idle', 10), info('claude', 'talk', 'A conversation', 'idle', 5)] })
+  const { hub } = hubOf([claude])
+  try {
+    await hub.open('claude:old', true)
+    await hub.open('claude:talk')
+    const [screen, conversation] = claude.resumed
+    assert.equal((await hub.list()).find((t) => t.key === 'claude:old').screen, true)
+    screen.emit({ type: 'ended', reason: 'closed' })
+    conversation.emit({ type: 'ended', reason: 'closed' })
+    const rows = await hub.list()
+    assert.equal(rows.find((t) => t.key === 'claude:old').mine, false, 'a screen is over with its program')
+    assert.equal(rows.find((t) => t.key === 'claude:old').screen, undefined)
+    assert.equal(rows.find((t) => t.key === 'claude:talk').mine, true, 'a conversation Togle shows keeps its log')
+    assert.deepEqual(hub.attention().map((t) => t.key), ['claude:talk'])
+  } finally {
+    await hub.dispose()
+  }
+})
+
+test('a request on a screen is a notice like any other, and the task is waiting for the person', async () => {
+  const claude = new FakeBackend('claude', { tasks: [info('claude', 'old', 'Earlier work', 'idle', 10)] })
+  const { hub } = hubOf([claude])
+  try {
+    await hub.open('claude:old', true)
+    const screen = claude.resumed[0]
+    void screen.want({ id: 'r1', kind: 'command', command: 'npm run migrate', folder: 'C:\\work\\old', offersAlways: false })
+    const [task] = hub.attention()
+    assert.deepEqual([task.key, task.state, task.terminal, task.pending[0].command], ['claude:old', 'waiting', true, 'npm run migrate'], 'Togle can show it and answer it')
+    hub.answer('claude:old', 'r1', 'allow-once')
+    assert.deepEqual(hub.attention().map((t) => t.state), ['idle'])
+  } finally {
+    await hub.dispose()
   }
 })
 

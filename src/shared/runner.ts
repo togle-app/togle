@@ -179,6 +179,8 @@ export interface TaskView extends TaskInfo {
   terminal?: boolean
   /** In such a task, the words it was given that its command had no place for: they wait to be typed in. */
   words?: string
+  /** It is the agent's own screen, and Togle hears what the agent asks: a command that waits is shown above it, to answer there or on the screen. */
+  screen?: boolean
 }
 
 /**

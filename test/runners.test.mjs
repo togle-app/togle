@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { after, test } from 'node:test'
@@ -657,6 +657,250 @@ test('the list joins what Claude Code kept, what is running, and what Togle runs
     const again = await backend.list()
     assert.equal(again.find((t) => t.id === own.id).title, 'Mine')
     assert.equal(again.length, 4)
+  } finally {
+    await backend.close()
+  }
+})
+
+// ---- Claude Code's own screen, in a terminal of Togle's own ----
+
+const fakeScreen = path.join(import.meta.dirname, 'fake-claude-screen.mjs')
+/** Claude Code's own screen, with a stand-in program. What `claude agents` would say of it is read from a file the stand-in writes. */
+function screenBackend(extra = {}) {
+  const dir = scratch()
+  const files = { status: path.join(dir, 'status.txt'), pid: path.join(dir, 'pid.txt') }
+  const told = []
+  const backend = new T.ClaudeBackend({
+    command: [process.execPath, fakeScreen],
+    env: { ...process.env, FAKE_STATUS_FILE: files.status, FAKE_PID_FILE: files.pid, ...extra },
+    live: async () => {
+      try {
+        return [{ sessionId: 'session-old', pid: Number(readFileSync(files.pid, 'utf8')), status: readFileSync(files.status, 'utf8') }]
+      } catch {
+        return []
+      }
+    },
+    stored: async () => [{ id: 'session-old', title: 'Fix the login redirect', cwd: dir, updatedAt: 5 }],
+    told: (chunk) => told.push(chunk)
+  })
+  return { backend, dir, files, told }
+}
+const shown = (task) => task.terminal.read().text
+
+test('the hook server tells news of the turn only to a task that asked for it', { timeout: 30_000 }, async () => {
+  const hooks = new T.HookServer()
+  const heard = []
+  const target = { permission: async () => null, news: (what, event) => heard.push([what, event.session_id]) }
+  try {
+    const plain = await hooks.attach(target, false)
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(plain.settings, 'utf8')).hooks), ['PermissionRequest'], 'a task that did not ask hears no news')
+    const { settings } = await hooks.attach(target, false, true)
+    const config = JSON.parse(readFileSync(settings, 'utf8'))
+    assert.deepEqual(Object.keys(config.hooks), ['PermissionRequest', 'UserPromptSubmit', 'Stop'])
+    assert.equal(config.permissions, undefined, 'nothing is forced on it: no rule that asks')
+    const prompt = config.hooks.UserPromptSubmit[0].hooks[0]
+    const stop = config.hooks.Stop[0].hooks[0]
+    assert.deepEqual([prompt.type, stop.type, prompt.timeout, stop.timeout], ['http', 'http', 10, 10], 'Claude Code does not wait long for news')
+    assert.match(prompt.url, /\/prompt$/)
+    assert.match(stop.url, /\/stop$/)
+    const post = (to, body) => fetch(to, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    const one = await post(prompt.url, { session_id: 's1' })
+    assert.deepEqual([one.status, await one.text()], [200, ''], 'news needs no answer')
+    await post(stop.url, { session_id: 's2' })
+    assert.deepEqual(heard, [['prompt', 's1'], ['stop', 's2']])
+    // A task that hears no news is not held up by it.
+    const quiet = await hooks.attach({ permission: async () => null }, false, true)
+    const quietStop = JSON.parse(readFileSync(quiet.settings, 'utf8')).hooks.Stop[0].hooks[0].url
+    assert.equal((await post(quietStop, {})).status, 200)
+    assert.equal((await post(stop.url.replace(/\/stop$/, '/other'), {})).status, 404, 'only the known words are heard')
+  } finally {
+    await hooks.close()
+  }
+})
+
+test('Claude Code’s own screen starts on the session in the task folder, with Togle’s hook and nothing forced on it', { timeout: 30_000 }, async () => {
+  const { backend, dir, told } = screenBackend({ CLAUDE_CODE_CHILD_SESSION: '1', CLAUDECODE: '1' })
+  try {
+    const task = await backend.resume('session-old', { folder: dir, screen: true })
+    assert.equal(task.runner, 'claude')
+    assert.equal(task.id, 'session-old')
+    assert.equal(task.title, 'Fix the login redirect')
+    assert.ok(task.terminal && task.screen, 'a terminal, and Togle hears it')
+    assert.equal(task.state, 'idle', 'it opens on a conversation that waits for a message')
+    await until(() => shown(task).includes('fake claude ready'), 'the screen to open')
+    assert.match(shown(task), /started with \["--resume","session-old","--settings","<settings>"\] hooks=PermissionRequest,UserPromptSubmit,Stop asks=false nested=false/, 'no permission mode, no rule that asks, and not marked as started inside Claude Code')
+    assert.ok(told.length > 0 && told.every((chunk) => chunk.key === 'claude:session-old'), 'what it prints goes to the window, under the task’s key')
+    assert.equal(typeof task.screen.pid, 'number')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('on Claude Code’s own screen a command that asks is a request in Togle, and a turn is working until it ends', { timeout: 30_000 }, async () => {
+  const { backend, dir } = screenBackend()
+  try {
+    const task = await backend.resume('session-old', { folder: dir, screen: true })
+    const events = watch(task)
+    await until(() => shown(task).includes('fake claude ready'), 'the screen to open')
+    task.terminal.write('run a\r')
+    const card = await until(() => task.pending[0], 'the request')
+    assert.deepEqual([card.kind, card.command, card.folder], ['command', 'echo x > a.txt', dir])
+    assert.equal(task.state, 'waiting')
+    task.answer(card.id, 'allow-once')
+    await until(() => shown(task).includes('ran a'), 'the command to run')
+    await until(() => task.state === 'idle', 'the turn to end')
+    assert.deepEqual(events.filter((e) => e.type === 'message').map((e) => e.text), ['done a'], 'what it said last, for the notice and the to-do list')
+    assert.deepEqual(events.filter((e) => e.type === 'turn-ended').map((e) => e.outcome), ['completed'])
+    // Refused: it does not run, and the task goes on.
+    task.terminal.write('run b\r')
+    const second = await until(() => task.pending[0], 'the second request')
+    task.answer(second.id, 'refuse')
+    await until(() => shown(task).includes('refused b'), 'the refusal to reach it')
+    await until(() => task.state === 'idle', 'the second turn to end')
+    // A message that asks nothing is working while it lasts, and then done.
+    task.terminal.write('hello\r')
+    await until(() => shown(task).includes('fine, hello'), 'the answer')
+    await until(() => events.filter((e) => e.type === 'turn-ended').length === 3, 'the third turn to end')
+    assert.equal(task.state, 'idle')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a command answered on Claude Code’s own screen is no longer asked in Togle, as soon as the program says it does not wait', { timeout: 30_000 }, async () => {
+  const { backend, dir, files } = screenBackend()
+  try {
+    const task = await backend.resume('session-old', { folder: dir, screen: true })
+    await until(() => shown(task).includes('fake claude ready'), 'the screen to open')
+    task.terminal.write('run c\r')
+    const card = await until(() => task.pending[0], 'the request')
+    // The screen asks as well. Claude Code says it waits, then the person answers there; the request is kept open, as Claude Code keeps it.
+    await until(() => readFileSync(files.status, 'utf8') === 'waiting', 'the program to say it waits')
+    assert.equal(task.pending.length, 1, 'not dropped while it waits')
+    task.terminal.write('y\r')
+    await until(() => task.pending.length === 0, 'the request to go', 10_000)
+    assert.ok(shown(task).includes('ran c (answered here)'))
+    assert.notEqual(task.state, 'waiting')
+    // Answering the dropped card does nothing now.
+    task.answer(card.id, 'refuse')
+    await until(() => task.state === 'idle', 'the turn to end')
+    assert.equal(task.pending.length, 0)
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Claude Code’s own screen follows the session the person moves to, and is over when its program ends', { timeout: 30_000 }, async () => {
+  const { backend, dir, files } = screenBackend()
+  try {
+    const task = await backend.resume('session-old', { folder: dir, screen: true })
+    const events = watch(task)
+    await until(() => shown(task).includes('fake claude ready'), 'the screen to open')
+    assert.equal(task.screen.session(), 'session-old')
+    task.terminal.write('clear\r')
+    await until(() => shown(task).includes('cleared'), 'the conversation to be cleared')
+    task.terminal.write('hello\r')
+    await until(() => task.screen.session() === 'session-old-2', 'the next hook to name the new session')
+    assert.equal(task.id, 'session-old', 'the task keeps the id it was known by')
+    const pid = task.screen.pid
+    assert.equal(alive(pid), true)
+    task.terminal.write('bye\r')
+    await until(() => events.some((e) => e.type === 'ended'), 'the program to end')
+    assert.equal(task.screen.pid, null)
+    assert.equal(alive(pid), false)
+    assert.ok(events.some((e) => e.type === 'ended' && e.reason === 'closed'), 'ended by itself: the task is over for the hub')
+    assert.equal(task.state, 'idle')
+  } finally {
+    await backend.close()
+  }
+})
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+test('a second command that asks right after the first has a card of its own, and is not dropped for what the first one saw', { timeout: 40_000 }, async () => {
+  const { backend, dir, files } = screenBackend({ FAKE_STATUS_MANUAL: '1' })
+  const says = (value) => writeFileSync(files.status, value)
+  try {
+    says('idle')
+    const task = await backend.resume('session-old', { folder: dir, screen: true })
+    await until(() => shown(task).includes('fake claude ready'), 'the screen to open')
+    task.terminal.write('run2 a b\r')
+    const first = await until(() => task.pending[0], 'the first request')
+    assert.equal(first.command, 'echo x > a.txt')
+    says('waiting')
+    await pause(2200)
+    // Allowed from the card: the program is busy a moment, and asks again. What was seen of the first does not count.
+    says('busy')
+    task.answer(first.id, 'allow-once')
+    const second = await until(() => task.pending.find((request) => request.id !== first.id), 'the second request')
+    assert.equal(second.command, 'echo x > b.txt')
+    await pause(3000)
+    assert.deepEqual(task.pending.map((request) => request.id), [second.id], 'it stays while the program has not said it waits')
+    says('waiting')
+    await pause(2200)
+    assert.equal(task.pending.length, 1, 'and while it says it waits')
+    says('busy')
+    await until(() => task.pending.length === 0, 'the card to go once the program does not wait', 10_000)
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a card whose question was answered on the screen goes when the next request comes, even before the program said so', { timeout: 30_000 }, async () => {
+  const { backend, dir, files } = screenBackend({ FAKE_STATUS_MANUAL: '1' })
+  try {
+    writeFileSync(files.status, 'idle')
+    const task = await backend.resume('session-old', { folder: dir, screen: true })
+    await until(() => shown(task).includes('fake claude ready'), 'the screen to open')
+    task.terminal.write('run2 a b\r')
+    const first = await until(() => task.pending[0], 'the first request')
+    task.terminal.write('y\r')
+    const second = await until(() => task.pending.find((request) => request.id !== first.id), 'the second request')
+    assert.deepEqual(task.pending.map((request) => request.command), ['echo x > b.txt'], 'no stale card beside the new one')
+    assert.notEqual(second.id, first.id)
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Claude Code\u2019s own screen opens the way the program was started, and not for a session that has no conversation', { timeout: 30_000 }, async () => {
+  const { backend, dir } = screenBackend()
+  try {
+    assert.equal(await backend.screenProblem('session-old'), undefined)
+    assert.match(await backend.screenProblem('never-used'), /has not had a message yet, so there is no conversation to open here\. It was left as it is\./)
+    const task = await backend.resume('session-old', { folder: dir, screen: true, flags: ['--model', 'opus', '--permission-mode', 'plan'] })
+    await until(() => shown(task).includes('fake claude ready'), 'the screen to open')
+    assert.match(shown(task), /started with \["--model","opus","--permission-mode","plan","--resume","session-old","--settings","<settings>"\]/)
+  } finally {
+    await backend.close()
+  }
+})
+
+test('the flags that decide what a Claude Code does are read from the command line it ran under, and nothing else', () => {
+  const flags = T.carriedFlags
+  assert.deepEqual(flags('"C:\\Users\\a b\\.local\\bin\\claude.exe" --model opus --permission-mode plan --add-dir C:\\x'), ['--model', 'opus', '--permission-mode', 'plan'])
+  assert.deepEqual(flags('claude --model=sonnet[1m] --effort high --dangerously-skip-permissions'), ['--model', 'sonnet[1m]', '--effort', 'high', '--dangerously-skip-permissions'])
+  assert.deepEqual(flags('claude --resume abc --settings C:\\a.json --name "Fix it"'), [])
+  assert.deepEqual(flags('claude --model'), [], 'a flag with no value is dropped')
+  assert.deepEqual(flags('claude --model "two words" --effort ;rm --permission-mode $(x)'), [], 'only a plain value is taken')
+  assert.deepEqual(flags(''), [])
+})
+
+test('closing Claude Code\u2019s own screen ends its program, and closing the backend ends every screen', { timeout: 30_000 }, async () => {
+  const { backend, dir, files } = screenBackend()
+  const task = await backend.resume('session-old', { folder: dir, screen: true })
+  await until(() => shown(task).includes('fake claude ready'), 'the screen to open')
+  const pid = Number(readFileSync(files.pid, 'utf8'))
+  assert.equal(alive(pid), true)
+  await backend.close()
+  await until(() => !alive(pid), 'the program to end')
+  await until(() => task.screen.pid === null, 'the task to know its program ended')
+})
+
+test('a screen that cannot open fails the start in words, and leaves no hook behind', { timeout: 30_000 }, async () => {
+  const backend = new T.ClaudeBackend({ command: [path.join(os.tmpdir(), 'no-such-claude-program.exe')], live: async () => [], stored: async () => [] })
+  try {
+    await assert.rejects(backend.resume('session-old', { folder: os.tmpdir(), screen: true }), /Claude Code could not be started/)
   } finally {
     await backend.close()
   }

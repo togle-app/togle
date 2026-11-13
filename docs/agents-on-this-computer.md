@@ -13,7 +13,7 @@ Togle lists the tasks of the coding agents on your computer (Claude Code, Codex 
 - **New task** opens the task box (below). A task started in Togle asks before every command and every change.
 - **Stop** stops a task. Codex lets a command that was already running finish, so a stopped Codex task shows a second button, **End the running command**.
 - What finished in the last day stays in the list; older tasks fold under **Earlier**.
-- A task that runs in a terminal or in an app shows in the list too. For Claude Code, **Take over** ends the program in the terminal and carries the conversation on here. Togle asks first.
+- A task that runs in a terminal or in an app shows in the list too. For Claude Code, **Take over** ends the program in the terminal and opens the same conversation here as Claude Code's own screen. Togle asks first. See "A task you started in a terminal" below.
 - A task that stops by itself (a turn that ends with an error, or an agent program that stops) waits for you like a question, and its row says why. When the error means the agent is signed out, the row says so with the command that signs it in again (`claude auth login`, `codex login`, `hermes model`) and **Copy**: run it in a terminal, then reply to go on. The words that count as signed out are in `isSignedOut` in `src/shared/runner.ts`; Claude Code's and Codex's were seen on this computer, Hermes's were not.
 - With no agent installed, Agents names Claude Code, Codex and Hermes, each with the one line its maker gives to install it and a link to its page. Togle looks for agents the way a terminal would: when one is not found, it adds the PATH saved in the registry (Windows) or the one the login shell sets up (Mac and Linux), so an agent installed while Togle runs shows within a minute. The login shell runs your start-up files, so Togle asks it at most every ten minutes, with no input, and stops it after five seconds; the usual folders (`~/.local/bin`, Homebrew's, `/usr/local/bin`) are checked every time.
 - **See changes**, beside a task's name, lists what differs from the last commit in its folder and shows each file's diff. It is read with git. It shows everything in the folder that differs, which can include changes that did not come from the agent.
@@ -109,6 +109,20 @@ The command is the program `out/main/cli.js`, started by Electron as plain Node 
 
 ## A task you started in a terminal
 
-A Claude Code session you started yourself in a terminal shows in Agents with its state, and its row offers **Take over**. Take over ends the program in the terminal and carries the conversation on in Togle, where you answer it; Togle asks first. `togle run claude` starts one in Togle from the beginning. Togle doesn't answer a session where it runs.
+A Claude Code session you started yourself in a terminal shows in Agents with its state, and its row offers **Take over**. Togle doesn't answer a session where it runs. `togle run claude` starts one in Togle from the beginning, as a conversation Togle shows.
+
+**Take over** asks first. It ends the program in your terminal, and opens the same conversation in Togle as **Claude Code's own screen**: the program you know, in a terminal of Togle's own, with its keys and its commands exactly as in your terminal (`/model`, `/compact`, `/resume`, shift+tab, pasting an image, all of it). What Togle adds is around the screen:
+
+- The task is in the list, **Working** while a message is being answered and **Done** when it has been. A notice says when it is done, with what Claude Code said last.
+- When Claude Code asks to run a command, a card shows it above the screen with **Allow once** and **Refuse**, while the screen shows its own question. Either one is enough: answer in Togle, or on the screen, and the card goes within a couple of seconds (Togle asks Claude Code whether it still waits). The card also reaches your other devices like any other request.
+- Nothing is forced on it. It starts with your own permission mode and your own rules, so Togle sees only what Claude Code asks. If yours never asks (it starts in `bypassPermissions`, for example), no card ever shows. Tasks Togle starts itself, as a conversation, always ask.
+- It opens the way your program was started: the `--model`, `--effort` and `--permission-mode` flags it ran with are carried over, and `--dangerously-skip-permissions` too. Its other flags are not.
+- A Claude Code that has had no message yet has no conversation to open: Take over says so and leaves it running. If the screen stops as soon as it opens, Take over says what it printed, and the `claude --resume` line to go on in your terminal.
+- **Hand back** ends the program here and gives you the line to go on in your own terminal: `claude --resume <session>`, to run in the folder the task worked in. It names the session the screen is in now, which is another one if you cleared the conversation (`/clear`) or picked another (`/resume`) on the screen. Leaving the screen yourself (`/exit`) lets the task go too, and the task is then an ordinary one in the list: continue it here as a conversation, or take over a terminal again.
+- A task is in one place at a time. Two programs on one session each know only their own half, and the saved conversation splits in two: a later resume follows one half and loses the other. So Take over ends your terminal's program, and Hand back ends Togle's before you go on in yours.
+
+A conversation you cleared on the screen is a session of its own in Claude Code. While the screen is open, Togle shows one task. Once Togle has been closed and opened again, the two show as two tasks.
+
+Take over is for Claude Code only. Codex and Hermes have ways to share a session with their own screens (`codex --remote`, a gateway), which Togle does not use yet.
 
 An earlier development build of Togle could add an entry to Claude Code's settings that started Togle as `--togle-hook`. That entry now does nothing; take it out of `~/.claude/settings.json` if it is there.
