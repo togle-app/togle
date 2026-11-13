@@ -26,7 +26,7 @@ import type { NoiseReport, TogleMicrophoneStatus } from './microphone'
 import type { MicrophoneLinkPage } from './microphone-link'
 import type { CloseWarning } from './close-warning'
 import type { TodoList, TodoRef } from './todo'
-import type { Changes, ClaudeHookStatus, Decision, RunnerStatus, StartRequest, TaskDetail, TaskNotice, TaskView } from './runner'
+import type { Changes, Decision, RunnerStatus, StartRequest, TaskDetail, TaskNotice, TaskView } from './runner'
 
 export type Unsubscribe = () => void
 
@@ -179,12 +179,6 @@ export interface TogleApi {
   runnerDetail(key: string): Promise<TaskDetail>
   /** What differs from the last commit in the folder a task works in (read with git). */
   runnerChanges(key: string): Promise<Changes>
-  /** Whether Claude Code in a terminal asks Togle about its commands. */
-  claudeHookStatus(): Promise<ClaudeHookStatus>
-  /** Adds Togle's hook to Claude Code's settings. Rejected with why in words when it cannot. */
-  connectClaudeHook(): Promise<ClaudeHookStatus>
-  /** Takes Togle's hook out of Claude Code's settings again. */
-  disconnectClaudeHook(): Promise<ClaudeHookStatus>
   /** Starts a task. It asks before every command and edit. */
   startRunnerTask(request: StartRequest): Promise<TaskView>
   /** Continues a task that was started earlier, so it can be answered and replied to here. */

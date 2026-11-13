@@ -78,23 +78,26 @@ async function open(T, agent, width, surface, extra = {}) {
 
 const texts = (ui, selector) => ui.evaluate("[...document.querySelectorAll(" + JSON.stringify(selector) + ")].map(e=>e.textContent.trim().replace(/\\s+/g,' '))")
 
-/** The titles under one heading of the list. */
-const groupTitles = (ui, heading) => ui.evaluate("(()=>{const group=[...document.querySelectorAll('.task-group')].find(g=>g.querySelector('h3').textContent===" + JSON.stringify(heading) + ");return group?[...group.querySelectorAll('.task-copy strong')].map(e=>e.textContent):null})()")
 
 async function checkTasks(T, agent) {
   const ui = await open(T, agent, 1024)
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.workspace-nav button')].map(button=>button.getAttribute('aria-label'))"), ['To-do', 'Agents', 'Meetings', 'Settings'])
   await ui.click('.workspace-nav button', 'Agents')
-  await ui.wait("document.querySelectorAll('.task-row').length===6")
-  assert.deepEqual(await texts(ui, '.task-group > h3'), ['Waiting for you', 'Working', 'Earlier · 2 tasks'])
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  assert.equal(await ui.evaluate("document.querySelectorAll('.task-group').length"), 0, 'one list, as the design has it: no headings')
+  assert.equal(await ui.evaluate("document.querySelector('.task-earlier-toggle').textContent"), 'Earlier · 1 task', 'what finished more than a day ago folds under Earlier')
   const rows = await ui.evaluate("[...document.querySelectorAll('.task-row')].map(row=>({title:row.querySelector('strong').textContent,state:row.dataset.state,more:row.querySelector('.task-copy span').textContent,danger:!!row.querySelector('.task-danger')}))")
-  assert.deepEqual(rows.map(row => row.title), ['Add the status column', 'Clean the build folder', 'Rebuild the pricing page', 'Write the release notes', 'Fix the login redirect', 'Port the settings screen'])
+  assert.deepEqual(rows.map(row => row.title), ['Add the status column', 'Clean the build folder', 'Rebuild the pricing page', 'Write the release notes', 'Fix the login redirect'])
   // One line each, as the design has it: the agent, where it works, and how it stands.
   assert.equal(rows[0].more, 'Codex · api-server · waiting')
-  assert.deepEqual(rows.map(row => row.danger), [false, true, false, false, false, false], 'only the command that looks dangerous is marked in the list')
+  assert.deepEqual(rows.map(row => row.danger), [false, true, false, false, false], 'only the command that looks dangerous is marked in the list')
   assert.equal(rows[2].more, 'Claude Code · website · working')
-  assert.equal(rows[3].more, 'Claude Code · terminal · working', 'a task in a terminal says so')
-  assert.ok(/^Claude Code · website · done · .*(ago|yesterday)/.test(rows[4].more) && /days ago/.test(rows[5].more), 'earlier tasks say when they were last worked on')
+  assert.equal(rows[3].more, 'Claude Code · terminal', 'a task in a terminal says so')
+  assert.equal(rows[4].more, 'Claude Code · website · done', 'what finished today says done')
+  assert.deepEqual(await texts(ui, '.task-row-action'), ['Take over'], 'a Claude Code task in a terminal offers Take over on its row')
+  await ui.click('.task-earlier-toggle', 'Earlier · 1 task')
+  await ui.wait("document.querySelectorAll('.task-row').length===6")
+  assert.match((await texts(ui, '.task-earlier .task-copy > span'))[0], /^Codex · mobile-app · done · \d+ days ago$/, 'an older task says when it was last worked on')
   assert.equal(await ui.evaluate("!!document.querySelector('.tasks-found')"), false, 'the agents found are listed in Settings')
   await ui.capture('tasks-list')
 
@@ -107,7 +110,10 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.task-latest').textContent"), 'I will add the column and a migration.')
   assert.equal(await ui.evaluate("document.querySelector('.task-steps > summary').textContent"), '2 steps: ran 1 command, changed 2 files')
   assert.equal(await ui.evaluate("document.querySelector('.task-steps').open"), false)
-  assert.ok((await ui.evaluate("document.querySelector('.task-title p').textContent")).includes('Waiting for you · 2 files changed'))
+  assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Waiting for you')
+  assert.ok((await ui.evaluate("document.querySelector('.task-status .hint').textContent")).startsWith('2 files changed'))
+  assert.equal(await ui.evaluate("document.querySelector('.task-where').textContent"), ' · Codex · api-server', 'the agent and the folder beside its name')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-request .hint')"), false, 'no folder line under the command')
   assert.ok((await ui.evaluate("document.querySelector('.task-reply input').placeholder")) === 'Reply, or hold F9 and talk')
   assert.deepEqual(await texts(ui, '.task-log .task-you'), ['Add a status column to the orders table.'])
   await ui.capture('tasks-request')
@@ -115,9 +121,8 @@ async function checkTasks(T, agent) {
   await ui.wait("!document.querySelector('.task-request')")
   assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args), [['codex:t1', 'r1', 'allow-once']])
   assert.ok((await texts(ui, '.task-note')).includes('You allowed it.'), 'the answer is written down')
-  assert.equal(await ui.evaluate("document.querySelector('.task-state').textContent"), 'Working')
-  await ui.wait("[...document.querySelectorAll('.task-group')].find(group=>group.querySelector('h3').textContent==='Waiting for you').querySelectorAll('.task-row').length===1")
-  assert.deepEqual(await groupTitles(ui, 'Working'), ['Rebuild the pricing page', 'Write the release notes', 'Add the status column'], 'an answered task moves from waiting to working')
+  assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Working')
+  await ui.wait("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Add the status column'))?.dataset.state==='working'")
 
   // Always, where the agent offers it: what it reaches is on the button.
   await ui.evaluate("window.togleUITest.askOutside('codex:t1', { id: 'r9', kind: 'command', command: 'npm run seed', raw: 'npm run seed', folder: 'C:\\\\work\\\\api-server', offersAlways: true, always: 'Always allow commands that start with npm run' })")
@@ -147,16 +152,9 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await texts(ui, '.task-actions button'), ['Stop'])
   await ui.capture('tasks-working')
   await ui.click('.task-actions button', 'Stop')
-  await ui.wait("document.querySelector('.task-state')?.textContent==='Stopped'")
+  await ui.wait("document.querySelector('.state-chip')?.textContent==='Stopped'")
   assert.deepEqual((await ui.calls('stopRunnerTask')).map(call => call.args), [['claude:s2']])
-  assert.deepEqual(await texts(ui, '.task-actions button'), ['Let go'], 'a stopped Claude Code task has no second press')
-  await ui.click('.task-actions button', 'Let go')
-  await ui.wait("document.querySelector('.task-banner')")
-  assert.deepEqual((await ui.calls('closeRunnerTask')).map(call => call.args), [['claude:s2']])
-  assert.ok((await texts(ui, '.task-banner'))[0].includes('Togle is not running this task'))
-  await ui.click('.task-banner button', 'Continue here')
-  await ui.wait("!document.querySelector('.task-banner')")
-  assert.deepEqual((await ui.calls('openRunnerTask')).map(call => call.args), [['claude:s2']])
+  assert.deepEqual(await texts(ui, '.task-actions button'), [], 'a stopped Claude Code task has no second press')
 
   // A reply goes to the task.
   await ui.fill('.task-reply input', 'Use three plans instead')
@@ -165,22 +163,24 @@ async function checkTasks(T, agent) {
   assert.deepEqual((await ui.calls('sendToRunnerTask')).map(call => call.args), [['claude:s2', 'Use three plans instead']])
   assert.equal(await ui.evaluate("document.querySelector('.task-reply input').value"), '', 'the box is empty after sending')
 
-  // A task in a terminal can be seen and, after a warning, taken over.
+  // A task in a terminal can be seen and, after a warning, taken over: from the task, or from its row.
   await ui.task('Write the release notes')
   await ui.wait("!!document.querySelector('.task-banner')")
   assert.equal(await ui.evaluate("!!document.querySelector('.task-reply')"), false, 'what Togle does not run cannot be replied to')
+  assert.ok((await texts(ui, '.task-banner'))[0].startsWith('It runs in a terminal. Take over moves it into Togle'))
   await ui.click('.task-banner button', 'Take over')
   assert.ok((await texts(ui, '.task-banner'))[0].includes('This ends the Claude Code running in its terminal'))
   assert.equal((await ui.calls('takeOverRunnerTask')).length, 0, 'nothing is ended before the second click')
   await ui.click('.task-banner button', 'Cancel')
-  await ui.click('.task-banner button', 'Take over')
+  await ui.click('.task-row-action', 'Take over')
+  await ui.wait("(document.querySelector('.task-banner')?.textContent ?? '').includes('This ends the Claude Code')")
   await ui.click('.task-banner button', 'End it and take over')
   await ui.wait("!document.querySelector('.task-banner')")
   assert.deepEqual((await ui.calls('takeOverRunnerTask')).map(call => call.args), [['claude:s4']])
 
   // Codex: Stop ends the turn and leaves the command, and the second press ends it.
   await ui.task('Add the status column')
-  await ui.wait("!!document.querySelector('.task-actions .stop')")
+  await ui.wait("[...document.querySelectorAll('.task-actions button')].some(b=>b.textContent==='Stop')")
   await ui.click('.task-actions button', 'Stop')
   await ui.wait("[...document.querySelectorAll('.task-actions button')].some(b=>b.textContent==='End the running command')")
   await ui.click('.task-actions button', 'End the running command')
@@ -208,10 +208,10 @@ async function checkTodo(T, agent) {
   // What waits for the person is on top, a command in full before it can be allowed, and one that looks dangerous only in the window.
   assert.deepEqual(await texts(ui, '.todo-group > h3'), ['Waiting for you', 'To do', 'From your calls'])
   assert.deepEqual(await texts(ui, '.todo-row.need b'), ['Add the status column', 'Clean the build folder'])
-  assert.equal((await texts(ui, '.todo-row.need small'))[0], 'Codex · api-server · wants to run')
-  assert.deepEqual(await texts(ui, '.todo-row.need .todo-command'), ['npm run migrate', 'rm -rf build'])
-  assert.deepEqual(await texts(ui, '.todo-row.need:nth-child(1) button'), ['Allow once', 'Refuse', 'Open'])
-  assert.deepEqual(await texts(ui, '.todo-row.need:nth-child(2) button'), ['Refuse', 'Open'], 'a command that looks dangerous is not allowed from a row')
+  assert.equal((await texts(ui, '.todo-row.need small'))[0], 'Codex · api-server · wants to run npm run migrate', 'the command in the row\'s one line, as the design has it')
+  assert.deepEqual(await texts(ui, '.todo-row.need .todo-line code'), ['npm run migrate', 'rm -rf build'])
+  assert.deepEqual(await texts(ui, '.todo-row.need:nth-child(1) button'), ['Allow once', 'Refuse'])
+  assert.deepEqual(await texts(ui, '.todo-row.need:nth-child(2) button'), ['Open'], 'a command that looks dangerous opens in Agents, where all of it shows')
   assert.equal(await ui.evaluate("document.querySelector('.todo-row.need:nth-child(2) .task-danger').textContent"), 'Dangerous')
   await ui.capture('todo-list')
 
@@ -221,15 +221,19 @@ async function checkTodo(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.todo-item.done .todo-text').textContent"), 'Send the invoice to Marta')
   assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.todo-item.done .todo-text')).textDecorationLine"), 'line-through')
   assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['Give to an agent', 'See changes'], 'only an item with no agent can be given, and only one whose agent is done has changes to see')
-  assert.ok((await texts(ui, '.todo-file'))[0].startsWith('Your list is a plain text file on this computer.'))
+  assert.equal(await ui.evaluate("!!document.querySelector('.todo-remove, .todo-file')"), false, 'no delete button on a row and no line about the file: the design has neither')
 
   // Allow once and Refuse go to the task.
   await ui.click('.todo-row.need button', 'Allow once')
   assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args), [['codex:t1', 'r1', 'allow-once']])
   await ui.wait("document.querySelectorAll('.todo-row.need').length===1")
-  await ui.click('.todo-row.need button', 'Refuse')
+  // The dangerous one opens in Agents, and is refused there.
+  await ui.click('.todo-row.need button', 'Open')
+  await ui.wait("!!document.querySelector('.task-request.danger')")
+  await ui.click('.task-request button', 'Refuse')
   assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args[2]), ['allow-once', 'refuse'])
-  await ui.wait("!document.querySelector('.todo-row.need')")
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.wait("!!document.querySelector('.todo') && !document.querySelector('.todo-row.need')")
   assert.deepEqual(await texts(ui, '.todo-group > h3'), ['To do', 'From your calls'], 'nothing waits, so that part is not there')
 
   // Add, tick, change, delete.
@@ -250,7 +254,11 @@ async function checkTodo(T, agent) {
   await ui.evaluate("document.querySelector('.todo-edit').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))")
   await ui.wait("!!document.querySelector('.todo-text') && [...document.querySelectorAll('.todo-text')].some(e=>e.textContent==='Call the bank about the card')")
   assert.deepEqual((await ui.calls('editTodo')).map(call => call.args), [[{ line: 4, text: 'Call the bank' }, 'Call the bank about the card']])
-  await ui.click('.todo-remove', 'Delete: Call the bank about the card')
+  // Its words cleared, an item goes: a row has no delete button.
+  await ui.click('.todo-text', 'Call the bank about the card')
+  await ui.wait("!!document.querySelector('.todo-edit')")
+  await ui.fill('.todo-edit', '')
+  await ui.evaluate("document.querySelector('.todo-edit').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))")
   await ui.wait("document.querySelectorAll('.todo-item').length===4")
   assert.deepEqual((await ui.calls('removeTodo')).map(call => call.args), [[{ line: 4, text: 'Call the bank about the card' }]])
 
@@ -267,14 +275,12 @@ async function checkTodo(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.todo-item:nth-child(1) .todo-chip').textContent"), 'Claude Code · working')
   assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['See changes'], 'an item with an agent cannot be given again')
 
-  // A chip opens the task, and Show the file shows the file.
+  // A chip opens the task.
   await ui.click('.todo-item:nth-child(2) .todo-chip', 'Claude Code · working')
   await ui.wait("!!document.querySelector('.tasks')")
-  assert.equal(await ui.evaluate("document.querySelector('.task-title h2')?.textContent"), 'Rebuild the pricing page', 'the Tasks screen opens on that task')
+  assert.equal(await ui.evaluate("document.querySelector('.task-title h2')?.firstChild?.textContent"), 'Rebuild the pricing page', 'the Tasks screen opens on that task')
   await ui.click('.workspace-nav button', 'To-do')
   await ui.wait("!!document.querySelector('.todo')")
-  await ui.click('.todo-file button', 'Show the file')
-  assert.equal((await ui.calls('showTodoFile')).length, 1)
 
   // An item that was changed under the person's hands says so, and the list is shown again as it is.
   await ui.evaluate("window.togle.removeTodo({line:3,text:'Send the invoice to Marta'}).then(()=>window.togleUITest.emit('onTodoChanged'))")
@@ -289,15 +295,17 @@ async function checkTodo(T, agent) {
 
   // What calls left for today: names to confirm, notes that are ready, and the to-dos in them that are the person's.
   const offered = '.todo-group[aria-label="From your calls"] .todo-row'
-  assert.deepEqual(await texts(ui, offered + ' b'), ['Sprint review', 'Planning sync', 'Send the API timeline to Dario.', 'Book the staging review.'])
-  assert.deepEqual(await texts(ui, offered + ' small'), ['Notes are ready · 2 names to confirm', 'Notes are ready', 'From Planning sync', 'From Planning sync'])
+  assert.deepEqual(await texts(ui, offered + ' b'), ['Sprint review', 'Planning sync'])
+  assert.deepEqual(await texts(ui, offered + ' .todo-offer'), ['Send the API timeline to Dario', 'Book the staging review'], 'what a call left is one plain line')
+  assert.deepEqual(await texts(ui, offered + ' small'), ['Notes are ready · 2 names to confirm', 'Notes are ready'])
+  assert.equal(await ui.evaluate("document.querySelectorAll('.todo-group[aria-label=\"From your calls\"] .todo-dot.done').length"), 2, 'each call has its dot')
   assert.deepEqual(await texts(ui, offered + ' button'), ['Confirm names', 'Open', 'Add', 'Add'])
   await ui.capture('todo-from-calls')
   await ui.click(offered + ' button', 'Add')
   await ui.wait("document.querySelectorAll('.todo-group[aria-label=\"From your calls\"] .todo-row').length===3")
-  assert.equal((await ui.calls('addTodo')).at(-1).args[0], 'Send the API timeline to Dario.')
-  assert.ok((await texts(ui, '.todo-item .todo-text')).includes('Send the API timeline to Dario.'), 'it is on the list now')
-  assert.deepEqual(await texts(ui, offered + ' b'), ['Sprint review', 'Planning sync', 'Book the staging review.'], 'and is not offered again')
+  assert.equal((await ui.calls('addTodo')).at(-1).args[0], 'Send the API timeline to Dario')
+  assert.ok((await texts(ui, '.todo-item .todo-text')).includes('Send the API timeline to Dario'), 'it is on the list now')
+  assert.deepEqual(await texts(ui, offered + ' .todo-offer'), ['Book the staging review'], 'and is not offered again')
   await ui.click(offered + ' button', 'Confirm names')
   await ui.wait("!!document.querySelector('.meetings')")
   assert.equal(await ui.evaluate("document.querySelector('.workspace-nav button[aria-current=page]')?.getAttribute('aria-label')"), 'Meetings', 'Confirm names opens the call in Meetings')
@@ -308,12 +316,12 @@ async function checkTodo(T, agent) {
 async function checkChanges(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.workspace-nav button', 'Agents')
-  await ui.wait("document.querySelectorAll('.task-row').length===6")
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
 
   // From a task: the files, and what changed in the one that is picked.
   await ui.task('Rebuild the pricing page')
-  await ui.wait("!!document.querySelector('.task-title .link')")
-  await ui.click('.task-title .link', 'See changes')
+  await ui.wait("!!document.querySelector('.task-status .link')")
+  await ui.click('.task-status .link', 'See changes')
   await ui.wait("!!document.querySelector('.changes-file')")
   assert.deepEqual((await ui.calls('runnerChanges')).map(call => call.args), [['claude:s2']])
   assert.equal(await ui.evaluate("document.querySelector('.changes .task-title h2').textContent"), 'Changes in website')
@@ -330,11 +338,11 @@ async function checkChanges(T, agent) {
   assert.equal(await ui.evaluate("document.querySelectorAll('.changes-diff .diff-line.add').length"), 2, 'the new file is all added, and its +++ line is not one of the added lines')
   await ui.click('.changes .tasks-back-to-task', 'Back to the task')
   await ui.wait("!!document.querySelector('.task-panel')")
-  assert.equal(await ui.evaluate("document.querySelector('.task-title h2').textContent"), 'Rebuild the pricing page')
+  assert.equal(await ui.evaluate("document.querySelector('.task-title h2').firstChild.textContent"), 'Rebuild the pricing page')
 
   // A folder that is not in a repository says so.
   await ui.task('Write the release notes')
-  await ui.click('.task-title .link', 'See changes')
+  await ui.click('.task-status .link', 'See changes')
   await ui.wait("!!document.querySelector('.changes-problem')")
   assert.equal((await texts(ui, '.changes-problem'))[0], 'This folder is not in a git repository, so Togle cannot tell what changed.')
   assert.equal(await ui.evaluate("!!document.querySelector('.changes-file')"), false)
@@ -350,97 +358,39 @@ async function checkChanges(T, agent) {
   ui.window.destroy()
 }
 
-async function checkOutside(T, agent) {
-  const ui = await open(T, agent, 1024)
-  await ui.click('.workspace-nav button', 'Agents')
-  await ui.wait("document.querySelectorAll('.task-row').length===6")
-
-  // Claude Code in a terminal: asking Togle is off until the person connects it, with the file it changes named.
-  await ui.wait("!!document.querySelector('.tasks-connect')")
-  assert.ok((await texts(ui, '.tasks-connect p'))[0].startsWith('Answer from here.'))
-  assert.deepEqual(await texts(ui, '.tasks-connect button'), ['Connect Claude Code'])
-  assert.equal(await ui.evaluate("document.querySelector('.tasks-connect details code').textContent"), 'C:\\Users\\demo\\.claude\\settings.json', 'the file it changes is named')
-  assert.ok((await texts(ui, '.tasks-connect details p'))[0].includes('Turn off takes the entry out again.'))
-  await ui.capture('tasks-connect')
-  await ui.evaluate("window.togleUITest.failNextConnect()")
-  await ui.click('.tasks-connect button', 'Connect Claude Code')
-  await ui.wait("!!document.querySelector('.tasks-connect .error')")
-  assert.equal((await texts(ui, '.tasks-connect .error'))[0], "Claude Code's settings file is not valid JSON, so Togle left it alone.")
-  assert.deepEqual(await texts(ui, '.tasks-connect button'), ['Connect Claude Code'], 'still not connected, and it can be tried again')
-  await ui.click('.tasks-connect button', 'Connect Claude Code')
-  await ui.wait("!document.querySelector('.tasks-connect .error') && document.querySelector('.tasks-connect strong')?.textContent==='Connected.'")
-  assert.equal((await ui.calls('connectClaudeHook')).length, 2)
-  assert.deepEqual(await texts(ui, '.tasks-connect button'), ['Turn off'])
-  await ui.click('.tasks-connect button', 'Turn off')
-  await ui.wait("document.querySelector('.tasks-connect strong')?.textContent==='Answer from here.'")
-  assert.equal((await ui.calls('disconnectClaudeHook')).length, 1)
-  // Togle moved since: connect again. An old Claude Code cannot run the hook, and says so.
-  const leaveAndReturn = async () => {
-    await ui.click('.workspace-nav button', 'To-do')
-    await ui.wait("!!document.querySelector('.todo')")
-    await ui.click('.workspace-nav button', 'Agents')
-    await ui.wait("!!document.querySelector('.tasks-connect')")
-  }
-  await ui.evaluate("window.togleUITest.hook({ installed: true, current: false })")
-  await leaveAndReturn()
-  await ui.wait("document.querySelector('.tasks-connect strong')?.textContent==='Togle has moved since this was set up.'")
-  assert.deepEqual(await texts(ui, '.tasks-connect button'), ['Connect again'])
-  await ui.evaluate("window.togleUITest.hook({ installed: false, current: false, supported: false, version: '2.0.30 (Claude Code)' })")
-  await leaveAndReturn()
-  assert.equal((await texts(ui, '.tasks-connect'))[0], 'Claude Code 2.0.30 is older than 2.1.139, so Togle cannot answer its terminal sessions. Update Claude Code to use this.')
-  assert.deepEqual(await texts(ui, '.tasks-connect button'), [])
-  assert.deepEqual(ui.errors, [], 'no errors in the console')
-  ui.window.destroy()
+/** Picks a choice from one of the task box's chips: the chip opens its menu, and the choice is clicked by its words. */
+const pickFrom = async (ui, chip, label) => {
+  await ui.click('.pick-chip', chip)
+  await ui.wait("[...document.querySelectorAll('.menu [role^=menuitem] .label')].some(e=>e.textContent.trim()===" + JSON.stringify(label) + ")")
+  await ui.evaluate("[...document.querySelectorAll('.menu [role^=menuitem]')].find(e=>e.querySelector('.label').textContent.trim()===" + JSON.stringify(label) + ").click()")
+  await ui.paint()
 }
-
-async function checkOutsideAsk(T, agent) {
-  const ui = await open(T, agent, 1024)
-  await ui.click('.workspace-nav button', 'Agents')
-  await ui.wait("document.querySelectorAll('.task-row').length===6")
-  // A session in a terminal asks about a command: it waits, and can be answered here as well as there.
-  await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'ext-1', kind: 'command', command: 'npm run build', raw: 'npm run build', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
-  await ui.wait("document.querySelector('.task-row[data-state=waiting] strong')")
-  await ui.task('Write the release notes')
-  await ui.wait("!!document.querySelector('.task-request')")
-  assert.equal(await ui.evaluate("document.querySelector('.task-request .task-command').textContent"), 'npm run build')
-  assert.deepEqual(await texts(ui, '.task-request button'), ['Allow once', 'Refuse'])
-  assert.equal((await texts(ui, '.task-banner'))[0].startsWith('It runs in its own window and asks there too. Answer here or there: the first answer counts.'), true)
-  await ui.capture('tasks-outside')
-  await ui.click('.task-request button', 'Allow once')
-  assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args), [['claude:s4', 'ext-1', 'allow-once']])
-  await ui.wait("!document.querySelector('.task-request')")
-  // The same question on the to-do list: the command in full, and the buttons.
-  await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'ext-2', kind: 'command', command: 'git status', raw: 'git status', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
-  await ui.click('.workspace-nav button', 'To-do')
-  await ui.wait("[...document.querySelectorAll('.todo-row.need b')].some(b=>b.textContent==='Write the release notes')")
-  const row = "[...document.querySelectorAll('.todo-row.need')].find(r=>r.querySelector('b').textContent==='Write the release notes')"
-  assert.equal(await ui.evaluate(row + ".querySelector('.todo-command').textContent"), 'git status')
-  assert.deepEqual(await ui.evaluate("[..." + row + ".querySelectorAll('button')].map(b=>b.textContent)"), ['Allow once', 'Refuse', 'Open'])
-  await ui.evaluate(row + ".querySelectorAll('button')[1].click()")
-  assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args[2]), ['allow-once', 'refuse'])
-  assert.deepEqual(ui.errors, [], 'no errors in the console')
-  ui.window.destroy()
-}
+const menuLabels = (ui) => ui.evaluate("[...document.querySelectorAll('.menu [role^=menuitem] .label')].map(e=>e.textContent.trim())")
 
 async function checkTaskBox(T, agent) {
   const ui = await open(T, agent, 600, 'taskbox')
-  await ui.wait("document.querySelectorAll('.taskbox-agents button').length===2")
-  assert.deepEqual(await texts(ui, '.taskbox-agents button'), ['Claude Code', 'Codex'], 'only the agents that are installed')
-  assert.equal(await ui.evaluate("document.querySelector('.taskbox-agents button').getAttribute('aria-checked')"), 'true', 'the first is picked')
-  await ui.wait("document.querySelectorAll('.taskbox-folder option').length===4")
-  assert.deepEqual(await texts(ui, '.taskbox-folder option'), ['api-server', 'website', 'notes', 'mobile-app'], 'the folders tasks were in lately')
-  assert.equal(await ui.evaluate("document.querySelector('.taskbox-folder select').value"), 'C:\\work\\api-server')
-  assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').placeholder"), 'Say what to do. Hold F9 to say it, then press Enter.')
-  assert.equal(await ui.evaluate("document.querySelector('.taskbox-foot .primary').disabled"), true, 'nothing to start yet')
-  assert.ok((await texts(ui, '.taskbox-foot span'))[0].startsWith('It asks before every command and every change.'))
+  // As the design draws it: the agent and the folder as two chips, then the words with Start beside them.
+  await ui.wait("document.querySelectorAll('.pick-chip').length===2 && document.querySelectorAll('.pick-chip')[1].textContent==='api-server'")
+  assert.deepEqual(await texts(ui, '.pick-chip'), ['Claude Code', 'api-server'], 'the first agent, and the folder used last')
+  await ui.click('.pick-chip', 'Agent')
+  await ui.wait("document.querySelectorAll('.menu [role^=menuitem]').length===2")
+  assert.deepEqual(await menuLabels(ui), ['Claude Code', 'Codex'], 'only the agents that are installed')
+  await ui.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+  await ui.click('.pick-chip', 'Folder')
+  await ui.wait("document.querySelectorAll('.menu [role^=menuitem]').length===5")
+  assert.deepEqual(await menuLabels(ui), ['api-server', 'website', 'notes', 'mobile-app', 'Choose…'], 'the folders tasks were in lately, and another')
+  await ui.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').placeholder"), 'Say what to do, or hold F9 and say it')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox-field .primary').disabled"), true, 'nothing to start yet')
+  assert.equal(await ui.evaluate("!!document.querySelector('.taskbox-foot')"), false, 'no line of instructions under the box')
   await ui.capture('task-box')
 
   // Another agent, another folder, the words: Enter starts it and puts the box away. Shift+Enter is a new line.
-  await ui.click('.taskbox-agents button', 'Codex')
-  await ui.click('.taskbox-folder button', 'Choose…')
-  await ui.wait("document.querySelector('.taskbox-folder select').value==='C:\\\\work\\\\chosen-for-box'")
+  await pickFrom(ui, 'Agent', 'Codex')
+  await pickFrom(ui, 'Folder', 'Choose…')
+  await ui.wait("document.querySelectorAll('.pick-chip')[1].textContent==='chosen-for-box'")
   assert.equal((await ui.calls('pickTaskBoxFolder')).length, 1)
-  assert.ok((await texts(ui, '.taskbox-folder option')).includes('chosen-for-box'))
+  assert.deepEqual(await texts(ui, '.pick-chip'), ['Codex', 'chosen-for-box'])
   await ui.fill('.taskbox textarea', 'Add a dark mode switch')
   await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',shiftKey:true,bubbles:true,cancelable:true}))")
   assert.equal((await ui.calls('startRunnerTask')).length, 0, 'Shift+Enter does not start')
@@ -460,17 +410,15 @@ async function checkTaskBox(T, agent) {
   await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))")
   assert.equal((await ui.calls('closeTaskBox')).length, 2)
   await ui.window.webContents.reload()
-  await ui.wait("document.querySelectorAll('.taskbox-agents button').length===2")
-  assert.equal(await ui.evaluate("document.querySelector('.taskbox-agents button[aria-checked=true]').textContent"), 'Codex', 'the agent used last')
-  assert.equal(await ui.evaluate("document.querySelector('.taskbox-folder select').value"), 'C:\\work\\chosen-for-box', 'and the folder')
+  await ui.wait("document.querySelectorAll('.pick-chip').length===2 && document.querySelectorAll('.pick-chip')[1].textContent==='chosen-for-box'")
+  assert.deepEqual(await texts(ui, '.pick-chip'), ['Codex', 'chosen-for-box'], 'the agent and the folder used last')
 
   // Opened from a to-do item: its words, a chip naming the item, and the task started for it carries the item.
   await ui.evaluate("window.togleUITest.emit('onTaskBoxShown',{prompt:'Review the onboarding copy',todo:{line:0,text:'Review the onboarding copy'},runner:'claude',folder:'C:\\\\work\\\\website'})")
   await ui.wait("!!document.querySelector('.taskbox-todo')")
   assert.equal((await texts(ui, '.taskbox-todo span'))[0], 'To-do: Review the onboarding copy')
   assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').value"), 'Review the onboarding copy')
-  assert.equal(await ui.evaluate("document.querySelector('.taskbox-agents button[aria-checked=true]').textContent"), 'Claude Code', 'the agent it was opened with')
-  assert.equal(await ui.evaluate("document.querySelector('.taskbox-folder select').value"), 'C:\\work\\website', 'and the folder')
+  assert.deepEqual(await texts(ui, '.pick-chip'), ['Claude Code', 'website'], 'the agent and the folder it was opened with')
   await ui.capture('task-box-todo')
   await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
   await ui.wait("document.querySelector('.taskbox textarea').value===''")
@@ -520,7 +468,10 @@ async function checkAgentSettings(T, agent) {
   await ui.click('.shell-settings', 'Settings')
   // The agents Togle found, as the design's Settings lists them.
   await ui.wait("document.querySelectorAll('#settings-agents .setting').length===4")
-  assert.deepEqual(await texts(ui, '#settings-agents .setting .name'), ['Claude Code', 'Codex', 'Hermes', 'Add an agent'])
+  assert.deepEqual(await texts(ui, '#settings-agents .agent-label'), ['Claude Code', 'Codex', 'Hermes'])
+  assert.deepEqual(await texts(ui, '#settings-agents .agent-name .av'), ['C', 'X', 'H'], 'each agent with its letter, as the design marks them')
+  assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add an agent'])
+  assert.equal(await ui.evaluate("!!document.querySelector('.settings .card-note, .settings .setting > .note')"), false, 'no notes under the rows: everything fits on one screen')
   assert.deepEqual(await texts(ui, '#settings-agents .setting-value'), ['Found', 'Found', 'Not found'])
   // The task box's key is with the other key, as Task.
   assert.deepEqual(await texts(ui, '#settings-keys .shortcut-what'), ['Talk', 'Show', 'Task'])
@@ -616,12 +567,13 @@ async function checkNotice(T, agent) {
   await emit(waiting({ others: 2 }))
   await ui.wait("!!document.querySelector('.task-notice')")
   assert.equal(await ui.evaluate("document.querySelector('.task-notice-head strong').textContent"), 'Add the status column')
-  assert.equal((await texts(ui, '.task-notice-says'))[0], 'Codex · api-server wants to run')
-  assert.equal(await ui.evaluate("document.querySelector('.task-notice-detail').textContent"), 'npm run migrate')
+  assert.equal((await texts(ui, '.task-notice-says'))[0], 'Codex · api-server wants to run npm run migrate')
+  assert.equal(await ui.evaluate("document.querySelector('.task-notice-says code').textContent"), 'npm run migrate')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-notice-head button')"), false, 'no close button: the notice goes when it is answered, or opened')
   assert.deepEqual(await buttons(), ['Allow once', 'Refuse', 'Open'])
   assert.equal(await disabled('Allow once'), true, 'a click meant for what was under the notice cannot allow a command')
   assert.equal(await disabled('Refuse'), false)
-  assert.equal((await texts(ui, '.task-notice-more'))[0], '2 other tasks wait')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-notice-more')"), false, 'one notice, about one task')
   assert.equal(await ui.evaluate("document.querySelector('.task-notice').dataset.kind"), 'waiting')
   await ui.capture('tasks-notice')
   await ui.wait("document.querySelector('.task-notice-actions .primary').disabled===false")
@@ -636,20 +588,18 @@ async function checkNotice(T, agent) {
 
   // A command that looks dangerous, or does not fit, is allowed in the window and nowhere else.
   await emit(waiting({ id: 'claude:s1#r3', key: 'claude:s1', requestId: 'r3', detail: 'rm -rf build', danger: 'It deletes files or folders for good.', canAllow: false }))
-  await ui.wait("!!document.querySelector('.task-notice-danger')")
+  await ui.wait("!!document.querySelector('.task-notice-head .task-danger')")
   assert.deepEqual(await buttons(), ['Refuse', 'Open'])
-  assert.equal(await ui.evaluate("document.querySelector('.task-notice-danger .task-danger').textContent"), 'Dangerous')
-  assert.ok((await texts(ui, '.task-notice-danger'))[0].includes('It deletes files or folders for good.'))
-  assert.ok((await texts(ui, '.task-notice-note'))[0].includes('allowed in the Togle window'))
+  assert.equal(await ui.evaluate("document.querySelector('.task-notice-head .task-danger').textContent"), 'Dangerous')
+  assert.equal(await ui.evaluate("document.querySelector('.task-notice-head .task-danger').title"), 'It deletes files or folders for good.')
   await ui.capture('tasks-notice-danger')
   await emit(waiting({ id: 'claude:s1#r4', key: 'claude:s1', requestId: 'r4', detail: 'npm run build -- --flag --flag…', canAllow: false }))
-  await ui.wait("!document.querySelector('.task-notice-danger')")
+  await ui.wait("!document.querySelector('.task-notice-head .task-danger')")
   assert.deepEqual(await buttons(), ['Refuse', 'Open'])
-  assert.ok((await texts(ui, '.task-notice-note'))[0].startsWith('Not all of it fits here'))
 
   // A question can only be answered in the window.
   await emit(waiting({ id: 'claude:s1#r5', key: 'claude:s1', requestId: 'r5', says: 'asks', detail: 'Which pricing table?', detailKind: 'question', canRefuse: false, canAllow: false }))
-  await ui.wait("document.querySelector('.task-notice-detail')?.textContent==='Which pricing table?'")
+  await ui.wait("(document.querySelector('.task-notice-says')?.textContent ?? '').endsWith('asks Which pricing table?')")
   assert.deepEqual(await buttons(), ['Open'])
   assert.equal((await ui.calls('answerRunnerTask')).length, 2, 'nothing was answered by showing it')
   await ui.click('.task-notice-actions button', 'Open')
@@ -660,9 +610,8 @@ async function checkNotice(T, agent) {
   await ui.wait("document.querySelector('.task-notice')?.dataset.kind==='done'")
   assert.deepEqual(await buttons(), ['Open'])
   assert.equal((await texts(ui, '.task-notice-says'))[0], 'Codex · api-server finished')
+  assert.equal(await ui.evaluate("document.querySelector('.task-notice-detail').textContent"), 'Added the column and ran the tests.', 'what it said keeps a line of its own')
   await ui.capture('tasks-notice-done')
-  await ui.click('.task-notice-head button', 'Close notice')
-  assert.deepEqual((await ui.calls('dismissTaskNotice')).map(call => call.args), [['codex:t1#end1']])
 
   // A refused answer says why, and the buttons come back.
   await emit(waiting({ id: 'codex:gone#r1', key: 'codex:gone', title: 'Gone' }))
@@ -747,9 +696,10 @@ async function checkCallStrip(T, agent) {
   await ui.capture('call-strip')
   await ui.click('.call-strip-bar button', 'Mark')
   await emit({ since: Date.now() - 12 * 60_000, told: false, marks: 1 })
-  await ui.wait("document.querySelector('.call-strip-bar button').textContent==='Mark 1'")
+  // A new state for the call starts the strip over: it is drawn before the next click.
+  await ui.wait("/^12:0[0-9]$/.test(document.querySelector('.call-strip-clock').textContent)")
   await ui.click('.call-strip-bar button', 'Tell the others')
-  assert.deepEqual(await texts(ui, '.call-strip-bar button'), ['Mark 1', 'Stop', 'I told them'], 'after the line is copied, the button says they were told')
+  assert.deepEqual(await texts(ui, '.call-strip-bar button'), ['Mark', 'Stop', 'I told them'], 'after the line is copied, the button says they were told')
   await ui.click('.call-strip-bar button', 'I told them')
   await emit({ since: Date.now() - 12 * 60_000, told: true, marks: 1 })
   await ui.wait("document.querySelectorAll('.call-strip-bar button').length===2")
@@ -766,24 +716,22 @@ async function checkCallStrip(T, agent) {
 async function checkStoppedTasks(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.workspace-nav button', 'Agents')
-  await ui.wait("document.querySelectorAll('.task-row').length===6")
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
   await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','The plan limit is reached until 14:00.')")
   await ui.evaluate("window.togleUITest.stopTask('claude:s4','stopped','')")
-  const group = label => "[...document.querySelectorAll('.task-group')].find(g=>g.querySelector('h3').textContent.startsWith(" + JSON.stringify(label) + "))"
-  await ui.wait(group('Waiting for you') + "?.textContent.includes('Rebuild the pricing page')")
-  assert.deepEqual(await ui.evaluate("[..." + group('Waiting for you') + ".querySelectorAll('.task-row strong')].map(s=>s.textContent)"), ['Add the status column', 'Clean the build folder', 'Rebuild the pricing page'])
+  await ui.wait("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page'))?.dataset.needs==='you'")
+  assert.deepEqual((await texts(ui, '.task-list .task-copy strong')).slice(0, 3), ['Add the status column', 'Clean the build folder', 'Rebuild the pricing page'], 'what waits for you comes first')
   assert.ok((await ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page')).textContent")).includes('stopped by an error: The plan limit is reached until 14:00.'), 'it says why')
   assert.equal(await ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page')).dataset.needs"), 'you')
-  assert.ok(!(await ui.evaluate(group('Waiting for you') + ".textContent")).includes('Write the release notes'), 'a task in its own window that stopped is not Togle\'s to continue')
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Write the release notes')).dataset.needs"), undefined, 'a task in its own window that stopped is not Togle\'s to continue')
   await ui.capture('tasks-stopped')
   await ui.click('.workspace-nav button', 'To-do')
   await ui.wait("[...document.querySelectorAll('.todo-row.need b')].some(b=>b.textContent==='Rebuild the pricing page')")
   const row = "[...document.querySelectorAll('.todo-row.need')].find(r=>r.querySelector('b').textContent==='Rebuild the pricing page')"
-  assert.equal(await ui.evaluate(row + ".querySelector('small').textContent"), 'Claude Code · website · stopped by an error')
-  assert.equal(await ui.evaluate(row + ".querySelector('.todo-command').textContent"), 'The plan limit is reached until 14:00.')
+  assert.equal(await ui.evaluate(row + ".querySelector('small').textContent"), 'Claude Code · website · stopped by an error: The plan limit is reached until 14:00.')
   assert.deepEqual(await ui.evaluate("[..." + row + ".querySelectorAll('button')].map(b=>b.textContent)"), ['Reply'])
   await ui.evaluate(row + ".querySelector('button').click()")
-  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Rebuild the pricing page'")
+  await ui.wait("document.querySelector('.task-title h2')?.firstChild?.textContent==='Rebuild the pricing page'")
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -792,7 +740,7 @@ async function checkStoppedTasks(T, agent) {
 async function checkSignedOut(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.workspace-nav button', 'Agents')
-  await ui.wait("document.querySelectorAll('.task-row').length===6")
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
   await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','Claude Code is signed out.',{signedOut:true,fix:'claude auth login'})")
   const taskRow = "[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page'))"
   await ui.wait(taskRow + "?.textContent.includes('signed out')")
@@ -802,7 +750,7 @@ async function checkSignedOut(T, agent) {
   await ui.wait("!!document.querySelector('.task-banner.signed-out')")
   assert.equal(await ui.evaluate("document.querySelector('.task-banner.signed-out span').textContent"), 'Claude Code is signed out. Run claude auth login in a terminal, then reply here to go on.')
   assert.equal(await ui.evaluate("document.querySelector('.task-banner.signed-out code').textContent"), 'claude auth login')
-  assert.equal(await ui.evaluate("document.querySelector('.task-title .task-state').textContent"), 'Signed out')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent"), 'Signed out')
   // The computer's own clipboard is left alone: the page's is a stand-in here.
   await ui.evaluate("Object.defineProperty(navigator.clipboard,'writeText',{value:async text=>{window.__copied=text}})")
   await ui.click('.task-banner.signed-out button', 'Copy')
@@ -812,13 +760,13 @@ async function checkSignedOut(T, agent) {
   await ui.click('.workspace-nav button', 'To-do')
   const row = "[...document.querySelectorAll('.todo-row.need')].find(r=>r.querySelector('b').textContent==='Rebuild the pricing page')"
   await ui.wait("!!" + row)
-  assert.equal(await ui.evaluate(row + ".querySelector('small').textContent"), 'Claude Code · website · is signed out · sign in with')
-  assert.equal(await ui.evaluate(row + ".querySelector('.todo-command').textContent"), 'claude auth login')
+  assert.equal(await ui.evaluate(row + ".querySelector('small').textContent"), 'Claude Code · website · is signed out · sign in with claude auth login')
+  assert.equal(await ui.evaluate(row + ".querySelector('.todo-line code').textContent"), 'claude auth login')
   assert.deepEqual(await ui.evaluate("[..." + row + ".querySelectorAll('button')].map(b=>b.textContent)"), ['Reply'])
   assert.ok((await texts(ui, '.todo-chip')).includes('Claude Code · signed out'), 'the item given to it says so too')
   // An agent Togle does not know the command for: it says how without one.
   await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','Gemini is signed out.',{signedOut:true,fix:undefined})")
-  await ui.wait(row + "?.querySelector('.todo-command')?.textContent==='Sign it in, then reply.'")
+  await ui.wait(row + "?.querySelector('small')?.textContent==='Claude Code · website · is signed out. Sign it in, then reply.'")
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -828,7 +776,7 @@ async function checkSignedOut(T, agent) {
 async function checkTerminalTask(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.workspace-nav button', 'Agents')
-  await ui.wait("document.querySelectorAll('.task-row').length===6")
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
   // What it printed so far holds a question to the terminal (where is the cursor?), as agents ask when they start.
   await ui.evaluate("window.togleUITest.terminalTask({ key: 'term-aider:t1', runner: 'term-aider', agent: 'Aider', title: 'Rename the module', folder: 'C:\\\\work\\\\api-server', words: 'Rename the module and fix the imports' }, 'Aider v0.99\\x1b[6n\\r\\n> ')")
   await ui.task('Rename the module')
@@ -874,7 +822,7 @@ async function checkTerminalTask(T, agent) {
 async function checkNarrow(T, agent) {
   const ui = await open(T, agent, 600)
   await ui.click('.workspace-nav button', 'Agents')
-  await ui.wait("document.querySelectorAll('.task-row').length===6")
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
   const fits = () => ui.evaluate("document.documentElement.scrollWidth<=innerWidth&&document.querySelector('.tasks').scrollWidth<=document.querySelector('.tasks').clientWidth+1")
   assert.ok(await fits(), 'the list fits a narrow window')
   assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.tasks-detail')).display"), 'none', 'a narrow window shows the list first')
@@ -901,8 +849,6 @@ app.whenReady().then(async () => {
     await checkNotice(T, agent)
     await checkTodo(T, agent)
     await checkChanges(T, agent)
-    await checkOutside(T, agent)
-    await checkOutsideAsk(T, agent)
     await checkTaskBox(T, agent)
     await checkCallNotice(T, agent)
     await checkKeysNotice(T, agent)
@@ -912,7 +858,7 @@ app.whenReady().then(async () => {
     await checkTerminalTask(T, agent)
     await checkAgentSettings(T, agent)
     await checkReach(T, agent)
-    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, Claude Code in a terminal, the task box, a signed-out agent, a task in a terminal of its own, the offer to change keys, the agents in Settings and other devices’ tasks with Settings → Devices passed')
+    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, the task box, a signed-out agent, a task in a terminal of its own, the offer to change keys, the agents in Settings and other devices’ tasks with Settings → Devices passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

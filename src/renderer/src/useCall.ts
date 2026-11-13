@@ -16,6 +16,8 @@ export interface CallView {
   /** Whether the person told the others (when: 0 is not yet), and the moments they marked. */
   flags: { toldOthers: number; marks: number[] }
   inputs: CaptureInputs
+  /** How loud each side is now (read when asked, so it never redraws the call). */
+  levels(): Partial<Record<'me' | 'them', number>>
   /** The call's id: its saved record in Meetings. */
   callKey: string
   /** What the call is, when a calendar or a brief named it. */
@@ -141,12 +143,13 @@ export function useCall(settings: Settings | null): CallView {
   }, [])
 
   const toggle = useCallback(() => (capture.current ? stop() : start()), [start, stop])
+  const levels = useCallback(() => capture.current?.levels ?? {}, [])
   // A microphone or call sound that could not be opened is tried again, and the call goes on.
   const reconnect = useCallback(async () => { setWarning(''); await capture.current?.retryMissing() }, [])
 
   return {
     listening, starting, since, transcript, flags, inputs, callKey, title, noise, warning,
-    start, stop, toggle, reconnect,
+    levels, start, stop, toggle, reconnect,
     clearNoise: () => setNoise(null),
     clearWarning: () => setWarning('')
   }

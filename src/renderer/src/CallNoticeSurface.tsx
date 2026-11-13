@@ -25,11 +25,10 @@ export function CallNoticeSurface() {
   return (
     <div className="call-notice" role="alert" aria-label={`A call started in ${notice.name}`}>
       <strong>A call started in {notice.name}</strong>
-      <span>Write it down?</span>
       <div className="call-notice-buttons">
         <button className="primary" disabled={held} onClick={() => api.answerCallNotice('write')}>Write it down</button>
         <button disabled={held} onClick={() => api.answerCallNotice('later')}>Not now</button>
-        <button className="link" disabled={held} onClick={() => api.answerCallNotice('always')}>Always in {notice.name}</button>
+        <button className="call-notice-always" disabled={held} onClick={() => api.answerCallNotice('always')}>Always in {notice.name}</button>
       </div>
     </div>
   )

@@ -45,7 +45,6 @@
     "test:dictation:latency": "electron-vite build && rolldown -c eval/rolldown.config.mjs && node test/dictation-latency-launch.cjs",
     "test:notes:live": "electron-vite build && node test/meeting-notes-live-launch.cjs",
     "test:call-titles:live": "rolldown -c eval/rolldown.config.mjs && node test/call-titles-live-launch.cjs",
-    "test:claude-hook:live": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/claude-hook-live-launch.cjs",
     "test:voices:live": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/voices-launch.cjs",
     "test:voices:clips": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/voices-clips-launch.cjs",
     "test:voices:memory": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/voice-benchmark-launch.cjs --memory",

@@ -509,16 +509,25 @@ button.icon.close:hover {
 .history-search { width: 100%; margin: 10px 0 14px; }
 .call-history-list { display: flex; flex-direction: column; gap: 8px; }
 .past-call-row {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 10px;
   width: 100%;
-  padding: 12px;
+  padding: 11px 12px;
   text-align: left;
   background: var(--panel);
 }
-.past-call-row strong { font-size: 13px; }
-.past-call-row > span { color: var(--muted); font-size: 11px; }
+.past-call-row strong { grid-column: 2; font-size: 13px; }
+.past-call-row > span:not(.meeting-dot) { grid-column: 2; color: var(--muted); font-size: 11.5px; }
+/* A call's dot, as the design colors it: indigo while live, amber while something is left for you, green when done. */
+.meeting-dot { grid-row: 1 / span 2; width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+.meeting-dot.work { background: var(--accent); }
+.meeting-dot.wait { background: var(--them); }
+.meeting-dot.done { background: var(--ok); }
+/* Meetings opens on search and Write down now, side by side. */
+.meetings-top { display: flex; gap: 10px; align-items: center; margin: 4px 0 14px; }
+.meetings-top .history-search { flex: 1; min-width: 0; margin: 0; }
 .past-call-row .past-call-preview {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -580,10 +589,13 @@ details.knowledge-item { display: block; }
 .learning-change.undone { color: var(--faint); }
 .pending-call { display: flex; flex-direction: column; gap: 5px; width: 100%; margin: 10px 0; padding: 12px; text-align: left; }
 .pending-call span, .pending-badge { color: var(--them); font-size: 11px; }
-.call-record-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 13px 0 18px; }
+.call-detail-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 14px; }
+.call-detail-head h2 { flex: 1; min-width: 0; }
+.call-record-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.icon-menu > button { min-width: 30px; justify-content: center; }
 .call-record-actions button { padding: 4px 10px; font-size: 12px; }
 .call-record-actions > .menu-anchor > button { display: inline-flex; align-items: center; gap: 6px; }
-.call-detail-head h2 { margin: 10px 0 6px; font-size: 20px; line-height: 1.4; overflow-wrap: anywhere; }
+.call-detail-head h2 { margin: 0; font-size: 20px; line-height: 1.4; overflow-wrap: anywhere; }
 .call-breadcrumb > button { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
 .past-call-row.live-record { border-color: var(--accent); }
 .call-detail-tabs { margin: 14px 0; gap: 0; }
@@ -3067,12 +3079,20 @@ ul.pending-lessons > li > span:first-child { flex: 1 1 260px; min-width: 0; over
 .task-group > [role='list'] { display: grid; gap: 3px; }
 .task-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 9px; width: 100%; text-align: left; padding: 8px 9px; border-radius: 8px; background: transparent; border-color: transparent; }
 .task-row:hover:not(:disabled) { background: var(--panel-2); border-color: var(--border); }
-.task-row.selected { background: var(--panel-2); border-color: #3a4252; }
-.task-row[data-state='waiting'] { background: #2a2418; border-color: #5a4a22; }
-.task-row[data-state='waiting'].selected { border-color: var(--them); }
+.task-row.selected { background: var(--panel-2); border-color: var(--muted); }
+/* One list, as the design has it: rows stay plain, and the dot says how each stands. Amber waits for you, indigo works,
+   green is done. */
+.task-list { display: grid; gap: 3px; }
+.task-item { position: relative; }
+.task-row.with-action { padding-right: 96px; }
+.task-row-action { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); }
+.task-earlier { display: grid; gap: 3px; }
+.tasks-list button.task-earlier-toggle { justify-self: start; padding: 4px 9px; color: var(--muted); font-size: 12px; text-decoration: none; }
+.tasks-list button.task-earlier-toggle:hover { color: var(--text); }
 .task-dot { width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--faint); }
 .task-row[data-state='waiting'] .task-dot { background: var(--them); }
 .task-row[data-state='working'] .task-dot { background: var(--accent); }
+.task-row[data-state='idle'] .task-dot { background: var(--ok); }
 .task-row[data-state='failed'] .task-dot { background: var(--danger); }
 .task-copy { display: grid; gap: 1px; min-width: 0; }
 .task-copy strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3087,6 +3107,15 @@ ul.pending-lessons > li > span:first-child { flex: 1 1 260px; min-width: 0; over
 .tasks-back { display: none; }
 .task-title { flex: 1; min-width: 0; }
 .task-title h2 { margin: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-where { color: var(--muted); font-size: 13px; font-weight: 400; }
+.task-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.task-status .hint { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+.task-status .link { padding: 0; font-size: inherit; }
+.state-chip { padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--panel-2); color: var(--muted); }
+.state-chip[data-state='waiting'] { background: #2a2418; color: var(--them); }
+.state-chip[data-state='working'] { background: #1f2747; color: var(--accent); }
+.state-chip[data-state='idle'] { background: #17302a; color: var(--ok); }
+.state-chip[data-state='failed'] { background: #3a2026; color: var(--danger); }
 .task-title p { margin: 2px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .task-state[data-state='waiting'] { color: var(--them); }
 .task-state[data-state='working'] { color: var(--accent); }
@@ -3122,7 +3151,7 @@ ul.pending-lessons > li > span:first-child { flex: 1 1 260px; min-width: 0; over
 .task-note { font-size: 12px; color: var(--faint); overflow-wrap: anywhere; }
 .task-request { display: grid; gap: 8px; padding: 11px 12px; border: 1px solid #5a4a22; border-radius: 10px; background: #2a2418; }
 .task-request.danger { border-color: #7a3340; background: #2e1b20; }
-.task-request h3 { display: flex; align-items: center; margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--them); }
+.task-request h3 { display: flex; align-items: center; margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
 .task-request p { margin: 0; }
 .task-request .row { display: flex; gap: 8px; }
 .task-command { margin: 0; padding: 8px 10px; max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: 12px/1.5 ui-monospace, 'Cascadia Mono', Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -3169,15 +3198,16 @@ body.notice-surface { background: transparent; color: var(--text); overflow: hid
 .todo-group { display: grid; gap: 6px; }
 .todo-group > [role='list'] { display: grid; gap: 6px; }
 .todo-row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
-.todo-row.need { align-items: flex-start; border-color: #5a4a22; background: #2a2418; }
-.todo-dot { flex: none; width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: var(--them); }
+.todo-row.need { border-color: #5a4a22; background: #2a2418; }
+.todo-dot { flex: none; align-self: flex-start; width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--them); }
+.todo-dot.done { background: var(--ok); }
+/* What a task asks, in its one line: the command inside it, shown whole only when it fits (else the button is Open). */
+.todo-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-line code { padding: 1px 5px; border-radius: 4px; background: var(--bg); color: var(--text); font: 11.5px ui-monospace, 'Cascadia Mono', Consolas, monospace; }
+.todo-offer { font-size: 13px; overflow-wrap: anywhere; }
 .todo-grow { display: grid; flex: 1; gap: 3px; min-width: 0; }
 .todo-grow b { font-size: 13px; overflow-wrap: anywhere; }
 .todo-grow small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.todo-command { display: block; margin: 2px 0 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font: 12px/1.5 ui-monospace, 'Cascadia Mono', Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-.todo-command.question { font-family: inherit; }
-.todo-why { color: var(--danger); }
-.todo-why .task-danger { margin-left: 0; margin-right: 4px; }
 .todo-row.need > button { flex: none; }
 .todo-box { flex: none; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1.5px solid var(--faint); border-radius: 6px; background: transparent; color: var(--bg); }
 .todo-box[aria-checked='true'] { border-color: var(--ok); background: var(--ok); }
@@ -3191,9 +3221,6 @@ body.notice-surface { background: transparent; color: var(--text); overflow: hid
 .todo-chip.wait { color: var(--them); border-color: #5a4a22; }
 .todo-chip.done { color: var(--ok); border-color: #2f5a3d; }
 .todo-chip.fail { color: var(--danger); border-color: #5c2a33; }
-.todo-remove { flex: none; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--faint); }
-.todo-remove:hover { color: var(--danger); }
-.todo-file { margin: 4px 0 0; }
 
 /* What differs from the last commit in the folder a task works in. */
 .task-title p .link { padding: 0; font-size: inherit; }
@@ -3235,26 +3262,25 @@ body.notice-surface { background: transparent; color: var(--text); overflow: hid
 body.taskbox-surface { background: var(--panel); color: var(--text); overflow: hidden; }
 .taskbox-surface #root { padding: 0; }
 .taskbox { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; height: 100vh; border: 1px solid var(--border); background: var(--panel); }
-.taskbox-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.taskbox-agents { display: flex; gap: 6px; flex-wrap: wrap; }
-.taskbox-agents button { padding: 5px 11px; border-radius: 999px; font-size: 12px; }
-.taskbox-agents button.on { border-color: var(--accent); color: var(--accent); background: var(--panel-2); }
-.taskbox-folder { display: flex; gap: 6px; align-items: center; min-width: 0; }
-.taskbox-folder select { max-width: 190px; padding: 5px 8px; font-size: 12px; }
-.taskbox-folder button { padding: 5px 10px; font-size: 12px; }
-.taskbox textarea { width: 100%; flex: 1 1 auto; min-height: 0; resize: none; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font: inherit; font-size: 14px; }
-.taskbox textarea:focus { outline: none; border-color: var(--accent); }
-.taskbox-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; color: var(--faint); }
+/* The task box, as the design draws it: the agent and the folder as two chips, then one field with Start in it. */
+.taskbox-pick { display: flex; gap: 6px; flex-wrap: wrap; }
+.pick-chip { padding: 4px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); color: var(--text); font-size: 12px; font-weight: 600; }
+.taskbox-field { display: flex; flex: 1 1 auto; align-items: flex-end; gap: 8px; min-height: 0; padding: 8px 8px 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.taskbox-field:focus-within { border-color: var(--accent); }
+.taskbox textarea { flex: 1; align-self: stretch; min-width: 0; min-height: 0; resize: none; padding: 2px 0; border: 0; background: transparent; font: inherit; font-size: 14px; }
+.taskbox textarea:focus { outline: none; }
 .taskbox-error { margin: 0; font-size: 12px; color: var(--danger); }
 .taskbox-none { margin: 0; padding: 20px 4px; color: var(--muted); font-size: 13px; }
 .tasks-connect-compact { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* During a call: the line to tell the others, and the button that marks a moment. In a short window the line folds away
    (it is the button's copy, and the card's tooltip), so the call's own controls keep their room. */
-.tell-others { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 10px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--panel); font-size: 12px; }
-.tell-others strong { font-size: 12px; }
-.tell-others .tell-actions { display: flex; gap: 6px; margin-left: auto; }
-.tell-others .tell-line { flex: 1 0 100%; margin: 0; color: var(--text); font-size: 12px; line-height: 1.4; user-select: text; }
+/* Tell the others: amber, as everything that waits for you, until "I told them" is ticked. */
+.tell-others { display: flex; flex-direction: column; gap: 7px; padding: 9px 11px; border: 1px solid #5a4a22; border-radius: 10px; background: #2a2418; font-size: 12.5px; }
+.tell-others strong { font-size: 13px; }
+.tell-others .tell-line { margin: 0; color: var(--text); line-height: 1.4; user-select: text; }
+.tell-others .tell-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tell-others .tell-tick { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
 @media (max-height: 700px) { .tell-others .tell-line { display: none; } }
 .notice.first-call strong { color: inherit; }
 .strip-row.tools button.mark-moment { display: inline-flex; align-items: center; gap: 6px; }
@@ -3264,8 +3290,9 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .confirm-names { display: grid; gap: 10px; margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); font-size: 12px; }
 .confirm-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .confirm-head h4 { margin: 0; font-size: 13px; }
-.confirm-voice { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--border); }
-.confirm-voice:first-of-type { border-top: none; padding-top: 0; }
+.confirm-voice { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
+.confirm-voice.guess { border-color: #5a4a22; background: #2a2418; }
+.confirm-names .live-people.confirmed { margin: -2px 0 2px; }
 .confirm-voice-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .confirm-voice-head strong { margin-right: auto; font-size: 13px; }
 .confirm-voice.answered { opacity: 0.7; }
@@ -3292,8 +3319,7 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .call-strip-bar button { padding: 4px 11px; border-radius: 999px; font-size: 12px; }
 .call-strip-bar button.stop { color: var(--danger); }
 @keyframes strip-pulse { 50% { opacity: 0.35; } }
-/* A task Togle runs that stopped waits for a reply, amber like one that asks. */
-.task-row[data-needs='you'] { background: #2a2418; border-color: #5a4a22; }
+/* A task Togle runs that stopped waits for a reply: its dot is amber like one that asks. */
 .task-row[data-needs='you'] .task-dot { background: var(--them); }
 
 /* The window of the product design: three places and Settings on the left, the place on the right. */
@@ -3320,38 +3346,54 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .live-call { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
 .live-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .live-head h2 { margin: 0; font-size: 17px; }
-.live-clock { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.live-clock { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; background: #1f2747; color: var(--accent); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .live-head > .spacer { flex: 1; }
 .live-head button { padding: 5px 13px; font-size: 12px; }
-.live-head button.stop { color: var(--danger); }
-.live-sources { display: flex; gap: 8px; font-size: 12px; color: var(--muted); }
-.live-sources > span { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; }
-.live-sources .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
-.live-sources [data-state='on'] .dot { background: #3fb950; }
-.live-sources [data-state='starting'] .dot, .live-sources [data-state='paused'] .dot { background: var(--them); }
-.live-sources [data-state='off'] .dot { background: var(--danger); }
+/* The two meters, as the design draws them: who is heard, and how loud, in four bars. */
+.live-sources { display: flex; gap: 16px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.live-meter { display: inline-flex; align-items: center; gap: 6px; }
+.live-meter .bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 13px; }
+.live-meter .bars i { display: block; width: 3px; border-radius: 1px; background: var(--border); }
+.live-meter .bars i.on { background: var(--accent); }
+.live-meter[data-state='off'] { color: var(--danger); }
 .live-problem { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--danger); font-size: 12px; }
 .live-problem button { padding: 4px 11px; font-size: 12px; color: var(--text); }
 .live-people { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.person-chip { padding: 4px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text); font-size: 12px; }
-.person-chip.guess { border-style: dashed; color: var(--them); }
-.person-chip.you { color: var(--muted); }
+/* Who spoke: green once confirmed, dashed while a guess or without a name. */
+.person-chip { padding: 3px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text); font-size: 12px; font-weight: 600; }
+.person-chip.ok { border-color: #2f5a3d; background: #17302a; color: var(--ok); }
+.person-chip.guess, .person-chip.unnamed { border-style: dashed; border-color: var(--muted); background: transparent; color: var(--muted); }
 .person-chip.naming { display: inline-flex; gap: 6px; align-items: center; padding: 2px 4px 2px 8px; }
 .person-chip.naming input { width: 140px; padding: 3px 6px; font-size: 12px; }
 /* A long call has thousands of lines. As blocks, not flex items, they are laid out faster when the page opens on one;
    the ones out of sight are not laid out at all until they scroll into view. */
-.live-lines { flex: 1; min-height: 140px; overflow: auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
-.live-lines > * + * { margin-top: 9px; }
-.live-line { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: baseline; font-size: 13px; content-visibility: auto; contain-intrinsic-size: auto 44px; }
-.live-line .who { font-weight: 600; }
-.live-line.me .who { color: var(--muted); }
-.live-line time { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
-.live-line p { grid-column: 1 / -1; margin: 0; line-height: 1.45; }
+.live-lines { flex: 1; min-height: 140px; overflow: auto; padding: 2px 0; }
+.live-lines > * + * { margin-top: 3px; }
+/* One line said, as the design lays it out: who and when on the left, the words on the right; a marked one stands out. */
+.live-line { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 0 12px; align-items: start; padding: 5px 8px; border-radius: 8px; font-size: 13px; content-visibility: auto; contain-intrinsic-size: auto 44px; }
+.live-line .who { grid-column: 1; grid-row: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-line time { grid-column: 1; grid-row: 2; color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.live-line p { grid-column: 2; grid-row: 1 / span 2; margin: 0; line-height: 1.45; }
+.live-line.marked { background: #1f2747; }
 .live-line.partial { opacity: 0.6; }
-.marked-tag { margin-left: 8px; padding: 1px 6px; border-radius: 6px; background: var(--panel-2); color: var(--them); font-size: 10px; vertical-align: 1px; }
+.marked-tag { margin-left: 8px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 10.5px; font-weight: 600; vertical-align: 1px; }
 
 /* Settings on one screen, as the design has it: Keys, Voice, Meetings, Agents, Accounts. */
-.settings-one .settings-content { max-width: 680px; }
+.settings-one .settings-content { max-width: 1000px; }
+/* Five groups side by side, each a few rows of a name and its value, so everything fits on one screen. */
+.sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 16px 18px; align-items: start; }
+.sets > section { margin: 0; min-width: 0; }
+.sets .section-head h3 { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--faint); }
+/* A group with something open to change spans the whole width while it is open. */
+.sets > section:has(.setting-detail) { grid-column: 1 / -1; }
+.sets .setting { min-height: 36px; padding: 5px 11px; font-size: 12.5px; }
+.sets .setting > .control > select, .sets .setting > .control > input:not(.switch) { width: auto; max-width: 160px; }
+.value-button { padding: 3px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.value-button:hover { background: var(--panel-2); color: var(--text); }
+.agent-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.agent-name .av { display: inline-grid; flex: none; place-items: center; width: 20px; height: 20px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--muted); font-size: 10.5px; font-weight: 700; }
+.agent-name .agent-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings .setting.add-row { display: flex; }
 .settings-title { margin: 4px 2px 14px; font-size: 17px; }
 .settings .setting-value { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .settings .setting-value.found { color: var(--ok); }
@@ -3382,9 +3424,11 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .first-download { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; font-size: 12px; }
 .first-download progress { grid-column: 1; width: 100%; }
 .first-download button { grid-row: 1 / span 2; grid-column: 2; }
-.first-found { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
-.first-found li { display: inline-flex; gap: 8px; align-items: baseline; padding: 5px 11px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; }
-.first-found span { color: var(--muted); }
+.first-found-list { display: grid; gap: 6px; }
+.first-found { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.first-found li { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.first-found span { color: var(--muted); font-size: 12px; }
+.first-found .av { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--muted); font-size: 11px; font-weight: 700; }
 .first-done { justify-content: flex-end; }
 @media (max-width: 560px) { .first-example > div { grid-template-columns: minmax(0, 1fr); gap: 0; } }
 
@@ -3397,7 +3441,8 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 .task-latest { max-width: 100%; }
 .task-steps > summary { cursor: pointer; padding: 4px 0; color: var(--muted); font-size: 12px; }
 .task-steps[open] { display: flex; flex-direction: column; gap: 8px; }
-.task-always { justify-self: start; font-size: 12px; }
+.task-always { justify-self: start; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; text-align: left; cursor: pointer; }
+.task-always:hover { color: var(--text); text-decoration: underline; }
 
 /* F8 Show: the frozen screen, the part chosen, what is drawn on it, and the bar with Cancel and Save. */
 body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: crosshair; user-select: none; }
@@ -3420,3 +3465,21 @@ body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: cross
 .task-device { margin-top: 18px; }
 .task-device .empty { margin: 6px 0 0; }
 .task-device-chip { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; vertical-align: middle; color: var(--muted); border: 1px solid var(--border); }
+
+/* Where the design mentions more than one device: at the end of the Agents list. */
+.task-devices-mention { display: grid; gap: 6px; justify-items: start; padding: 4px 9px; }
+.task-devices-mention p { margin: 0; color: var(--muted); font-size: 12.5px; }
+
+/* A call's notes, as the design shows them: what wrote them, then marked moments, decisions and to-dos under small labels. */
+.notes-text h1, .notes-text h2, .notes-text h3, .notes-text h4 { margin: 14px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.notes-text > :first-child { margin-top: 4px; }
+.notes-text ul { margin: 0; padding-left: 0; list-style: none; }
+.notes-text li { margin: 2px 0; }
+.notes-foot { margin-top: 14px; }
+
+/* The notice's command sits in its line, as the design writes it. */
+.task-notice-says code { padding: 1px 5px; border-radius: 4px; background: var(--bg); color: var(--text); font: 11.5px ui-monospace, 'Cascadia Mono', Consolas, monospace; overflow-wrap: anywhere; }
+.task-notice-head .task-danger { margin-left: auto; }
+.call-notice-always { padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 12px; }
+.call-notice-always:hover:not(:disabled) { color: var(--text); text-decoration: underline; }
+.call-strip-bar button.tell { border-color: #5a4a22; background: #2a2418; color: var(--them); }

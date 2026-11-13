@@ -337,16 +337,6 @@ module.exports = function install(fixture) {
   api.callNoticeNow = async () => { record('callNoticeNow', []); return clone(fixture.callNoticeNow ?? null) }
   api.keysNoticeNow = async () => { record('keysNoticeNow', []); return clone(fixture.keysNoticeNow ?? null) }
   // Claude Code in a terminal asking Togle: the connection, as the window is told it.
-  let hookStatus = { claude: fixture.scenario === 'tasks', version: '2.1.322 (Claude Code)', supported: true, minimum: '2.1.139', installed: false, current: false, file: 'C:\\Users\\demo\\.claude\\settings.json' }
-  let failHook = false
-  api.claudeHookStatus = async () => clone(hookStatus)
-  api.connectClaudeHook = async () => {
-    record('connectClaudeHook', [])
-    if (failHook) { failHook = false; throw new Error("Claude Code's settings file is not valid JSON, so Togle left it alone.") }
-    hookStatus = { ...hookStatus, installed: true, current: true }
-    return clone(hookStatus)
-  }
-  api.disconnectClaudeHook = async () => { record('disconnectClaudeHook', []); hookStatus = { ...hookStatus, installed: false, current: false }; return clone(hookStatus) }
   // What differs from the last commit: a repository for every folder but the notes one.
   const sampleDiff = [
     'diff --git a/src/status.ts b/src/status.ts', 'index 1111111..2222222 100644', '--- a/src/status.ts', '+++ b/src/status.ts', '@@ -1,3 +1,3 @@',
@@ -399,8 +389,6 @@ module.exports = function install(fixture) {
     // A task Togle runs stops: by the person's Stop, or by itself (an error, or its agent signed out: `extra`).
     stopTask: (key, state, line, extra) => { const found = runnerFind(key); found.state = state; found.line = line; found.pending = []; Object.assign(found, extra ?? {}); runnerChanged() },
     // What the window is told of Claude Code's connection to Togle, changed by hand.
-    hook: patch => { hookStatus = { ...hookStatus, ...patch } },
-    failNextConnect: () => { failHook = true },
     failNextTask: () => { failTask = true },
     microphone: status => { microphone = clone(status); microphoneChanged() },
     calls: () => clone(calls), emit, settings: () => clone(fixture.settings),

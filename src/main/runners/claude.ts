@@ -429,15 +429,6 @@ export class ClaudeBackend implements Backend {
     return [...found.values()].sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
-  /** How a session that runs in a terminal or an app is now, by what Claude Code says about the sessions it has running. */
-  async sessionState(id: string): Promise<TaskState | 'gone' | null> {
-    const live = await (this.options.live ? this.options.live() : this.command().then(liveSessions)).catch(() => null)
-    // An empty answer is also what a failed one looks like: it says nothing about this session.
-    if (!live?.length) return null
-    const session = live.find((candidate) => candidate.sessionId === id)
-    return session ? stateOfLive(session) : 'gone'
-  }
-
   async start(options: StartOptions): Promise<TaskHandle> {
     const task = await this.launch(options.folder, null, options.asks ?? false, options.title ?? null)
     task.title = options.title ?? oneLine(options.prompt)

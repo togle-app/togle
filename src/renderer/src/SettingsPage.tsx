@@ -16,7 +16,7 @@ import { Row, Section, Toggle } from './Rows'
 import { useAccounts } from './Accounts'
 import { Menu } from './Menu'
 import { VocabularyEditor } from './DictationVocabulary'
-import { Devices } from './Devices'
+import { Devices, SignIn, useReach } from './Devices'
 import { useRememberedVoices } from './VoiceMemory'
 import type { SettingsPart } from './open-settings'
 
@@ -33,8 +33,9 @@ interface Props {
 }
 
 /**
- * Settings, on one screen as the design has it: Keys, Voice, Meetings, Agents and Accounts. Every setting has a default
- * that works, so nobody has to come here.
+ * Settings, on one screen as the design has it: five groups side by side (Keys, Voice, Meetings, Agents, Accounts), each a
+ * few rows of a name and its value. Every setting has a default that works, so nobody has to come here. A row that opens
+ * something to change (names and terms, a key, an agent to add) widens its group while it is open.
  */
 export function SettingsPage({ settings, stt, at, onChange }: Props) {
   const [saveError, setSaveError] = useState('')
@@ -45,23 +46,23 @@ export function SettingsPage({ settings, stt, at, onChange }: Props) {
   // Opened to fix something: at the part that does, ready to use.
   useEffect(() => {
     if (!at) return
-    const target = document.getElementById(at === 'speech' ? 'settings-speech' : at === 'ai' ? 'settings-accounts' : at === 'keys' ? 'settings-keys' : 'settings-voice')
+    const target = document.getElementById(at === 'speech' ? 'settings-speech' : at === 'ai' ? 'settings-accounts' : at === 'keys' ? 'settings-keys' : at === 'devices' ? 'settings-devices' : 'settings-voice')
     target?.scrollIntoView({ block: 'start' })
     ;(target?.tabIndex === -1 ? target : target?.querySelector<HTMLElement>('h3'))?.focus({ preventScroll: true })
   }, [at])
   return (
     <div className="settings settings-one">
       <div className="settings-content">
-        <h2 className="settings-title">Settings</h2>
         {saveError && <p className="error" role="alert">{saveError}</p>}
-        <Keys />
-        <Voice settings={settings} stt={stt} save={save} />
-        <Meetings settings={settings} save={save} />
-        <Agents />
-        <Devices />
-        <Accounts settings={settings} save={save} />
         <Update />
-        <p className="settings-foot">Togle is free and open source, under the MIT license. <button className="link" onClick={() => api.openExternal('https://github.com/togle-app/togle')}>Source code</button></p>
+        <div className="sets">
+          <Keys />
+          <Voice settings={settings} stt={stt} save={save} />
+          <Meetings settings={settings} save={save} />
+          <Agents />
+          <Accounts settings={settings} save={save} />
+          <Devices />
+        </div>
       </div>
     </div>
   )
@@ -103,7 +104,7 @@ function Keys() {
   const keys = useHotkeys()
   const talk = keys.find((key) => key.id === 'dictate'), show = keys.find((key) => key.id === 'show'), task = keys.find((key) => key.id === 'task')
   return (
-    <Section id="settings-keys" title="Keys" note={platform === 'darwin' ? 'On most Mac keyboards, hold Fn with these keys, or pick other keys here.' : undefined}>
+    <Section id="settings-keys" title="Keys">
       {talk && <Shortcut hotkey={talk} />}
       {show && <Shortcut hotkey={show} />}
       {task && <Shortcut hotkey={task} />}
@@ -139,11 +140,10 @@ function Voice({ settings, stt, save }: { settings: Settings; stt: SttStatus; sa
   const { microphones, problem } = useMicrophones()
   const accounts = useAccounts()
   const chosen = settings.dictation.microphoneId
-  const ai = useAI(settings)
   return (
     <Section id="settings-voice" title="Voice">
       {/* Calls stay on the system's microphone: Togle Studio cleans the sound by being that microphone. */}
-      <Row name="Microphone" note={problem || (chosen ? "For talking. Calls use the system's microphone." : undefined)}>
+      <Row name="Microphone" note={problem || undefined}>
         <select aria-label="Microphone" value={chosen} onChange={(event) => void save({ dictation: { microphoneId: event.target.value } })}>
           <option value="">System default</option>
           {chosen && !microphones.some((device) => device.deviceId === chosen) && <option value={chosen}>Saved microphone (not listed)</option>}
@@ -156,7 +156,7 @@ function Voice({ settings, stt, save }: { settings: Settings; stt: SttStatus; sa
         </select>
       </Row>
       <NamesAndTerms accountId={voiceAccountId(settings, accounts.accounts)} />
-      <Toggle name="Clean up what I say" note={ai.kind === 'none' ? 'Needs your AI plan, under Accounts. Until then your words go in as heard.' : undefined} checked={settings.dictation.polish} onChange={(polish) => void save({ dictation: { polish } })} />
+      <Toggle name="Clean up what I say" checked={settings.dictation.polish} onChange={(polish) => void save({ dictation: { polish } })} />
       <RecentDictations accountId={voiceAccountId(settings, accounts.accounts)} />
       {stt.state === 'missing' && (
         <div className="setting-detail speech-setup" id="settings-speech" tabIndex={-1}>
@@ -202,35 +202,40 @@ function NamesAndTerms({ accountId }: { accountId: string }) {
   }, [accountId, open])
   return (
     <>
-      <Row label={false} name="Names and terms" note="Spelled your way, and phrases that type a longer text.">
-        <span className="setting-value">{count === undefined ? '' : count ? `${count} ${count === 1 ? 'entry' : 'entries'}` : 'None'}</span>
-        <button className="ghost small" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Done' : 'Change'}</button>
+      <Row label={false} name="Names and terms">
+        <button className="value-button" aria-expanded={open} title="Names and terms spelled your way, and phrases that type a longer text" onClick={() => setOpen(!open)}>{count === undefined ? '…' : count ? `${count} ${count === 1 ? 'entry' : 'entries'}` : 'None'}</button>
       </Row>
-      {open && <div className="setting-detail"><VocabularyEditor accountId={accountId} /></div>}
+      {open && <div className="setting-detail"><VocabularyEditor accountId={accountId} /><div className="row"><button className="ghost small" onClick={() => setOpen(false)}>Done</button></div></div>}
     </>
   )
 }
+
+/** The call apps the design names in Settings; another shows once it is set to something other than Ask. */
+const MAIN_CALL_APPS: CallApp[] = ['zoom', 'meet', 'teams']
 
 function Meetings({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
   const apps = settings.meetings.apps
   const modeOf = (id: CallApp): CallAppMode => (isCallAppMode(apps[id]) ? apps[id]! : 'ask')
   const notices = platform === 'win32' || platform === 'linux' || platform === 'darwin'
-  const note = platform === 'win32' ? 'Togle sees which app uses the microphone, and for a browser the title of its window. It never listens before a call is written down.'
-    : platform === 'darwin' ? 'Togle sees which app uses the microphone, and for a browser the title of its window once screen recording is allowed. It never listens before a call is written down.'
-    : platform === 'linux' ? 'Togle sees which app uses the microphone. It never listens before a call is written down.' : undefined
+  // Zoom, Meet and Teams always; another call app once it is set to something other than Ask (from a call's notice).
+  const shown = CALL_APPS.filter((app) => MAIN_CALL_APPS.includes(app.id) || modeOf(app.id) !== 'ask')
+  const groups = (['always', 'ask', 'never'] as CallAppMode[]).map((mode) => ({ mode, apps: shown.filter((app) => modeOf(app.id) === mode) })).filter((group) => group.apps.length)
   return (
-    <Section id="settings-meetings" title="Meetings" note={note}>
+    <Section id="settings-meetings" title="Meetings">
       {notices
-        ? CALL_APPS.map((app) => (
-          <Row key={app.id} name={app.name}>
-            <select aria-label={`When a call starts in ${app.name}`} value={modeOf(app.id)} onChange={(event) => void save({ meetings: { ...settings.meetings, notice: true, apps: { ...apps, [app.id]: event.target.value as CallAppMode } } })}>
-              <option value="ask">Ask</option>
-              <option value="always">Always write down</option>
-              <option value="never">Never</option>
-            </select>
-          </Row>
-        ))
-        : <Row label={false} name="Call apps" note="Togle notices calls by itself on Windows, a Mac and Linux. Here, start one with Write down now in Meetings." />}
+        ? groups.map(({ mode, apps: inGroup }) => {
+          const names = inGroup.map((app) => app.name).join(', ')
+          return (
+            <Row key={mode} name={names}>
+              <select aria-label={`When a call starts in ${names}`} value={mode} onChange={(event) => void save({ meetings: { ...settings.meetings, notice: true, apps: { ...apps, ...Object.fromEntries(inGroup.map((app) => [app.id, event.target.value as CallAppMode])) } } })}>
+                <option value="ask">Ask</option>
+                <option value="always">Always write down</option>
+                <option value="never">Never</option>
+              </select>
+            </Row>
+          )
+        })
+        : <Row label={false} name="Call apps"><span className="setting-value">Write down now, in Meetings</span></Row>}
       <RememberedVoices settings={settings} save={save} />
     </Section>
   )
@@ -245,8 +250,7 @@ function RememberedVoices({ settings, save }: { settings: Settings; save: (patch
   return (
     <>
       <Row label={false} name="Remembered voices">
-        <span className="setting-value">{people.length ? `${people.length} ${people.length === 1 ? 'person' : 'people'}` : 'None'}</span>
-        <button className="ghost small" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Done' : 'Change'}</button>
+        <button className="value-button" aria-expanded={open} onClick={() => setOpen(!open)}>{people.length ? `${people.length} ${people.length === 1 ? 'person' : 'people'}` : 'None'}</button>
       </Row>
       {open && (
         <div className="setting-detail remembered-people">
@@ -260,11 +264,15 @@ function RememberedVoices({ settings, save }: { settings: Settings; save: (patch
             </Row>
           ))}
           {(loadError || error) && <p className="error" role="status">{loadError || error}</p>}
+          <div className="row"><button className="ghost small" onClick={() => setOpen(false)}>Done</button></div>
         </div>
       )}
     </>
   )
 }
+
+/** An agent's letter, as the design marks each agent: C for Claude Code, X for Codex, H for Hermes. */
+const agentLetter = (agent: RunnerStatus): string => (agent.runner === 'codex' ? 'X' : agent.name.trim().charAt(0).toUpperCase() || '?')
 
 /** The coding agents Togle found on this computer, and the ones the person added: any agent that speaks ACP. */
 function Agents() {
@@ -282,17 +290,15 @@ function Agents() {
     try { setFound(await api.removeCodingAgent(agent.runner)) } catch (failure) { setError(errorText(failure)) } finally { setBusy('') }
   }
   return (
-    <Section id="settings-agents" title="Agents" note="Togle uses each agent's own sign-in, and never reads it.">
-      {found === null ? <Row label={false} name="Looking…" /> : !found.length ? <Row label={false} name="No agent found" note="Install Claude Code, Codex or Hermes, and Togle finds it." /> : found.map((agent) => (
-        <Row key={agent.runner} label={false} name={agent.name}>
+    <Section id="settings-agents" title="Agents">
+      {found === null ? <Row label={false} name="Looking…" /> : !found.length ? <Row label={false} name="No agent found" /> : found.map((agent) => (
+        <Row key={agent.runner} label={false} name={<span className="agent-name"><span className="av" aria-hidden="true">{agentLetter(agent)}</span><span className="agent-label">{agent.name}</span></span>}>
           <span className={`setting-value ${agent.installed ? 'found' : ''}`}>{agent.installed ? (agent.added ? 'Added' : 'Found') : 'Not found'}</span>
           {agent.added && <button className="ghost small" aria-label={`Remove ${agent.name}`} disabled={!!busy} onClick={() => void remove(agent)}>{busy === agent.runner ? 'Removing…' : 'Remove'}</button>}
         </Row>
       ))}
       {adding ? <AddAgent onAdded={(list) => { setFound(list); setAdding(false) }} onCancel={() => setAdding(false)} /> : (
-        <Row label={false} name="Add an agent" note="Any other agent: one that speaks ACP, the open standard Hermes and others share, or any that runs in a terminal.">
-          <button className="ghost small" onClick={() => { setError(''); setAdding(true) }}>Add</button>
-        </Row>
+        <div className="setting add-row"><button className="small" title="Any other agent: one that speaks ACP, or any that runs in a terminal" onClick={() => { setError(''); setAdding(true) }}>Add an agent</button></div>
       )}
       {error && <p className="error" role="alert">{error}</p>}
     </Section>
@@ -381,10 +387,10 @@ const keyProfile = (sourceId: string, model: string): AIProfile => ({ tasks: Obj
 
 function Accounts({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
   return (
-    <Section id="settings-accounts" title="Accounts" note="Togle works without either. Your AI plan gets words, never sound.">
+    <Section id="settings-accounts" title="Accounts">
       <AIPlan settings={settings} save={save} />
       <StudioRow />
-      <Toggle name="Mention Togle Studio" note="One line where it could help, like after a call in a noisy room. Never during a call." checked={settings.microphone.suggestions} onChange={(suggestions) => void save({ microphone: { suggestions, ...(suggestions ? { dismissals: 0 } : {}) } })} />
+      <Toggle name="Mention Togle Studio" checked={settings.microphone.suggestions} onChange={(suggestions) => void save({ microphone: { suggestions, ...(suggestions ? { dismissals: 0 } : {}) } })} />
     </Section>
   )
 }
@@ -405,13 +411,12 @@ function AIPlan({ settings, save }: { settings: Settings; save: (patch: Settings
   const waiting = chatgpt && (chatgpt.signingIn || chatgpt.pending)
   return (
     <>
-      <div className="setting noted ai-plan">
+      <div className="setting ai-plan">
         <span className="name">AI plan</span>
         {ai.kind === 'plan' ? (
           <>
-            <span className="note">{ai.account.provider === 'chatgpt' ? 'ChatGPT' : 'Claude'} · signed in{ai.account.email ? ` · ${ai.account.email}` : ''}</span>
             <span className="control">
-              <Menu className="ghost small" label="Manage" ariaLabel="Manage the AI plan" align="right" items={[
+              <Menu className="value-button" label={`${ai.account.provider === 'chatgpt' ? 'ChatGPT' : 'Claude'} · signed in`} ariaLabel="Manage the AI plan" align="right" items={[
                 ...(ai.account.provider === 'chatgpt' ? [{ label: 'Manage usage', onSelect: () => api.openExternal(MANAGE_USAGE_URL) }] : []),
                 { label: 'Sign out', disabled: busy, onSelect: () => void run(() => api.signOutAccount(ai.account.id)) }
               ]} />
@@ -419,9 +424,8 @@ function AIPlan({ settings, save }: { settings: Settings; save: (patch: Settings
           </>
         ) : ai.kind === 'key' ? (
           <>
-            <span className="note">{ai.connection.label} · key</span>
             <span className="control">
-              <Menu className="ghost small" label="Manage" ariaLabel="Manage the AI key" align="right" items={[
+              <Menu className="value-button" label={`${ai.connection.label} · key`} ariaLabel="Manage the AI key" align="right" items={[
                 { label: 'Use a different key', disabled: busy, onSelect: () => setKeyForm(true) },
                 ...(chatgpt ? [{ label: 'Sign in with ChatGPT instead', disabled: busy, onSelect: () => void run(async () => { await api.signInAccount(chatgpt.id); await usePlan() }) }] : []),
                 { label: 'Remove the key', disabled: busy, onSelect: () => void run(async () => { await usePlan(); await api.removeApiConnection(ai.connection.id) }) }
@@ -434,12 +438,9 @@ function AIPlan({ settings, save }: { settings: Settings; save: (patch: Settings
             <span className="control"><button className="ghost small" onClick={() => void run(() => api.cancelAccountSignIn(chatgpt!.id))}>Cancel</button></span>
           </>
         ) : (
-          <>
-            <span className="note">No key and no new bill. What Togle uses counts toward your plan's limit.</span>
-            <span className="control">
-              <button className="primary small continue-chatgpt" disabled={busy || !chatgpt} onClick={() => void run(async () => { await usePlan(); await api.signInAccount(chatgpt!.id) })}>Sign in with ChatGPT</button>
-            </span>
-          </>
+          <span className="control">
+            <button className="primary small continue-chatgpt" title="No key and no new bill. What Togle uses counts toward your plan's limit." disabled={busy || !chatgpt} onClick={() => void run(async () => { await usePlan(); await api.signInAccount(chatgpt!.id) })}>Sign in with ChatGPT</button>
+          </span>
         )}
       </div>
       {ai.kind === 'none' && !waiting && !keyForm && (
@@ -531,8 +532,37 @@ function studioSummary(status: TogleMicrophoneStatus | undefined): string {
   return isMicrophoneOn(status) ? `On${status.state.input ? ` · cleaning ${status.state.input}` : ''}` : 'Off'
 }
 
-/** Togle Studio, the paid app that cleans the microphone: where it stands, and the one thing to do next. */
+/**
+ * Togle Studio under Accounts. While Reach is in this Togle, it is Studio's sign-in, as the design has it: the first
+ * computer you sign in on starts your devices. Otherwise it is the Studio app that cleans the microphone: where it stands,
+ * and the one thing to do next.
+ */
 function StudioRow() {
+  const reach = useReach()
+  const [signingIn, setSigningIn] = useState(false)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  if (reach?.available) {
+    const run = async (what: string, work: () => Promise<unknown>): Promise<void> => {
+      setBusy(what); setError('')
+      try { await work() } catch (failure) { setError(errorText(failure)) } finally { setBusy('') }
+    }
+    return (
+      <>
+        <Row label={false} name="Togle Studio" className="studio-row">
+          {reach.account
+            ? <Menu className="value-button" label={reach.account.email} ariaLabel="Togle Studio account" align="right" items={[{ label: 'Sign out', onSelect: () => void run('out', () => api.reachSignOut()) }]} />
+            : <button className="small" aria-expanded={signingIn} onClick={() => setSigningIn(!signingIn)}>Sign in</button>}
+        </Row>
+        {signingIn && !reach.account && <div className="setting-detail"><SignIn busy={busy} run={run} /></div>}
+        {error && <p className="error" role="alert">{error}</p>}
+      </>
+    )
+  }
+  return <StudioApp />
+}
+
+function StudioApp() {
   const [status, setStatus] = useState<TogleMicrophoneStatus>()
   useEffect(() => {
     void api.microphoneStatus().then(setStatus, () => undefined)

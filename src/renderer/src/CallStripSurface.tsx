@@ -28,11 +28,11 @@ export function CallStripSurface() {
     <div className="call-strip-bar" role="group" aria-label="Call being written down">
       <span className="call-strip-live" aria-hidden="true" />
       <span className="call-strip-clock" aria-label="Time into the call">{clockText(now - state.since)}</span>
-      <button onClick={() => api.callStripAction('mark')} title="Mark this moment">Mark{state.marks > 0 ? ` ${state.marks}` : ''}</button>
-      <button className="stop" onClick={() => api.callStripAction('stop')} title="End the call">Stop</button>
+      <button onClick={() => api.callStripAction('mark')} title="Mark this moment">Mark</button>
+      <button onClick={() => api.callStripAction('stop')} title="End the call">Stop</button>
       {!state.told && (copied
         ? <button className="primary" onClick={() => api.callStripAction('told')} title="Click when you have told the others the call is written down">I told them</button>
-        : <button onClick={() => { api.callStripAction('copy'); setCopied(true) }} title="Copies the line to say or paste in the chat">Tell the others</button>)}
+        : <button className="tell" onClick={() => { api.callStripAction('copy'); setCopied(true) }} title="Copies the line to say or paste in the chat">Tell the others</button>)}
     </div>
   )
 }

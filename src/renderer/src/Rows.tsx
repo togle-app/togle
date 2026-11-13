@@ -7,9 +7,9 @@ import type { ReactNode } from 'react'
  * A part of a page: its name (with how it's doing, for one that may not be ready), its settings together in a card,
  * and a line under them.
  */
-export function Section({ id, title, state, note, children }: { id?: string; title: string; state?: ReactNode; note?: ReactNode; children: ReactNode }) {
+export function Section({ id, title, state, note, className, children }: { id?: string; title: string; state?: ReactNode; note?: ReactNode; className?: string; children: ReactNode }) {
   return (
-    <section id={id}>
+    <section id={id} className={className}>
       <div className="section-head">
         <h3 tabIndex={id ? -1 : undefined}>{title}</h3>
         {state}

@@ -38,6 +38,8 @@ export function Shell() {
   // In Meetings: the call being written down, or the list (with a call opened from elsewhere).
   const [live, setLive] = useState(false)
   const [meetingFocus, setMeetingFocus] = useState<{ id: string; seq: number }>()
+  // Meetings pressed in the sidebar: back to the list, from a call's page.
+  const [meetingsHome, setMeetingsHome] = useState(0)
   const [taskFocus, setTaskFocus] = useState<{ key: string; seq: number; changes?: boolean }>({ key: '', seq: 0 })
   const [settingsAt, setSettingsAt] = useState<SettingsPart>()
   const [confirmClose, setConfirmClose] = useState<CloseWarning | null>(null)
@@ -148,7 +150,7 @@ export function Shell() {
       <div className="shell-layout">
         <nav className="shell-nav workspace-nav" aria-label="Places">
           {PLACES.map((place) => (
-            <button key={place.id} aria-label={place.label} title={place.title} aria-current={view === place.id ? 'page' : undefined} onClick={() => { if (place.id === 'meetings') setLive(call.listening); setView(place.id) }}>
+            <button key={place.id} aria-label={place.label} title={place.title} aria-current={view === place.id ? 'page' : undefined} onClick={() => { if (place.id === 'meetings') { setLive(call.listening); setMeetingsHome((count) => count + 1) } setView(place.id) }}>
               <Icon name={place.icon as 'todo'} size={16} /><span>{place.label}</span>
               {place.id === 'todo' && waiting > 0 && <span className="nav-count" aria-label={`${waiting} waiting for you`}>{waiting}</span>}
               {place.id === 'meetings' && call.listening && <span className="dot live" aria-label="A call is being written down" />}
@@ -175,9 +177,9 @@ export function Shell() {
           {view === 'todo' && settings?.firstMinute?.done && <Todo onOpenTask={openTask} onOpenCall={openMeeting} />}
           {view === 'agents' && <Tasks focus={taskFocus} />}
           {view === 'meetings' && settings && (live && call.listening
-            ? <LiveCall settings={settings} title={call.title} since={call.since} transcript={call.transcript} flags={call.flags} inputs={call.inputs}
+            ? <LiveCall settings={settings} title={call.title} since={call.since} transcript={call.transcript} flags={call.flags} inputs={call.inputs} levels={call.levels}
                 onMark={() => void api.markCall().catch(() => undefined)} onStop={() => void call.stop()} onReconnect={() => void call.reconnect()} onFirstCallSeen={() => void changeSettings({ meetings: { ...settings.meetings, introSeen: true } })} />
-            : <div className="settings meetings-page"><MeetingsPage agents={[]} liveId={call.listening ? call.callKey : undefined} onOpenLive={showLive} onWriteDown={() => void writeDown()} focus={meetingFocus} noise={call.noise && !call.listening ? { callId: call.callKey, finding: call.noise } : undefined} microphone={microphone} /></div>)}
+            : <div className="settings meetings-page"><MeetingsPage agents={[]} liveId={call.listening ? call.callKey : undefined} onOpenLive={showLive} onWriteDown={() => void writeDown()} focus={meetingFocus} home={meetingsHome} noise={call.noise && !call.listening ? { callId: call.callKey, finding: call.noise } : undefined} microphone={microphone} /></div>)}
           {view === 'settings' && settings && <SettingsPage settings={settings} stt={stt} at={settingsAt} onChange={setSettings} />}
         </main>
       </div>

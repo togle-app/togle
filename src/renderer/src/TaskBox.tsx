@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { Menu } from './Menu'
 import { asksEveryTime, type RunnerKind, type RunnerStatus, type TaskBoxOpen } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
 import { useHotkeys } from './hotkeys'
@@ -131,27 +132,15 @@ export function TaskBox() {
         <p className="taskbox-none">No coding agent found. Install Claude Code, Codex or Hermes, and Togle finds it.</p>
       ) : (
         <>
-          <div className="taskbox-row">
-            <div className="taskbox-agents" role="radiogroup" aria-label="Agent">
-              {installed.map((status) => (
-                <button key={status.runner} type="button" role="radio" aria-checked={runner === status.runner} className={runner === status.runner ? 'on' : ''} onClick={() => setRunner(status.runner)}>
-                  {status.name}
-                </button>
-              ))}
-            </div>
-            <div className="taskbox-folder">
-              <select aria-label="Folder" value={folder} onChange={(event) => setFolder(event.target.value)}>
-                {!options.length && <option value="">No folder yet</option>}
-                {options.map((path) => (
-                  <option key={path} value={path} title={path}>
-                    {label(path)}
-                  </option>
-                ))}
-              </select>
-              <button type="button" onClick={() => void choose()}>
-                Choose…
-              </button>
-            </div>
+          <div className="taskbox-pick">
+            <Menu className="pick-chip" ariaLabel="Agent" title="The agent that does it" label={installed.find((status) => status.runner === runner)?.name ?? 'Pick an agent'}
+              items={installed.map((status) => ({ label: status.name, checked: status.runner === runner, onSelect: () => setRunner(status.runner) }))} />
+            <Menu className="pick-chip" ariaLabel="Folder" title={folder || 'The folder it works in'} label={folder ? label(folder) : 'Pick a folder'}
+              items={[
+                ...options.map((path) => ({ label: label(path), detail: path, checked: path === folder, onSelect: () => setFolder(path) })),
+                ...(options.length ? ['divider' as const] : []),
+                { label: 'Choose…', onSelect: () => void choose() }
+              ]} />
           </div>
           {attach && (
             <div className="taskbox-attach">
@@ -169,29 +158,28 @@ export function TaskBox() {
               </button>
             </div>
           )}
-          <textarea
-            ref={input}
-            aria-label="Task"
-            placeholder={`Say what to do. Hold ${dictate?.ok && dictate.keys ? dictate.keys : 'F9'} to say it, then press Enter.`}
-            rows={4}
-            autoFocus
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) void start(event)
-            }}
-          />
+          <div className="taskbox-field">
+            <textarea
+              ref={input}
+              aria-label="Task"
+              placeholder={`Say what to do, or hold ${dictate?.ok && dictate.keys ? dictate.keys : 'F9'} and say it`}
+              rows={3}
+              autoFocus
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) void start(event)
+              }}
+            />
+            <button className="primary" disabled={busy || !runner || !folder || !text.trim()} title={!runner || asksEveryTime(runner) ? 'It asks before every command and every change.' : undefined}>
+              {busy ? 'Starting…' : 'Start'}
+            </button>
+          </div>
           {error && (
             <p className="taskbox-error" role="alert">
               {error}
             </p>
           )}
-          <div className="taskbox-foot">
-            <span>{!runner || asksEveryTime(runner) ? 'It asks before every command and every change.' : `${installed.find((status) => status.runner === runner)?.name ?? 'It'} asks before a command only when its own settings say so.`} Enter starts. Esc closes.</span>
-            <button className="primary" disabled={busy || !runner || !folder || !text.trim()}>
-              {busy ? 'Starting…' : 'Start'}
-            </button>
-          </div>
         </>
       )}
     </form>

@@ -58,7 +58,7 @@ export function FirstMinute({ settings, stt, onDone }: Props) {
     <section className="first-minute" aria-label="The first minute">
       <header>
         <h2>Togle works before you set anything up</h2>
-        <p className="hint">Three steps. What you skip waits on your to-do list.</p>
+        <p className="hint">One sign-in turns on the parts that need AI. The steps you have not done yet sit on your to-do list.</p>
       </header>
 
       <ol className="first-steps">
@@ -151,11 +151,14 @@ function Found() {
   const installed = found.agents.filter((agent) => agent.installed)
   if (!installed.length) return <p>No coding agent on this computer yet. When you install Claude Code, Codex or Hermes, Togle finds it and lists its tasks under Agents.</p>
   return (
-    <ul className="first-found" aria-label="Found on this computer">
-      {installed.map((agent) => {
-        const count = found.tasks.filter((task) => task.runner === agent.runner).length
-        return <li key={agent.runner}><strong>{agent.name}</strong><span>{count === 1 ? '1 task' : `${count} tasks`}</span></li>
-      })}
-    </ul>
+    <div className="first-found-list">
+      <span className="hint">Found on this computer</span>
+      <ul className="first-found" aria-label="Found on this computer">
+        {installed.map((agent) => {
+          const count = found.tasks.filter((task) => task.runner === agent.runner).length
+          return <li key={agent.runner}><span className="av" aria-hidden="true">{agent.runner === 'codex' ? 'X' : agent.name.charAt(0).toUpperCase()}</span><strong>{agent.name}</strong><span>{count === 1 ? '1 task' : `${count} tasks`}</span></li>
+        })}
+      </ul>
+    </div>
   )
 }

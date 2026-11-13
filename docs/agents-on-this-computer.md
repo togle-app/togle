@@ -12,7 +12,7 @@ Togle lists the tasks of the coding agents on your computer (Claude Code, Codex 
 - A command that looks dangerous (it deletes for good, pushes over what is on a server, runs hidden text, changes the computer) carries a red mark and the reason. The mark is a hint. The command shown is what runs.
 - **New task** opens the task box (below). A task started in Togle asks before every command and every change.
 - **Stop** stops a task. Codex lets a command that was already running finish, so a stopped Codex task shows a second button, **End the running command**.
-- **Let go** stops Togle running a task. The task stays on the computer, and **Continue here** picks it up again.
+- What finished in the last day stays in the list; older tasks fold under **Earlier**.
 - A task that runs in a terminal or in an app shows in the list too. For Claude Code, **Take over** ends the program in the terminal and carries the conversation on here. Togle asks first.
 - A task that stops by itself (a turn that ends with an error, or an agent program that stops) waits for you like a question, and its row says why. When the error means the agent is signed out, the row says so with the command that signs it in again (`claude auth login`, `codex login`, `hermes model`) and **Copy**: run it in a terminal, then reply to go on. The words that count as signed out are in `isSignedOut` in `src/shared/runner.ts`; Claude Code's and Codex's were seen on this computer, Hermes's were not.
 - With no agent installed, Agents names Claude Code, Codex and Hermes, each with the one line its maker gives to install it and a link to its page. Togle looks for agents the way a terminal would: when one is not found, it adds the PATH saved in the registry (Windows) or the one the login shell sets up (Mac and Linux), so an agent installed while Togle runs shows within a minute. The login shell runs your start-up files, so Togle asks it at most every ten minutes, with no input, and stops it after five seconds; the usual folders (`~/.local/bin`, Homebrew's, `/usr/local/bin`) are checked every time.
@@ -38,7 +38,7 @@ Every way of giving work to an agent opens this same box: **New task** in Agents
 
 ## Settings
 
-**Settings → Agents** lists Claude Code, Codex and Hermes, found or not. The task box key is under **Keys** (Task, F10). Connecting Claude Code in a terminal is on the Agents screen, and the to-do file is shown on To-do.
+**Settings → Agents** lists Claude Code, Codex and Hermes, found or not. The task box key is under **Keys** (Task, F10).
 
 **Add an agent** takes any other agent that speaks ACP, the open standard Hermes uses: give it a name and the command that starts it for ACP, as its own docs give it. Togle runs that command on this computer the way a terminal would (an agent installed with npm on Windows starts through cmd.exe). The agent then shows like the others: in the list, in the task box, and as `togle run acp-<name>`. It asks before a command as its own settings say, and "always allow" is its own option, in its words. **Remove** takes it off again; what it ran is not undone.
 
@@ -56,7 +56,7 @@ Every way of giving work to an agent opens this same box: **New task** in Agents
 
 **To-do**, the screen Togle opens on, is your list. What waits for you is at the top, with the same buttons as in Agents. Below it is your own list.
 
-The list is a plain text file you can also open in any editor: `to-do.md` in Togle's data folder (`%APPDATA%\togle` on Windows; **Show the file** opens it). Each item is a line of a Markdown checklist:
+The list is a plain text file you can also open in any editor: `to-do.md` in Togle's data folder (`%APPDATA%\togle` on Windows). Each item is a line of a Markdown checklist:
 
 ```
 - [ ] Review the onboarding copy
@@ -82,22 +82,12 @@ togle tasks
 
 The first word names the agent: `claude`, `codex`, `hermes`, or the id of one added in Settings (`acp-…`). Without one it is Claude Code; a task that starts with one of those words goes after `--`. With no task, Togle's task box opens with that agent and folder, for you to type or say it. A script that pipes in nothing is told to say what the task is, and no box opens.
 
-The task shows in Agents like any other, goes on the to-do list, and asks before every command and every change. The command talks to Togle over the same local channel as the Claude Code hook below, so it needs Togle running, and it says so when it is not. It exits with 0 when it worked, 1 when Togle could not do it, and 2 when the command was not understood.
+The task shows in Agents like any other, goes on the to-do list, and asks before every command and every change. The command talks to Togle over a local channel (a named pipe on Windows, a socket file elsewhere), where both ends prove they hold a secret kept in Togle's data folder, so it needs Togle running, and it says so when it is not. It exits with 0 when it worked, 1 when Togle could not do it, and 2 when the command was not understood.
 
 The command is the program `out/main/cli.js`, started by Electron as plain Node (`ELECTRON_RUN_AS_NODE=1`). From a copy of the source, run `npm run build`, then `node bin/togle.cjs tasks`, or `npm link` to get `togle` on your path. An installed Togle has the command beside the app in `resources/bin` (`togle.cmd` on Windows, `togle` on Mac and Linux); add that folder to your path to use it from anywhere. The installer does not add it yet, and the Mac and Linux versions were not tried. From a development run, name the data folder: `TOGLE_DATA`.
 
-## Claude Code in a terminal
+## A task you started in a terminal
 
-Claude Code asks the person at its terminal. With Togle connected, it also asks Togle, so you can answer from a notice or from this window. Either answer counts, and the first one wins. In a test with a real Claude Code session, the terminal's own question appeared at the same time as Togle's notice, an answer in the terminal worked while Togle's notice was still up, and an answer in Togle ended the terminal's question.
+A Claude Code session you started yourself in a terminal shows in Agents with its state, and its row offers **Take over**. Take over ends the program in the terminal and carries the conversation on in Togle, where you answer it; Togle asks first. `togle run claude` starts one in Togle from the beginning. Togle doesn't answer a session where it runs.
 
-Connect it from **Agents → Connect Claude Code**. This adds one entry to Claude Code's settings file (`~/.claude/settings.json`, or the folder named by `CLAUDE_CONFIG_DIR`). The first time, a copy of the file is kept beside it as `settings.json.togle-backup`. A file that is not valid JSON is left alone. **Turn off** takes Togle's entry out again and leaves the rest. It needs Claude Code 2.1.139 or later.
-
-How it works:
-
-- Claude Code starts Togle as `Togle --togle-hook claude-permission --data <Togle's data folder>` for each question. That short run does not open a window. It hands the question to the running Togle, waits for your answer, prints it the way Claude Code takes it, and exits. It takes about a tenth of a second to start.
-- If Togle is not running, or does not answer, the hook prints nothing and Claude Code asks in the terminal as it always did.
-- Togle listens on a named pipe on Windows and a socket file elsewhere. Both ends hold one secret, kept in a file only you can read (`channel/secret` in Togle's data folder), and each proves it holds it before anything else is said. A program that took the pipe's name before Togle did cannot answer a hook, so it cannot allow a command, and it is never sent the command. This has not had an outside security review.
-- A question goes away from Togle when it is answered in the terminal: Togle sees the session's transcript grow, or the session stop waiting.
-- To see what a hook did, start Claude Code with the environment variable `TOGLE_HOOK_LOG` set to a file name.
-
-`npm run test:claude-hook:live` runs this against a real Claude Code session in a terminal, from the same node-pty Togle runs agents without ACP in (`TOGLE_PTY_MODULE` names another copy).
+An earlier development build of Togle could add an entry to Claude Code's settings that started Togle as `--togle-hook`. That entry now does nothing; take it out of `~/.claude/settings.json` if it is there.

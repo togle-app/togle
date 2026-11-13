@@ -46,7 +46,7 @@ export function Devices() {
   }
   const member = reach.standing === 'member'
   return (
-    <Section id="settings-devices" title="Devices" note={member ? 'Togle Studio carries what your devices send each other, locked so that only they can open it. Each device checks the others itself.' : 'Part of Togle Studio. Your agents and your lists stay on your devices.'}>
+    <Section id="settings-devices" title="Devices">
       {member ? <Member reach={reach} busy={busy} run={run} /> : <NotYet reach={reach} busy={busy} run={run} />}
       {reach.problem && <p className="error" role="alert">{reach.problem}</p>}
       {error && <p className="error" role="alert">{error}</p>}
@@ -75,16 +75,14 @@ function NotYet({ reach, busy, run }: PartProps) {
   }
   return (
     <>
-      {reach.account
-        ? <Row label={false} name={`Signed in as ${reach.account.email}`} note={reach.link === 'connecting' ? 'Connecting to Togle Studio…' : 'This computer starts your devices.'} />
-        : <SignIn busy={busy} run={run} />}
-      <Row label={false} name="Add this computer from one you use" note="Show a code here, and type it into Togle on a computer that is one of your devices.">{showCode}</Row>
+      {reach.account && reach.link === 'connecting' && <Row label={false} name="Connecting to Togle Studio…" />}
+      <Row label={false} name="Add this computer from one you use" note={reach.account ? undefined : 'Or sign in to Togle Studio, under Accounts, to start your devices here.'}>{showCode}</Row>
     </>
   )
 }
 
 /** Signing in with a code sent by email: the first computer you sign in on starts your devices. */
-function SignIn({ busy, run }: Pick<PartProps, 'busy' | 'run'>) {
+export function SignIn({ busy, run }: Pick<PartProps, 'busy' | 'run'>) {
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
   const [sent, setSent] = useState(false)

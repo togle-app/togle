@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, stepsLine, type ClaudeHookStatus, type LogEntry, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
+import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, stepsLine, type LogEntry, type RunnerStatus, type TaskDetail, type TaskView, type ViewRequest } from '@shared/runner'
 import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
 import { Changes } from './Changes'
 import { useReach } from './Devices'
+import { openSettings } from './open-settings'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { Markdown } from './Markdown'
@@ -15,12 +16,10 @@ const agentOf = (task: Pick<TaskView, 'runner' | 'agent'>): string => task.agent
 const STATE_WORDS: Record<TaskView['state'], string> = { working: 'Working', waiting: 'Waiting for you', idle: 'Done', stopped: 'Stopped', failed: 'Stopped by an error' }
 // How often the list is asked for again: what runs in a terminal of its own sends no message when it changes.
 const REFRESH_MS = 4_000
-// The first this many earlier tasks show; the rest come with "Show all".
-const EARLIER_SHOWN = 8
+// What finished within a day stays in the list; older tasks fold under Earlier.
+const RECENT_MS = 24 * 3600_000
 // The task looked at last, for when the screen is opened again.
 let remembered: string | undefined
-// What a banner says of a session in its own window that asks a question: the terminal asks too, and either answer counts.
-const ASKS_ELSEWHERE = 'It runs in its own window and asks there too. Answer here or there: the first answer counts.'
 
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
@@ -69,7 +68,9 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   const [error, setError] = useState('')
   const [loaded, setLoaded] = useState(false)
   const [now, setNow] = useState(Date.now())
-  const [showAll, setShowAll] = useState(false)
+  const [showEarlier, setShowEarlier] = useState(false)
+  // Take over pressed on a row: the task opens with the question that confirms it.
+  const [takingOver, setTakingOver] = useState<string>()
   const remote = useRemoteTasks()
   const selectedNow = useRef(selected)
   selectedNow.current = selected
@@ -130,19 +131,24 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   )
 
   const installed = status.filter((s) => s.installed)
-  // A task Togle runs that stopped waits for a reply, with the ones that ask.
-  const waiting = tasks.filter(needsYou)
-  const working = tasks.filter((t) => t.state === 'working')
-  const earlier = tasks.filter((t) => !needsYou(t) && t.state !== 'working')
-  const row = (task: TaskView): ReactNode => (
+  // One list, as the design has it: what waits for you comes first (a task Togle runs that stopped waits for a reply too),
+  // then what works, then what finished today. Older tasks fold under Earlier.
+  const recent = (task: TaskView): boolean => needsYou(task) || task.state === 'working' || now - task.updatedAt < RECENT_MS
+  const rank = (task: TaskView): number => (needsYou(task) ? 0 : task.state === 'working' ? 1 : 2)
+  const shown = tasks.filter(recent).sort((a, b) => rank(a) - rank(b))
+  const earlier = tasks.filter((task) => !recent(task))
+  const row = (task: TaskView, old = false): ReactNode => (
     <TaskRow
       key={task.key}
       task={task}
       now={now}
+      old={old}
       selected={task.key === selected}
       onSelect={() => setSelected(task.key)}
+      onTakeOver={takesOver(task) ? () => { setTakingOver(task.key); setSelected(task.key) } : undefined}
     />
   )
+  const reach = useReach()
   const remoteSelected = selected?.startsWith(REMOTE)
     ? remote.flatMap((device) => device.tasks.map((task) => ({ device, task }))).find(({ device, task }) => remoteKey(device.device, task.key) === selected)
     : undefined
@@ -157,17 +163,14 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
           </button>
         </div>
         {loaded && !installed.length && <NoAgents />}
-        {!!waiting.length && <TaskGroup label="Waiting for you">{waiting.map(row)}</TaskGroup>}
-        {!!working.length && <TaskGroup label="Working">{working.map(row)}</TaskGroup>}
+        {!!shown.length && <div className="task-list" role="list">{shown.map((task) => row(task))}</div>}
         {!!earlier.length && (
-          <TaskGroup label={`Earlier · ${earlier.length} task${earlier.length === 1 ? '' : 's'}`}>
-            {(showAll ? earlier : earlier.slice(0, EARLIER_SHOWN)).map(row)}
-            {earlier.length > EARLIER_SHOWN && (
-              <button className="link" onClick={() => setShowAll(!showAll)}>
-                {showAll ? 'Show fewer' : `Show all ${earlier.length}`}
-              </button>
-            )}
-          </TaskGroup>
+          <div className="task-earlier">
+            <button className="link task-earlier-toggle" aria-expanded={showEarlier} onClick={() => setShowEarlier(!showEarlier)}>
+              Earlier · {earlier.length} task{earlier.length === 1 ? '' : 's'}
+            </button>
+            {showEarlier && <div className="task-list" role="list">{earlier.map((task) => row(task, true))}</div>}
+          </div>
         )}
         {loaded && !!installed.length && !tasks.length && <p className="empty">No tasks yet. Start one, or let an agent run in a terminal and it shows here.</p>}
         {remote.map((device) => (
@@ -184,7 +187,14 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
             ) : <p className="empty">No tasks there in the last week.</p>}
           </div>
         ))}
-        <TerminalAnswers />
+        {/* With Reach in this Togle and no other device yet: where the design says Togle mentions more than one device. */}
+        {reach?.available && reach.standing !== 'member' && (
+          <div className="task-device task-devices-mention">
+            <span className="tasks-label">Other devices</span>
+            <p>Your server, your laptop, your phone.</p>
+            <button className="primary small" onClick={() => openSettings('devices')}>Add a device</button>
+          </div>
+        )}
       </aside>
       <section className="tasks-detail">
         {error && (
@@ -221,12 +231,11 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
             onEndCommands={() => act(() => api.endRunnerCommands(detail.task.key))}
             onOpen={() => act(() => api.openRunnerTask(detail.task.key))}
             onTakeOver={() => act(() => api.takeOverRunnerTask(detail.task.key))}
-            onClose={() => act(() => api.closeRunnerTask(detail.task.key))}
+            takeOverAsked={takingOver === detail.task.key}
           />
         ) : (
           <div className="tasks-empty">
             <p>Pick a task, or start a new one.</p>
-            <p className="hint">Every row says what the agent is doing. A command it wants to run waits here for you.</p>
           </div>
         )}
       </section>
@@ -234,97 +243,6 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   )
 }
 
-/**
- * Whether Claude Code in a terminal asks Togle about its commands, and the button that turns that on or off. `compact` is
- * for a row of Settings, which has the name and the note itself.
- */
-export function TerminalAnswers({ compact = false }: { compact?: boolean }) {
-  const [status, setStatus] = useState<ClaudeHookStatus | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  useEffect(() => {
-    void api.claudeHookStatus().then(setStatus, () => undefined)
-  }, [])
-  if (!status?.claude) return null
-  const change = async (work: () => Promise<ClaudeHookStatus>): Promise<void> => {
-    setBusy(true)
-    setError('')
-    try {
-      setStatus(await work())
-    } catch (caught) {
-      setError(errorText(caught))
-    } finally {
-      setBusy(false)
-    }
-  }
-  if (!status.supported) {
-    return (
-      <p className={`hint ${compact ? '' : 'tasks-connect'}`}>
-        Claude Code {status.version?.replace(/\s*\(.*$/, '')} is older than {status.minimum}, so Togle cannot answer its terminal sessions. Update Claude Code to use this.
-      </p>
-    )
-  }
-  if (compact) {
-    return (
-      <span className="tasks-connect-compact">
-        {status.installed && status.current ? (
-          <>
-            <span className="hint">Connected</span>
-            <button className="ghost" disabled={busy} onClick={() => void change(() => api.disconnectClaudeHook())}>
-              Turn off
-            </button>
-          </>
-        ) : (
-          <button className="ghost" disabled={busy || !!status.problem} title={`Adds one entry to ${status.file}`} onClick={() => void change(() => api.connectClaudeHook())}>
-            {status.installed ? 'Connect again' : 'Connect Claude Code'}
-          </button>
-        )}
-        {(error || status.problem) && (
-          <span className="error" role="alert">
-            {error || status.problem}
-          </span>
-        )}
-      </span>
-    )
-  }
-  return (
-    <div className="tasks-connect" aria-label="Claude Code in a terminal">
-      {status.installed && status.current ? (
-        <>
-          <p>
-            <strong>Connected.</strong> Claude Code sessions in a terminal ask Togle about a command too. Answer here or in the terminal: the first answer counts.
-          </p>
-          <button className="small" disabled={busy} onClick={() => void change(() => api.disconnectClaudeHook())}>
-            Turn off
-          </button>
-        </>
-      ) : (
-        <>
-          <p>
-            <strong>{status.installed ? 'Togle has moved since this was set up.' : 'Answer from here.'}</strong>{' '}
-            {status.installed ? 'Connect again, so Claude Code finds it.' : 'Claude Code in a terminal can ask Togle about a command, so you can allow or refuse it from a notice or from this window. You can still answer in the terminal. The first answer counts.'}
-          </p>
-          <button className="primary small" disabled={busy || !!status.problem} onClick={() => void change(() => api.connectClaudeHook())}>
-            {status.installed ? 'Connect again' : 'Connect Claude Code'}
-          </button>
-          <details>
-            <summary>What this changes</summary>
-            <p className="hint">
-              It adds one entry to <code>{status.file}</code>, and keeps a copy of that file beside it the first time. Turn off takes the entry out again. When Togle is not running, Claude Code asks in the terminal as it always did.
-            </p>
-          </details>
-        </>
-      )}
-      {(error || status.problem) && (
-        <p className="error" role="alert">
-          {error || status.problem}
-        </p>
-      )}
-    </div>
-  )
-}
-
-/** No agent on this computer: the ones Togle knows, each with the one line its maker gives to install it. */
 function NoAgents() {
   const windows = api.platform === 'win32'
   const [copied, setCopied] = useState('')
@@ -354,33 +272,29 @@ function NoAgents() {
   )
 }
 
-function TaskGroup({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="task-group">
-      <h3 className="tasks-label">{label}</h3>
-      <div role="list">{children}</div>
-    </div>
-  )
-}
+/** A session that runs in its own terminal, which Take over can move into Togle: Claude Code's only. */
+const takesOver = (task: TaskView): boolean => !task.mine && !!task.pid && task.runner === 'claude'
 
-function TaskRow({ task, now, selected, onSelect }: { task: TaskView; now: number; selected: boolean; onSelect: () => void }) {
+function TaskRow({ task, now, old, selected, onSelect, onTakeOver }: { task: TaskView; now: number; old: boolean; selected: boolean; onSelect: () => void; onTakeOver?: () => void }) {
   const stoppedHere = needsYou(task) && task.state !== 'waiting'
-  // One line, as the design has it: the agent, where it works, and how it stands. Stopped and waiting for a reply, it
-  // says why; done, it says when.
-  const detail = stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : 'stopped · reply to go on') : task.state === 'waiting' ? 'waiting' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : `done · ${ago(task.updatedAt, now)}`
-  const where = !task.mine && task.pid ? 'terminal' : baseName(task.folder)
+  const elsewhere = !task.mine && !!task.pid
+  // One line, as the design has it: the agent, where it works, and how it stands. A task in a terminal says so. Stopped
+  // and waiting for a reply, it says why; done long ago, it says when.
+  const detail = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : 'stopped · reply to go on') : task.state === 'waiting' ? 'waiting' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `done · ${ago(task.updatedAt, now)}` : 'done'
+  const line = elsewhere ? `${agentOf(task)} · terminal` : `${agentOf(task)} · ${baseName(task.folder)} · ${detail}`
   const dangerous = task.pending.some((request) => request.danger)
   return (
-    <button className={`task-row ${selected ? 'selected' : ''}`} role="listitem" data-state={task.state} data-needs={stoppedHere ? 'you' : undefined} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
-      <span className="task-dot" aria-hidden="true" />
-      <span className="task-copy">
-        <strong>{task.title}</strong>
-        <span>
-          {agentOf(task)} · {where} · {detail}
+    <div className="task-item" role="listitem">
+      <button className={`task-row ${selected ? 'selected' : ''} ${onTakeOver ? 'with-action' : ''}`} data-state={task.state} data-needs={stoppedHere ? 'you' : undefined} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
+        <span className="task-dot" aria-hidden="true" />
+        <span className="task-copy">
+          <strong>{task.title}</strong>
+          <span>{line}</span>
         </span>
-      </span>
-      {dangerous && <span className="task-danger">Dangerous</span>}
-    </button>
+        {dangerous && <span className="task-danger">Dangerous</span>}
+      </button>
+      {onTakeOver && <button className="small task-row-action" onClick={onTakeOver}>Take over</button>}
+    </div>
   )
 }
 
@@ -423,14 +337,16 @@ interface PanelProps {
   onEndCommands: () => void
   onOpen: () => void
   onTakeOver: () => void
-  onClose: () => void
+  /** Take over was pressed on the task's row: the question that confirms it shows at once. */
+  takeOverAsked: boolean
 }
 
-function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, onTakeOver, onClose }: PanelProps) {
+function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, onTakeOver, takeOverAsked }: PanelProps) {
   const { task, log } = detail
   const talkKey = useHotkeys().find((key) => key.id === 'dictate')?.keys || 'F9'
   const [text, setText] = useState('')
-  const [confirmTakeOver, setConfirmTakeOver] = useState(false)
+  const [confirmTakeOver, setConfirmTakeOver] = useState(takeOverAsked)
+  useEffect(() => { if (takeOverAsked) setConfirmTakeOver(true) }, [takeOverAsked])
   const end = useRef<HTMLDivElement>(null)
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: 'end' })
@@ -453,45 +369,40 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
           <Icon name="back" size={14} />
         </button>
         <div className="task-title">
-          <h2 title={task.title}>{task.title}</h2>
-          <p>
-            {agentOf(task)} · <span title={task.folder}>{task.folder ? baseName(task.folder) : 'No folder'}</span> · <span className="task-state" data-state={task.state}>{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
-            {task.updatedAt && !running ? ` · ${ago(task.updatedAt, now)}` : ''}
-            {changed > 0 && ` · ${changed} ${changed === 1 ? 'file' : 'files'} changed`}
-            {task.folder && (
-              <>
-                {' · '}
-                <button className="link" onClick={onSeeChanges} title="What differs from the last commit in this folder">
-                  See changes
-                </button>
-              </>
-            )}
-          </p>
+          <h2 title={task.title}>
+            {task.title}
+            <span className="task-where" title={task.folder}> · {agentOf(task)} · {task.folder ? baseName(task.folder) : 'no folder'}</span>
+          </h2>
         </div>
         <div className="task-actions">
-          {task.mine && running && (
-            <button className="small primary stop" onClick={onStop}>
-              <Icon name="stop" size={12} /> Stop
-            </button>
-          )}
+          {task.mine && running && <button className="small" onClick={onStop}>Stop</button>}
           {task.mine && task.commandsRunning && task.state === 'stopped' && (
             <button className="small" onClick={onEndCommands} title="Stop ended the agent's turn. The command it started is still running.">
               End the running command
             </button>
           )}
-          {task.mine && !running && (
-            <button className="ghost small" onClick={onClose} title="Togle stops running it. It stays on this computer.">
-              Let go
-            </button>
-          )}
         </div>
       </header>
+      <div className="task-status">
+        <span className="state-chip" data-state={task.signedOut ? 'failed' : task.state}>{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
+        {(changed > 0 || task.folder) && (
+          <span className="hint">
+            {changed > 0 && `${changed} ${changed === 1 ? 'file' : 'files'} changed`}
+            {changed > 0 && task.folder && <span className="sep" aria-hidden="true">·</span>}
+            {task.folder && (
+              <button className="link" onClick={onSeeChanges} title="What differs from the last commit in this folder">
+                See changes
+              </button>
+            )}
+          </span>
+        )}
+      </div>
 
       {task.mine && task.signedOut && <SignedOut task={task} />}
 
       {!task.mine && (
         <div className="task-banner" role="note">
-          {task.pid ? (
+          {takesOver(task) ? (
             confirmTakeOver ? (
               <>
                 <span>This ends the {agentOf(task)} running in its terminal. The conversation is kept and goes on here.</span>
@@ -506,14 +417,14 @@ function TaskPanel({ detail, now, onSeeChanges, onBack, onAnswer, onReply, onSen
               </>
             ) : (
               <>
-                <span>{task.pending.length ? ASKS_ELSEWHERE : `${task.line || 'It runs in its own window.'} Togle can see it, and cannot answer it there.`}</span>
+                <span>It runs in a terminal. Take over moves it into Togle so you can answer it here.</span>
                 <button className="small" onClick={() => setConfirmTakeOver(true)}>
                   Take over
                 </button>
               </>
             )
-          ) : task.pending.length ? (
-            <span>{ASKS_ELSEWHERE}</span>
+          ) : task.pid ? (
+            <span>It runs in its own window, where it is answered.</span>
           ) : (
             <>
               <span>Togle is not running this task. Continue it here to answer it and reply to it.</span>
@@ -676,8 +587,6 @@ function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { reques
         <pre className="task-command">{request.command}</pre>
       )}
       {request.danger && <p className="task-why">{request.danger} Look at the whole command before you allow it.</p>}
-      {request.reason && <p className="hint">{request.reason}</p>}
-      {request.folder && <p className="hint">In {request.folder}</p>}
       <div className="row">
         <button className="primary small" onClick={onAllow}>
           Allow once
@@ -687,7 +596,7 @@ function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { reques
         </button>
       </div>
       {/* What always reaches, in the agent's terms; never for a command that looks dangerous. */}
-      {request.always && !request.danger && (<button className="link task-always" onClick={onAlways}>{request.always}</button>)}
+      {request.always && !request.danger && (<button className="task-always" onClick={onAlways}>{request.always}</button>)}
     </section>
   )
 }
@@ -722,18 +631,13 @@ function RemotePanel({ device, task, now, onBack, act }: { device: DeviceTasks; 
           <Icon name="back" size={14} />
         </button>
         <div className="task-title">
-          <h2 title={task.title}>{task.title} <span className="task-device-chip">{device.name}</span></h2>
-          <p>
-            {task.agent} · {task.folder} · <span className="task-state" data-state={task.state}>{STATE_WORDS[task.state]}</span>
-            {!running ? ` · ${ago(task.updatedAt, now)}` : ''}
-          </p>
+          <h2 title={task.title}>
+            {task.title}
+            <span className="task-where"> · {task.agent} · {task.folder}</span> <span className="task-device-chip">{device.name}</span>
+          </h2>
         </div>
         <div className="task-actions">
-          {here && running && (
-            <button className="small primary stop" disabled={!device.online} onClick={() => act({ what: 'stop', task: task.key })}>
-              <Icon name="stop" size={12} /> Stop
-            </button>
-          )}
+          {here && running && <button className="small" disabled={!device.online} onClick={() => act({ what: 'stop', task: task.key })}>Stop</button>}
           {here && task.commandsRunning && task.state === 'stopped' && (
             <button className="small" disabled={!device.online} onClick={() => act({ what: 'end-commands', task: task.key })} title="Stop ended the agent's turn. The command it started is still running.">
               End the running command
@@ -741,6 +645,10 @@ function RemotePanel({ device, task, now, onBack, act }: { device: DeviceTasks; 
           )}
         </div>
       </header>
+      <div className="task-status">
+        <span className="state-chip" data-state={task.state}>{STATE_WORDS[task.state]}</span>
+        {!running && <span className="hint">{ago(task.updatedAt, now)}</span>}
+      </div>
 
       {!device.online && <div className="task-banner" role="note"><span>{device.name} is offline. It can be answered once it is back.</span></div>}
       {task.terminal && <div className="task-banner" role="note"><span>This task runs in a terminal on {device.name}. It is watched from here and answered only there.</span></div>}

@@ -34,17 +34,23 @@ function chipOf(task: TaskView | undefined): { text: string; tone: 'work' | 'wai
   }
 }
 
-/** What a waiting task asks, in a few words for a row. */
-function asking(request: ViewRequest | undefined, task: TaskView): { says: string; detail: string } {
+/** The longest command shown whole on a row; a longer one, or one of several lines, opens in Agents. */
+const ROW_FITS = 72
+
+/** What a waiting task asks, in a few words for a row: the command (or what signs the agent in) shows as code. */
+function asking(request: ViewRequest | undefined, task: TaskView): { says: string; detail: string; code: boolean } {
   // Stopped and waiting for a reply to go on: it says why, and signed out, what signs the agent in again.
-  if (!request && task.signedOut) return task.fix ? { says: 'is signed out · sign in with', detail: task.fix } : { says: 'is signed out', detail: 'Sign it in, then reply.' }
-  if (!request && task.state === 'failed') return { says: 'stopped by an error', detail: task.line }
-  if (!request && task.state === 'stopped') return { says: 'was stopped', detail: 'Reply to go on.' }
-  if (!request) return { says: task.line || 'is waiting', detail: '' }
-  if (request.kind === 'question') return { says: 'asks', detail: shownPart(request.questions?.[0]?.text ?? 'A question') }
-  if (request.kind === 'edit') return { says: 'wants to change', detail: shownPart((request.files ?? []).join('\n') || 'a file') }
-  return { says: 'wants to run', detail: shownPart(request.command ?? request.raw ?? '') }
+  if (!request && task.signedOut) return task.fix ? { says: 'is signed out · sign in with', detail: task.fix, code: true } : { says: 'is signed out.', detail: 'Sign it in, then reply.', code: false }
+  if (!request && task.state === 'failed') return { says: task.line ? 'stopped by an error:' : 'stopped by an error', detail: task.line, code: false }
+  if (!request && task.state === 'stopped') return { says: 'was stopped.', detail: 'Reply to go on.', code: false }
+  if (!request) return { says: task.line || 'is waiting', detail: '', code: false }
+  if (request.kind === 'question') return { says: 'asks:', detail: shownPart(request.questions?.[0]?.text ?? 'a question'), code: false }
+  if (request.kind === 'edit') return { says: 'wants to change', detail: shownPart((request.files ?? []).join('\n') || 'a file'), code: true }
+  return { says: 'wants to run', detail: shownPart(request.command ?? request.raw ?? ''), code: true }
 }
+
+/** An item's words as they are compared: a call's to-do ends with a full stop, the same item on the list may not. */
+const plain = (text: string): string => text.trim().replace(/\.$/, '').toLocaleLowerCase()
 
 /** The to-do list: what waits for the person at the top, then their own list, kept in a plain text file. */
 export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, changes?: boolean) => void; onOpenCall: (id: string) => void }) {
@@ -149,9 +155,12 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
     if (text && (await change(() => api.addTodo(text)))) setDraft('')
   }
   const saveEdit = async (item: TodoItem): Promise<void> => {
-    const next = editing && editing.line === item.line ? editing.text.trim() : ''
+    if (!editing || editing.line !== item.line) return
+    const next = editing.text.trim()
     setEditing(null)
-    if (next && next !== item.text) await change(() => api.editTodo({ line: item.line, text: item.text }, next))
+    // Its words cleared, the item goes: a row has no delete button.
+    if (!next) await change(() => api.removeTodo({ line: item.line, text: item.text }))
+    else if (next !== item.text) await change(() => api.editTodo({ line: item.line, text: item.text }, next))
   }
   // The task box, as for any task: with the item's words, and the item, which the task is then given to.
   const give = (item: TodoItem): void => {
@@ -166,8 +175,8 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
   const ticked = items.filter((item) => item.done)
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
   // A to-do from a call that is already on the list is not offered again.
-  const onList = new Set(items.map((item) => item.text.trim().toLocaleLowerCase()))
-  const fromCalls = offers.items.filter((offer) => !onList.has(offer.text.trim().toLocaleLowerCase()))
+  const onList = new Set(items.map((item) => plain(item.text)))
+  const fromCalls = offers.items.filter((offer) => !onList.has(plain(offer.text)))
 
   const row = (item: TodoItem): ReactNode => {
     const task = item.task ? tasks.find((candidate) => candidate.key === item.task) : undefined
@@ -212,9 +221,6 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
               Give to an agent
             </button>
           )}
-          <button className="icon todo-remove" aria-label={`Delete: ${item.text}`} title="Delete" onClick={() => void change(() => api.removeTodo({ line: item.line, text: item.text }))}>
-            <Icon name="close" size={12} />
-          </button>
         </div>
       </div>
     )
@@ -241,37 +247,37 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
             {waiting.map((task) => {
               // A task that runs elsewhere has requests only when its question is held here, and then they can be answered here.
               const request = task.pending[0]
-              const { says, detail } = asking(request, task)
-              const allowHere = !!request && canAllowHere(request)
+              const { says, detail, code } = asking(request, task)
+              // A command or a change is allowed here only when all of it shows on the row and it doesn't look dangerous.
+              const fits = !!request && request.kind !== 'question' && canAllowHere(request) && !detail.includes('\n') && detail.length <= ROW_FITS
+              const reply = request?.kind === 'question' || (!request && task.state !== 'waiting')
               return (
                 <div key={task.key} className="todo-row need" role="listitem" data-state="waiting">
                   <span className="todo-dot" aria-hidden="true" />
                   <span className="todo-grow">
                     <b>{task.title}</b>
-                    <small>
+                    <small className="todo-line">
                       {agentOf(task)} · {baseName(task.folder)} · {says}
+                      {detail && (code ? <> <code>{detail.split('\n')[0]}</code></> : ` ${detail}`)}
                     </small>
-                    {detail && <code className={`todo-command ${request?.kind ?? ''}`}>{detail}</code>}
-                    {request?.danger && (
-                      <small className="todo-why">
-                        <span className="task-danger">Dangerous</span> {request.danger}
-                      </small>
-                    )}
                   </span>
-                  {request && request.kind !== 'question' && allowHere && (
-                    <button className="primary small" onClick={() => void answer(() => api.answerRunnerTask(task.key, request.id, 'allow-once'))}>
-                      Allow once
+                  {request?.danger && <span className="task-danger">Dangerous</span>}
+                  {fits && (
+                    <>
+                      <button className="primary small" onClick={() => void answer(() => api.answerRunnerTask(task.key, request.id, 'allow-once'))}>
+                        Allow once
+                      </button>
+                      <button className="small" onClick={() => void answer(() => api.answerRunnerTask(task.key, request.id, 'refuse'))}>
+                        Refuse
+                      </button>
+                    </>
+                  )}
+                  {/* A question, or a task Togle runs that stopped, goes on with a reply; anything else opens in Agents. */}
+                  {!fits && (
+                    <button className={`small ${reply ? 'primary' : ''}`} onClick={() => onOpenTask(task.key)}>
+                      {reply ? 'Reply' : 'Open'}
                     </button>
                   )}
-                  {request && request.kind !== 'question' && (
-                    <button className="small" onClick={() => void answer(() => api.answerRunnerTask(task.key, request.id, 'refuse'))}>
-                      Refuse
-                    </button>
-                  )}
-                  {/* A question, or a task Togle runs that stopped, goes on with a reply. */}
-                  <button className={`small ${request?.kind === 'question' || (!request && task.state !== 'waiting') ? 'primary' : 'ghost'}`} onClick={() => onOpenTask(task.key)}>
-                    {request?.kind === 'question' || (!request && task.state !== 'waiting') ? 'Reply' : 'Open'}
-                  </button>
                 </div>
               )
             })}
@@ -292,6 +298,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
           <div role="list">
             {offers.calls.map((call) => (
               <div key={call.id} className="todo-row" role="listitem">
+                <span className="todo-dot done" aria-hidden="true" />
                 <span className="todo-grow">
                   <b>{meetingTitle(call)}</b>
                   <small>
@@ -304,12 +311,9 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
               </div>
             ))}
             {fromCalls.map((offer) => (
-              <div key={offer.callId + offer.text} className="todo-row" role="listitem">
-                <span className="todo-grow">
-                  <b>{offer.text}</b>
-                  <small>From {meetingTitle({ title: offer.title, startedAt: offer.startedAt })}</small>
-                </span>
-                <button className="small" onClick={() => void change(() => api.addTodo(offer.text)).then(() => refreshOffers())}>
+              <div key={offer.callId + offer.text} className="todo-row" role="listitem" title={`From ${meetingTitle({ title: offer.title, startedAt: offer.startedAt })}`}>
+                <span className="todo-grow todo-offer">{offer.text.replace(/\.$/, '')}</span>
+                <button className="small" onClick={() => void change(() => api.addTodo(offer.text.trim().replace(/\.$/, ''))).then(() => refreshOffers())}>
                   Add
                 </button>
               </div>
@@ -317,12 +321,6 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
           </div>
         </section>
       )}
-      <p className="hint todo-file">
-        Your list is a plain text file on this computer.{' '}
-        <button className="link" onClick={() => void api.showTodoFile()}>
-          Show the file
-        </button>
-      </p>
     </div>
   )
 }

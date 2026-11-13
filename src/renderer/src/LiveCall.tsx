@@ -27,6 +27,8 @@ interface Props {
   transcript: TranscriptEntry[]
   flags: { toldOthers: number; marks: number[] }
   inputs: CaptureInputs
+  /** How loud each side is now: read by the meters themselves, a few times a second. */
+  levels: () => Partial<Record<'me' | 'them', number>>
   onMark: () => void
   onStop: () => void
   onReconnect: () => void
@@ -37,7 +39,7 @@ interface Props {
  * A call being written down: its words as people speak, who said them (a name with a question mark is a guess, to
  * confirm or change), the line to tell the others until it is ticked, Mark and Stop.
  */
-export function LiveCall({ settings, title, since, transcript, flags, inputs, onMark, onStop, onReconnect, onFirstCallSeen }: Props) {
+export function LiveCall({ settings, title, since, transcript, flags, inputs, levels, onMark, onStop, onReconnect, onFirstCallSeen }: Props) {
   const [partials, setPartials] = useState<PartialTranscript[]>([])
   const finished = useRef(new Set<string>())
   useEffect(() => {
@@ -80,14 +82,14 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, on
     <section className="live-call" aria-label="Call being written down">
       <header className="live-head">
         <h2>{title || 'Call'}</h2>
-        <span className="live-clock" role="timer" aria-label="Time into the call"><span className="dot live" />Live · <Elapsed since={since} /></span>
+        <span className="live-clock" role="timer" aria-label="Time into the call">Live · <Elapsed since={since} /></span>
         <span className="spacer" />
-        <button onClick={onMark} title="Mark this moment. The notes list marked moments first.">Mark{flags.marks.length ? ` ${flags.marks.length}` : ''}</button>
-        <button className="stop" onClick={onStop} title="Stop writing the call down">Stop</button>
+        <button onClick={onMark} title="Mark this moment. The notes list marked moments first.">Mark</button>
+        <button className="primary" onClick={onStop} title="Stop writing the call down">Stop</button>
       </header>
       <div className="live-sources" aria-label="What is heard">
-        <span data-state={heard('me')} title="Your microphone"><span className="dot" />You</span>
-        <span data-state={heard('them')} title="The call's sound, from this computer"><span className="dot" />Call</span>
+        <Meter label="You" title="Your microphone" state={heard('me')} level={() => levels().me} />
+        <Meter label="Call" title="The call's sound, from this computer" state={heard('them')} level={() => levels().them} />
       </div>
       {(inputs.me.state === 'unavailable' || inputs.them.state === 'unavailable') && (
         <div className="live-problem" role="status">
@@ -98,7 +100,7 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, on
       {!settings.meetings.introSeen && <FirstCallNotice settings={settings} onDone={onFirstCallSeen} />}
       {!flags.toldOthers && <TellOthers transcription={settings.transcription} onTold={() => api.setToldOthers(true)} />}
       <div className="live-people" aria-label="Who spoke">
-        <span className="person-chip you">You</span>
+        <span className="person-chip ok">You</span>
         {people.map((line) => <PersonChip key={line.voiceId} line={line} />)}
       </div>
       <div className="live-lines" ref={lines} onScroll={(event) => { const box = event.currentTarget; atEnd.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40 }}>
@@ -122,7 +124,7 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, on
  */
 const LiveLine = memo(function LiveLine({ line, marked }: { line: TranscriptEntry; marked: boolean }) {
   return (
-    <div className={`live-line ${line.speaker}`}>
+    <div className={`live-line ${line.speaker} ${marked ? 'marked' : ''}`}>
       <span className="who">{speakerLabel(line)}</span>
       <time dateTime={new Date(line.at).toISOString()}>{clock.format(line.at)}</time>
       <p>{line.text}{marked && <span className="marked-tag">Marked</span>}</p>
@@ -157,8 +159,27 @@ function PersonChip({ line }: { line: TranscriptEntry }) {
     )
   }
   return (
-    <button className={`person-chip ${guessed ? 'guess' : ''}`} title={guessed ? 'A guess from what was said: click to confirm or change it' : 'Click to name this voice'} onClick={() => { setName(line.voiceName ?? ''); setNaming(true) }}>
+    <button className={`person-chip ${guessed ? 'guess' : line.voiceName ? 'ok' : 'unnamed'}`} title={guessed ? 'A guess from what was said: click to confirm or change it' : 'Click to name this voice'} onClick={() => { setName(line.voiceName ?? ''); setNaming(true) }}>
       {label}
     </button>
+  )
+}
+
+/** How loud one side is, as four bars, read a few times a second. Off or paused, the bars stay dark. */
+function Meter({ label, title, state, level }: { label: string; title: string; state: string; level: () => number | undefined }) {
+  const [lit, setLit] = useState(0)
+  useEffect(() => {
+    if (state !== 'on') { setLit(0); return }
+    const timer = setInterval(() => {
+      const rms = level() ?? 0
+      setLit(rms > 0.08 ? 4 : rms > 0.035 ? 3 : rms > 0.012 ? 2 : rms > 0.003 ? 1 : 0)
+    }, 120)
+    return () => clearInterval(timer)
+  }, [state, level])
+  return (
+    <span className="live-meter" data-state={state} title={state === 'on' ? title : `${title}: ${state}`}>
+      {label}
+      <span className="bars" aria-hidden="true">{[4, 7, 10, 13].map((height, index) => <i key={height} className={index < lit ? 'on' : ''} style={{ height }} />)}</span>
+    </span>
   )
 }

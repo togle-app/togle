@@ -37,6 +37,13 @@ export function meetingState(call: CallSessionSummary, now = Date.now()): string
   return `${length} · ${state}`
 }
 
+/** A call's dot, as the design colors it: indigo while live, amber while something is left for you, green when done. */
+export function meetingDot(call: CallSessionSummary, now = Date.now()): 'work' | 'wait' | 'done' | 'gone' {
+  if (call.status === 'live') return 'work'
+  if (call.status === 'interrupted') return 'gone'
+  return namesToConfirm(call.confirm, now) || call.minutes?.state === 'generating' ? 'wait' : 'done'
+}
+
 interface Props {
   agents: Agent[]
   /** The call going on now, if any. */
@@ -49,13 +56,15 @@ interface Props {
   /** After a call in a loud room: what the microphone picked up, for that call's page. */
   noise?: { callId: string; finding: NoiseFinding }
   microphone?: TogleMicrophoneStatus
+  /** Meetings was pressed in the sidebar: the list shows again. */
+  home?: number
 }
 
 /**
  * The calls Togle wrote down, newest first, with what is left to do for each: names to confirm, notes to read. Search
  * looks in what was said. A call opens to its notes and its transcript, and can be given to an agent or shared.
  */
-export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus, noise, microphone }: Props) {
+export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus, noise, microphone, home }: Props) {
   const [calls, setCalls] = useState<CallSessionSummary[] | null>(null)
   const [openId, setOpenId] = useState<string>()
   const [openTab, setOpenTab] = useState<'notes' | 'transcript'>('notes')
@@ -73,6 +82,7 @@ export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus, n
     const stop = api.onCallSessions(() => load())
     return () => { current = false; stop() }
   }, [open])
+  useEffect(() => { setOpenId(undefined) }, [home])
   useEffect(() => { if (focus?.id) { setOpenId(focus.id); setOpenTab('notes') } }, [focus?.id, focus?.seq])
   useEffect(() => {
     const text = query.trim()
@@ -86,17 +96,19 @@ export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus, n
   }, [query])
   const now = Date.now()
   const rows = useMemo(() => [...(calls ?? [])].sort((a, b) => Number(b.status === 'live') - Number(a.status === 'live') || b.startedAt - a.startedAt), [calls])
-  if (open) return <MeetingDetail id={open} noise={noise?.callId === open ? noise.finding : undefined} microphone={microphone} agents={agents} tab={openTab} onTab={setOpenTab} onBack={() => setOpenId(undefined)} onDeleted={() => setOpenId(undefined)} />
+  if (open) return <MeetingDetail id={open} noise={noise?.callId === open ? noise.finding : undefined} microphone={microphone} agents={agents} tab={openTab} onTab={setOpenTab} onDeleted={() => setOpenId(undefined)} />
   return (
     <div className="meetings call-history">
-      <div className="page-head"><h2>Meetings</h2><span className="spacer" /><button className="primary" disabled={!!liveId} title={liveId ? 'A call is being written down' : 'Start writing down a call now'} onClick={onWriteDown}>Write down now</button></div>
-      <p className="hint">Togle hears both sides of a call on this computer and writes it down. Your AI writes the notes when the call ends.</p>
-      <div className="history-filters"><input className="history-search" aria-label="Search what was said" placeholder="Search what was said" value={query} onChange={event => setQuery(event.target.value)} /></div>
+      <div className="meetings-top">
+        <input className="history-search" aria-label="Search what was said" placeholder="Search what was said" value={query} onChange={event => setQuery(event.target.value)} />
+        <button className="primary" disabled={!!liveId} title={liveId ? 'A call is being written down' : 'Start writing down a call now'} onClick={onWriteDown}>Write down now</button>
+      </div>
       {hits ? (
         <div className="call-history-list" aria-label="Search results">
           {searching && <p className="hint" role="status">Searching…</p>}
           {hits.map(hit => (
             <button key={hit.id} className="past-call-row meeting-row" aria-label={`Open call: ${meetingTitle(hit)}`} onClick={() => { setOpenId(hit.id); setOpenTab(hit.lines.length ? 'transcript' : 'notes') }}>
+              <span className="meeting-dot done" aria-hidden="true" />
               <strong>{meetingTitle(hit)}</strong>
               <span>{whenText(hit.startedAt, now)}</span>
               {hit.lines.map(line => <span key={line.at} className="past-call-preview"><b>{line.who}:</b> {line.text}</span>)}
@@ -108,6 +120,7 @@ export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus, n
         <div className="call-history-list">
           {rows.map(call => (
             <button key={call.id} className={`past-call-row meeting-row ${call.status === 'live' ? 'live-record' : ''}`} aria-label={`Open call: ${meetingTitle(call)}`} onClick={() => call.status === 'live' && call.id === liveId ? onOpenLive() : (setOpenId(call.id), setOpenTab('notes'))}>
+              <span className={`meeting-dot ${meetingDot(call, now)}`} aria-hidden="true" />
               <strong>{meetingTitle(call)}</strong>
               <span>{whenText(call.startedAt, now)} · {meetingState(call, now)}</span>
             </button>
@@ -120,7 +133,7 @@ export function MeetingsPage({ agents, liveId, onOpenLive, onWriteDown, focus, n
   )
 }
 
-function MeetingDetail({ id, noise, microphone, agents, tab, onTab, onBack, onDeleted }: { id: string; noise?: NoiseFinding; microphone?: TogleMicrophoneStatus; agents: Agent[]; tab: 'notes' | 'transcript'; onTab: (tab: 'notes' | 'transcript') => void; onBack: () => void; onDeleted: () => void }) {
+function MeetingDetail({ id, noise, microphone, tab, onTab, onDeleted }: { id: string; noise?: NoiseFinding; microphone?: TogleMicrophoneStatus; agents: Agent[]; tab: 'notes' | 'transcript'; onTab: (tab: 'notes' | 'transcript') => void; onDeleted: () => void }) {
   const [record, setRecord] = useState<CallSession | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -144,18 +157,16 @@ function MeetingDetail({ id, noise, microphone, agents, tab, onTab, onBack, onDe
   const ended = !!record && record.status !== 'live'
   return (
     <div className="meetings meeting-detail call-history">
-      <div className="page-head call-breadcrumb"><button className="ghost" aria-label="Back to Meetings" onClick={onBack}><Icon name="back" size={14} />Meetings</button></div>
       {!record ? <p className="hint" role="status">{error || 'Loading call…'}</p> : <>
         <div className="call-detail-head">
-          <h2>{meetingTitle(record)}</h2>
-          <p className="hint">{whenText(record.startedAt)} · {record.status === 'live' ? 'live' : callLength((record.endedAt ?? record.transcript.at(-1)?.at ?? record.startedAt) - record.startedAt)}{ended && ` · ${record.toldOthers ? 'you told the others it was written down' : 'you did not tick “I told them”'}`}</p>
+          <h2 title={`${whenText(record.startedAt)} · ${callLength((record.endedAt ?? record.transcript.at(-1)?.at ?? record.startedAt) - record.startedAt)}`}>{meetingTitle(record)}</h2>
           <div className="call-record-actions">
-            <button className="primary" disabled={busy || !ended} title={ended ? 'Start a task for a coding agent with this call attached' : 'End the call first'} onClick={() => void run(() => api.giveCallToAgent(record.id))}>Give to an agent</button>
-            <Menu className="ghost" ariaLabel="Share" title="Share this call" label={<>Share <Icon name="chevron" size={12} /></>} items={[
+            <Menu className="ghost" ariaLabel="Share" title="Share this call" label="Share" items={[
               { label: copied ? 'Copied' : 'Copy the notes', disabled: busy || !record.summary, keepOpen: false, onSelect: () => void navigator.clipboard.writeText(record.summary).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }, failure => setError(errorText(failure))) },
               { label: 'Save as a file', disabled: busy, onSelect: () => void run(async () => { await api.exportCallSession(record.id) }) }
             ]} />
-            <Menu className="ghost" ariaLabel="Call options" title="Call options" label={<>More <Icon name="chevron" size={12} /></>} items={[
+            <button className="primary" disabled={busy || !ended} title={ended ? 'Start a task for a coding agent with this call attached' : 'End the call first'} onClick={() => void run(() => api.giveCallToAgent(record.id))}>Give to an agent</button>
+            <Menu className="ghost icon-menu" ariaLabel="Call options" title="Rename or delete this call" label="⋯" items={[
               { label: 'Rename', disabled: busy, onSelect: () => { setTitle(record.title); setEditing(!editing) } },
               'divider',
               { label: 'Delete call', danger: true, disabled: busy || record.status === 'live', onSelect: () => setDeleting(!deleting) }
@@ -173,7 +184,7 @@ function MeetingDetail({ id, noise, microphone, agents, tab, onTab, onBack, onDe
           {(['notes', 'transcript'] as const).map(name => <button key={name} role="tab" id={`meeting-tab-${name}`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => onTab(name)}>{name === 'notes' ? 'Notes' : 'Transcript'}</button>)}
         </div>
         <section className="call-detail-content" role="tabpanel" aria-labelledby={`meeting-tab-${tab}`}>
-          {tab === 'notes' ? <CallNotes key={`notes-${record.id}`} record={record} onRecord={setRecord} canGenerate /> : <CallTranscript key={record.id} record={record} onRecord={setRecord} />}
+          {tab === 'notes' ? <CallNotes key={`notes-${record.id}`} record={record} onRecord={setRecord} /> : <CallTranscript key={record.id} record={record} />}
         </section>
       </>}
       {error && record && <p className="error" role="status">{error}</p>}

@@ -77,11 +77,6 @@ export interface Backend {
   start(options: StartOptions): Promise<TaskHandle>
   /** Picks up a task that was started earlier, here or in the agent's own app. */
   resume(id: string, options?: ResumeOptions): Promise<TaskHandle>
-  /**
-   * How a session that runs in another program is now: what the agent says about the sessions it has running, `gone` when
-   * it is not among them, null when the agent cannot tell. Not every agent can.
-   */
-  sessionState?(id: string): Promise<TaskState | 'gone' | null>
   /** Stops using the agent's program. Tasks stay as they are. */
   close(): Promise<void>
 }

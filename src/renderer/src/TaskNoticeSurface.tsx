@@ -48,25 +48,21 @@ export function TaskNoticeSurface() {
     }
   }
 
+  // A command or a question of one line reads in the notice's own line, as the design writes it.
+  const inline = !!notice.detail && (notice.detailKind === 'command' || notice.detailKind === 'question') && !notice.detail.includes('\n')
   return (
     <div className="task-notice-frame">
       <div ref={card} className="task-notice" role="alertdialog" aria-label={`${notice.title}. ${notice.where} ${notice.says}`} data-kind={notice.kind}>
         <div className="task-notice-head">
           <span className="task-notice-dot" aria-hidden="true" />
           <strong>{notice.title}</strong>
-          <button className="icon" aria-label="Close notice" title="Close" onClick={() => api.dismissTaskNotice(notice.id)}>
-            <Icon name="close" size={12} />
-          </button>
+          {notice.danger && <span className="task-danger" title={notice.danger}>Dangerous</span>}
         </div>
         <p className="task-notice-says">
           {notice.where} {notice.says}
+          {inline && <> {notice.detailKind === 'command' ? <code>{notice.detail}</code> : notice.detail}</>}
         </p>
-        {notice.detail && <pre className={`task-notice-detail ${notice.detailKind}`}>{notice.detail}</pre>}
-        {notice.danger && (
-          <p className="task-notice-danger">
-            <span className="task-danger">Dangerous</span> {notice.danger}
-          </p>
-        )}
+        {notice.detail && !inline && <pre className={`task-notice-detail ${notice.detailKind}`}>{notice.detail}</pre>}
         {error && <p className="task-notice-error" role="alert">{error}</p>}
         <div className="task-notice-actions">
           {notice.canAllow && (
@@ -79,14 +75,10 @@ export function TaskNoticeSurface() {
               Refuse
             </button>
           )}
-          <button className="ghost small" onClick={() => api.openTaskFromNotice(notice.key)}>
+          <button className="small" onClick={() => api.openTaskFromNotice(notice.key)}>
             Open
           </button>
         </div>
-        {!notice.canAllow && notice.canRefuse && (
-          <p className="task-notice-note">{notice.danger ? 'It looks dangerous, so it is allowed in the Togle window, not here.' : 'Not all of it fits here. Open it to read all of it before you allow it.'}</p>
-        )}
-        {notice.others > 0 && <p className="task-notice-more">{notice.others === 1 ? '1 other task waits' : `${notice.others} other tasks wait`}</p>}
       </div>
     </div>
   )

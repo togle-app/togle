@@ -124,7 +124,7 @@ src/main/              Electron main process
                        their tasks, requests and stops; hub.ts holds them together; claude-sessions.ts lists
                        Claude Code's own sessions
   agent-store.ts       what a call belongs to, with the words calls are heard with
-  channel/, cli/       Claude Code in a terminal asking Togle, and the togle command
+  channel/, cli/       the togle command, and the local channel it reaches Togle on
   todo.ts              the to-do list as a plain text file
   task-box-window.ts   the F10 box; notice-window.ts the corner notice; tray.ts the tray
   microphone-link.ts   Togle Studio, when it's on this computer: found, watched, turned on and off around calls

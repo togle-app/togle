@@ -15,9 +15,11 @@ export function TellOthers({ transcription, onTold }: { transcription: Settings[
   return (
     <div className="tell-others" role="group" aria-label="Tell the others" title={line}>
       <strong>Tell the others</strong>
+      <q className="tell-line">{line}</q>
       <span className="tell-actions">
+        <label className="tell-tick"><input type="checkbox" onChange={(event) => { if (event.target.checked) onTold() }} />I told them</label>
         <button
-          className="ghost small"
+          className="primary small"
           onClick={() => void navigator.clipboard.writeText(line).then(() => {
             setCopied(true)
             setTimeout(() => setCopied(false), COPIED_MS)
@@ -25,9 +27,7 @@ export function TellOthers({ transcription, onTold }: { transcription: Settings[
         >
           {copied ? 'Copied' : 'Copy the line'}
         </button>
-        <button className="primary small" onClick={onTold}>I told them</button>
       </span>
-      <p className="tell-line">{line}</p>
     </div>
   )
 }

@@ -18,9 +18,7 @@ import { ShowWindow } from './show-window'
 import { DictationWindow } from './dictation-window'
 import { MicrophoneLink } from './microphone-link'
 import type { CloseWarning } from '@shared/close-warning'
-import { ClaudeSettings, claudeSettingsFile } from './channel/claude-settings'
-import { hookAnswer, logHook, readInput } from './channel/hook-main'
-import { registerConnection, startChannel } from './channel/register'
+import { startChannel } from './channel/register'
 import type { ChannelServer } from './channel/server'
 import { NoticeWindow } from './notice-window'
 import { TaskBoxWindow } from './task-box-window'
@@ -235,7 +233,7 @@ let reach: Reach | undefined
 // The to-do list: a plain text file in Togle's folder.
 let todo: TodoFile | null = null
 // What Togle answers to the programs that talk to it: a hook of Claude Code asking about a command.
-let hookChannel: ChannelServer | null = null
+let localChannel: ChannelServer | null = null
 // The box to start a task in, opened by its key from any app.
 const taskBox = new TaskBoxWindow()
 const callNotice = new CallNoticeWindow()
@@ -1618,18 +1616,10 @@ if (!app.isPackaged && process.env.TOGLE_DEBUG_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.TOGLE_DEBUG_PORT)
 }
 
-// Claude Code starts Togle as `Togle --togle-hook claude-permission --data <folder>` to ask it about a command: that run
-// hands the question to the running Togle and prints the answer. It opens nothing, and is not a second Togle. It must
-// exit without waiting for Electron to be ready: once ready, Electron starts helper processes that keep the pipes Claude
-// Code reads open after the hook has ended, which would hold Claude Code up.
-const hookAt = process.argv.indexOf('--togle-hook')
-if (hookAt !== -1) {
-  void hookAnswer(process.argv.slice(hookAt + 1), readInput)
-    .then(out => new Promise<void>(resolve => { if (out) process.stdout.write(out, () => resolve()); else resolve() }))
-    .finally(() => {
-      logHook('exiting')
-      app.exit(0)
-    })
+// An entry an earlier Togle left in Claude Code's settings may still start Togle as `--togle-hook`: it ends at once and
+// says nothing, so Claude Code asks in its terminal as it always did.
+if (process.argv.includes('--togle-hook')) {
+  app.exit(0)
 } else if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
@@ -1746,23 +1736,9 @@ if (hookAt !== -1) {
       },
       acted: (what, by) => { if (Notification.isSupported()) new Notification({ title: `${by} acted on this computer`, body: what }).show() }
     })
-    // Connecting Claude Code in a terminal: one entry in its settings that starts Togle as `--togle-hook`.
-    const hubForClaude = runners
-    registerConnection({
-      handle: (name, listener) => ipcMain.handle(name, (_event, ...args) => listener(...args)),
-      settings: new ClaudeSettings(claudeSettingsFile(), () => ({
-        command: process.execPath,
-        args: [...(app.isPackaged ? [] : [app.getAppPath()]), '--togle-hook', 'claude-permission', '--data', app.getPath('userData')]
-      })),
-      claude: async () => {
-        const found = (await hubForClaude.status()).find(item => item.runner === 'claude')
-        return { installed: !!found?.installed, ...(found?.version ? { version: found.version } : {}) }
-      }
-    })
-    // A question from a Claude Code hook can only come once the channel is open; without it the hook finds nobody and
-    // the question stays with the person where the session runs.
+    // The `togle` command reaches the running Togle on its local channel (togle run claude, togle tasks).
     startChannel({ dataFolder: app.getPath('userData'), hub: runners, openBox: opening => taskBox.show(opening) }).then(
-      server => { if (quitting) void server.close(); else hookChannel = server },
+      server => { if (quitting) void server.close(); else localChannel = server },
       error => console.warn('[channel] could not open:', (error as Error).message)
     )
     started.window = Date.now()
@@ -1824,7 +1800,7 @@ if (hookAt !== -1) {
     // The sound kept to confirm names of a call a day old goes now, whether or not Togle runs again soon.
     confirmSound.sweepOld(CONFIRM_KEEP_MS)
     todo?.dispose()
-    void hookChannel?.close()
+    void localChannel?.close()
     microphoneLink.stop()
     dictation.dispose()
     tray?.close()
