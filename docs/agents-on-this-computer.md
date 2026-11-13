@@ -165,6 +165,7 @@ Some limits, as Hermes 0.22.5 has them on Windows:
 
 - Togle hears the title only while the screen is open. After a restart of Togle, a Hermes task is a row in the list, not a task Togle hears.
 - Hermes's own list does not say which sessions are running.
+- Hermes prints a title cut at 26 characters, so a session taken from its list shows a short title until its screen is opened.
 - Mac and Linux were not tried.
 
 An earlier development build of Togle could add an entry to Claude Code's settings that started Togle as `--togle-hook`. That entry now does nothing; take it out of `~/.claude/settings.json` if it is there.
