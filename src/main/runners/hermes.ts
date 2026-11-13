@@ -207,6 +207,8 @@ class HermesTask extends TaskBase implements ScreenSide {
   private markedOnce: (() => void) | null = null
   private searches = 0
   private searching = false
+  /** The marker of the last window title, to tell a change from a title set again. */
+  private lastMarker: Marker | undefined
   /** The id Hermes gave the session, once it shows in its list: the task is first known by the name it was started with. */
   real: string | null = null
   closed: string | undefined
@@ -331,21 +333,23 @@ class HermesTask extends TaskBase implements ScreenSide {
     this.markedOnce = null
     once?.()
     // The session is in Hermes's list from the turn's first words: a look when the turn begins finds it, however long the screen
-    // took to start and however many looks that used up.
-    if (!this.real) this.searches = Math.min(this.searches, 6)
+    // took to start and however many looks that used up. Only a change of marker counts, so that a title set again says nothing.
+    const changed = marker !== this.lastMarker
+    this.lastMarker = marker
+    if (changed && !this.real) this.searches = Math.min(this.searches, 6)
     if (marker === 'busy') {
       this.sawBusy = true
       this.turnOpen = true
       this.waitingFor = undefined
       this.stopped = false
       this.setBase('working')
-      this.search()
+      if (changed) this.search()
     } else if (marker === 'waiting') {
       this.sawBusy = true
       this.turnOpen = true
       this.waitingFor = 'approval or an answer'
       this.setBase('waiting')
-      this.search()
+      if (changed) this.search()
     } else {
       this.waitingFor = undefined
       // A task started with words is at work from the start: the idle screen that shows first is not its end.
