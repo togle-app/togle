@@ -27,7 +27,7 @@ Type `/` in the reply box of a task Togle runs, and the agent's own commands ope
 
 - Go on typing to narrow the list: the commands whose name starts with the letters come first, and when none does, the ones that hold them anywhere (a plugin's `supabase:…`).
 - The arrow keys move, **Enter** or a click sends the command as it is (the agent says what it needs), **Tab** completes its name so you can type what follows it, and **Esc** closes the list.
-- `/model` lists the agent's models. Picking one sends `/model` with it.
+- `/model` lists the agent's models, and picking one switches the task to it. Claude Code is sent `/model` with the one picked. Hermes, and an added agent that speaks ACP, is switched the way ACP has for it, and then asked which model it is on, so the answer is its own. (Sent as words after `/model`, an id from Hermes's list such as `openai-codex:gpt-6.1-sol` is read as one model's name, and Hermes stays with the provider it had.) Other words after `/model` go to the agent as they are, such as Hermes's own `--provider`.
 - The answer shows as what the agent said. A command that the agent does not know goes to its model as ordinary words.
 
 What each agent tells:

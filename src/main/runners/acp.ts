@@ -76,6 +76,8 @@ export const forCmd = (word: string): string => (/[\s"&|<>^()%!]/.test(word) ? `
 
 // The ways ACP names what a tool does.
 const EDIT_KINDS = new Set(['edit', 'delete', 'move'])
+/** How long a switch of model may take: the agent checks the model over the network, and may ask the person first. */
+const MODEL_SWITCH_MS = 10 * 60_000
 const oneLine = (value: string, longest = 90): string => value.replace(/\s+/g, ' ').trim().slice(0, longest)
 
 /** The command a tool call runs: "$ <command>" in its content (as Hermes writes it), its raw input, else its title. */
@@ -124,6 +126,18 @@ class AcpTask extends TaskBase {
   }
 
   async send(message: string): Promise<void> {
+    // A model picked from the agent's own list ("/model" and its id there) is switched to the way ACP has for it. The
+    // ids are the protocol's, not words for the agent's command: sent as words, Hermes 0.22 reads "provider:model" as
+    // one model's name and stays with the provider it had. Anything else after "/model" is the agent's to read.
+    const picked = /^\/model\s+(\S+)$/.exec(message)?.[1]
+    if (picked && this.modelList.some((model) => model.id === picked)) {
+      void this.switchModel(picked)
+      return
+    }
+    this.prompt(message)
+  }
+
+  private prompt(message: string): void {
     this.stopped = false
     this.open++
     this.setBase('working')
@@ -132,6 +146,41 @@ class AcpTask extends TaskBase {
       (result) => this.turnEnded(rec(result)),
       (error: unknown) => this.turnFailed(error)
     )
+  }
+
+  /**
+   * Switches the session to one of the models the agent listed. The switch itself answers nothing, so an agent that
+   * has a "/model" command is then asked which model it is on (it answers that without a model): its own words are
+   * the answer. One that has told no such command is asked nothing, as that would be a turn of its model. A switch the
+   * agent refuses ends the turn with its reason. The agent may ask the person first (a model that costs a lot), so the
+   * switch is given the time a question takes.
+   */
+  private async switchModel(id: string): Promise<void> {
+    this.stopped = false
+    this.open++
+    this.setBase('working')
+    let refused: unknown
+    try {
+      await this.server.peer.request('session/set_model', { sessionId: this.id, modelId: id }, MODEL_SWITCH_MS)
+    } catch (error) {
+      refused = error ?? new Error('The model was not switched.')
+    }
+    if (this.dead) return
+    if (refused) {
+      this.turnFailed(refused)
+      return
+    }
+    this.open = Math.max(0, this.open - 1)
+    if (this.stopped) {
+      if (!this.open) this.setBase('stopped')
+      return
+    }
+    if (this.commandList.some((command) => command.name === 'model')) {
+      this.prompt('/model')
+      return
+    }
+    this.emit({ type: 'turn-ended', outcome: 'completed', error: null })
+    if (!this.open) this.setBase('idle')
   }
 
   async stop(): Promise<void> {

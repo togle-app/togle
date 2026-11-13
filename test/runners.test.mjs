@@ -730,6 +730,58 @@ test('Hermes starts a task, keeps the name given, asks in its asking mode, and e
   }
 })
 
+test('a model picked from the list Hermes gave is switched to as ACP has it, and Hermes then says which model it is on', { timeout: 30_000 }, async () => {
+  const calls = path.join(scratch(), 'calls.jsonl')
+  const backend = hermes({ FAKE_CALLS: calls })
+  try {
+    const task = await backend.start({ folder: os.tmpdir(), prompt: 'say ok', asks: true })
+    const events = watch(task)
+    const ended = () => events.filter((e) => e.type === 'turn-ended')
+    const said = () => events.filter((e) => e.type === 'message').map((e) => e.text)
+    const switched = () => callsOf(calls).filter((c) => c.method === 'session/set_model').map((c) => c.modelId)
+    await until(() => ended().length === 1, 'the first turn to end')
+    await until(() => task.offers().commands.length, 'the commands it told')
+    // An id from its list: sent as words, Hermes would take all of it for a model's name and keep its provider.
+    await task.send('/model openai-codex:gpt-6.1-sol')
+    await until(() => ended().length === 2, 'the switch to end')
+    assert.deepEqual(switched(), ['openai-codex:gpt-6.1-sol'], 'the protocol’s own switch')
+    assert.equal(said().at(-1), 'Current model: gpt-6.1-sol\nProvider: openai-codex', 'and its own words for where it is now')
+    assert.equal(task.state, 'idle')
+    // A model the agent refuses: the turn ends with its reason, and the task goes on.
+    await task.send('/model openrouter:kimi-k3')
+    await until(() => ended().length === 3, 'the refusal')
+    assert.deepEqual([ended().at(-1).outcome, ended().at(-1).error], ['failed', 'No provider can serve kimi-k3.'])
+    assert.equal(task.state, 'idle')
+    assert.equal(said().length, 2, 'nothing is said of a model it did not switch to')
+    // Other words after "/model" are the agent's own to read, as they are.
+    await task.send('/model some-other-name')
+    await until(() => ended().length === 4, 'its own command to end')
+    assert.equal(said().at(-1), 'Model switched to: some-other-name\nProvider: openai-codex')
+    assert.equal(switched().length, 2, 'no switch of the protocol for words that are not a listed id')
+    await task.send('say ok')
+    await until(() => ended().length === 5, 'a reply after them')
+    assert.equal(said().at(-1), 'ok')
+  } finally {
+    await backend.close()
+  }
+  // An agent that told no "/model" of its own is switched the same way, and asked nothing after: that would be a turn.
+  const quiet = hermes({ FAKE_CALLS: calls, FAKE_NO_COMMANDS: '1' })
+  try {
+    const task = await quiet.start({ folder: os.tmpdir(), prompt: 'say ok', asks: true })
+    const events = watch(task)
+    const ended = () => events.filter((e) => e.type === 'turn-ended')
+    await until(() => ended().length === 1, 'the first turn to end')
+    assert.deepEqual(task.offers().commands, [])
+    await task.send('/model openai-codex:gpt-6.1-sol')
+    await until(() => ended().length === 2, 'the switch to end')
+    assert.deepEqual([ended().at(-1).outcome, task.state], ['completed', 'idle'])
+    assert.deepEqual(events.filter((e) => e.type === 'message').map((e) => e.text), ['ok'], 'no words were asked of it')
+    assert.equal(callsOf(calls).filter((c) => c.method === 'session/set_model').length, 3)
+  } finally {
+    await quiet.close()
+  }
+})
+
 test('a Hermes command waits as a request, and only allow once lets it run', { timeout: 30_000 }, async () => {
   const backend = hermes()
   try {

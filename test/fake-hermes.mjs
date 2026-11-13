@@ -8,7 +8,8 @@
 //   "sleep"       starts a long command; session/cancel ends it and the turn
 //   "fail"        says why in words, then answers with a plain error
 // FAKE_CALLS names a file that gets one line for each of set_mode, set_model, new, resume and load;
-// FAKE_NO_RESUME takes session/resume away so that session/load is used; FAKE_PID_FILE gets the long command's pid.
+// FAKE_NO_RESUME takes session/resume away so that session/load is used; FAKE_PID_FILE gets the long command's pid;
+// FAKE_NO_COMMANDS makes it an agent that tells no commands of its own.
 import { spawn } from 'node:child_process'
 import { appendFileSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
@@ -33,10 +34,18 @@ const ask = (params) => new Promise((resolve) => {
 const modes = () => ({ currentModeId: 'dont_ask', availableModes: [{ id: 'default', name: 'Default' }, { id: 'accept_edits', name: 'Accept edits' }, { id: 'dont_ask', name: "Don't ask" }] })
 
 async function turn(session, prompt, finish) {
-  const say = (words) => { for (const piece of words.match(/.{1,6}/g) ?? []) update(session.id, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: piece }, messageId: 'm1' }) }
+  const say = (words) => { for (const piece of words.match(/[\s\S]{1,6}/g) ?? []) update(session.id, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: piece }, messageId: 'm1' }) }
   const call = (id, kind, title, extra = {}) => update(session.id, { sessionUpdate: 'tool_call', toolCallId: id, title, kind, content: kind === 'execute' ? [{ type: 'content', content: { type: 'text', text: `$ ${title.replace(/^terminal: /, '')}` } }] : [], locations: [], ...extra })
   const done = (id, status) => update(session.id, { sessionUpdate: 'tool_call_update', toolCallId: id, status })
   const options = [{ optionId: 'once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'always', name: 'Always allow', kind: 'allow_always' }, { optionId: 'no', name: 'Reject', kind: 'reject_once' }]
+  // Its own "/model", as Hermes 0.22.5 answers it: which model the session is on; and, given words, a switch that
+  // reads all of them as one model's name ("provider:model" becomes "provider/model") and keeps the provider.
+  const model = /^\/model(?:\s+(\S+))?$/.exec(prompt)
+  if (model) {
+    if (model[1]) session.model = model[1].replace(':', '/')
+    say(`${model[1] ? 'Model switched to' : 'Current model'}: ${session.model ?? 'claude-sonnet-5'}\nProvider: ${session.provider ?? 'anthropic'}`)
+    return finish('end_turn')
+  }
   const run = /^run (\S+)/.exec(prompt)
   const edit = /^edit (\S+)/.exec(prompt)
   if (run) {
@@ -108,7 +117,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       calls({ method, cwd: params.cwd })
       // As Hermes 0.22 does: the models a session can be switched to come with the session, its commands as news of it.
       reply({ sessionId: session.id, modes: modes(), models: { availableModels: [{ modelId: 'openai-codex:gpt-6.1-sol', name: 'gpt-6.1-sol' }, { modelId: 'openrouter:kimi-k3', name: 'kimi-k3', description: 'A second one' }], currentModelId: 'openai-codex:gpt-6.1-sol' } })
-      update(session.id, { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'model', description: 'Show current model and provider, or switch models', input: { hint: 'model name to switch to' } }, { name: 'version', description: 'Show Hermes version' }] })
+      if (!process.env.FAKE_NO_COMMANDS) update(session.id, { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'model', description: 'Show current model and provider, or switch models', input: { hint: 'model name to switch to' } }, { name: 'version', description: 'Show Hermes version' }] })
       return undefined
     }
     case 'session/resume':
@@ -119,12 +128,21 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       // Real Hermes tells the past again on resume as well as on load.
       update(session.id, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'old words from before' } })
       update(session.id, { sessionUpdate: 'tool_call', toolCallId: 'old', title: 'terminal: echo old', kind: 'execute', content: [] })
-      return reply({ modes: modes() })
+      update(session.id, { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'model', description: 'Show current model and provider, or switch models', input: { hint: 'model name to switch to' } }] })
+      return reply({ modes: modes(), models: { availableModels: [{ modelId: 'openai-codex:gpt-6.1-sol', name: 'gpt-6.1-sol' }], currentModelId: 'openai-codex:gpt-6.1-sol' } })
     }
     case 'session/set_mode':
-    case 'session/set_model':
       calls({ method, ...params })
       return reply({})
+    case 'session/set_model': {
+      calls({ method, ...params })
+      // The protocol's own switch: "provider:model" names both. One model no provider serves is refused, with why.
+      const [provider, name] = String(params.modelId).split(':')
+      if (name === 'kimi-k3') return out({ id, error: { code: -32602, message: 'No provider can serve kimi-k3.' } })
+      const session = sessions.get(params.sessionId)
+      if (session) Object.assign(session, { provider, model: name })
+      return reply({})
+    }
     case 'session/prompt': {
       const session = sessions.get(params.sessionId)
       if (!session) return fail('no such session')
