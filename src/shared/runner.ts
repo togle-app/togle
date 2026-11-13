@@ -331,6 +331,8 @@ export interface TaskAttention {
   fix?: string
   /** As in TaskView: it runs in a terminal of Togle's own, and so does not wait for a reply once it ended. */
   terminal?: boolean
+  /** As in TaskView: what a task waits for on its own screen, when Togle has no request of its own for it. */
+  waitingFor?: string
 }
 
 /** A small notice: a task waits for the person, or it finished. */
@@ -343,7 +345,7 @@ export interface TaskNotice {
   title: string
   /** The agent and the folder: "Codex · api-server". */
   where: string
-  /** Follows `where`: "wants to run", "wants to change", "asks", "finished", "stopped with an error", "is signed out". */
+  /** Follows `where`: "wants to run", "wants to change", "asks", "waits on its screen", "finished", "stopped with an error", "is signed out". */
   says: string
   /** The command in full, the files, the question, or what the finished task said last. */
   detail: string

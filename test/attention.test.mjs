@@ -37,6 +37,25 @@ test('a task that stopped, by the Stop button or by an error, waits for a reply:
   assert.equal(asked.notices[0].others, 1, 'the notice for the one that asks counts the stopped one among the others')
 })
 
+test('a task in the background that waits on its own screen counts, with a notice that only opens it, until it no longer waits', () => {
+  const attention = new T.Attention(clock())
+  const waiting = task('claude:a', 'waiting', [], { screen: true, waitingFor: 'permission prompt' })
+  assert.equal(attention.look([waiting]).waiting, 1, 'the tray counts it')
+  const look = attention.look([waiting, task('codex:b', 'waiting', [request('r1', 'command', { command: 'ls', raw: 'ls' })])])
+  assert.equal(look.waiting, 2, 'and with the other')
+  assert.deepEqual(look.notices.map((notice) => notice.id), ['claude:a#screen', 'codex:b#r1'], 'oldest first')
+  assert.deepEqual({ ...look.notices[0] }, {
+    id: 'claude:a#screen', kind: 'waiting', key: 'claude:a', title: 'Task claude:a', where: 'Claude Code · api-server', says: 'waits on its screen', detail: 'permission prompt',
+    detailKind: 'words', canRefuse: false, canAllow: false, others: 1
+  })
+  attention.dismiss('claude:a#screen')
+  assert.deepEqual(attention.look([waiting]).notices, [], 'a notice the person closed does not come back')
+  const gone = attention.look([task('claude:a', 'idle', [], { screen: true })])
+  assert.equal(gone.waiting, 0)
+  assert.deepEqual(gone.notices, [])
+  assert.equal(attention.look([waiting]).notices.length, 1, 'it waits again: a new notice')
+})
+
 test('Allow once is offered only when everything asked is shown and nothing looks dangerous', () => {
   const attention = new T.Attention(clock())
   const long = `npm run build -- ${'--flag '.repeat(60)}`

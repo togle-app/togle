@@ -16,6 +16,23 @@ function waitingNotice(task: TaskAttention, request: ViewRequest, others: number
   return { ...base, says: 'wants to run', detail: shown(request.command ?? request.raw ?? ''), detailKind: 'command', canRefuse: true, canAllow: canAllowHere(request), ...(request.danger ? { danger: request.danger } : {}) }
 }
 
+/** A task in the background that waits on its own screen, with no request of Togle's own to show (it came while Togle was closed): the notice only opens it. */
+function screenNotice(task: TaskAttention, others: number): TaskNotice {
+  return {
+    id: `${task.key}#screen`,
+    kind: 'waiting',
+    key: task.key,
+    title: task.title,
+    where: `${task.agent ?? RUNNER_NAMES[task.runner] ?? task.runner} · ${baseName(task.folder)}`,
+    says: 'waits on its screen',
+    detail: shown(task.waitingFor ?? ''),
+    detailKind: 'words',
+    canRefuse: false,
+    canAllow: false,
+    others
+  }
+}
+
 export interface AttentionLook {
   /** How many tasks wait for the person. */
   waiting: number
@@ -45,6 +62,13 @@ export class Attention {
         requests.push({ task, request, at: this.firstSeen.get(id) as number })
       }
     }
+    // A task in the background that waits with no request of Togle's own: it waits on its screen, and counts like any other.
+    const onScreen = tasks.filter((task) => task.state === 'waiting' && !task.pending.length && !!task.waitingFor)
+    for (const task of onScreen) {
+      const id = `${task.key}#screen`
+      live.add(id)
+      if (!this.firstSeen.has(id)) this.firstSeen.set(id, now)
+    }
     // What is no longer asked is forgotten, so what was closed does not stay in memory.
     for (const id of [...this.firstSeen.keys()]) {
       if (live.has(id)) continue
@@ -54,8 +78,10 @@ export class Attention {
     requests.sort((a, b) => a.at - b.at)
     // A task that stopped (by the person's Stop, or by itself) waits for a reply to go on: it counts too.
     // Not one in a terminal of Togle's own: it ended with its program, and no reply goes on with it.
-    const waitingTasks = new Set([...requests.map(({ task }) => task.key), ...tasks.filter((task) => !task.terminal && (task.state === 'stopped' || task.state === 'failed')).map((task) => task.key)])
-    const notices = requests.filter(({ task, request }) => !this.dismissed.has(`${task.key}#${request.id}`)).map(({ task, request }) => waitingNotice(task, request, waitingTasks.size - 1))
+    const waitingTasks = new Set([...requests.map(({ task }) => task.key), ...onScreen.map((task) => task.key), ...tasks.filter((task) => !task.terminal && (task.state === 'stopped' || task.state === 'failed')).map((task) => task.key)])
+    const asked = requests.filter(({ task, request }) => !this.dismissed.has(`${task.key}#${request.id}`)).map(({ task, request, at }) => ({ at, notice: waitingNotice(task, request, waitingTasks.size - 1) }))
+    const onItsScreen = onScreen.filter((task) => !this.dismissed.has(`${task.key}#screen`)).map((task) => ({ at: this.firstSeen.get(`${task.key}#screen`) as number, notice: screenNotice(task, waitingTasks.size - 1) }))
+    const notices = [...asked, ...onItsScreen].sort((a, b) => a.at - b.at).map(({ notice }) => notice)
 
     const finished: TaskNotice[] = []
     const present = new Set<string>()

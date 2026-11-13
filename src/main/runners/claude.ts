@@ -100,6 +100,7 @@ interface Known {
 const KNOWN = 'jobs.json'
 /** The most words a task is started with: a Windows command line holds about 32,000 characters. */
 const MOST_WORDS = 20_000
+const STILL_OPEN = 'It is still open in a terminal. End that Claude Code first: a conversation goes on in one program at a time.'
 const BACKGROUNDED = /backgrounded\s+·\s+([0-9a-f]{8})/
 const COPY = /started a copy as ([0-9a-f]{8})/
 
@@ -155,7 +156,11 @@ export class ClaudeBackend implements Backend {
       run: (args, cwd) => this.run(command, args, cwd),
       look: () => this.look(),
       said: (session) => (this.options.said ?? claudeLastSaid)(session),
-      over: (job) => void this.finished(job)
+      over: (job) => void this.finished(job),
+      openElsewhere: async (session) => {
+        const open = (await this.rows(0).catch(() => [] as AgentRow[])).find((row) => row.sessionId === session && row.kind !== 'background' && row.pid)
+        return open?.pid && alive(open.pid) ? STILL_OPEN : undefined
+      }
     }))
     this.resolved.catch(() => { this.resolved = undefined })
     return this.resolved
@@ -213,7 +218,9 @@ export class ClaudeBackend implements Backend {
     const stored = await (this.options.stored ?? storedSessions)().catch(() => [] as StoredSession[])
     const found = new Map<string, TaskInfo>()
     for (const session of stored) found.set(session.id, { id: session.id, runner: 'claude', title: session.title, folder: session.cwd, state: 'idle', updatedAt: session.updatedAt })
-    for (const row of rows) {
+    // One session can be listed twice: as a background session that was stopped, and as the program in a terminal that has
+    // it open now. The program that runs is the one to take over, and the background session is the one that opens after.
+    for (const row of [...rows.filter(isJob), ...rows.filter((candidate) => !isJob(candidate))]) {
       if (!row.sessionId) continue
       const before = found.get(row.sessionId)
       const job = isJob(row)
@@ -228,7 +235,7 @@ export class ClaudeBackend implements Backend {
         updatedAt: before?.updatedAt ?? row.startedAt ?? 0,
         // A task in the background has no program of its own to take over: its screen is opened.
         ...(row.pid && !job ? { pid: row.pid } : {}),
-        ...(job ? { job: row.id } : {}),
+        ...(job ? { job: row.id } : before?.job ? { job: before.job } : {}),
         ...(row.status === 'waiting' && row.waitingFor ? { waitingFor: row.waitingFor } : {})
       })
     }
@@ -237,7 +244,7 @@ export class ClaudeBackend implements Backend {
       // After "/clear" Claude Code keeps the task in another session: that one is this task, and not a second row.
       if (task.session() !== task.id) found.delete(task.session())
       const before = found.get(task.id)
-      found.set(task.id, { id: task.id, runner: 'claude', title: task.title || before?.title || 'Claude Code task', folder: task.folder || before?.folder || '', state: task.state, updatedAt: before?.updatedAt ?? Date.now(), job: task.job, ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}) })
+      found.set(task.id, { id: task.id, runner: 'claude', title: task.title || before?.title || 'Claude Code task', folder: task.folder || before?.folder || '', state: task.state, updatedAt: before?.updatedAt ?? Date.now(), job: task.screen.job, ...(before?.pid ? { pid: before.pid } : {}), ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}) })
     }
     return [...found.values()].sort((a, b) => b.updatedAt - a.updatedAt)
   }
@@ -278,9 +285,13 @@ export class ClaudeBackend implements Backend {
     // What the list says decides how it opens: a session in the background has its screen opened, whatever its state.
     const row = rows.filter(isJob).find((candidate) => (options.job ? candidate.id === options.job : candidate.sessionId === id))
     if (options.job && !row) throw new Error('That task is gone.')
+    // A conversation goes on in one program at a time: one open in a terminal is ended first (by the hub, with the person's
+    // yes), or this would split the saved conversation in two.
+    const open = rows.find((candidate) => candidate.sessionId === (row?.sessionId ?? id) && candidate.kind !== 'background' && candidate.pid)
+    if (open?.pid && alive(open.pid)) throw new Error(STILL_OPEN)
     let task = row ? this.jobs.get(row.id) : undefined
     if (row && !task) task = this.take(context, row, options.folder)
-    task ??= await this.begin(context, rows, id, options)
+    task ??= await this.begin(context, id, options)
     await task.show()
     return task
   }
@@ -299,11 +310,11 @@ export class ClaudeBackend implements Backend {
   }
 
   /** A session that is not in the background yet goes there, as the same session. */
-  private async begin(context: JobContext, rows: AgentRow[], id: string, options: ResumeOptions): Promise<ClaudeJob> {
+  private async begin(context: JobContext, id: string, options: ResumeOptions): Promise<ClaudeJob> {
     const problem = await this.cannotRunInBackground()
     if (problem) throw new Error(problem)
-    const open = rows.find((row) => row.sessionId === id && row.kind !== 'background' && row.pid)
-    if (open?.pid && alive(open.pid)) throw new Error('It is still open in a terminal. End that Claude Code first: a conversation goes on in one program at a time.')
+    // A session id is a UUID: anything else could be read as a flag.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new Error('That is not a session Claude Code knows.')
     const info = (await this.list()).find((task) => task.id === id)
     const folder = options.folder ?? info?.folder ?? os.homedir()
     const hook = await this.hooks.attach(this.waiting(), false)

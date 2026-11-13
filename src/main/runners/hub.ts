@@ -351,7 +351,7 @@ export class RunnerHub {
   attention(): TaskAttention[] {
     const mine = [...this.owned.values()].map((owned) => {
       const view = this.viewOfOwned(owned, undefined)
-      return { key: owned.key, runner: view.runner, agent: this.nameOf(view.runner), title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line, ...(view.signedOut ? { signedOut: true } : {}), ...(view.fix ? { fix: view.fix } : {}), ...(view.terminal ? { terminal: true } : {}) }
+      return { key: owned.key, runner: view.runner, agent: this.nameOf(view.runner), title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line, ...(view.signedOut ? { signedOut: true } : {}), ...(view.fix ? { fix: view.fix } : {}), ...(view.terminal ? { terminal: true } : {}), ...(view.waitingFor ? { waitingFor: view.waitingFor } : {}) }
     })
     return mine
   }

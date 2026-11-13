@@ -687,6 +687,36 @@ test('a conversation still open in a terminal is not started a second time', { t
   }
 })
 
+test('a session a terminal has open and a stopped background session that has it are one task, taken over from the terminal, and opened after', { timeout: 60_000 }, async () => {
+  const dir = scratch()
+  const { backend, home } = claude()
+  try {
+    const task = await backend.start({ folder: dir, prompt: '', title: 'Both' })
+    await task.stop()
+    await until(() => !alive(job(home, task.screen.job).pid), 'the session to end')
+    writeFileSync(path.join(home, 'interactive.json'), JSON.stringify([{ pid: process.pid, sessionId: task.id, cwd: dir }]))
+    // The list is reused for a moment: wait until it has seen the program.
+    await until(async () => (await backend.list()).find((row) => row.id === task.id)?.pid === process.pid, 'the list to show the program in the terminal')
+    const rows = (await backend.list()).filter((row) => row.id === task.id)
+    assert.equal(rows.length, 1, 'one task')
+    assert.equal(rows[0].pid, process.pid, 'the program in the terminal is the one to take over')
+    assert.equal(rows[0].job, task.screen.job, 'and the background session is the one that opens after')
+    // Opened while that program runs, it would split the conversation: refused, and nothing is started.
+    await assert.rejects(() => backend.resume(task.id, { folder: dir, job: task.screen.job }), /still open in a terminal/)
+    await assert.rejects(() => task.screen.show(), /still open in a terminal/)
+    assert.match(task.screen.closed, /still open in a terminal/, 'and the task says why its screen is closed')
+    assert.equal(alive(job(home, task.screen.job).pid), false, 'the stopped session stays stopped')
+    // The program was ended (the hub does that first): now it opens, as the same session.
+    writeFileSync(path.join(home, 'interactive.json'), '[]')
+    const again = await backend.resume(task.id, { folder: dir, job: task.screen.job })
+    assert.equal(again, task)
+    await until(() => alive(job(home, task.screen.job).pid), 'the session to come back')
+    assert.equal(job(home, task.screen.job).sessionId, task.id)
+  } finally {
+    await backend.close()
+  }
+})
+
 test('a session that was removed is gone when it is opened', async () => {
   const { backend } = claude()
   try {
@@ -732,6 +762,16 @@ test('a row of the list is read as it is, and a session in the background is one
   assert.equal(T.isJob(row), true)
   assert.equal(T.isJob(T.rowOf({ pid: 3, kind: 'interactive', sessionId: 'x' })), false)
   assert.equal(T.isJob({ kind: 'background' }), false, 'without the id its screen opens with it is not one Togle can open')
+  assert.equal(T.isJob({ kind: 'background', id: '--help' }), false, 'an id that is not eight hex characters is never put in a command')
+})
+
+test('a session id that is not a UUID is not put in a command, where it could be read as a flag', async () => {
+  const { backend } = claude({ backend: { stored: async () => [{ id: '--help', title: 'Odd', cwd: scratch(), updatedAt: 1 }] } })
+  try {
+    await assert.rejects(() => backend.resume('--help', {}), /not a session Claude Code knows/)
+  } finally {
+    await backend.close()
+  }
 })
 
 test('a session is working, waiting or idle by its program and its status, and stopped without a program', () => {

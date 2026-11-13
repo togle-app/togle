@@ -287,7 +287,7 @@ function TaskRow({ task, now, old, selected, onSelect, onTakeOver }: { task: Tas
   const elsewhere = !task.mine && !!task.pid
   // One line, as the design has it: the agent, where it works, and how it stands. A task in a terminal says so. Stopped
   // and waiting for a reply, it says why; done long ago, it says when.
-  const detail = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : 'stopped · reply to go on') : task.state === 'waiting' ? 'waiting' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `done · ${ago(task.updatedAt, now)}` : 'done'
+  const detail = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : task.screen ? 'stopped · open it to go on' : 'stopped · reply to go on') : task.state === 'waiting' ? (task.waitingFor && !task.pending.length ? 'waiting on its screen' : 'waiting') : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `done · ${ago(task.updatedAt, now)}` : 'done'
   const line = elsewhere ? `${agentOf(task)} · terminal` : `${agentOf(task)} · ${baseName(task.folder)} · ${detail}`
   return (
     <div className="task-item" role="listitem">

@@ -47,7 +47,7 @@ export interface AgentRow {
 export type JobRow = AgentRow & { id: string }
 
 /** Whether a row is a session in the background, which has the id its screen is opened with. */
-export const isJob = (row: AgentRow): row is JobRow => row.kind === 'background' && !!row.id
+export const isJob = (row: AgentRow): row is JobRow => row.kind === 'background' && /^[0-9a-f]{8}$/.test(row.id ?? '')
 
 /** A row as Claude Code gives it: the fields Togle uses, as they are. */
 export function rowOf(told: Record<string, unknown>): AgentRow {
@@ -141,6 +141,8 @@ export interface JobContext {
   said(session: string): Promise<string>
   /** The session is gone for good. */
   over(job: ClaudeJob): void
+  /** Why a stopped session may not be opened now, in words: a terminal has its conversation open. Nothing when it may. */
+  openElsewhere(session: string): Promise<string | undefined>
 }
 
 /** How long a task started with words is shown as working before the list can say it is not: the program takes a moment to begin. */
@@ -300,6 +302,15 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
 
   async show(): Promise<void> {
     if (this.screenTask || this.over) return
+    // Opening a session that is stopped brings it back, and a conversation goes on in one program at a time: with a terminal
+    // that has it open, it would split in two.
+    if (this.pid === null) {
+      const elsewhere = await this.context.openElsewhere(this.current)
+      if (elsewhere) {
+        this.closed = elsewhere
+        throw new Error(elsewhere)
+      }
+    }
     const pty = await loadPty()
     if (!pty) {
       this.closed = 'Togle cannot open a terminal on this computer.'
