@@ -1,5 +1,6 @@
 // What the window can ask of the agents' tasks: each a message from the window to the hub, and one back when
 // something changed (the window then asks again for what it shows).
+import path from 'node:path'
 import { addedAgentProblem, agentIdOf, KNOWN_AGENTS, runsInTerminal, type AddedAgent, type RunnerKind, type StartRequest, type TaskView } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
 import { AcpBackend, commandWords, whereIs } from './acp'
@@ -46,6 +47,8 @@ export interface RunnerDeps {
   backends?: Backend[]
   /** A folder of Togle's own where what Claude Code's tasks need to go on without Togle is kept: see ClaudeOptions.keep. */
   keep?: string
+  /** A folder of Togle's own where Codex keeps what its tasks need to go on without Togle (a folder of its own name in it). */
+  keepIn?: string
   /** The agents the person added (any that speaks ACP), and keeping a changed list. */
   added?(): AddedAgent[]
   saveAdded?(agents: AddedAgent[]): Promise<void>
@@ -71,7 +74,11 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   const told = (chunk: TerminalChunk): void => deps.send('runners:terminal-data', chunk)
   const hub = new RunnerHub({
     backends: [
-      ...(deps.backends ?? [new CodexBackend({ version: deps.version }), new ClaudeBackend({ told, ...(deps.keep ? { keep: deps.keep } : {}) }), new HermesBackend({ version: deps.version })]),
+      ...(deps.backends ?? [
+        new CodexBackend({ version: deps.version, told, ...(deps.keepIn ? { keep: path.join(deps.keepIn, 'codex') } : {}) }),
+        new ClaudeBackend({ told, ...(deps.keep ? { keep: deps.keep } : {}) }),
+        new HermesBackend({ told })
+      ]),
       ...(deps.added?.() ?? []).map((agent) => addedBackend(agent, deps.version, told))
     ],
     changed: () => {

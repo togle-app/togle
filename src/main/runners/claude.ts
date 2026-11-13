@@ -40,8 +40,8 @@ export interface ClaudeOptions {
   live?: () => Promise<AgentRow[]>
   /** The sessions it kept, as files under ~/.claude/projects. Read from there when left out. */
   stored?: () => Promise<StoredSession[]>
-  /** Where what its screens print goes, for the window. */
-  told?: (chunk: TerminalChunk) => void
+  /** Where what its screens print goes, for the window. Required: a screen whose words are not told shows only what it had printed when it was opened. */
+  told: (chunk: TerminalChunk) => void
   /**
    * A folder of Togle's own, where the address Claude Code posts to, each task's settings file and the list of tasks stay
    * between runs: tasks that went on while Togle was closed are heard again. Without one, nothing is kept.
@@ -137,7 +137,7 @@ export class ClaudeBackend implements Backend {
   private resolved?: Promise<JobContext>
   private background?: Promise<string | undefined>
 
-  constructor(private readonly options: ClaudeOptions = {}) {
+  constructor(private readonly options: ClaudeOptions) {
     this.hooks = new HookServer(options.keep)
   }
 
@@ -152,7 +152,7 @@ export class ClaudeBackend implements Backend {
     this.resolved ??= this.command().then((command) => ({
       command,
       env: this.options.env ?? process.env,
-      told: this.options.told ?? (() => undefined),
+      told: this.options.told,
       run: (args, cwd) => this.run(command, args, cwd),
       look: () => this.look(),
       said: (session) => (this.options.said ?? claudeLastSaid)(session),

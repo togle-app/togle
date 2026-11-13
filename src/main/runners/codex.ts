@@ -1,27 +1,46 @@
-// Codex on this computer, through its app server. `codex app-server` speaks JSON-RPC over its standard input and
-// output, the way Codex's editor extension does. One app server serves every task Togle runs: each task is a thread.
+// Codex on this computer. Togle runs each task as a thread on Codex's shared server (its "daemon", see codex-daemon.ts) and
+// opens the thread's screen when someone looks at it: Codex's own terminal program, `codex --remote unix:// resume <thread>`, in
+// a terminal of Togle's own. The person has the program they know, with its keys and commands, and the thread goes on when the
+// screen is closed and when Togle quits: the server, not Togle, runs it. Togle is a second client of the server beside the
+// screen. It hears what the thread does and what it asks, and an answer given in either place is enough: the other is told it
+// was answered (`serverRequest/resolved`). Codex's sign-in and settings are the person's own; Togle touches neither.
 //
-// What trying it on Windows (Codex 0.166) showed, which this follows:
-// - The program to start is the native codex.exe: Node cannot start npm's codex.cmd without a shell.
-// - A thread Togle starts must set its own approval policy and sandbox: the person's Codex may be set to never ask.
-// - `turn/interrupt` ends the turn at once, but a command already running goes on to its end. Ending it is a second
-//   press (`endCommands`), done by finding the command among the programs below the app server.
-// - A thread shows `active` with the flag `waitingOnApproval` while a command waits for the person.
+// What trying Codex 0.169 (the server) with Codex 0.166 (its screen) on Windows showed, which this follows:
+// - A client joins the server through `codex app-server proxy` and a WebSocket (codex-link.ts). `thread/start` subscribes the
+//   client to its thread; `thread/resume` subscribes it to one that exists (it needs a first message: "no rollout found"
+//   before). Status changes reach every client; a thread's items and what it asks reach the subscribed ones.
+// - What a thread asks reaches the screen and every subscribed client at once. Whoever answers first wins. A request that is
+//   still open when every client has gone stays open, and is sent again to the next client that joins the thread.
+// - A command already running goes on when the screen or Togle is gone, and the turn goes on to its answer with nobody
+//   connected. `turn/interrupt` ends the turn but not a command already running: Stop's second press ends that.
+// - A thread started with no `approvalPolicy` and `sandbox` follows the person's own Codex settings, as in their terminal.
+// - The server may report a thread `notLoaded` in the middle of a turn: that is not read as "not running" while a turn is.
 import { execFile, spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { AgentQuestion, TaskInfo, TaskState } from '@shared/runner'
-import { type Id, JsonRpcPeer, RpcError, list, rec, text } from './jsonrpc'
+import { daemonPid, daemonState, startDaemon } from './codex-daemon'
+import { WsRpcPeer } from './codex-link'
+import { type Id, JsonRpcPeer, NO_ANSWER, type PeerHandlers, RpcError, type RpcPeer, list, rec, text } from './jsonrpc'
 import { endCommandsMatching, unwrapShell } from './process-tree'
 import { type Answer, TaskBase } from './task-base'
-import type { Backend, Detected, ResumeOptions, StartOptions, TaskHandle } from './types'
+import { cleanWords, loadPty, openTerminal, TerminalTask, type TerminalChunk } from './terminal'
+import type { Backend, Detected, ResumeOptions, ScreenSide, StartOptions, TaskHandle, TerminalSide } from './types'
 
 export interface CodexOptions {
-  /** What starts the app server, before the word `app-server`. Found on this computer when left out. */
+  /** What starts Codex, before the word `app-server`. Found on this computer when left out. */
   command?: string[]
   env?: NodeJS.ProcessEnv
   /** Togle's version, told to Codex. */
   version?: string
+  /** Where what its screens print goes, for the window. Required: a screen whose words are not told shows only what it had printed when it was opened. */
+  told: (chunk: TerminalChunk) => void
+  /** A folder of Togle's own where the threads Togle runs are listed between runs: those that go on while Togle is closed are heard again. Without one, nothing is kept. */
+  keep?: string
+  /** The process Codex's shared server runs as, when one does: found by its command line when left out. */
+  serverPid?: () => Promise<number | null>
+  /** How often a lost connection to the shared server is tried again, in milliseconds. */
+  retryMs?: number
 }
 
 const NATIVE: Record<string, { pkg: string; triple: string }> = {
@@ -63,9 +82,15 @@ const policy = (asks: boolean | undefined): Record<string, unknown> => (asks ? {
 
 const oneLine = (value: string, longest = 90): string => value.replace(/\s+/g, ' ').trim().slice(0, longest)
 
+/** The folder a thread works in: older Codex tells it as `cwd`, newer as the first of its `environments`. */
+const folderOf = (thread: Record<string, unknown>): string => text(thread.cwd) || text(rec(list(thread.environments)[0]).cwd)
+
 const titleOf = (thread: Record<string, unknown>): string => text(thread.name).trim() || oneLine(text(thread.preview)) || 'Codex task'
 
-/** The state a thread's status stands for. A thread this app server does not hold is `notLoaded`: not running here. */
+/** A thread's id is a UUID: anything else could be read as a flag by the program it is handed to. */
+const THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** The state a thread's status stands for. A thread the server does not hold is `notLoaded`: not running there. */
 const stateOf = (status: unknown): TaskState => {
   const s = rec(status)
   if (s.type === 'systemError') return 'failed'
@@ -73,14 +98,29 @@ const stateOf = (status: unknown): TaskState => {
   return 'idle'
 }
 
-const infoOf = (thread: Record<string, unknown>, live: CodexTask | undefined): TaskInfo => ({
-  id: text(thread.id),
-  runner: 'codex',
-  title: live?.title || titleOf(thread),
-  folder: text(thread.cwd),
-  state: live ? live.state : stateOf(thread.status),
-  updatedAt: (typeof thread.updatedAt === 'number' ? thread.updatedAt : 0) * 1000
-})
+/** What a thread that waits waits for, in words: the person is told on the thread's screen when Togle has no request of its own. */
+const waitingOf = (status: unknown): string | undefined => {
+  const flags = list(rec(status).activeFlags).map(text)
+  if (flags.includes('waitingOnApproval')) return 'approval'
+  if (flags.includes('waitingOnUserInput')) return 'an answer'
+  return flags.length ? 'you' : undefined
+}
+
+const infoOf = (thread: Record<string, unknown>, live: CodexTask | undefined, shared: boolean): TaskInfo => {
+  const loaded = rec(thread.status).type !== 'notLoaded'
+  const state = live ? live.state : stateOf(thread.status)
+  return {
+    id: text(thread.id),
+    runner: 'codex',
+    title: live?.title || titleOf(thread),
+    folder: folderOf(thread) || live?.folder || '',
+    state,
+    updatedAt: (typeof thread.updatedAt === 'number' ? thread.updatedAt : 0) * 1000,
+    // On the shared server a thread that is loaded there goes on without any window, and its screen is opened.
+    ...(shared && (loaded || live) ? { job: text(thread.id) } : {}),
+    ...(state === 'waiting' && !live?.pending.length && waitingOf(thread.status) ? { waitingFor: waitingOf(thread.status) } : {})
+  }
+}
 
 const decisionOf = (answer: Answer): 'accept' | 'decline' | 'cancel' => (answer.kind === 'cancelled' ? 'cancel' : answer.kind === 'decision' && answer.decision !== 'refuse' ? 'accept' : 'decline')
 /**
@@ -90,24 +130,142 @@ const decisionOf = (answer: Answer): 'accept' | 'decline' | 'cancel' => (answer.
 const commandDecisionOf = (answer: Answer, amendment: string[]): unknown =>
   answer.kind === 'decision' && answer.decision === 'allow-always' && amendment.length ? { acceptWithExecpolicyAmendment: { execpolicy_amendment: amendment } } : decisionOf(answer)
 
-class CodexTask extends TaskBase {
+/** The environment of a screen: this computer's, as a terminal gives it. */
+const screenEnv = (base: NodeJS.ProcessEnv): Record<string, string> => {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(base)) if (value !== undefined && key !== 'ELECTRON_RUN_AS_NODE') env[key] = value
+  return { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+}
+
+/** One screen: Codex's own program on a thread, in a terminal of Togle's own. It is over with its program, and the thread goes on. */
+class CodexScreen extends TerminalTask {
+  /** How its program ended: 0 or 130 (Ctrl+C) when the person left, anything else when Codex could not open it. */
+  code: number | undefined
+
+  constructor(id: string, title: string, folder: string, term: ConstructorParameters<typeof TerminalTask>[5], told: (chunk: TerminalChunk) => void, gone: () => void, readonly screenId: string) {
+    super('codex', id, title, folder, 'Codex', term, undefined, told, gone)
+  }
+
+  protected override get tag(): string {
+    return this.screenId
+  }
+
+  protected override exited(code: number, signal?: number): void {
+    this.code = code
+    super.exited(code, signal)
+  }
+}
+
+const NOT_ANSWERED = 'The person did not answer.'
+
+class CodexTask extends TaskBase implements ScreenSide {
   readonly runner = 'codex' as const
   private turnId: string | null = null
   /** The turn that ended last: its end may be heard before the answer that named it. */
   private lastEnded: string | null = null
   private stopped = false
+  /** Closing: what waits is left open on the server, for the screen or the next client, and not answered. */
+  private releasing = false
+  /** Requests someone else answered: nothing is sent for them. */
+  private readonly elsewhere = new Set<string>()
   /** Commands in progress: item id to the command as Codex sent it. */
   private readonly running = new Map<string, string>()
   /** The files each edit in progress changes: item id to paths. */
   private readonly edits = new Map<string, string[]>()
+  private screenTask: CodexScreen | null = null
+  private screens = 0
+  closed: string | undefined
 
   constructor(private readonly server: CodexServer, thread: Record<string, unknown>) {
     super()
     this.id = text(thread.id)
     this.title = titleOf(thread)
-    this.folder = text(thread.cwd)
+    this.folder = folderOf(thread)
     this.setBase(stateOf(thread.status))
   }
+
+  private get thread(): string {
+    return this.id ?? ''
+  }
+
+  // ---- The screen (a thread on the shared server) ----
+
+  get screen(): ScreenSide | undefined {
+    return this.server.shared ? this : undefined
+  }
+
+  get terminal(): TerminalSide | undefined {
+    return this.screenTask ?? undefined
+  }
+
+  get pid(): number | null {
+    return null
+  }
+
+  get job(): string {
+    return this.thread
+  }
+
+  get open(): boolean {
+    return this.screenTask !== null
+  }
+
+  get screenId(): string | undefined {
+    return this.screenTask?.screenId
+  }
+
+  get line(): string {
+    return `codex resume ${this.thread}`
+  }
+
+  session(): string {
+    return this.thread
+  }
+
+  async show(): Promise<void> {
+    if (this.screenTask) return
+    if (!THREAD_ID.test(this.thread)) throw new Error('That is not a thread Codex knows.')
+    const pty = await loadPty()
+    if (!pty) {
+      this.closed = 'Togle cannot open a terminal on this computer.'
+      throw new Error(`${this.closed} The task goes on: ${this.line} opens it in your own terminal.`)
+    }
+    this.closed = undefined
+    const { command, env, told } = this.server.context
+    const task: CodexScreen = new CodexScreen(
+      this.thread,
+      this.title,
+      this.folder,
+      openTerminal(pty, command[0], [...command.slice(1), '--remote', 'unix://', 'resume', this.thread], this.folder || process.cwd(), screenEnv(env)),
+      told,
+      () => this.screenEnded(task),
+      `${this.thread.slice(0, 8)}-${++this.screens}`
+    )
+    this.screenTask = task
+    this.emit({ type: 'screen', shown: true })
+    this.server.context.look()
+  }
+
+  async hide(): Promise<void> {
+    const task = this.screenTask
+    if (!task) return
+    this.screenTask = null
+    this.emit({ type: 'screen', shown: false })
+    await task.close()
+  }
+
+  /** The program of a screen ended: the person left it, or it could not open (the server is not there). */
+  private screenEnded(task: CodexScreen): void {
+    if (this.screenTask !== task) return
+    this.screenTask = null
+    const said = cleanWords(task.read().text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    // A screen that could not open prints why and ends with an error; one the person left ends well.
+    if (task.code !== 0 && task.code !== 130 && said.length > 0) this.closed = said.at(-1)?.slice(0, 200)
+    this.emit({ type: 'screen', shown: false })
+    this.server.context.look()
+  }
+
+  // ---- What the person does ----
 
   async send(message: string): Promise<void> {
     this.stopped = false
@@ -143,32 +301,47 @@ class CodexTask extends TaskBase {
   }
 
   async endCommands(): Promise<number> {
-    const pid = this.server.pid
+    const pid = await this.server.commandRoot()
     if (!pid) return 0
     let ended = 0
     for (const command of [...this.running.values()]) ended += await endCommandsMatching(pid, unwrapShell(command))
     return ended
   }
 
+  /**
+   * Lets go of the task. On the shared server the thread goes on, and what waits stays open for the screen or the next client to
+   * answer; on a server of Togle's own the thread is let go of and the server ends with Togle.
+   */
   async close(): Promise<void> {
+    this.releasing = true
     this.cancelRequests()
-    await this.server.peer.request('thread/unsubscribe', { threadId: this.id }, 5_000).catch(() => undefined)
-    this.server.tasks.delete(this.id ?? '')
+    await this.hide()
+    if (!this.server.shared) await this.server.peer.request('thread/unsubscribe', { threadId: this.id }, 5_000).catch(() => undefined)
+    this.server.tasks.delete(this.thread)
     this.emit({ type: 'ended', reason: 'closed' })
   }
 
-  /** The program ended under the task. */
+  /** The connection ended under the task. On the shared server that says nothing of the thread, which goes on. */
   gone(): void {
+    this.releasing = true
     this.cancelRequests()
+    void this.hide()
+    if (this.server.shared) {
+      this.setBase('idle')
+      this.emit({ type: 'ended', reason: 'closed' })
+      return
+    }
     this.setBase('failed')
     this.emit({ type: 'ended', reason: 'crashed' })
   }
 
-  // ---- What the app server says ----
+  // ---- What the server says ----
 
   status(status: unknown): void {
     const next = stateOf(status)
     if (next === 'idle' && this.stopped) return
+    // `notLoaded` while a turn is known to run says the server let go of its copy of the thread, not that the work stopped.
+    if (rec(status).type === 'notLoaded' && this.turnId) return
     this.setBase(next)
   }
 
@@ -223,8 +396,31 @@ class CodexTask extends TaskBase {
     }
   }
 
+  /**
+   * A thread taken up in the middle of a turn (Togle was closed when it began): the turn and the commands it runs are read from
+   * the thread, so that Stop can end the turn and the second press can end the commands.
+   */
+  async learn(): Promise<void> {
+    if (this.turnId) return
+    const read = rec(await this.server.peer.request('thread/read', { threadId: this.id, includeTurns: true }).catch(() => ({})))
+    const open = [...list(rec(read.thread).turns).map(rec)].reverse().find((turn) => text(turn.status) === 'inProgress')
+    if (!open) return
+    this.turnId = text(open.id) || null
+    for (const item of list(open.items).map(rec)) if (text(item.status) === 'inProgress') this.itemStarted(item)
+  }
+
+  /** Answered on the screen, or by another client: the card goes, and nothing is sent for it. */
   resolvedElsewhere(requestId: Id): void {
-    this.dropRequest(String(requestId), 'cancelled')
+    const id = String(requestId)
+    this.elsewhere.add(id)
+    this.dropRequest(id, 'cancelled')
+    // A request that was not Togle's to answer (never asked here) leaves nothing behind.
+    setTimeout(() => this.elsewhere.delete(id), 5_000).unref?.()
+  }
+
+  /** No answer for a request that was cancelled for a reason other than Stop: the server has its answer, or keeps the question open. */
+  private unanswered(id: string, answer: Answer): boolean {
+    return answer.kind === 'cancelled' && (this.releasing || this.elsewhere.delete(id))
   }
 
   /** Something the agent asks, which waits for the person. */
@@ -243,11 +439,13 @@ class CodexTask extends TaskBase {
         offersAlways: amendment.length > 0,
         ...(amendment.length ? { always: `Always allow commands that start with ${amendment.join(' ')}` } : {})
       })
+      if (this.unanswered(id, answer)) return NO_ANSWER
       return { decision: commandDecisionOf(answer, amendment) }
     }
     if (method === 'item/fileChange/requestApproval') {
       const files = this.edits.get(text(params.itemId)) ?? (text(params.grantRoot) ? [text(params.grantRoot)] : [])
       const answer = await this.ask({ id, kind: 'edit', folder: this.folder, reason: text(params.reason) || undefined, files, offersAlways: false })
+      if (this.unanswered(id, answer)) return NO_ANSWER
       return { decision: decisionOf(answer) }
     }
     if (method === 'item/tool/requestUserInput') {
@@ -262,7 +460,8 @@ class CodexTask extends TaskBase {
         }
       })
       const answer = await this.ask({ id, kind: 'question', questions, offersAlways: false })
-      if (answer.kind !== 'text') throw new RpcError('The person did not answer.', -32000)
+      if (this.unanswered(id, answer)) return NO_ANSWER
+      if (answer.kind !== 'text') throw new RpcError(NOT_ANSWERED, -32000)
       return { answers: Object.fromEntries(questions.map((q, at) => [q.id, { answers: at === 0 ? [answer.text] : [] }])) }
     }
     this.emit({ type: 'error', message: `Codex asked for something Togle cannot answer yet (${method}).` })
@@ -270,36 +469,50 @@ class CodexTask extends TaskBase {
   }
 }
 
+/** What a server asks of the backend that runs it. */
+interface ServerContext {
+  command: string[]
+  env: NodeJS.ProcessEnv
+  /** Where what a screen prints goes, for the window. */
+  told: (chunk: TerminalChunk) => void
+  /** The process the shared server runs as, when one does. */
+  serverPid: () => Promise<number | null>
+  /** Something changed: the window is told soon. */
+  look: () => void
+}
+
 class CodexServer {
   readonly tasks = new Map<string, CodexTask>()
-  readonly peer: JsonRpcPeer
+  readonly peer: RpcPeer
 
+  /** `shared`: Codex's shared server, joined through its proxy; else a server of our own on standard input and output. */
   constructor(
-    command: string[],
-    env: NodeJS.ProcessEnv | undefined,
+    readonly context: ServerContext,
+    readonly shared: boolean,
     private readonly onClosed: () => void
   ) {
-    const proc = spawn(command[0], [...command.slice(1), 'app-server'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: env ?? process.env })
-    this.peer = new JsonRpcPeer(
-      proc,
-      {
-        request: (method, params, id) => this.route(method, rec(params), id),
-        notification: (method, params) => this.notified(method, rec(params)),
-        closed: () => this.closed()
-      },
-      false
-    )
+    const handlers: PeerHandlers = {
+      request: (method, params, id) => this.route(method, rec(params), id),
+      notification: (method, params) => this.notified(method, rec(params)),
+      closed: () => this.closed()
+    }
+    this.peer = shared
+      ? new WsRpcPeer([context.command[0], ...context.command.slice(1), 'app-server', 'proxy'], context.env, handlers)
+      : new JsonRpcPeer(spawn(context.command[0], [...context.command.slice(1), 'app-server'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: context.env }), handlers, false)
   }
 
-  get pid(): number | undefined {
-    return this.peer.pid
+  /** The process that runs the commands of the threads: Codex's server, or ours. */
+  async commandRoot(): Promise<number | undefined> {
+    return this.shared ? ((await this.context.serverPid()) ?? undefined) : this.peer.pid
   }
 
   async initialize(version: string): Promise<void> {
     try {
+      if (this.peer instanceof WsRpcPeer) await this.peer.opened
       await this.peer.request('initialize', { clientInfo: { name: 'togle', title: 'Togle', version } }, 30_000)
     } catch (error) {
-      const why = this.peer.errors.join('').trim().split('\n').pop()
+      const why = error instanceof RpcError && this.shared ? error.message : this.peer.errors.join('').trim().split('\n').pop()
+      this.peer.close()
       throw new Error(`Codex did not start${why ? `: ${why}` : '.'}`, { cause: error })
     }
     this.peer.notify('initialized')
@@ -348,6 +561,7 @@ class CodexServer {
       default:
         break
     }
+    this.context.look()
   }
 
   private closed(): void {
@@ -357,11 +571,36 @@ class CodexServer {
   }
 }
 
+/** A thread Togle runs on the shared server, and what is needed to hear it again if Togle is closed while it works. */
+interface Known {
+  id: string
+  folder: string
+  title: string
+}
+
+const KNOWN = 'threads.json'
+const SOURCES = ['cli', 'vscode', 'exec', 'appServer']
+/** The most threads that are remembered. */
+const KEEP_MOST = 60
+
 export class CodexBackend implements Backend {
   readonly runner = 'codex' as const
-  private server: Promise<CodexServer> | null = null
+  readonly screens = true
+  /** The connection to Codex's shared server, while there is one. */
+  private shared: Promise<CodexServer> | null = null
+  /** A server of our own, only to list the threads while the shared one is not running. */
+  private own: Promise<CodexServer> | null = null
+  private lookedAt = 0
+  private readonly known = new Map<string, Known>()
+  private loaded?: Promise<void>
+  private adopted?: (task: TaskHandle) => void
+  private timer: NodeJS.Timeout | null = null
+  private soon: NodeJS.Timeout | null = null
+  private retries = 0
+  private closing = false
+  private resolved?: Promise<ServerContext>
 
-  constructor(private readonly options: CodexOptions = {}) {}
+  constructor(private readonly options: CodexOptions) {}
 
   async detect(): Promise<Detected> {
     const command = this.options.command?.[0] ?? (await findCodex())
@@ -370,53 +609,288 @@ export class CodexBackend implements Backend {
     return { installed: true, command, ...(version ? { version } : {}) }
   }
 
-  private connect(): Promise<CodexServer> {
-    this.server ??= this.launch().catch((error: unknown) => {
-      this.server = null
+  private context(): Promise<ServerContext> {
+    this.resolved ??= (async (): Promise<ServerContext> => {
+      const command = this.options.command ?? [await findCodex()].filter((found): found is string => !!found)
+      if (!command.length) throw new Error('Codex is not installed on this computer.')
+      return {
+        command,
+        env: this.options.env ?? process.env,
+        told: this.options.told,
+        serverPid: this.options.serverPid ?? daemonPid,
+        look: () => this.look()
+      }
+    })()
+    this.resolved.catch(() => {
+      this.resolved = undefined
+    })
+    return this.resolved
+  }
+
+  // ---- The servers ----
+
+  /** The connection to Codex's shared server. `start`: the server is started when it is not running; otherwise this fails. */
+  private async join(start: boolean): Promise<CodexServer> {
+    if (this.shared) {
+      try {
+        return await this.shared
+      } catch {
+        this.shared = null
+      }
+    }
+    const attempt = (async (): Promise<CodexServer> => {
+      const context = await this.context()
+      const state = start ? await startDaemon(context.command, context.env) : await daemonState(context.command, context.env)
+      if (!state.running) throw new Error('Codex’s shared server is not running.')
+      const server = new CodexServer(context, true, () => {
+        if (this.shared === attempt) this.shared = null
+        // Whatever Togle ran there goes on; Togle looks again for it soon.
+        this.look()
+        this.ticking()
+      })
+      await server.initialize(this.options.version ?? '0.0.0')
+      return server
+    })()
+    this.shared = attempt
+    attempt.catch(() => {
+      if (this.shared === attempt) this.shared = null
+    })
+    return attempt
+  }
+
+  /** The server to list the threads from: the shared one when it runs (asked every so often), else one of our own. */
+  private async listing(): Promise<CodexServer> {
+    if (this.shared) {
+      try {
+        return await this.shared
+      } catch {
+        // gone: look again below
+      }
+    }
+    if (Date.now() - this.lookedAt > 8_000) {
+      this.lookedAt = Date.now()
+      try {
+        const server = await this.join(false)
+        // A server of our own is only for when there is no shared one.
+        const own = this.own
+        this.own = null
+        void own?.then((found) => found.peer.close(), () => undefined)
+        return server
+      } catch {
+        // Not running: the threads are read from a server of our own.
+      }
+    }
+    this.own ??= (async (): Promise<CodexServer> => {
+      const context = await this.context()
+      const server = new CodexServer(context, false, () => {
+        this.own = null
+      })
+      await server.initialize(this.options.version ?? '0.0.0')
+      return server
+    })().catch((error: unknown) => {
+      this.own = null
       throw error
     })
-    return this.server
+    return this.own
   }
 
-  private async launch(): Promise<CodexServer> {
-    const command = this.options.command ?? [await findCodex()].filter((found): found is string => !!found)
-    if (!command.length) throw new Error('Codex is not installed on this computer.')
-    const server = new CodexServer(command, this.options.env, () => {
-      this.server = null
-    })
-    await server.initialize(this.options.version ?? '0.0.0')
-    return server
-  }
+  // ---- What Codex lists ----
 
   async list(): Promise<TaskInfo[]> {
-    const server = await this.connect()
-    const found = rec(await server.peer.request('thread/list', { limit: 100, sortKey: 'updated_at', sourceKinds: ['cli', 'vscode', 'exec', 'appServer'] }))
-    return list(found.data)
+    const server = await this.listing()
+    // A server that does not answer soon is left to the next look: one slow agent must not hold up the whole list.
+    const found = rec(await server.peer.request('thread/list', { limit: 100, sortKey: 'updated_at', sourceKinds: SOURCES }, 15_000))
+    const rows = list(found.data)
       .map(rec)
-      .map((thread) => infoOf(thread, server.tasks.get(text(thread.id))))
+      .map((thread) => infoOf(thread, server.tasks.get(text(thread.id)), server.shared))
+    // A thread the server lists only once its first message is saved: one Togle runs is shown from the start.
+    for (const task of server.tasks.values()) {
+      if (!task.id || rows.some((row) => row.id === task.id)) continue
+      rows.unshift({ id: task.id, runner: 'codex', title: task.title || 'Codex task', folder: task.folder, state: task.state, updatedAt: Date.now(), ...(server.shared ? { job: task.id } : {}) })
+    }
+    return rows
   }
 
+  // ---- Starting and opening ----
+
   async start(options: StartOptions): Promise<TaskHandle> {
-    const server = await this.connect()
+    const server = await this.join(true)
     const started = rec(await server.peer.request('thread/start', { cwd: options.folder, ephemeral: false, ...policy(options.asks) }))
     const task = server.adopt(rec(started.thread))
+    if (!task.folder) task.folder = options.folder
     if (options.title) {
       await server.peer.request('thread/name/set', { threadId: task.id, name: options.title })
       task.title = options.title
     }
     await task.send(options.prompt)
+    await this.remember(task)
+    // A screen that cannot open does not undo the task: it goes on, and its screen says why it is closed.
+    await task.show().catch(() => undefined)
     return task
   }
 
   async resume(id: string, options: ResumeOptions = {}): Promise<TaskHandle> {
-    const server = await this.connect()
+    const server = await this.join(true)
+    // A thread Togle runs already is opened, not joined again.
+    const running = server.tasks.get(id)
+    if (running) {
+      await running.show().catch(() => undefined)
+      return running
+    }
     const resumed = rec(await server.peer.request('thread/resume', { threadId: id, ...policy(options.asks) }))
-    return server.adopt(rec(resumed.thread))
+    const task = server.adopt(rec(resumed.thread))
+    // The folder as the list told it, when the server does not say.
+    if (!task.folder && options.folder) task.folder = options.folder
+    // One that is at work now (a screen of the person's own started it): the turn is read, so that Stop can end it.
+    if (stateOf(rec(resumed.thread).status) !== 'idle') await task.learn()
+    await this.remember(task)
+    await task.show().catch(() => undefined)
+    return task
   }
 
+  // ---- Threads that go on without Togle ----
+
+  /** Picks up the threads Togle ran before that are at work or waiting now, with what they ask. */
+  async restore(adopt: (task: TaskHandle) => void): Promise<void> {
+    this.adopted = adopt
+    await this.ready()
+    if (!this.known.size) return
+    await this.catchUp()
+    this.ticking()
+  }
+
+  /** Joins the shared server if it runs, and takes up the threads Togle ran that are at work or waiting. */
+  private async catchUp(): Promise<boolean> {
+    if (!this.known.size || !this.adopted) return false
+    let server: CodexServer
+    try {
+      server = await this.join(false)
+    } catch {
+      return false
+    }
+    try {
+      const rows = list(rec(await server.peer.request('thread/list', { limit: 100, sortKey: 'updated_at', sourceKinds: SOURCES })).data).map(rec)
+      for (const known of [...this.known.values()]) {
+        const row = rows.find((thread) => text(thread.id) === known.id)
+        if (!row) continue
+        // Idle: nothing waits for Togle, and the list shows it. Only what works or waits is taken up.
+        if (rec(row.status).type !== 'active') {
+          await this.dismiss(known)
+          continue
+        }
+        if (server.tasks.has(known.id)) continue
+        try {
+          const resumed = rec(await server.peer.request('thread/resume', { threadId: known.id }))
+          const task = server.adopt(rec(resumed.thread))
+          if (!task.folder) task.folder = known.folder
+          if (known.title) task.title = known.title
+          await task.learn()
+          this.adopted(task)
+        } catch {
+          // The thread could not be taken up now: the list still shows it, and opening it tries again.
+        }
+      }
+    } catch {
+      return false
+    }
+    return true
+  }
+
+  // ---- Looking again ----
+
+  /** While a thread of Togle's may be at work with no connection to its server, the server is looked for again. */
+  private ticking(): void {
+    if (this.timer || this.closing || !this.known.size || !this.adopted) return
+    const every = this.options.retryMs ?? (this.retries < 8 ? 8_000 : 30_000)
+    this.timer = setTimeout(() => {
+      this.timer = null
+      void this.tick()
+    }, every)
+    this.timer.unref?.()
+  }
+
+  private async tick(): Promise<void> {
+    if (this.closing) return
+    this.retries++
+    try {
+      if (!this.shared || !(await this.shared.then((server) => server.peer.running, () => false))) {
+        if (await this.catchUp()) this.retries = 0
+      }
+    } catch {
+      // Tried again at the next look.
+    }
+    if (this.known.size) this.ticking()
+  }
+
+  /** Something changed: nothing to do but be ready for the window to ask again. */
+  private look(): void {
+    if (this.soon || this.closing) return
+    this.soon = setTimeout(() => {
+      this.soon = null
+    }, 150)
+    this.soon.unref?.()
+  }
+
+  // ---- What is kept between runs ----
+
+  private ready(): Promise<void> {
+    this.loaded ??= (async () => {
+      if (!this.options.keep) return
+      try {
+        const saved = rec(JSON.parse(await fs.readFile(path.join(this.options.keep, KNOWN), 'utf8')) as unknown)
+        for (const item of list(saved.threads).map(rec)) {
+          const id = typeof item.id === 'string' ? item.id : ''
+          if (!THREAD_ID.test(id)) continue
+          this.known.set(id, { id, folder: typeof item.folder === 'string' ? item.folder : '', title: typeof item.title === 'string' ? item.title : '' })
+        }
+      } catch {
+        // Nothing was kept yet, or what was kept cannot be read: Togle starts without it.
+      }
+    })()
+    return this.loaded
+  }
+
+  private async remember(task: CodexTask): Promise<void> {
+    await this.ready()
+    const id = task.id ?? ''
+    if (!THREAD_ID.test(id)) return
+    this.known.delete(id)
+    this.known.set(id, { id, folder: task.folder, title: task.title })
+    // The oldest are let go of when there are many.
+    for (const old of [...this.known.keys()].slice(0, Math.max(0, this.known.size - KEEP_MOST))) this.known.delete(old)
+    await this.save()
+    this.ticking()
+  }
+
+  private async dismiss(known: Known): Promise<void> {
+    this.known.delete(known.id)
+    await this.save()
+  }
+
+  private async save(): Promise<void> {
+    const keep = this.options.keep
+    if (!keep) return
+    const file = path.join(keep, KNOWN)
+    const temp = `${file}.${process.pid}.tmp`
+    try {
+      await fs.mkdir(keep, { recursive: true })
+      await fs.writeFile(temp, JSON.stringify({ threads: [...this.known.values()] }), { mode: 0o600 })
+      await fs.rename(temp, file)
+    } catch {
+      // Not kept this time: the thread goes on, and the list shows it.
+      await fs.rm(temp, { force: true }).catch(() => undefined)
+    }
+  }
+
+  /** Stops using Codex. The threads on the shared server go on: only the connection and the screens close here. */
   async close(): Promise<void> {
-    const server = await this.server?.catch(() => null)
-    this.server = null
-    server?.peer.close()
+    this.closing = true
+    for (const timer of [this.timer, this.soon]) if (timer) clearTimeout(timer)
+    this.timer = null
+    this.soon = null
+    const servers = await Promise.all([this.shared, this.own].map((server) => server?.catch(() => null)))
+    this.shared = null
+    this.own = null
+    for (const server of servers) server?.peer.close()
   }
 }

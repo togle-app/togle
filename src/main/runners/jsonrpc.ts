@@ -18,6 +18,25 @@ export class RpcError extends Error {
   }
 }
 
+/**
+ * What a request handler returns to answer nothing: the request stays open on the agent's side. For a question Togle was
+ * going to answer and cannot any more (Togle is closing, or someone else answered first): an answer such as "cancel"
+ * would end a task that goes on without Togle.
+ */
+export const NO_ANSWER = Symbol('no answer')
+
+/** What a program on the other end of JSON-RPC is to the rest of Togle: asked things, told things, and closed. */
+export interface RpcPeer {
+  /** The id of the program that is spoken to, when there is one of its own to name. */
+  readonly pid: number | undefined
+  readonly running: boolean
+  /** The last of what the program wrote to its error output: what to show when it will not start. */
+  readonly errors: string[]
+  request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T>
+  notify(method: string, params?: unknown): void
+  close(): void
+}
+
 /** A value of unknown shape, looked into: what the other side sent is not trusted to be what it should be. */
 export const rec = (value: unknown): Record<string, unknown> => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {})
 export const text = (value: unknown): string => (typeof value === 'string' ? value : '')
@@ -32,7 +51,10 @@ interface Wire {
 }
 
 export interface PeerHandlers {
-  /** The agent asks something (`id` is how it numbered the question). What this returns is the answer, and it may take as long as the person does. */
+  /**
+   * The agent asks something (`id` is how it numbered the question). What this returns is the answer, and it may take as long
+   * as the person does. `NO_ANSWER` sends none.
+   */
   request(method: string, params: unknown, id: Id): Promise<unknown>
   notification(method: string, params: unknown): void
   /** The program ended or could not start. Called once. */
@@ -45,7 +67,7 @@ interface Waiting {
   timer: NodeJS.Timeout
 }
 
-export class JsonRpcPeer {
+export class JsonRpcPeer implements RpcPeer {
   private nextId = 1
   private readonly waiting = new Map<Id, Waiting>()
   private ended = false
@@ -132,7 +154,7 @@ export class JsonRpcPeer {
       const id = message.id as Id
       try {
         const result = await this.handlers.request(message.method, message.params, id)
-        this.write({ id, result: result ?? {} })
+        if (result !== NO_ANSWER) this.write({ id, result: result ?? {} })
       } catch (error) {
         const failure = error instanceof RpcError ? error : new RpcError(error instanceof Error ? error.message : String(error))
         this.write({ id, error: { code: failure.code, message: failure.message, ...(failure.data === undefined ? {} : { data: failure.data }) } })

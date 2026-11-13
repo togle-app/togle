@@ -1,16 +1,42 @@
-// Hermes on this computer, through ACP (acp.ts): `hermes acp` speaks JSON-RPC over its standard input and output.
-// Hermes asks about a command only when its own settings say to (the person's may be set to never ask), and refuses some
-// commands outright without asking.
-import { AcpBackend, exists, lines } from './acp'
+// Hermes on this computer. Togle runs each task as Hermes's own terminal screen (`hermes --tui`) in a terminal of Togle's own:
+// the person has the program they know, with its keys, commands and questions. The conversation does not live in the screen:
+// the screen is a client of the Hermes gateway that runs in the background on the computer (the one that serves its messaging
+// platforms, or one a screen starts and that ends itself after ten idle minutes), so a turn goes on when the screen is
+// closed and when Togle quits. Hermes's own settings and sign-in are the person's; Togle touches neither, and adds no flag
+// to the screen: it follows the person's own configuration, as in their terminal.
+//
+// What trying Hermes 0.22.5 on Windows showed, which this follows:
+// - The screen sets its window title as `<marker> <session name> · <model> · <folder>`, where the marker is `⏳` while it works,
+//   `⚠` while it waits on an approval, a password or a question, and `✓` when idle (Hermes's ui-tui, useMainApp.ts). That is how
+//   Togle tells what a task does, for as long as its screen is open.
+// - Commands run in the gateway, not under the screen: ending the screen leaves a running command running, and the turn goes
+//   on to its answer. A turn with news in the last ten minutes is not ended when its screen goes (a quiet one is, after
+//   twenty seconds); a session with no turn is let go of by the gateway after twenty seconds and is opened again from its store.
+// - A session is held by one screen at a time: opening one that another window holds is refused, in words, and the screen ends.
+// - `hermes chat --tui --query=<words> -c <name> --create-if-missing` starts a session named <name> with the words as its
+//   first turn; `hermes --tui --resume <id or name>` opens one again. `hermes sessions list` lists them (its Workspace column
+//   is the folder's name only), `rename` names one, `delete` removes one.
+// - Hermes tells Togle nothing else while a screen holds a session: what it asks is answered on the screen, and Togle says
+//   that it waits there. Once the screen is closed Togle knows nothing of what the session does.
+import { execFile } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import os from 'node:os'
+import type { TaskInfo } from '@shared/runner'
+import { exists, lines } from './acp'
+import { TaskBase } from './task-base'
+import { cleanWords, loadPty, openTerminal, TerminalTask, type TerminalChunk } from './terminal'
+import type { Backend, Detected, ResumeOptions, ScreenSide, StartOptions, TaskHandle, TerminalSide } from './types'
 
 export interface HermesOptions {
-  /** What starts Hermes, before the word `acp`. Found on this computer when left out. */
+  /** What starts Hermes, before its words. Found on this computer when left out. */
   command?: string[]
   env?: NodeJS.ProcessEnv
-  /** Togle's version, told to Hermes. */
-  version?: string
-  /** A model for every task ("provider:model"), when the person's default is not the one to use. */
-  model?: string
+  /** Where what its screens print goes, for the window. Required: a screen whose words are not told shows only what it had printed when it was opened. */
+  told: (chunk: TerminalChunk) => void
+  /** How long the sessions are reused, in milliseconds. */
+  cacheMs?: number
+  /** How often Hermes's list is looked at for the session of a task just started, in milliseconds. */
+  findMs?: number
 }
 
 /** The program that starts Hermes, or null when it is not on this computer. `TOGLE_HERMES_PATH` names it by hand. */
@@ -23,24 +49,483 @@ export async function findHermes(): Promise<string | null> {
   return found.find((file) => /\.exe$/i.test(file)) ?? null
 }
 
-export class HermesBackend extends AcpBackend {
-  constructor(options: HermesOptions = {}) {
-    // What starts it, without the word `acp`: the version is asked of that.
-    const program = async (): Promise<string[] | null> => (options.command?.length ? options.command : [await findHermes()].filter((found): found is string => !!found))
-    super({
-      runner: 'hermes',
-      name: 'Hermes',
-      command: async () => {
-        const base = await program()
-        return base?.length ? [...base, 'acp'] : null
-      },
-      versionOf: async () => {
-        const base = await program()
-        return base?.length ? (await lines(base[0], [...base.slice(1), '--version']))[0] : undefined
-      },
-      ...(options.env ? { env: options.env } : {}),
-      ...(options.version ? { version: options.version } : {}),
-      ...(options.model ? { model: options.model } : {})
+/** A session as `hermes sessions list` tells it. */
+export interface StoredRow {
+  id: string
+  title: string
+  /** The folder's name only: that is all the list says. */
+  workspace: string
+  /** When it last changed, in milliseconds (the list says "4h ago" or a date). */
+  updatedAt: number
+}
+
+const UNITS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }
+
+/** "just now", "4h ago", "6d ago" or a date, as a time. */
+function ageOf(said: string, now: number): number {
+  const text = said.trim()
+  if (/just now/i.test(text)) return now
+  const ago = /^(\d+)\s*([smhdw])\w*\s+ago$/i.exec(text)
+  if (ago) return now - Number(ago[1]) * (UNITS[ago[2].toLowerCase()] ?? 0)
+  const date = Date.parse(text)
+  return Number.isNaN(date) ? 0 : date
+}
+
+/** The sessions in what `hermes sessions list` printed: a table whose columns start where its header's words do. */
+export function parseSessionList(output: string, now = Date.now()): StoredRow[] {
+  const rows = output.split(/\r?\n/)
+  const head = rows.findIndex((line) => /^\s*Title\s+Workspace\s+Last Active\s+ID\s*$/.test(line))
+  if (head < 0) return []
+  const header = rows[head]
+  const workspace = header.indexOf('Workspace')
+  const active = header.indexOf('Last Active')
+  const id = header.lastIndexOf('ID')
+  const found: StoredRow[] = []
+  for (const line of rows.slice(head + 1)) {
+    if (!line.trim() || /^[\s─-]+$/.test(line) || /more not shown/i.test(line)) continue
+    const key = line.slice(id).trim().split(/\s+/)[0] ?? ''
+    // A row whose id is cut or missing is not one.
+    if (!key || line.length <= id) continue
+    const place = line.slice(workspace, active).trim()
+    found.push({ id: key, title: line.slice(0, workspace).trim(), workspace: place === '—' ? '' : place, updatedAt: ageOf(line.slice(active, id), now) })
+  }
+  return found
+}
+
+const exec = (file: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number }): Promise<{ ok: boolean; out: string; text: string }> =>
+  new Promise((resolve) => {
+    execFile(file, args, { windowsHide: true, timeout: options.timeout ?? 20_000, maxBuffer: 16 * 1024 * 1024, ...(options.cwd ? { cwd: options.cwd } : {}), ...(options.env ? { env: options.env } : {}) }, (error, stdout, stderr) =>
+      resolve({ ok: !error, out: String(stdout), text: `${stdout}${stderr}`.trim() })
+    )
+  })
+
+/** The most words a task is started with: a Windows command line holds about 32,000 characters. */
+const MOST_WORDS = 20_000
+
+/** The environment of a screen: this computer's, as a terminal gives it. */
+const screenEnv = (base: NodeJS.ProcessEnv): Record<string, string> => {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(base)) if (value !== undefined && key !== 'ELECTRON_RUN_AS_NODE') env[key] = value
+  return { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+}
+
+/** What a screen's window title says it is doing. */
+export type Marker = 'busy' | 'waiting' | 'idle'
+
+/** The marker in a window title, when it has one: ⏳ at work, ⚠ waiting on the person, ✓ idle. */
+export function markerOf(title: string): Marker | undefined {
+  if (title.startsWith('⏳')) return 'busy'
+  if (title.startsWith('⚠')) return 'waiting'
+  if (title.startsWith('✓')) return 'idle'
+  return undefined
+}
+
+const OSC_TITLE = /\x1b\](?:0|2);([^\x07\x1b]*)(?:\x07|\x1b\\)/g
+
+/** One screen: Hermes's own program in a terminal of Togle's own. It is over with its program, and the session goes on. */
+class HermesScreen extends TerminalTask {
+  private carry = ''
+  /** How its program ended: 0 or 130 (Ctrl+C) when the person left, anything else when Hermes refused or failed. */
+  code: number | undefined
+
+  constructor(id: string, title: string, folder: string, term: ConstructorParameters<typeof TerminalTask>[5], told: (chunk: TerminalChunk) => void, gone: () => void, readonly screenId: string, private readonly marked: (marker: Marker) => void) {
+    super('hermes', id, title, folder, 'Hermes', term, undefined, told, gone)
+    term.onData((data) => this.sniff(data))
+  }
+
+  protected override get tag(): string {
+    return this.screenId
+  }
+
+  protected override exited(code: number, signal?: number): void {
+    this.code = code
+    super.exited(code, signal)
+  }
+
+  /** Reads the window titles the screen sets, among what it prints; one cut in two by the end of a chunk is read with the next. */
+  private sniff(data: string): void {
+    const text = this.carry + data
+    let end = 0
+    for (const found of text.matchAll(OSC_TITLE)) {
+      end = (found.index ?? 0) + found[0].length
+      const marker = markerOf(found[1])
+      if (marker) this.marked(marker)
+    }
+    const rest = text.slice(end)
+    const open = rest.lastIndexOf('\x1b]')
+    this.carry = open >= 0 && rest.length - open < 400 ? rest.slice(open) : ''
+  }
+}
+
+/** How long a task started with words is shown as working before its screen says it is not: the screen takes a moment to begin. */
+const BEGIN_MS = 25_000
+/** How long Stop waits for a screen it had to open to say whether the session works. */
+const SAYS_MS = 20_000
+
+/** What a task asks of the backend that runs it. */
+interface TaskContext {
+  command: string[]
+  env: NodeJS.ProcessEnv
+  told: (chunk: TerminalChunk) => void
+  /** Something changed: the sessions are asked again soon. */
+  look: () => void
+  /** Asks Hermes what it lists and names, once the session is known. */
+  find(task: HermesTask): Promise<void>
+  /** How long to wait between two looks for the session of a task just started, in milliseconds. */
+  findMs: number
+}
+
+class HermesTask extends TaskBase implements ScreenSide {
+  readonly runner = 'hermes' as const
+  private screenTask: HermesScreen | null = null
+  private screens = 0
+  private sawBusy = false
+  /** A turn is on (its screen showed ⏳ or ⚠ and has not shown ✓ since). */
+  private turnOpen = false
+  private holdUntil = 0
+  private stopped = false
+  /** Told when the screen next shows a marker: what Stop waits for on a screen it had to open. */
+  private markedOnce: (() => void) | null = null
+  private searches = 0
+  private searching = false
+  /** The id Hermes gave the session, once it shows in its list: the task is first known by the name it was started with. */
+  real: string | null = null
+  closed: string | undefined
+  waitingFor: string | undefined
+
+  /** `words`: when it is a new session, the words and name it is started with; a session that exists is opened by `job`. */
+  constructor(
+    private readonly context: TaskContext,
+    id: string,
+    title: string,
+    folder: string,
+    private starting?: { words: string }
+  ) {
+    super()
+    this.id = id
+    this.title = title
+    this.folder = folder
+    this.setBase(starting ? 'working' : 'idle')
+    if (starting) this.holdUntil = Date.now() + BEGIN_MS
+  }
+
+  // ---- The screen ----
+
+  get screen(): ScreenSide {
+    return this
+  }
+
+  get terminal(): TerminalSide | undefined {
+    return this.screenTask ?? undefined
+  }
+
+  get pid(): number | null {
+    return this.screenTask?.program ?? null
+  }
+
+  get open(): boolean {
+    return this.screenTask !== null
+  }
+
+  get screenId(): string | undefined {
+    return this.screenTask?.screenId
+  }
+
+  /** What opens the session: the id Hermes gave it, or the name it was started with until then (Hermes takes either). */
+  get job(): string {
+    return this.real ?? this.id ?? ''
+  }
+
+  get line(): string {
+    return `hermes --resume ${this.job}`
+  }
+
+  session(): string {
+    return this.job
+  }
+
+  async show(): Promise<void> {
+    if (this.screenTask) return
+    const pty = await loadPty()
+    if (!pty) {
+      this.closed = 'Togle cannot open a terminal on this computer.'
+      throw new Error(`${this.closed} The task goes on: ${this.line} opens it in your own terminal.`)
+    }
+    this.closed = undefined
+    const [program, ...rest] = this.context.command
+    // The first screen of a new session starts it; any later one opens it again.
+    const args = this.starting
+      ? [...rest, 'chat', '--tui', `--query=${this.starting.words}`, '--in', this.folder, '-c', this.id ?? '', '--create-if-missing']
+      : [...rest, '--tui', '--resume', this.job]
+    if (this.starting) {
+      this.sawBusy = false
+      this.turnOpen = false
+      this.holdUntil = Date.now() + BEGIN_MS
+    }
+    this.starting = undefined
+    const task: HermesScreen = new HermesScreen(
+      this.id ?? this.job,
+      this.title,
+      this.folder,
+      openTerminal(pty, program, args, this.folder || os.homedir(), screenEnv(this.context.env)),
+      this.context.told,
+      () => this.screenEnded(task),
+      `${(this.id ?? 'h').slice(-8)}-${++this.screens}`,
+      (marker) => this.marked(marker)
+    )
+    this.screenTask = task
+    this.emit({ type: 'screen', shown: true })
+    this.context.look()
+    this.search()
+  }
+
+  async hide(): Promise<void> {
+    const task = this.screenTask
+    if (!task) return
+    this.screenTask = null
+    this.waitingFor = undefined
+    this.turnOpen = false
+    // What the session does from here on is not told: the task rests until its screen is opened again.
+    if (this.state !== 'stopped') this.setBase('idle')
+    this.emit({ type: 'screen', shown: false })
+    await task.close()
+  }
+
+  /** The program of a screen ended: the person left it (Ctrl+C twice, `/exit`), or it did not open. */
+  private screenEnded(task: HermesScreen): void {
+    if (this.screenTask !== task) return
+    this.screenTask = null
+    this.waitingFor = undefined
+    this.turnOpen = false
+    const said = cleanWords(task.read().text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    // A screen Hermes refused prints what it refused and ends with an error; one the person left ends well.
+    if (task.code !== 0 && task.code !== 130 && said.length > 0) this.closed = said.slice(-3).join(' ').slice(0, 240)
+    if (this.state !== 'stopped') this.setBase('idle')
+    this.emit({ type: 'screen', shown: false })
+    this.context.look()
+  }
+
+  // ---- What the screen's window title tells ----
+
+  private marked(marker: Marker): void {
+    const once = this.markedOnce
+    this.markedOnce = null
+    once?.()
+    if (marker === 'busy') {
+      this.sawBusy = true
+      this.turnOpen = true
+      this.waitingFor = undefined
+      this.stopped = false
+      this.setBase('working')
+    } else if (marker === 'waiting') {
+      this.sawBusy = true
+      this.turnOpen = true
+      this.waitingFor = 'approval or an answer'
+      this.setBase('waiting')
+    } else {
+      this.waitingFor = undefined
+      // A task started with words is at work from the start: the idle screen that shows first is not its end.
+      if (!this.sawBusy && Date.now() < this.holdUntil) return
+      const ended = this.turnOpen
+      this.turnOpen = false
+      this.setBase(this.stopped ? 'stopped' : 'idle')
+      if (ended) this.emit({ type: 'turn-ended', outcome: this.stopped ? 'interrupted' : 'completed', error: null })
+      // The session shows in Hermes's list once it has a message: its id and a name of the person's own are taken then.
+      this.search()
+    }
+    this.context.look()
+  }
+
+  /** Looks for the session in Hermes's list, a few times, until it shows. */
+  private search(): void {
+    if (this.real || this.searching || this.searches >= 12 || !this.id) return
+    this.searching = true
+    this.searches++
+    void this.context.find(this).finally(() => {
+      this.searching = false
+      if (!this.real && this.screenTask && this.searches < 12) setTimeout(() => this.search(), this.context.findMs).unref?.()
     })
+  }
+
+  // ---- What the person does ----
+
+  /** Words typed into the screen as one line, without Enter: the person presses it. */
+  async send(words: string): Promise<void> {
+    if (!this.screenTask) throw new Error('Open its screen first.')
+    this.screenTask.write(cleanWords(words).replace(/\s*[\r\n]+\s*/g, ' ').trim())
+  }
+
+  /**
+   * Ctrl+C on its screen: Hermes ends the turn, and the command it runs, as in a terminal. A closed screen is opened first, and
+   * Ctrl+C is pressed only if it then says the session works: on a screen that is idle it would only start to leave it.
+   */
+  async stop(): Promise<void> {
+    if (!this.screenTask) {
+      const told = new Promise<void>((resolve) => {
+        this.markedOnce = resolve
+        setTimeout(resolve, SAYS_MS).unref?.()
+      })
+      await this.show()
+      await told
+    }
+    if (this.state !== 'working' && this.state !== 'waiting') return
+    this.stopped = true
+    this.screenTask?.write('\x03')
+    this.setBase('stopped')
+  }
+
+  /** Hermes ends the command with the turn, so there is nothing left for a second press. */
+  async endCommands(): Promise<number> {
+    return 0
+  }
+
+  /** Lets go of the screen. The session goes on in Hermes, and Togle no longer hears it. */
+  async close(): Promise<void> {
+    await this.hide()
+    this.emit({ type: 'ended', reason: 'closed' })
+  }
+}
+
+export class HermesBackend implements Backend {
+  readonly runner = 'hermes' as const
+  readonly screens = true
+  private readonly tasks = new Set<HermesTask>()
+  private cache: { at: number; rows: StoredRow[] } | null = null
+  private closed = false
+  private resolved?: Promise<TaskContext>
+
+  constructor(private readonly options: HermesOptions) {}
+
+  private async command(): Promise<string[]> {
+    if (this.options.command?.length) return this.options.command
+    const found = await findHermes()
+    if (!found) throw new Error('Hermes is not installed on this computer.')
+    return [found]
+  }
+
+  private context(): Promise<TaskContext> {
+    this.resolved ??= this.command().then((command) => ({
+      command,
+      env: this.options.env ?? process.env,
+      told: this.options.told,
+      look: () => {
+        this.cache = null
+      },
+      find: (task) => this.locate(task),
+      findMs: this.options.findMs ?? 3_000
+    }))
+    this.resolved.catch(() => {
+      this.resolved = undefined
+    })
+    return this.resolved
+  }
+
+  async detect(): Promise<Detected> {
+    const command = this.options.command?.length ? this.options.command : [await findHermes()].filter((found): found is string => !!found)
+    if (!command.length) return { installed: false }
+    const version = (await lines(command[0], [...command.slice(1), '--version']))[0]
+    return { installed: true, command: command[0], ...(version ? { version } : {}) }
+  }
+
+  // ---- What Hermes lists ----
+
+  /** The sessions Hermes keeps that came from a terminal or a screen (not its messaging platforms or its scheduled jobs). */
+  private async stored(): Promise<StoredRow[]> {
+    const command = await this.command()
+    const env = this.options.env ?? process.env
+    const asked = await Promise.all(['local', 'cli'].map((source) => exec(command[0], [...command.slice(1), 'sessions', 'list', '--source', source, '--limit', '60'], { env })))
+    const seen = new Set<string>()
+    return asked
+      .flatMap((out) => (out.ok ? parseSessionList(out.out) : []))
+      .filter((row) => !seen.has(row.id) && !!seen.add(row.id))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  async list(): Promise<TaskInfo[]> {
+    const live = [...this.tasks].filter((task) => task.id)
+    // Asking Hermes for its list starts a Python program each time: it is asked again after a while, or when something changed.
+    if (!this.cache || Date.now() - this.cache.at > (this.options.cacheMs ?? 20_000)) {
+      this.cache = { at: Date.now(), rows: await this.stored().catch(() => [] as StoredRow[]) }
+    }
+    const mine = new Set(live.map((task) => task.real).filter((id): id is string => !!id))
+    const found: TaskInfo[] = this.cache.rows
+      // A session that a task of Togle's runs is that task, and not a second row.
+      .filter((row) => !mine.has(row.id))
+      .map((row) => ({ id: row.id, runner: 'hermes', title: row.title || row.workspace || 'Hermes task', folder: '', state: 'idle', updatedAt: row.updatedAt }))
+    for (const task of live) {
+      found.push({ id: task.id as string, runner: 'hermes', title: task.title || 'Hermes task', folder: task.folder, state: task.state, updatedAt: Date.now(), job: task.job, ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}) })
+    }
+    return found.sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  /** Finds the id Hermes gave a session Togle started, by the name it was started with, and gives it the name of the person's words. */
+  private async locate(task: HermesTask): Promise<void> {
+    if (!task.id || task.real) return
+    // Not asked by folder: a session whose first turn failed (its model did not answer) is in the list with no folder at all.
+    const rows = await this.stored().catch(() => [] as StoredRow[])
+    const row = rows.find((candidate) => candidate.title.startsWith(task.id as string))
+    if (!row) return
+    const command = await this.command()
+    // The person's own words as its name, so that Hermes's own list reads as Togle's does. Hermes keeps one session to a name
+    // (the rename then ends with an error): a name that is taken is tried again with a number, as Hermes does itself ("#2").
+    if (task.title) {
+      const words = task.title.slice(0, 110)
+      for (let n = 1; n <= 5; n++) {
+        const named = await exec(command[0], [...command.slice(1), 'sessions', 'rename', row.id, n === 1 ? words : `${words} #${n}`], { env: this.options.env ?? process.env })
+        if (named.ok) break
+      }
+    }
+    task.real = row.id
+    this.cache = null
+  }
+
+  // ---- Starting and opening ----
+
+  async start(options: StartOptions): Promise<TaskHandle> {
+    if (this.closed) throw new Error('Hermes is closed.')
+    if (options.prompt.length > MOST_WORDS) throw new Error('That is too long to start a task with. Put the words in a file, and ask the task to read it.')
+    const context = await this.context()
+    // A name of its own: Hermes would open a session that already has the name instead of starting one.
+    const name = `togle-${randomBytes(4).toString('hex')}`
+    const title = options.title?.trim() || options.prompt.replace(/\s+/g, ' ').trim().slice(0, 90)
+    const task = new HermesTask(context, name, title, options.folder, { words: options.prompt })
+    this.tasks.add(task)
+    try {
+      await task.show()
+    } catch (error) {
+      this.tasks.delete(task)
+      throw error
+    }
+    return task
+  }
+
+  async resume(id: string, options: ResumeOptions = {}): Promise<TaskHandle> {
+    if (this.closed) throw new Error('Hermes is closed.')
+    // A session id or name is handed to Hermes as a word of its command: one that could be read as a flag is not one.
+    if (!/^[\w][\w.:-]{0,200}$/.test(id)) throw new Error('That is not a session Hermes knows.')
+    const context = await this.context()
+    const known = [...this.tasks].find((task) => task.job === id || task.id === id)
+    if (known) {
+      await known.show()
+      return known
+    }
+    const stored = (await this.stored().catch(() => [] as StoredRow[])).find((row) => row.id === id)
+    const task = new HermesTask(context, id, stored?.title || 'Hermes task', options.folder ?? '')
+    task.real = id
+    this.tasks.add(task)
+    try {
+      await task.show()
+    } catch (error) {
+      this.tasks.delete(task)
+      throw error
+    }
+    return task
+  }
+
+  /** Stops using Hermes. The sessions go on in its gateway: only the screens close here. */
+  async close(): Promise<void> {
+    this.closed = true
+    await Promise.all([...this.tasks].map((task) => task.close()))
+    this.tasks.clear()
   }
 }

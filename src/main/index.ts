@@ -1712,6 +1712,8 @@ if (process.argv.includes('--togle-hook')) {
       backends: standIns,
       // What Claude Code's tasks need to go on while Togle is closed: its address, each task's settings and the list of tasks.
       keep: path.join(app.getPath('userData'), 'claude'),
+      // The same for Codex: a folder of its name in Togle's own.
+      keepIn: app.getPath('userData'),
       handle: (channel, listener) => ipcMain.handle(channel, (_event, ...args) => listener(...args)),
       send,
       titles: runnerTitles,

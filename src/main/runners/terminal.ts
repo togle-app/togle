@@ -258,7 +258,7 @@ export class TerminalTask extends TaskBase implements TerminalSide {
     this.told(chunk)
   }
 
-  private exited(code: number, signal?: number): void {
+  protected exited(code: number, signal?: number): void {
     if (this.ended) return
     this.ended = true
     this.flush()

@@ -288,7 +288,8 @@ function TaskRow({ task, now, old, selected, onSelect, onTakeOver }: { task: Tas
   // One line, as the design has it: the agent, where it works, and how it stands. A task in a terminal says so. Stopped
   // and waiting for a reply, it says why; done long ago, it says when.
   const detail = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : task.screen ? 'stopped · open it to go on' : 'stopped · reply to go on') : task.state === 'waiting' ? (task.waitingFor && !task.pending.length ? 'waiting on its screen' : 'waiting') : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `done · ${ago(task.updatedAt, now)}` : 'done'
-  const line = elsewhere ? `${agentOf(task)} · terminal` : `${agentOf(task)} · ${baseName(task.folder)} · ${detail}`
+  // A session Hermes lists has no folder (its list says only a name): the line leaves that part out, and no empty one shows.
+  const line = elsewhere ? `${agentOf(task)} · terminal` : [agentOf(task), task.folder ? baseName(task.folder) : '', detail].filter(Boolean).join(' · ')
   return (
     <div className="task-item" role="listitem">
       <button className={`task-row ${selected ? 'selected' : ''} ${onTakeOver ? 'with-action' : ''}`} data-state={task.state} data-needs={stoppedHere ? 'you' : undefined} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
@@ -526,7 +527,7 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
             <span>It runs in its own window, where it is answered.</span>
           ) : (
             <>
-              <span>Togle is not running this task. Continue it here to answer it and reply to it.</span>
+              <span>{task.runner in KNOWN_AGENTS ? `Togle is not running this task. Continue it here: it opens as ${agentOf(task)}'s own screen, to answer there.` : 'Togle is not running this task. Continue it here to answer it and reply to it.'}</span>
               <button className="primary small" onClick={onOpen}>
                 Continue here
               </button>

@@ -1,23 +1,39 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { after, test } from 'node:test'
+import WebSocket from 'ws'
 import { workDir } from './helpers.mjs'
 workDir('runners')
 const T = await import('./.build/togle.mjs')
 const fake = path.join(import.meta.dirname, 'fake-codex.mjs')
 
-// The folders the tests work in, taken away when they are done.
+// The folders the tests work in, taken away when they are done; and the shared servers the stand-in for Codex started.
 const made = []
+const daemons = []
 const scratch = () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'togle-runners-'))
   made.push(dir)
   return dir
 }
 after(() => {
-  for (const dir of made) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  for (const file of daemons) {
+    try {
+      execFileSync(process.execPath, [fake, 'app-server', 'daemon', 'stop'], { env: { ...process.env, FAKE_DAEMON_FILE: file } })
+    } catch {
+      // Nothing to stop.
+    }
+  }
+  // A screen's console can hold its folder for a while after the screen ended: a folder that stays is only left in the temporary folder.
+  for (const dir of made) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+    } catch {
+      // Left for the system's own cleaning.
+    }
+  }
 })
 
 const alive = (pid) => {
@@ -42,7 +58,61 @@ const watch = (task) => {
   task.on((event) => events.push(event))
   return events
 }
-const codex = (env = {}) => new T.CodexBackend({ command: [process.execPath, fake], env: { ...process.env, ...env } })
+/**
+ * Codex as the tests have it: a backend over the stand-in, whose shared server is kept in a file of its own (`daemonFile`), and
+ * what its screens printed (`chunks`). A second backend over the same file (`options.daemonFile`) is another Togle on that server.
+ */
+const codex = (env = {}, options = {}) => {
+  const daemonFile = options.daemonFile ?? path.join(scratch(), 'daemon.json')
+  if (!daemons.includes(daemonFile)) daemons.push(daemonFile)
+  const chunks = []
+  const backend = new T.CodexBackend({
+    command: [process.execPath, fake],
+    env: { ...process.env, FAKE_DAEMON_FILE: daemonFile, ...env },
+    told: (chunk) => chunks.push(chunk),
+    serverPid: async () => {
+      try {
+        return JSON.parse(readFileSync(daemonFile, 'utf8')).pid
+      } catch {
+        return null
+      }
+    },
+    retryMs: 150,
+    ...(options.backend ?? {})
+  })
+  return Object.assign(backend, { daemonFile, chunks })
+}
+const strip = (text) => text.replace(/\x1b\[[0-9;?<>=]*[ -/]*[@-~]/g, '').replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
+const screenText = (backend, task) => strip(backend.chunks.filter((chunk) => chunk.key === `codex:${task.id}`).map((chunk) => chunk.data).join('')).replace(/\s+/g, ' ')
+
+/** Another client of the shared server, as a second window of Codex is: it speaks to the server's own port. */
+async function otherClient(daemonFile) {
+  const { port } = JSON.parse(readFileSync(daemonFile, 'utf8'))
+  const socket = new WebSocket(`ws://127.0.0.1:${port}`)
+  const got = { requests: [], notes: [] }
+  const waiting = new Map()
+  let next = 1
+  socket.on('message', (data) => {
+    const message = JSON.parse(String(data))
+    if (message.method === undefined) waiting.get(message.id)?.(message)
+    else if (message.id !== undefined) got.requests.push(message)
+    else got.notes.push(message)
+  })
+  await new Promise((resolve, reject) => {
+    socket.once('open', resolve)
+    socket.once('error', reject)
+  })
+  const call = (method, params = {}) =>
+    new Promise((resolve) => {
+      const id = next++
+      waiting.set(id, resolve)
+      socket.send(JSON.stringify({ id, method, params }))
+    })
+  await call('initialize', { clientInfo: { name: 'test', title: 'test', version: '0' } })
+  socket.send(JSON.stringify({ method: 'initialized' }))
+  return { call, got, answer: (request, result) => socket.send(JSON.stringify({ id: request.id, result })), close: () => socket.close() }
+}
+const answersIn = (file) => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [])
 
 // ---- reading a shell command ----
 
@@ -277,21 +347,203 @@ test('a task that was started earlier is listed and picked up again, and a reply
   }
 })
 
-test('when the agent program ends, its tasks fail and what they waited for is cancelled', { timeout: 30_000 }, async () => {
-  const backend = codex()
+test('when the shared server goes away, its tasks are let go of, and what they waited for is cancelled without an answer', { timeout: 30_000 }, async () => {
+  const calls = path.join(scratch(), 'calls.jsonl')
+  const backend = codex({ FAKE_CALLS: calls })
   const task = await backend.start({ folder: os.tmpdir(), prompt: 'run gone', asks: true })
   const events = watch(task)
   await until(() => task.pending[0], 'the command to wait')
-  await backend.close()
-  await until(() => task.state === 'failed', 'the task to fail', 10_000)
+  execFileSync(process.execPath, [fake, 'app-server', 'daemon', 'stop'], { env: { ...process.env, FAKE_DAEMON_FILE: backend.daemonFile } })
+  await until(() => events.some((e) => e.type === 'ended'), 'the task to be let go of', 10_000)
   assert.equal(task.pending.length, 0)
-  assert.ok(events.some((e) => e.type === 'ended' && e.reason === 'crashed'))
+  assert.deepEqual(events.find((e) => e.type === 'ended'), { type: 'ended', reason: 'closed' }, 'the server going away says nothing of the thread: it is not a failure of the task')
+  assert.equal(task.state, 'idle')
+  assert.deepEqual(answersIn(calls), [], 'nothing was answered for a question the server can no longer hold')
+  await backend.close()
 })
 
-// ---- Hermes ----
+// ---- Codex: the shared server, the screen, and a second client ----
+
+test('listing never starts the shared server; starting a task does, and a failure to start says why', { timeout: 30_000 }, async () => {
+  const listing = codex()
+  try {
+    const rows = await listing.list()
+    assert.ok(rows.some((row) => row.id === 'old1'), 'the threads are listed from a server of Codex’s own while none is shared')
+    assert.ok(rows.every((row) => !row.job), 'none of them runs in the background')
+    assert.equal(existsSync(listing.daemonFile), false, 'asking for the list started nothing')
+  } finally {
+    await listing.close()
+  }
+  const failing = codex({ FAKE_DAEMON_FAILS: 'there is no room on the disk' })
+  await assert.rejects(failing.start({ folder: os.tmpdir(), prompt: 'say ok' }), /Codex.s shared server did not start: there is no room on the disk/)
+  await failing.close()
+  const starting = codex()
+  try {
+    const task = await starting.start({ folder: os.tmpdir(), prompt: 'say ok', title: 'Start it' })
+    assert.equal(existsSync(starting.daemonFile), true, 'starting a task started the shared server')
+    const row = (await starting.list()).find((item) => item.id === task.id)
+    assert.equal(row?.job, task.id, 'a thread that runs on the shared server is a task in the background')
+    assert.equal(row?.title, 'Start it')
+  } finally {
+    await starting.close()
+  }
+})
+
+test('a task opens as Codex’s own screen, which can be closed and opened again without ending the task', { timeout: 30_000 }, async () => {
+  const dir = scratch()
+  const backend = codex()
+  try {
+    const task = await backend.start({ folder: dir, prompt: 'say ok' })
+    const screen = task.screen
+    assert.ok(screen, 'a task on the shared server has a screen')
+    assert.equal(screen.job, task.id)
+    assert.equal(screen.line, `codex resume ${task.id}`, 'the line that opens it in the person’s own terminal')
+    assert.equal(screen.open, true, 'starting a task opens its screen')
+    await until(() => screenText(backend, task).includes(`FAKE CODEX SCREEN ${task.id}`), 'the screen to print')
+    task.terminal.write('hello\r')
+    await until(() => screenText(backend, task).includes('typed: hello'), 'what is typed to reach the program')
+    const first = screen.screenId
+    await screen.hide()
+    assert.equal(screen.open, false)
+    assert.equal(task.terminal, undefined)
+    await until(() => task.state === 'idle', 'the task to be idle')
+    assert.ok((await backend.list()).some((row) => row.id === task.id), 'the thread goes on after its screen is closed')
+    await screen.show()
+    assert.equal(screen.open, true)
+    assert.notEqual(screen.screenId, first, 'each screen is a new one')
+    task.terminal.write('/exit\r')
+    await until(() => screen.open === false, 'the screen to end when its program does')
+    assert.equal(screen.closed, undefined, 'one the person left says nothing')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a screen that could not open says why, and the task goes on', { timeout: 30_000 }, async () => {
+  const backend = codex({ FAKE_SCREEN_FAILS: 'failed to connect to the shared server' })
+  try {
+    const task = await backend.start({ folder: os.tmpdir(), prompt: 'say ok' })
+    await until(() => task.screen.closed, 'the reason the screen closed')
+    assert.match(task.screen.closed, /failed to connect to the shared server/)
+    assert.equal(task.screen.open, false)
+    assert.ok(task.id, 'the task itself goes on')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a command that waits is answered here or by another client, whichever comes first, and Togle sends nothing for the one that lost', { timeout: 30_000 }, async () => {
+  const calls = path.join(scratch(), 'calls.jsonl')
+  const backend = codex({ FAKE_CALLS: calls })
+  const other = []
+  try {
+    const task = await backend.start({ folder: os.tmpdir(), prompt: 'run elsewhere' })
+    const events = watch(task)
+    const request = await until(() => task.pending[0], 'the command to wait')
+    // Another window on the same thread: it is asked what is still open, and answers it.
+    const client = await otherClient(backend.daemonFile)
+    other.push(client)
+    await client.call('thread/resume', { threadId: task.id })
+    const asked = await until(() => client.got.requests[0], 'the other client to be asked')
+    assert.equal(asked.method, 'item/commandExecution/requestApproval')
+    client.answer(asked, { decision: 'accept' })
+    await until(() => task.pending.length === 0, 'the card to go')
+    assert.deepEqual(events.find((e) => e.type === 'request-ended'), { type: 'request-ended', id: request.id, outcome: 'cancelled' })
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    assert.deepEqual(events.filter((e) => e.type === 'command').map((e) => e.status), ['started', 'finished'], 'the other client’s Allow ran it')
+    assert.equal(answersIn(calls).length, 1, 'only the other client answered: nothing was sent for the card that was dropped')
+    // And the other way: Togle answers first, and the other client is told it was answered.
+    await task.send('run second')
+    const second = await until(() => task.pending[0], 'the second command to wait')
+    const heard = await until(() => client.got.requests[1], 'the other client to be asked too')
+    task.answer(second.id, 'refuse')
+    await until(() => client.got.notes.some((note) => note.method === 'serverRequest/resolved' && note.params.requestId === heard.id), 'the other client to be told')
+    assert.equal(answersIn(calls).length, 2)
+  } finally {
+    for (const client of other) client.close()
+    await backend.close()
+  }
+})
+
+test('closing a task leaves what it waited for open on the server, and the next client to join the thread is asked again', { timeout: 30_000 }, async () => {
+  const calls = path.join(scratch(), 'calls.jsonl')
+  const backend = codex({ FAKE_CALLS: calls })
+  let client
+  try {
+    const task = await backend.start({ folder: os.tmpdir(), prompt: 'run keep' })
+    await until(() => task.pending[0], 'the command to wait')
+    await task.close()
+    assert.deepEqual(answersIn(calls), [], 'a task let go of answers nothing: "cancel" would end work that goes on without Togle')
+    client = await otherClient(backend.daemonFile)
+    await client.call('thread/resume', { threadId: task.id })
+    const asked = await until(() => client.got.requests[0], 'the question to be asked again')
+    assert.equal(asked.method, 'item/commandExecution/requestApproval')
+    client.answer(asked, { decision: 'accept' })
+    await until(() => answersIn(calls).length === 1, 'the answer to arrive')
+  } finally {
+    client?.close()
+    await backend.close()
+  }
+})
+
+test('a task that works while Togle is closed is taken up by the next Togle, which can stop it', { timeout: 60_000 }, async () => {
+  const dir = scratch()
+  const pidFile = path.join(dir, 'pid')
+  const keep = path.join(scratch(), 'codex')
+  const first = codex({ FAKE_PID_FILE: pidFile }, { backend: { keep } })
+  const second = codex({ FAKE_PID_FILE: pidFile }, { daemonFile: first.daemonFile, backend: { keep } })
+  try {
+    const task = await first.start({ folder: dir, prompt: 'sleep', title: 'Long one' })
+    const childPid = Number(await until(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8'), 'the long command to start'))
+    await until(() => task.state === 'working', 'the task to work')
+    await first.close()
+    assert.ok(alive(childPid), 'the command goes on when Togle is closed')
+    const adopted = []
+    await second.restore((found) => adopted.push(found))
+    assert.equal(adopted.length, 1, 'the thread that works is Togle’s again')
+    assert.equal(adopted[0].id, task.id)
+    assert.equal(adopted[0].title, 'Long one')
+    assert.equal(adopted[0].state, 'working')
+    const events = watch(adopted[0])
+    await adopted[0].stop()
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    assert.equal(await adopted[0].endCommands(), 1, 'the command is found below the shared server')
+    await until(() => !alive(childPid), 'the command to end')
+  } finally {
+    await second.close()
+    await first.close()
+  }
+})
+
+test('a thread the server calls not loaded in the middle of a turn is not read as stopped', { timeout: 30_000 }, async () => {
+  const backend = codex()
+  try {
+    const task = await backend.start({ folder: os.tmpdir(), prompt: 'unload' })
+    const events = watch(task)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    assert.equal(task.state, 'working', 'the turn is still running')
+    await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
+    assert.deepEqual(events.filter((e) => e.type === 'message').map((e) => e.text), ['still here'])
+    assert.equal(task.state, 'idle')
+  } finally {
+    await backend.close()
+  }
+})
+
+// ---- ACP agents ----
+// Togle ran Hermes through ACP before it opened Hermes's own screen; any agent a person adds that speaks ACP still runs this way
+// (a conversation Togle shows). The stand-in below speaks as Hermes does, and these tests keep what the ACP code does checked.
 
 const fakeHermes = path.join(import.meta.dirname, 'fake-hermes.mjs')
-const hermes = (env = {}, options = {}) => new T.HermesBackend({ command: [process.execPath, fakeHermes], env: { ...process.env, ...env }, ...options })
+const hermes = (env = {}, options = {}) =>
+  new T.AcpBackend({
+    runner: 'hermes',
+    name: 'Hermes',
+    command: async () => [process.execPath, fakeHermes, 'acp'],
+    versionOf: async () => 'Hermes Agent v0.0.0-fake',
+    env: { ...process.env, ...env },
+    ...options
+  })
 const callsOf = (file) => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [])
 
 test('Hermes starts a task, keeps the name given, asks in its asking mode, and ends the turn by what it said', { timeout: 30_000 }, async () => {
@@ -569,7 +821,7 @@ test('when Hermes ends under a task, the task fails; and one that cannot start f
   } finally {
     await backend.close()
   }
-  const missing = new T.HermesBackend({ command: [path.join(os.tmpdir(), 'no-such-hermes-program')] })
+  const missing = new T.AcpBackend({ runner: 'hermes', name: 'Hermes', command: async () => [path.join(os.tmpdir(), 'no-such-hermes-program'), 'acp'] })
   await assert.rejects(missing.start({ folder: os.tmpdir(), prompt: 'say ok' }), /Hermes did not start/)
   assert.deepEqual(await missing.list(), [], 'what Hermes would not list is left to the hub\'s record')
 })
@@ -592,7 +844,7 @@ test('someone who starts listening late hears what already happened, in order', 
 })
 
 test('a Codex program that will not start fails the start with a plain message, and a later start tries again', async () => {
-  const backend = new T.CodexBackend({ command: [path.join(os.tmpdir(), 'no-such-codex-program')] })
+  const backend = new T.CodexBackend({ command: [path.join(os.tmpdir(), 'no-such-codex-program')], told: () => undefined })
   await assert.rejects(backend.start({ folder: os.tmpdir(), prompt: 'say ok' }), /Codex did not start/)
   await assert.rejects(backend.start({ folder: os.tmpdir(), prompt: 'say ok' }), /Codex did not start/, 'the failure is not remembered')
 })

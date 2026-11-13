@@ -182,7 +182,7 @@ export function TaskBox() {
                 if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) void start(event)
               }}
             />
-            <button className="primary" disabled={busy || !runner || !folder || !text.trim()} title={!runner || asksEveryTime(runner) ? 'It asks before every command and every change.' : undefined}>
+            <button className="primary" disabled={busy || !runner || !folder || !text.trim()} title={runner && asksEveryTime(runner) ? 'It asks before every command and every change.' : undefined}>
               {busy ? 'Starting…' : 'Start'}
             </button>
           </div>

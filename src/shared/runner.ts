@@ -6,9 +6,12 @@ import type { TodoRef } from './todo'
 /** An agent, by its id in task keys: one Togle knows (`codex`, `claude`, `hermes`), or one the person added (`acp-…`). */
 export type RunnerKind = string
 
-/** Whether Togle can make the agent ask before every command and every change: Claude Code and Codex. Hermes and an added
- * agent ask as their own settings say. */
-export const asksEveryTime = (runner: RunnerKind): boolean => runner === 'claude' || runner === 'codex'
+/**
+ * Whether a task started in Togle asks before every command and every change. Claude Code, Codex and Hermes tasks are the
+ * agent's own screen and follow the person's own settings, as in their terminal; an agent the person added that speaks ACP is
+ * shown as a conversation and asks every time; one that runs in a terminal of Togle's own asks as its own settings say.
+ */
+export const asksEveryTime = (runner: RunnerKind): boolean => !(runner in KNOWN_AGENTS) && !runsInTerminal(runner)
 
 /** The agents Togle knows by name, before any is added. */
 export const KNOWN_AGENTS: Readonly<Record<string, string>> = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }

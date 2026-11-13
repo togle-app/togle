@@ -54,6 +54,8 @@ test('where an installed Togle keeps its data is told for each system, and a dev
 class Backend {
   constructor() {
     this.runner = 'claude'
+    // Claude Code runs as its own screen, which follows the person's own settings.
+    this.screens = true
     this.started = []
   }
   async detect() { return { installed: true, version: '2.1.322' } }
@@ -86,16 +88,16 @@ const run = async (argv, { dataFolder, cwd = os.tmpdir(), stdin = null } = {}) =
   return { code, out: out.join(''), err: err.join('') }
 }
 
-test('togle run starts a task in the running Togle, which asks before every command', async () => {
+test('togle run starts a task in the running Togle, which follows the agent’s own settings for what it asks', async () => {
   const running = await togle()
   try {
     const folder = scratch()
     const result = await run(['run', '--title', 'Dark mode', 'Add', 'a', 'dark', 'mode', 'switch'], { dataFolder: running.dataFolder, cwd: folder })
     assert.equal(result.code, 0, result.err)
-    assert.equal(result.out, `Started in Togle: Dark mode (Claude Code, ${folder}). It asks before every command. Answer it in Togle, under Agents.\n`)
+    assert.equal(result.out, `Started in Togle: Dark mode (Claude Code, ${folder}). It asks as its own settings say. Answer it in Togle, under Agents.\n`)
     assert.equal(result.err, '')
     const [task] = running.backend.started
-    assert.deepEqual({ folder: task.options.folder, prompt: task.options.prompt, title: task.options.title, asks: task.options.asks }, { folder, prompt: 'Add a dark mode switch', title: 'Dark mode', asks: true })
+    assert.deepEqual({ folder: task.options.folder, prompt: task.options.prompt, title: task.options.title, asks: task.options.asks }, { folder, prompt: 'Add a dark mode switch', title: 'Dark mode', asks: false })
     assert.equal((await running.hub.list())[0].key, 'claude:s1', 'it is in the list Togle shows')
   } finally {
     await running.close()
