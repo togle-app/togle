@@ -8,7 +8,7 @@ import { titleFromNotes, withGeneratedTitle } from '@shared/call-title'
 
 const TEMPLATES = new Set<MeetingNoteTemplate>(['concise', 'detailed', 'action-items'])
 const instructions: Record<MeetingNoteTemplate, string> = {
-  concise: 'Write concise notes with these sections, leaving out empty ones: Marked, Decided, To do, Open questions. Under To do, write each item as "- Name: the task", with the name of the person who took it (the speaker label You for the person who wrote the notes).',
+  concise: 'Write concise notes with these sections, leaving out empty ones: Marked, Decided, To do. Under To do, write each item as "- Name: the task", with the name of the person who took it (the speaker label You for the person who wrote the notes).',
   detailed: 'Write detailed notes organized by discussion topic, followed by Decisions, Action items, and Open questions. Preserve important reasoning, technical details and disagreements.',
   'action-items': 'Write an action list with Task, Owner, Deadline, and Evidence, followed by outstanding decisions. Clearly label proposals that nobody committed to.'
 }

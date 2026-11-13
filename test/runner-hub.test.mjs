@@ -899,6 +899,6 @@ test('an open task says what it did in one line: steps, commands run, files chan
   const log = [entry('you'), entry('command', { status: 'finished' }), entry('command', { status: 'failed' }), entry('command', { status: 'declined' }),
     entry('files', { paths: ['a.ts', 'b.ts'] }), entry('files', { paths: ['b.ts', 'c.ts'] }), entry('agent')]
   assert.equal(T.changedFiles(log), 3, 'each file once')
-  assert.equal(T.stepsLine(log), '5 steps: ran 2 commands, changed 3 files, 1 refused')
+  assert.equal(T.stepsLine(log), '5 steps: edited 3 files, ran 2 commands, 1 refused')
   assert.equal(T.stepsLine([entry('command', { status: 'running' })]), '1 step: ran 1 command')
 })

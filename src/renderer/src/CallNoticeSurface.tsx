@@ -28,8 +28,8 @@ export function CallNoticeSurface() {
       <div className="call-notice-buttons">
         <button className="primary" disabled={held} onClick={() => api.answerCallNotice('write')}>Write it down</button>
         <button disabled={held} onClick={() => api.answerCallNotice('later')}>Not now</button>
-        <button className="call-notice-always" disabled={held} onClick={() => api.answerCallNotice('always')}>Always in {notice.name}</button>
       </div>
+      <button className="call-notice-always" disabled={held} onClick={() => api.answerCallNotice('always')}>Always in {notice.name}</button>
     </div>
   )
 }

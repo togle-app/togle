@@ -305,7 +305,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
                     {[call.notes && 'Notes are ready', call.toConfirm > 0 && `${call.toConfirm} ${call.toConfirm === 1 ? 'name' : 'names'} to confirm`].filter(Boolean).join(' · ')}
                   </small>
                 </span>
-                <button className={`small ${call.toConfirm > 0 ? 'primary' : 'ghost'}`} onClick={() => onOpenCall(call.id)}>
+                <button className="small" onClick={() => onOpenCall(call.id)}>
                   {call.toConfirm > 0 ? 'Confirm names' : 'Open'}
                 </button>
               </div>

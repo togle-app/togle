@@ -316,14 +316,14 @@ kbd {
    window's time). */
 .dot.live {
   position: relative;
-  background: var(--danger);
+  background: var(--accent);
 }
 .dot.live::after {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: var(--danger);
+  background: var(--accent);
   animation: pulse 1.6s ease-out infinite;
 }
 @keyframes pulse {
@@ -507,7 +507,9 @@ button.icon.close:hover {
 .call-prep-inline textarea { width: 100%; min-height: 76px; margin: 6px 0 10px; resize: vertical; }
 .call-prep-inline > p { margin-bottom: 0; }
 .history-search { width: 100%; margin: 10px 0 14px; }
-.call-history-list { display: flex; flex-direction: column; gap: 8px; }
+/* Calls as cards side by side, as the design lays them out. */
+.call-history-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; align-items: start; }
+.call-history-list > :not(.past-call-row) { grid-column: 1 / -1; }
 .past-call-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -3138,7 +3140,8 @@ ul.pending-lessons > li > span:first-child { flex: 1 1 260px; min-width: 0; over
 .no-agents-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .no-agents-line code { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: 11.5px/1.45 ui-monospace, 'Cascadia Mono', Consolas, monospace; overflow-wrap: anywhere; }
 .task-banner code { padding: 1px 5px; border-radius: 4px; background: var(--bg); color: var(--text); font: 12px ui-monospace, 'Cascadia Mono', Consolas, monospace; }
-.task-log { flex: 1; min-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 2px; }
+/* As the design stacks it: where it stands, its steps, what it asks, then the reply box. */
+.task-log { flex: 0 1 auto; min-height: 60px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 2px; }
 .task-you { align-self: flex-end; max-width: 82%; padding: 7px 10px; border-radius: 10px 10px 2px 10px; background: var(--accent-strong); color: #fff; white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-agent { max-width: 92%; padding: 7px 10px; border-radius: 10px 10px 10px 2px; background: var(--panel-2); overflow-wrap: anywhere; }
 .task-agent > :first-child { margin-top: 0; }
@@ -3314,7 +3317,7 @@ body.taskbox-surface { background: var(--panel); color: var(--text); overflow: h
 
 /* The strip at the top of the screen during a call, with Togle's window closed. */
 .call-strip-bar { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 100vh; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text); font-size: 12px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
-.call-strip-live { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); animation: strip-pulse 1.6s ease-in-out infinite; }
+.call-strip-live { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: strip-pulse 1.6s ease-in-out infinite; }
 .call-strip-clock { margin-right: auto; font: 600 12px ui-monospace, 'Cascadia Mono', Consolas, monospace; font-variant-numeric: tabular-nums; }
 .call-strip-bar button { padding: 4px 11px; border-radius: 999px; font-size: 12px; }
 .call-strip-bar button.stop { color: var(--danger); }
@@ -3483,3 +3486,4 @@ body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: cross
 .call-notice-always { padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 12px; }
 .call-notice-always:hover:not(:disabled) { color: var(--text); text-decoration: underline; }
 .call-strip-bar button.tell { border-color: #5a4a22; background: #2a2418; color: var(--them); }
+.call-notice-always { justify-self: start; }

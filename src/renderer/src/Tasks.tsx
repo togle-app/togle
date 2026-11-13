@@ -282,7 +282,6 @@ function TaskRow({ task, now, old, selected, onSelect, onTakeOver }: { task: Tas
   // and waiting for a reply, it says why; done long ago, it says when.
   const detail = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : 'stopped · reply to go on') : task.state === 'waiting' ? 'waiting' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `done · ${ago(task.updatedAt, now)}` : 'done'
   const line = elsewhere ? `${agentOf(task)} · terminal` : `${agentOf(task)} · ${baseName(task.folder)} · ${detail}`
-  const dangerous = task.pending.some((request) => request.danger)
   return (
     <div className="task-item" role="listitem">
       <button className={`task-row ${selected ? 'selected' : ''} ${onTakeOver ? 'with-action' : ''}`} data-state={task.state} data-needs={stoppedHere ? 'you' : undefined} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
@@ -291,7 +290,6 @@ function TaskRow({ task, now, old, selected, onSelect, onTakeOver }: { task: Tas
           <strong>{task.title}</strong>
           <span>{line}</span>
         </span>
-        {dangerous && <span className="task-danger">Dangerous</span>}
       </button>
       {onTakeOver && <button className="small task-row-action" onClick={onTakeOver}>Take over</button>}
     </div>
@@ -355,11 +353,14 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
   const latest = [...log].reverse().find((entry) => entry.kind === 'agent')
   const changed = changedFiles(log)
   const steps = stepsLine(log)
+  // A question the agent asks is answered from the reply box; anything else typed there goes to the task.
+  const question = task.pending.find((request) => request.kind === 'question')
   const send = (event: FormEvent): void => {
     event.preventDefault()
     const message = text.trim()
     if (!message) return
-    onSend(message)
+    if (question) onReply(question.id, message)
+    else onSend(message)
     setText('')
   }
   return (
@@ -462,8 +463,8 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
 
       {task.mine && (
         <form className="task-reply" onSubmit={send}>
-          <input value={text} onChange={(event) => setText(event.target.value)} placeholder={'Reply, or hold ' + talkKey + ' and talk'} aria-label="Reply to the agent" />
-          <button className="primary small" disabled={!text.trim()}>
+          <input value={text} onChange={(event) => setText(event.target.value)} placeholder={'Reply, or hold ' + talkKey + ' and talk'} aria-label="Reply to the agent" type={question?.questions?.[0]?.secret ? 'password' : 'text'} />
+          <button className="small" disabled={!text.trim()}>
             Send
           </button>
         </form>
@@ -534,7 +535,6 @@ function LogLine({ entry }: { entry: LogEntry }) {
 }
 
 function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { request: ViewRequest; onAllow: () => void; onAlways: () => void; onRefuse: () => void; onReply: (text: string) => void }) {
-  const [text, setText] = useState('')
   if (request.kind === 'question') {
     const questions = request.questions ?? []
     return (
@@ -554,19 +554,6 @@ function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { reques
             )}
           </div>
         ))}
-        <form
-          className="task-reply"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (text.trim()) onReply(text.trim())
-            setText('')
-          }}
-        >
-          <input value={text} onChange={(event) => setText(event.target.value)} placeholder="Your answer" aria-label="Your answer" type={questions[0]?.secret ? 'password' : 'text'} />
-          <button className="primary small" disabled={!text.trim()}>
-            Reply
-          </button>
-        </form>
       </section>
     )
   }
@@ -575,7 +562,7 @@ function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { reques
     <section className={`task-request ${request.danger ? 'danger' : ''}`} aria-label={edit ? 'The agent wants to change files' : 'The agent wants to run a command'}>
       <h3>
         {edit ? 'Wants to change' : 'Wants to run'}
-        {request.danger && <span className="task-danger">Dangerous</span>}
+        {request.danger && <span className="task-danger" title={request.danger}>Dangerous</span>}
       </h3>
       {edit ? (
         <ul className="task-files">
@@ -586,7 +573,6 @@ function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { reques
       ) : (
         <pre className="task-command">{request.command}</pre>
       )}
-      {request.danger && <p className="task-why">{request.danger} Look at the whole command before you allow it.</p>}
       <div className="row">
         <button className="primary small" onClick={onAllow}>
           Allow once
@@ -611,7 +597,6 @@ function RemoteRow({ task, now, selected, onSelect }: { task: RemoteTask; now: n
         <strong>{task.title}</strong>
         <span>{task.agent} · {task.terminal ? 'terminal' : task.folder} · {detail}</span>
       </span>
-      {task.pending.some((request) => request.danger) && <span className="task-danger">Dangerous</span>}
     </button>
   )
 }

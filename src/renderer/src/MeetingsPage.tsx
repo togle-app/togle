@@ -41,7 +41,8 @@ export function meetingState(call: CallSessionSummary, now = Date.now()): string
 export function meetingDot(call: CallSessionSummary, now = Date.now()): 'work' | 'wait' | 'done' | 'gone' {
   if (call.status === 'live') return 'work'
   if (call.status === 'interrupted') return 'gone'
-  return namesToConfirm(call.confirm, now) || call.minutes?.state === 'generating' ? 'wait' : 'done'
+  if (namesToConfirm(call.confirm, now)) return 'wait'
+  return call.minutes?.state === 'generating' ? 'work' : 'done'
 }
 
 interface Props {

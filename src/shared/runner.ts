@@ -196,7 +196,7 @@ export function changedFiles(log: readonly LogEntry[]): number {
 }
 
 /**
- * What a task did, in one line, for the fold that holds its log: "5 steps: ran 3 commands, changed 2 files, 1 refused".
+ * What a task did, in one line, for the fold that holds its log: "5 steps: edited 2 files, ran 3 commands, 1 refused".
  * Undefined while it has done nothing but talk.
  */
 export function stepsLine(log: readonly LogEntry[]): string | undefined {
@@ -207,7 +207,7 @@ export function stepsLine(log: readonly LogEntry[]): string | undefined {
   const steps = commands.length + log.filter((entry) => entry.kind === 'files').length
   if (!steps) return undefined
   const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`
-  const parts = [...(ran ? [`ran ${plural(ran, 'command', 'commands')}`] : []), ...(files ? [`changed ${plural(files, 'file', 'files')}`] : []), ...(refused ? [`${refused} refused`] : [])]
+  const parts = [...(files ? [`edited ${plural(files, 'file', 'files')}`] : []), ...(ran ? [`ran ${plural(ran, 'command', 'commands')}`] : []), ...(refused ? [`${refused} refused`] : [])]
   return `${plural(steps, 'step', 'steps')}: ${parts.join(', ')}`
 }
 

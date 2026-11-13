@@ -1,6 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { PartialTranscript, Settings, TranscriptEntry } from '@shared/types'
 import { markedLineIds, speakerLabel } from '@shared/meeting'
+import { intoCall } from './CallTranscript'
 import type { CaptureInputs } from './audio/capture'
 import { FirstCallNotice, TellOthers } from './TellOthers'
 
@@ -81,7 +82,7 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, le
   return (
     <section className="live-call" aria-label="Call being written down">
       <header className="live-head">
-        <h2>{title || 'Call'}</h2>
+        <h2>{title || `Call on ${new Date(since || Date.now()).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}</h2>
         <span className="live-clock" role="timer" aria-label="Time into the call">Live · <Elapsed since={since} /></span>
         <span className="spacer" />
         <button onClick={onMark} title="Mark this moment. The notes list marked moments first.">Mark</button>
@@ -105,11 +106,11 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, le
       </div>
       <div className="live-lines" ref={lines} onScroll={(event) => { const box = event.currentTarget; atEnd.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40 }}>
         {!transcript.length && !partials.length && <p className="hint">Listening… The words appear as people speak.</p>}
-        {transcript.map((line) => <LiveLine key={line.id} line={line} marked={marked.has(line.id)} />)}
+        {transcript.map((line) => <LiveLine key={line.id} line={line} since={since} marked={marked.has(line.id)} />)}
         {partials.map((partial) => (
           <div key={partial.segmentId} className="live-line partial">
             <span className="who">{speakerLabel({ speaker: partial.speaker, voiceId: partial.voiceId, voiceName: partial.voiceName, voiceNamedBy: partial.voiceNamedBy })}</span>
-            <time dateTime={new Date(partial.at).toISOString()}>{clock.format(partial.at)}</time>
+            <time dateTime={new Date(partial.at).toISOString()} title={clock.format(partial.at)}>{intoCall(partial.at - since)}</time>
             <p>{partial.text}</p>
           </div>
         ))}
@@ -122,11 +123,11 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, le
  * One line said: drawn when it comes, and again only when it changes (a name given, a mark), so a long call's new
  * words and live captions don't redraw every line before them.
  */
-const LiveLine = memo(function LiveLine({ line, marked }: { line: TranscriptEntry; marked: boolean }) {
+const LiveLine = memo(function LiveLine({ line, since, marked }: { line: TranscriptEntry; since: number; marked: boolean }) {
   return (
     <div className={`live-line ${line.speaker} ${marked ? 'marked' : ''}`}>
       <span className="who">{speakerLabel(line)}</span>
-      <time dateTime={new Date(line.at).toISOString()}>{clock.format(line.at)}</time>
+      <time dateTime={new Date(line.at).toISOString()} title={clock.format(line.at)}>{intoCall(line.at - since)}</time>
       <p>{line.text}{marked && <span className="marked-tag">Marked</span>}</p>
     </div>
   )

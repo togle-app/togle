@@ -38,7 +38,7 @@ export function FirstCallNotice({ settings, onDone }: { settings: Settings; onDo
   return (
     <div className="notice ask first-call" role="alert" aria-label="Before your first call">
       <span>
-        <strong>Before your first call.</strong> The rules for writing down a call differ by place, and in some places everyone on it has to agree. Togle gives you a line to tell the others. The words of the call go to the AI you set up, so it can write the notes. {here ? 'The sound stays on this computer.' : 'The sound goes to the speech service you chose in Settings.'}
+        <strong>Before your first call.</strong> The rules for writing down a call differ by place. The words go to your AI plan, which writes the notes{here ? '; the sound stays on this computer.' : ', and the sound to the speech service you chose in Settings.'}
       </span>
       <div className="row">
         <button className="primary" autoFocus onClick={onDone}>Got it</button>

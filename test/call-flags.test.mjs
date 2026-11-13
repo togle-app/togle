@@ -111,7 +111,7 @@ test('the notes are asked to list the marked lines first, and are written again 
   const notes = new MeetingNotes(sessions, () => provider)
   const written = await notes.generate('flags-notes')
   assert.match(requests[0].system, /Lines flagged \[MARKED\]/)
-  assert.match(requests[0].system, /Marked, Decided, To do, Open questions/)
+  assert.match(requests[0].system, /Marked, Decided, To do\./, 'the sections the design shows, and no others')
   assert.equal(written.minutes.state, 'ready')
   assert.equal(written.minutes.by, 'chatgpt', 'the notes say what wrote them')
   // The same transcript with other marks is another source: the notes of a call that gained a mark are written again.

@@ -90,7 +90,7 @@ async function checkTasks(T, agent) {
   assert.deepEqual(rows.map(row => row.title), ['Add the status column', 'Clean the build folder', 'Rebuild the pricing page', 'Write the release notes', 'Fix the login redirect'])
   // One line each, as the design has it: the agent, where it works, and how it stands.
   assert.equal(rows[0].more, 'Codex · api-server · waiting')
-  assert.deepEqual(rows.map(row => row.danger), [false, true, false, false, false], 'only the command that looks dangerous is marked in the list')
+  assert.deepEqual(rows.map(row => row.danger), [false, false, false, false, false], 'the red mark is on the command, not on the row')
   assert.equal(rows[2].more, 'Claude Code · website · working')
   assert.equal(rows[3].more, 'Claude Code · terminal', 'a task in a terminal says so')
   assert.equal(rows[4].more, 'Claude Code · website · done', 'what finished today says done')
@@ -108,7 +108,7 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await texts(ui, '.task-request button'), ['Allow once', 'Refuse', 'Always allow commands that start with npm run'])
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request .task-danger')"), false)
   assert.equal(await ui.evaluate("document.querySelector('.task-latest').textContent"), 'I will add the column and a migration.')
-  assert.equal(await ui.evaluate("document.querySelector('.task-steps > summary').textContent"), '2 steps: ran 1 command, changed 2 files')
+  assert.equal(await ui.evaluate("document.querySelector('.task-steps > summary').textContent"), '2 steps: edited 2 files, ran 1 command')
   assert.equal(await ui.evaluate("document.querySelector('.task-steps').open"), false)
   assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Waiting for you')
   assert.ok((await ui.evaluate("document.querySelector('.task-status .hint').textContent")).startsWith('2 files changed'))
@@ -135,7 +135,7 @@ async function checkTasks(T, agent) {
   await ui.task('Clean the build folder')
   await ui.wait("!!document.querySelector('.task-request.danger')")
   assert.equal(await ui.evaluate("document.querySelector('.task-request .task-danger').textContent"), 'Dangerous')
-  assert.ok((await texts(ui, '.task-why'))[0].startsWith('It deletes files or folders for good.'))
+  assert.ok((await ui.evaluate("document.querySelector('.task-request .task-danger').title")).startsWith('It deletes files or folders for good.'), 'why, on the mark')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-always')"), false)
   await ui.capture('tasks-danger')
   await ui.click('.task-request button', 'Refuse')
@@ -162,6 +162,17 @@ async function checkTasks(T, agent) {
   await ui.wait("[...document.querySelectorAll('.task-you')].some(e=>e.textContent==='Use three plans instead')")
   assert.deepEqual((await ui.calls('sendToRunnerTask')).map(call => call.args), [['claude:s2', 'Use three plans instead']])
   assert.equal(await ui.evaluate("document.querySelector('.task-reply input').value"), '', 'the box is empty after sending')
+
+  // A question the agent asks is answered from the same reply box: the question has no box of its own.
+  await ui.evaluate("window.togleUITest.askOutside('claude:s2', { id: 'q1', kind: 'question', questions: [{ id: 'q', text: 'Which pricing table should I show?', options: ['Two plans', 'Three plans'] }], offersAlways: false })")
+  await ui.wait("!!document.querySelector('.task-request[aria-label=\"The agent asks you\"]')")
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-request input')"), false, 'one reply box')
+  assert.deepEqual(await texts(ui, '.task-request .task-options button'), ['Two plans', 'Three plans'], "and the agent's own buttons")
+  await ui.fill('.task-reply input', 'Two plans, please')
+  await ui.click('.task-reply button', 'Send')
+  await ui.wait("window.togleUITest.calls().some(call=>call.name==='replyRunnerTask')")
+  assert.deepEqual((await ui.calls('replyRunnerTask')).map(call => call.args), [['claude:s2', 'q1', 'Two plans, please']])
+  assert.equal((await ui.calls('sendToRunnerTask')).length, 1, 'the answer went to the question, not as a new message')
 
   // A task in a terminal can be seen and, after a warning, taken over: from the task, or from its row.
   await ui.task('Write the release notes')

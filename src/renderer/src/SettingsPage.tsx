@@ -230,7 +230,7 @@ function Meetings({ settings, save }: { settings: Settings; save: (patch: Settin
               <select aria-label={`When a call starts in ${names}`} value={mode} onChange={(event) => void save({ meetings: { ...settings.meetings, notice: true, apps: { ...apps, ...Object.fromEntries(inGroup.map((app) => [app.id, event.target.value as CallAppMode])) } } })}>
                 <option value="ask">Ask</option>
                 <option value="always">Always write down</option>
-                <option value="never">Never</option>
+                {mode === 'never' && <option value="never">Never</option>}
               </select>
             </Row>
           )
