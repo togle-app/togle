@@ -60,7 +60,7 @@ export function TaskNoticeSurface() {
         </div>
         <p className="task-notice-says">
           {notice.where} {notice.says}
-          {inline && <> {notice.detailKind === 'command' ? <code>{notice.detail}</code> : notice.detail}</>}
+          {inline && <> {notice.detailKind === 'command' ? <code className={notice.danger ? 'danger' : undefined}>{notice.detail}</code> : notice.detail}</>}
         </p>
         {notice.detail && !inline && <pre className={`task-notice-detail ${notice.detailKind}`}>{notice.detail}</pre>}
         {error && <p className="task-notice-error" role="alert">{error}</p>}

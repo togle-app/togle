@@ -1579,6 +1579,9 @@ function registerIpc(): void {
   ipcMain.on('taskbox:close', (event) => {
     if (taskBox.owns(event.sender)) taskBox.hide()
   })
+  ipcMain.on('taskbox:size', (event, height: unknown) => {
+    if (taskBox.owns(event.sender) && typeof height === 'number' && Number.isFinite(height)) taskBox.resize(height)
+  })
   ipcMain.handle('taskbox:pick-folder', (event) => {
     if (!taskBox.owns(event.sender)) throw new Error('That is not for this window.')
     return taskBox.pickFolder()

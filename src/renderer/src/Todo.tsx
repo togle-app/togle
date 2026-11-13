@@ -4,7 +4,6 @@ import { canAllowHere, shownPart } from '@shared/runner-command'
 import type { TodoItem, TodoList } from '@shared/todo'
 import type { CallOffer, TodoOffer } from '@shared/call-todo'
 import { meetingTitle } from './MeetingsPage'
-import { Icon } from './Icon'
 
 const api = window.togle
 
@@ -177,6 +176,8 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
   // A to-do from a call that is already on the list is not offered again.
   const onList = new Set(items.map((item) => plain(item.text)))
   const fromCalls = offers.items.filter((offer) => !onList.has(plain(offer.text)))
+  // A call is on the list while it needs you: names to confirm. Its notes wait in Meetings either way.
+  const callsToConfirm = offers.calls.filter((call) => call.toConfirm > 0)
 
   const row = (item: TodoItem): ReactNode => {
     const task = item.task ? tasks.find((candidate) => candidate.key === item.task) : undefined
@@ -185,9 +186,8 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
     return (
       <div key={item.line} className={`todo-item ${item.done ? 'done' : ''}`}>
         <div className="todo-row" role="listitem">
-          <button className="todo-box" role="checkbox" aria-checked={item.done} aria-label={`${item.done ? 'Untick' : 'Tick'}: ${item.text}`} onClick={() => void change(() => api.setTodoDone({ line: item.line, text: item.text }, !item.done))}>
-            {item.done && <Icon name="check" size={12} />}
-          </button>
+          {/* A small square, green once ticked, as the design draws it. */}
+          <button className="todo-box" role="checkbox" aria-checked={item.done} aria-label={`${item.done ? 'Untick' : 'Tick'}: ${item.text}`} onClick={() => void change(() => api.setTodoDone({ line: item.line, text: item.text }, !item.done))} />
           {isEditing ? (
             <input
               className="todo-edit"
@@ -258,10 +258,10 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
                     <b>{task.title}</b>
                     <small className="todo-line">
                       {agentOf(task)} · {baseName(task.folder)} · {says}
-                      {detail && (code ? <> <code>{detail.split('\n')[0]}</code></> : ` ${detail}`)}
+                      {/* A command that looks dangerous is marked red, and why is on it. */}
+                      {detail && (code ? <> <code className={request?.danger ? 'danger' : undefined} title={request?.danger || undefined}>{detail.split('\n')[0]}</code></> : ` ${detail}`)}
                     </small>
                   </span>
-                  {request?.danger && <span className="task-danger">Dangerous</span>}
                   {fits && (
                     <>
                       <button className="primary small" onClick={() => void answer(() => api.answerRunnerTask(task.key, request.id, 'allow-once'))}>
@@ -292,11 +292,11 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
         </div>
         {list && !items.length && <p className="empty">Nothing on your list. Add what you need to do today.</p>}
       </section>
-      {(!!offers.calls.length || !!fromCalls.length) && (
+      {(!!callsToConfirm.length || !!fromCalls.length) && (
         <section className="todo-group" aria-label="From your calls">
           <h3 className="tasks-label">From your calls</h3>
           <div role="list">
-            {offers.calls.map((call) => (
+            {callsToConfirm.map((call) => (
               <div key={call.id} className="todo-row" role="listitem">
                 <span className="todo-dot done" aria-hidden="true" />
                 <span className="todo-grow">
@@ -306,7 +306,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
                   </small>
                 </span>
                 <button className="small" onClick={() => onOpenCall(call.id)}>
-                  {call.toConfirm > 0 ? 'Confirm names' : 'Open'}
+                  Confirm names
                 </button>
               </div>
             ))}

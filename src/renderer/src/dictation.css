@@ -59,6 +59,12 @@
 .dictation-actions .ghost { border: 1px solid #ffffff24; color: #d5dde9; }
 .dictation-actions .dictation-icon { margin-left: auto; }
 .dictation-action-error { margin: 0; color: #ffb5b5; font-size: 10px; line-height: 1.35; }
+/* While you talk, as the design draws it: a light pill, your voice in dark bars. Trouble (a muted mic, no sound) keeps
+   the dark pill, where its amber words read. */
+.dictation-bar.is-recording:not(.is-expanded):not(.needs-attention) { background: #e9ecf5; border-color: #e9ecf5; border-radius: 999px; }
+.dictation-bar.is-recording:not(.is-expanded):not(.needs-attention) .dictation-wave { color: #0f1115; }
+.dictation-bar.is-recording:not(.is-expanded):not(.needs-attention) .dictation-wave > span { flex-basis: 3px; border-radius: 2px; }
+.dictation-bar.is-recording:not(.is-expanded):not(.needs-attention) .dictation-stage { color: #0f1115; }
 @media (prefers-reduced-motion: reduce) {
   .dictation-hit, .dictation-bar, .dictation-details, .dictation-wave, .is-recording .dictation-wave > span { transition: none; }
   .dictation-spinner { animation: none; }

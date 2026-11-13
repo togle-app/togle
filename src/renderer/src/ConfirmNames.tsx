@@ -7,6 +7,12 @@ const api = window.togle
 const SAMPLE_RATE = 16000
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 
+/** A call is at its second stage, Who spoke?, while a voice waits for an answer and its sound is kept. */
+export function confirmOpen(record: CallSession, now = Date.now()): boolean {
+  const confirm = record.confirm
+  return record.status !== 'live' && !!confirm && !confirm.closed && confirm.until > now && confirm.voices.some(voice => voice.answered === undefined)
+}
+
 /**
  * After a call: who is confirmed, then each voice that is worth a question, with one thing it said to play, a guess at
  * who it is and why. The person says yes, or gives the name. It closes after the last answer; the sound is deleted then,
@@ -52,7 +58,7 @@ export function ConfirmNames({ record, onRecord }: { record: CallSession; onReco
         <ConfirmRow key={voice.id} voice={voice} busy={!!busy} playing={playing === voice.id} onPlay={() => void play(voice)}
           onAnswer={name => void run(voice.id, () => api.confirmAnswer(record.id, voice.id, name))} />
       ))}
-      <p className="hint">Closes after your last answer. The sound is deleted then, or tomorrow at the latest.</p>
+      <p className="hint confirm-end">Closes after your last answer. The sound is deleted then, or tomorrow at the latest.</p>
       {error && <p className="error" role="status">{error}</p>}
     </section>
   )

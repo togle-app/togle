@@ -256,6 +256,8 @@ export interface TogleApi {
   taskBoxOpening(): Promise<import('./runner').TaskBoxOpen | null>
   /** Puts the task box away. */
   closeTaskBox(): void
+  /** The task box's window, as tall as what is in it. */
+  sizeTaskBox(height: number): void
   /** Asks for a folder for a task, in a dialog that belongs to the task box. Null when it is closed without a choice. */
   pickTaskBoxFolder(): Promise<string | null>
   /** F8 Show's overlay: the frozen screen to show (device pixels), or null for any other window. */

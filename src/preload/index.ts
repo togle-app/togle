@@ -161,6 +161,7 @@ const api: TogleApi = {
   openTaskBox: opening => ipcRenderer.invoke('taskbox:open', opening),
   taskBoxOpening: () => ipcRenderer.invoke('taskbox:opening'),
   closeTaskBox: () => ipcRenderer.send('taskbox:close'),
+  sizeTaskBox: height => ipcRenderer.send('taskbox:size', height),
   pickTaskBoxFolder: () => ipcRenderer.invoke('taskbox:pick-folder'),
   showPicture: () => ipcRenderer.invoke('show:picture'),
   showDone: png => ipcRenderer.send('show:done', png),

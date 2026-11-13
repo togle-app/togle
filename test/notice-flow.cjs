@@ -70,7 +70,8 @@ async function run() {
   await wait(() => icon?.menu && BrowserWindow.getAllWindows().length === 2 && BrowserWindow.getAllWindows().some((win) => win.webContents.getURL().includes('surface=dictation')), 'the windows and the tray')
   const bar = BrowserWindow.getAllWindows().find((win) => win.webContents.getURL().includes('surface=dictation'))
   const main = BrowserWindow.getAllWindows().find((win) => win !== bar)
-  const js = (win, code) => win.webContents.executeJavaScript(code)
+  // A script that throws says which one it was.
+  const js = (win, code) => win.webContents.executeJavaScript(code).catch((error) => { throw new Error(error.message + '\nWhile running: ' + code.slice(0, 300)) })
   const problems = []
   for (const win of BrowserWindow.getAllWindows()) win.webContents.on('console-message', (event) => { if (event.level === 'error') problems.push(event.message) })
   try {
@@ -94,8 +95,9 @@ async function run() {
   const notice = noticeWindow()
   await wait(() => js(notice, "!!document.querySelector('.task-notice')"), 'the notice')
   assert.equal(await js(notice, "document.querySelector('.task-notice-head strong').textContent"), 'Update the notes')
-  assert.equal(await js(notice, "document.querySelector('.task-notice-says').textContent"), `Hermes · ${path.basename(folder)} wants to run`)
-  assert.equal(await js(notice, "document.querySelector('.task-notice-detail').textContent"), 'echo x > notes.txt')
+  // The command in the notice's own line, as the design writes it.
+  assert.equal(await js(notice, "document.querySelector('.task-notice-says').textContent"), `Hermes · ${path.basename(folder)} wants to run echo x > notes.txt`)
+  assert.equal(await js(notice, "document.querySelector('.task-notice-says code').textContent"), 'echo x > notes.txt')
   assert.deepEqual(await js(notice, "[...document.querySelectorAll('.task-notice-actions button')].map(b=>b.textContent)"), ['Allow once', 'Refuse', 'Open'])
   assert.ok(icon.tooltip.includes('1 task waiting for you'), icon.tooltip)
   assert.equal(icon.menu.items[0].label, '1 task waiting for you')
@@ -121,8 +123,9 @@ async function run() {
   await wait(() => js(notice, "document.querySelector('.task-notice')?.dataset.kind==='done'"), 'the finished notice')
   assert.equal(await js(notice, "document.querySelector('.task-notice-says').textContent"), `Hermes · ${path.basename(folder)} finished`)
   assert.equal(await js(notice, "document.querySelector('.task-notice-detail').textContent"), 'ran it')
-  await js(notice, "document.querySelector('.task-notice-head button').click()")
-  await wait(async () => !(await js(notice, "!!document.querySelector('.task-notice')")), 'the notice to close')
+  // It has no close button, as the design draws it: it goes by itself.
+  assert.equal(await js(notice, "!!document.querySelector('.task-notice-head button')"), false)
+  await wait(async () => !(await js(notice, "!!document.querySelector('.task-notice')")), 'the finished notice to go by itself', 12000)
 
   // The to-do list is a plain file in Togle's folder, and every task given to an agent is on it: the task started above is
   // an item of its own, given to that task. An item added by hand can be given to a task too.
@@ -149,7 +152,7 @@ async function run() {
   const before = opened
   await press('Open')
   await wait(() => opened > before, 'Togle to open')
-  await wait(() => js(main, "document.querySelector('.task-title h2')?.textContent==='Second task'"), 'the task to show')
+  await wait(() => js(main, "document.querySelector('.task-title h2')?.firstChild?.textContent==='Second task'"), 'the task to show')
   await wait(async () => !(await js(notice, "!!document.querySelector('.task-notice')")), 'the notice to go')
 
   // The task box opens from its key, starts a task with what is typed in it, and keeps itself out of the way.
@@ -157,8 +160,9 @@ async function run() {
   const boxWindow = () => BrowserWindow.getAllWindows().find((win) => win.webContents.getURL().includes('surface=taskbox'))
   await wait(() => boxWindow(), 'the task box window')
   const box = boxWindow()
-  await wait(() => js(box, "document.querySelectorAll('.taskbox-agents button').length>0 && document.querySelector('.taskbox-folder select').value!==''"), 'the box to show its agent and folder')
-  assert.deepEqual(await js(box, "[...document.querySelectorAll('.taskbox-agents button')].map(b=>b.textContent)"), ['Hermes'], 'the agents that are installed: here, the stand-in')
+  // As the design draws it: the agent and the folder as two chips, then the words.
+  await wait(() => js(box, "document.querySelectorAll('.pick-chip').length===2 && document.querySelectorAll('.pick-chip')[1].textContent!=='Pick a folder'"), 'the box to show its agent and folder')
+  assert.equal(await js(box, "document.querySelectorAll('.pick-chip')[0].textContent"), 'Hermes', 'the agent that is installed: here, the stand-in')
   await js(box, "(() => { const area = document.querySelector('.taskbox textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(area, 'run frombox'); area.dispatchEvent(new Event('input', { bubbles: true })) })()")
   await js(box, "document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
   const fromBox = await find(async () => (await invoke('runners:list')).find((task) => task.title === 'run frombox'), 'the task from the box')

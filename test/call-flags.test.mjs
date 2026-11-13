@@ -123,11 +123,10 @@ test('the notes are asked to list the marked lines first, and are written again 
 })
 
 test('the line to tell the others says where the sound goes', () => {
-  assert.equal(tellOthersLine({ me: 'local', them: 'local' }), "I'm writing this call down with Togle. The sound stays on my computer, and an AI writes the notes from the words.")
+  assert.equal(tellOthersLine({ me: 'local', them: 'local' }), "I'm writing this call down with Togle. The sound stays on my computer.", "the design's words")
   for (const [me, them] of [['openai', 'local'], ['local', 'server'], ['server', 'openai']]) {
     const said = tellOthersLine({ me, them })
     assert.match(said, /sent to a speech service/)
-    assert.match(said, /an AI writes the notes from the words./)
     assert.doesNotMatch(said, /stays on my computer/)
   }
 })

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { Menu } from './Menu'
 import { asksEveryTime, type RunnerKind, type RunnerStatus, type TaskBoxOpen } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
@@ -47,7 +47,18 @@ export function TaskBox() {
   const [error, setError] = useState('')
   const [loaded, setLoaded] = useState(false)
   const input = useRef<HTMLTextAreaElement>(null)
+  const form = useRef<HTMLFormElement>(null)
   const dictate = useHotkeys().find((key) => key.id === 'dictate')
+
+  // As the design draws it: one line, which grows with the words, and a window no taller than what is in it.
+  useLayoutEffect(() => {
+    const box = input.current
+    if (box) {
+      box.style.height = 'auto'
+      box.style.height = `${box.scrollHeight}px`
+    }
+    if (form.current) api.sizeTaskBox(Math.ceil(form.current.getBoundingClientRect().height))
+  })
 
   const load = useCallback(async () => {
     try {
@@ -127,7 +138,7 @@ export function TaskBox() {
   }
 
   return (
-    <form className="taskbox" onSubmit={(event) => void start(event)} onKeyDown={(event) => event.key === 'Escape' && api.closeTaskBox()} aria-label="Start a task">
+    <form ref={form} className="taskbox" onSubmit={(event) => void start(event)} onKeyDown={(event) => event.key === 'Escape' && api.closeTaskBox()} aria-label="Start a task">
       {loaded && !installed.length ? (
         <p className="taskbox-none">No coding agent found. Install Claude Code, Codex or Hermes, and Togle finds it.</p>
       ) : (
@@ -163,7 +174,7 @@ export function TaskBox() {
               ref={input}
               aria-label="Task"
               placeholder={`Say what to do, or hold ${dictate?.ok && dictate.keys ? dictate.keys : 'F9'} and say it`}
-              rows={3}
+              rows={1}
               autoFocus
               value={text}
               onChange={(event) => setText(event.target.value)}

@@ -8,7 +8,11 @@ import { KeysNoticeSurface } from './KeysNoticeSurface'
 import { CallStripSurface } from './CallStripSurface'
 import { ShowSurface } from './ShowSurface'
 import { TaskNoticeSurface } from './TaskNoticeSurface'
+// The design's two typefaces, kept with the app: Inter for text, Bricolage Grotesque for a page's heading.
+import '@fontsource-variable/inter'
+import '@fontsource-variable/bricolage-grotesque/opsz.css'
 import './styles.css'
+import './design.css'
 
 /**
  * A render error would leave the frameless window blank, with no button to close it: show what happened, and a way

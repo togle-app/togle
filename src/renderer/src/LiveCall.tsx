@@ -180,7 +180,8 @@ function Meter({ label, title, state, level }: { label: string; title: string; s
   return (
     <span className="live-meter" data-state={state} title={state === 'on' ? title : `${title}: ${state}`}>
       {label}
-      <span className="bars" aria-hidden="true">{[4, 7, 10, 13].map((height, index) => <i key={height} className={index < lit ? 'on' : ''} style={{ height }} />)}</span>
+      {/* Four bars, as the design draws them: lit up to how loud it is. */}
+      <span className="bars" aria-hidden="true">{[4, 8, 10, 10].map((height, index) => <i key={index} className={index < lit ? 'on' : ''} style={{ height }} />)}</span>
     </span>
   )
 }

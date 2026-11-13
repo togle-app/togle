@@ -19,10 +19,10 @@ export function NoisyMicrophone({ finding, minutes, microphone }: { finding: Noi
   // The one link does what Togle Studio needs next: get it, sign in to it, or turn it on.
   const clean = (): Promise<unknown> => !microphone?.installed ? api.openMicrophonePage('after-call') : microphoneNeedsSignIn(microphone) ? api.showMicrophone() : api.turnOnMicrophone()
   return (
-    <p className="studio-mention" role="status">
-      Your microphone picked up room noise for {noisy} of {of} minutes.{' '}
-      <button className="link" onClick={() => { setError(''); void clean().catch((failure) => setError(errorText(failure))) }}>Clean my microphone</button>
-      {error && <span className="error"> {error}</span>}
-    </p>
+    <div className="studio-mention" role="status">
+      <span>Your microphone picked up room noise for {noisy} of {of} minutes.</span>
+      <button className="small" onClick={() => { setError(''); void clean().catch((failure) => setError(errorText(failure))) }}>Clean my microphone</button>
+      {error && <span className="error">{error}</span>}
+    </div>
   )
 }

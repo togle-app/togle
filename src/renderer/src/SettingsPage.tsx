@@ -570,9 +570,10 @@ function StudioApp() {
   }, [])
   return (
     <Row label={false} name="Togle Studio" className="studio-row">
-      <span className="setting-value microphone-status">{studioSummary(status)}</span>
+      {/* Not there yet: just the one button, as the design's row has it. */}
+      {status?.installed && <span className="setting-value microphone-status">{studioSummary(status)}</span>}
       {!status?.installed
-        ? <button className="ghost small" onClick={() => void api.openMicrophonePage('settings')}>See Togle Studio</button>
+        ? <button className="small" onClick={() => void api.openMicrophonePage('settings')}>See Togle Studio</button>
         : microphoneNeedsSignIn(status)
           ? <button className="primary small" onClick={() => void api.showMicrophone()}>Sign in</button>
           : <button className="ghost small" onClick={() => void api.showMicrophone()}>Open</button>}

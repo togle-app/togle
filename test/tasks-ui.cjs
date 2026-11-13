@@ -223,7 +223,8 @@ async function checkTodo(T, agent) {
   assert.deepEqual(await texts(ui, '.todo-row.need .todo-line code'), ['npm run migrate', 'rm -rf build'])
   assert.deepEqual(await texts(ui, '.todo-row.need:nth-child(1) button'), ['Allow once', 'Refuse'])
   assert.deepEqual(await texts(ui, '.todo-row.need:nth-child(2) button'), ['Open'], 'a command that looks dangerous opens in Agents, where all of it shows')
-  assert.equal(await ui.evaluate("document.querySelector('.todo-row.need:nth-child(2) .task-danger').textContent"), 'Dangerous')
+  assert.equal(await ui.evaluate("document.querySelector('.todo-row.need:nth-child(2) .todo-line code').className"), 'danger', 'the command that looks dangerous is marked red')
+  assert.ok((await ui.evaluate("document.querySelector('.todo-row.need:nth-child(2) .todo-line code').title")).startsWith('It deletes files or folders for good.'), 'and why is on it')
   await ui.capture('todo-list')
 
   // The list: open items first, the ticked one last and struck through, a chip for what an agent does with an item.
@@ -306,14 +307,14 @@ async function checkTodo(T, agent) {
 
   // What calls left for today: names to confirm, notes that are ready, and the to-dos in them that are the person's.
   const offered = '.todo-group[aria-label="From your calls"] .todo-row'
-  assert.deepEqual(await texts(ui, offered + ' b'), ['Sprint review', 'Planning sync'])
+  assert.deepEqual(await texts(ui, offered + ' b'), ['Sprint review'], 'a call is here while it needs you: names to confirm')
   assert.deepEqual(await texts(ui, offered + ' .todo-offer'), ['Send the API timeline to Dario', 'Book the staging review'], 'what a call left is one plain line')
-  assert.deepEqual(await texts(ui, offered + ' small'), ['Notes are ready · 2 names to confirm', 'Notes are ready'])
-  assert.equal(await ui.evaluate("document.querySelectorAll('.todo-group[aria-label=\"From your calls\"] .todo-dot.done').length"), 2, 'each call has its dot')
-  assert.deepEqual(await texts(ui, offered + ' button'), ['Confirm names', 'Open', 'Add', 'Add'])
+  assert.deepEqual(await texts(ui, offered + ' small'), ['Notes are ready · 2 names to confirm'])
+  assert.equal(await ui.evaluate("document.querySelectorAll('.todo-group[aria-label=\"From your calls\"] .todo-dot.done').length"), 1, 'the call has its dot')
+  assert.deepEqual(await texts(ui, offered + ' button'), ['Confirm names', 'Add', 'Add'])
   await ui.capture('todo-from-calls')
   await ui.click(offered + ' button', 'Add')
-  await ui.wait("document.querySelectorAll('.todo-group[aria-label=\"From your calls\"] .todo-row').length===3")
+  await ui.wait("document.querySelectorAll('.todo-group[aria-label=\"From your calls\"] .todo-row').length===2")
   assert.equal((await ui.calls('addTodo')).at(-1).args[0], 'Send the API timeline to Dario')
   assert.ok((await texts(ui, '.todo-item .todo-text')).includes('Send the API timeline to Dario'), 'it is on the list now')
   assert.deepEqual(await texts(ui, offered + ' .todo-offer'), ['Book the staging review'], 'and is not offered again')
@@ -394,6 +395,8 @@ async function checkTaskBox(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').placeholder"), 'Say what to do, or hold F9 and say it')
   assert.equal(await ui.evaluate("document.querySelector('.taskbox-field .primary').disabled"), true, 'nothing to start yet')
   assert.equal(await ui.evaluate("!!document.querySelector('.taskbox-foot')"), false, 'no line of instructions under the box')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').rows"), 1, 'one line, as the design draws it, which grows with the words')
+  assert.ok((await ui.calls('sizeTaskBox')).some(({ args: [height] }) => height > 60 && height < 120), 'the window is as tall as the chips and the line')
   await ui.capture('task-box')
 
   // Another agent, another folder, the words: Enter starts it and puts the box away. Shift+Enter is a new line.

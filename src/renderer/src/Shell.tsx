@@ -5,10 +5,9 @@ import { needsYou } from '@shared/runner'
 import { MANAGE_USAGE_URL } from '@shared/plan'
 import { quitQuestion, type CloseWarning } from '@shared/close-warning'
 import type { TogleMicrophoneStatus } from '@shared/microphone'
-import togleIcon from '../../../build/icon.svg'
 import { Icon } from './Icon'
 import { FirstMinute } from './FirstMinute'
-import { Elapsed, LiveCall } from './LiveCall'
+import { LiveCall } from './LiveCall'
 import { MeetingsPage } from './MeetingsPage'
 import { onOpenSettings, openSettings, type SettingsPart } from './open-settings'
 import { SettingsPage } from './SettingsPage'
@@ -113,18 +112,12 @@ export function Shell() {
     return () => window.removeEventListener('keydown', keep, true)
   }, [confirmClose])
 
-  const hidden = api.platform === 'win32' && !!settings?.window.hideFromCapture
   return (
     <div className={`app shell ${call.listening ? 'in-call' : ''}`}>
       <header className="titlebar">
+        {/* As the design draws the window: its name, quiet. A call going on shows on Meetings in the rail. */}
         <div className="title">
-          <span className="brand"><img src={togleIcon} width={20} height={20} alt="" /><span className="brand-name">Togle</span></span>
-          {call.listening && (
-            <button className="live live-call-link" aria-label="Open the call being written down" onClick={showLive} title={hidden ? "Writing the call down. Only you can see Togle: screen shares and recordings show what's behind it." : 'Writing the call down'}>
-              <span className="dot live" /><span>Live</span><Elapsed since={call.since} />
-              {hidden && <Icon name="eyeOff" size={12} />}
-            </button>
-          )}
+          <span className="brand"><span className="brand-name">Togle</span></span>
         </div>
         <div className="window-buttons">
           <button className="icon" title="Minimize" aria-label="Minimize" onClick={() => api.minimize()}><Icon name="minimize" /></button>
@@ -153,7 +146,7 @@ export function Shell() {
             <button key={place.id} aria-label={place.label} title={place.title} aria-current={view === place.id ? 'page' : undefined} onClick={() => { if (place.id === 'meetings') { setLive(call.listening); setMeetingsHome((count) => count + 1) } setView(place.id) }}>
               <Icon name={place.icon as 'todo'} size={16} /><span>{place.label}</span>
               {place.id === 'todo' && waiting > 0 && <span className="nav-count" aria-label={`${waiting} waiting for you`}>{waiting}</span>}
-              {place.id === 'meetings' && call.listening && <span className="dot live" aria-label="A call is being written down" />}
+              {place.id === 'meetings' && call.listening && <span className="dot live" role="img" aria-label="A call is being written down" />}
             </button>
           ))}
           <span className="spacer" />

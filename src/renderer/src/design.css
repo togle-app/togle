@@ -1,0 +1,666 @@
+/*
+ * Togle's look, as the product design draws it: its colors, its two typefaces, and the few parts every screen is made
+ * of (a row, a chip, a dot, a field, a button). Indigo is Togle and "working". Amber is "waiting for you" and is used
+ * for nothing else. Green is "done". The window is the design's dark theme. Loaded after styles.css, so where both
+ * style a part, this wins.
+ */
+
+:root {
+  --bg: #0f1115;
+  --surface: #171b23;
+  --stage: #080a0e;
+  --ink: #e9ecf5;
+  --muted: #a0a7bc;
+  --line: #2b3142;
+  --togle: #98a5ff;
+  --togle-soft: #20264d;
+  --wait: #e5b865;
+  --wait-soft: #352a10;
+  --ok: #55d3b6;
+  --ok-soft: #0f322c;
+  --shadow: rgba(0, 0, 0, 0.55);
+  /* Not in the design's palette: what looks dangerous, and a hover over the surface. */
+  --danger: #ff7a7a;
+  --danger-soft: #3a2026;
+  --raised: #1e2330;
+  --font-display: 'Bricolage Grotesque Variable', 'Segoe UI', system-ui, sans-serif;
+  /* Korean, Japanese and Chinese have their system fonts after the Latin ones, which lack them. */
+  --font-body: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Malgun Gothic', 'Yu Gothic UI', 'Microsoft YaHei UI', 'Apple SD Gothic Neo', 'Hiragino Sans', 'PingFang SC', 'Noto Sans CJK KR', 'Noto Sans KR', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+  /* The names the older parts of the window use, on the design's colors. */
+  --panel: var(--surface);
+  --panel-2: var(--raised);
+  --border: var(--line);
+  --text: var(--ink);
+  --faint: var(--muted);
+  --accent: var(--togle);
+  --accent-strong: var(--togle);
+  --them: var(--wait);
+  --me: var(--ok);
+  --mono: var(--font-mono);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--surface);
+  color: var(--ink);
+  font: 13px/1.4 var(--font-body);
+}
+
+/* ---- The parts ---- */
+
+/* A button, one size everywhere. The primary one is light on the dark window. */
+button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+button:hover:not(:disabled) { border-color: var(--muted); }
+button.small { padding: 3px 9px; font-size: 12px; }
+button.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); font-weight: 600; }
+button.primary:hover:not(:disabled) { background: #ffffff; border-color: #ffffff; }
+button.primary:disabled { opacity: 0.45; }
+button.primary.stop { background: var(--danger-soft); border-color: var(--danger-soft); color: var(--danger); }
+button.ghost { background: transparent; }
+button.link { color: var(--togle); font-weight: 400; font-size: inherit; white-space: normal; }
+button:focus-visible, summary:focus-visible { outline: 2px solid var(--togle); outline-offset: 2px; }
+
+/* A field: the words go in a dark box with round corners. */
+input,
+select,
+textarea {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px 10px;
+}
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--togle); }
+
+kbd {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0.05em 0.4em;
+  white-space: nowrap;
+}
+code { font-family: var(--font-mono); font-size: 0.9em; }
+
+.hint { color: var(--muted); font-size: 12px; }
+.empty { color: var(--muted); font-size: 12px; margin: 2px 0; }
+.error { color: var(--danger); font-size: 12px; }
+
+/* A small label over a group: "WAITING FOR YOU". */
+.tasks-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* A chip says how something stands, in a word or two. */
+.todo-chip,
+.state-chip,
+.live-clock,
+.marked-tag,
+.task-danger,
+.task-device-chip {
+  display: inline-block;
+  flex: none;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  background: var(--raised);
+  color: var(--muted);
+}
+.task-danger { background: var(--danger-soft); color: var(--danger); }
+.marked-tag, .task-device-chip { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+
+/* The menus and the dialogs over the window. */
+.popover { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 14px 28px -12px var(--shadow); }
+.popover.menu button { font-size: 13px; font-weight: 400; color: var(--ink); border-radius: 6px; }
+.popover.menu.menu-overlay button { font-size: 13px; }
+.popover.menu button:hover:not(:disabled), .popover.menu button:focus-visible { background: var(--raised); }
+.popover.menu .menu-chip { margin-left: auto; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.monitor-picker { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 22px 36px -26px var(--shadow); }
+.monitor-picker h2 { font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; }
+.monitor-picker-backdrop { inset: 36px 0 0; background: rgba(8, 10, 14, 0.82); }
+
+/* A line Togle says in the window: neutral, and amber when it waits for an answer. */
+.notice { align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); font-size: 12.5px; }
+.notice.ask { border-color: var(--wait); background: var(--wait-soft); color: var(--ink); gap: 8px; }
+.notice.ask .row { display: flex; gap: 6px; flex-wrap: wrap; }
+.notice .dismiss { color: var(--muted); }
+
+/* Tabs: the open one in ink, with an indigo line under it. */
+.tabs { display: flex; gap: 14px; margin: 0 0 12px; border-bottom: 1px solid var(--line); }
+.tabs button { padding: 0 0 6px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); font-size: 13px; font-weight: 600; }
+.tabs button[aria-selected='true'], .tabs button[aria-selected='true']:hover { color: var(--ink); border-bottom-color: var(--togle); }
+.tabs button:hover:not(:disabled) { color: var(--ink); border-color: transparent; }
+
+/* ---- The window: a title bar, the rail of places, the place ---- */
+
+.titlebar { height: 36px; padding: 0 6px 0 14px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.titlebar .brand { padding: 0; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; }
+button.icon { color: var(--muted); border-radius: 6px; }
+button.icon:hover, button.icon.active { background: var(--raised); color: var(--ink); }
+
+.shell-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 136px minmax(0, 1fr); }
+.shell-nav { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 8px; background: var(--bg); border-right: 1px solid var(--line); }
+.shell-nav > .spacer { flex: 1; }
+.shell-nav button { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; padding: 6px 9px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 13px; font-weight: 600; text-align: left; }
+.shell-nav button > svg { flex-shrink: 0; }
+.shell-nav button > svg { display: none; }
+.shell-nav button:hover:not(:disabled) { background: var(--raised); color: var(--ink); }
+.shell-nav button[aria-current='page'], .shell-nav button[aria-current='page']:hover:not(:disabled) { background: var(--togle-soft); color: var(--togle); }
+.shell-nav .nav-count { margin-left: 0; min-width: 0; padding: 0 7px; border-radius: 999px; background: var(--wait-soft); color: var(--wait); font-size: 11px; font-weight: 600; line-height: 17px; font-variant-numeric: tabular-nums; }
+.shell-nav .dot.live { margin-left: 0; flex-shrink: 0; }
+.shell-content { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; padding: 14px 16px; overflow: auto; background: var(--surface); }
+/* Agents is two panes side by side, each with its own room, the line between them the window's full height. */
+.shell-content:has(> .tasks) { padding: 0; }
+@media (max-width: 560px) {
+  .shell-layout { grid-template-columns: 52px minmax(0, 1fr); }
+  .shell-nav button { justify-content: center; padding: 8px 0; }
+  .shell-nav button > svg { display: block; }
+  .shell-nav button > span:not(.nav-count):not(.dot) { display: none; }
+  .shell-nav .nav-count { position: absolute; top: 1px; right: 2px; padding: 0 5px; line-height: 16px; font-size: 10px; }
+  .shell-nav .dot.live { position: absolute; top: 6px; right: 8px; width: 7px; height: 7px; }
+  .shell-content { padding: 12px; }
+}
+
+/* A dot says how something stands: indigo works, amber waits for you, green is done. */
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.live, .dot.live::after { background: var(--togle); }
+
+/* ---- To-do ---- */
+
+.todo { display: flex; flex-direction: column; gap: 12px; max-width: none; margin: 0; padding: 0; height: auto; overflow: visible; }
+.todo-head h2 { margin: 0; font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; line-height: 1.12; }
+.todo-add { display: flex; align-items: center; gap: 10px; padding: 0 10px 0 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.todo-add:focus-within { border-color: var(--togle); }
+.todo-add input { flex: 1; min-width: 0; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; }
+.todo-add kbd { padding: 0.05em 0.4em; font: 600 0.82em var(--font-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; }
+.todo-group { display: flex; flex-direction: column; gap: 6px; }
+.todo-group > [role='list'] { display: flex; flex-direction: column; gap: 6px; }
+/* A row: a state, a name, one line and at most two buttons. */
+.todo-row { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; }
+.todo-row.need { border-color: var(--wait); background: var(--wait-soft); }
+.todo-dot { flex: none; align-self: center; width: 8px; height: 8px; margin: 0; border-radius: 50%; background: var(--wait); }
+.todo-dot.done { background: var(--ok); }
+.todo-grow { display: flex; flex-direction: column; flex: 1; gap: 0; min-width: 0; }
+.todo-grow b { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.todo-grow small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.todo-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-line code { padding: 0; border-radius: 0; background: none; color: inherit; font: 0.9em var(--font-mono); }
+.todo-line code.danger { color: var(--danger); }
+.todo-offer { font-size: 13px; overflow-wrap: anywhere; }
+.todo-box { flex: none; width: 14px; height: 14px; padding: 0; border: 1.5px solid var(--muted); border-radius: 4px; background: transparent; }
+.todo-box:hover:not(:disabled) { border-color: var(--ink); }
+.todo-box[aria-checked='true'], .todo-box[aria-checked='true']:hover:not(:disabled) { border-color: var(--ok); background: var(--ok); }
+.todo-text { flex: 1; min-width: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; overflow-wrap: anywhere; cursor: text; }
+.todo-text:hover { background: transparent; }
+.todo-item.done .todo-text { color: var(--muted); text-decoration: line-through; }
+.todo-edit { flex: 1; min-width: 0; padding: 2px 6px; border-radius: 6px; }
+.todo-chip { cursor: pointer; }
+.todo-chip:hover:not(:disabled) { filter: brightness(1.15); }
+.todo-chip.work { background: var(--togle-soft); color: var(--togle); }
+.todo-chip.wait { background: var(--wait-soft); color: var(--wait); }
+.todo-chip.done { background: var(--ok-soft); color: var(--ok); }
+.todo-chip.fail { background: var(--danger-soft); color: var(--danger); }
+
+/* ---- Agents: the list of tasks, and the one open beside it ---- */
+
+.tasks { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 15.5rem) minmax(0, 1fr); }
+.tasks-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; padding: 14px 15px; border-right: 1px solid var(--line); }
+.tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.task-list { display: flex; flex-direction: column; gap: 6px; }
+.task-item { position: relative; }
+.task-row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; }
+.task-row:hover:not(:disabled) { border-color: var(--muted); background: transparent; }
+.task-row.selected, .task-row.selected:hover:not(:disabled) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); background: transparent; }
+.task-row.with-action { padding-right: 96px; }
+.task-row-action { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); }
+.task-dot { flex: none; width: 8px; height: 8px; margin: 0; border-radius: 50%; background: var(--muted); }
+.task-row[data-state='waiting'] .task-dot, .task-row[data-needs='you'] .task-dot { background: var(--wait); }
+.task-row[data-state='working'] .task-dot { background: var(--togle); }
+.task-row[data-state='idle'] .task-dot { background: var(--ok); }
+.task-row[data-state='failed']:not([data-needs='you']) .task-dot { background: var(--danger); }
+.task-copy { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.task-copy strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-copy span { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-earlier { display: flex; flex-direction: column; gap: 6px; }
+.tasks-list button.task-earlier-toggle { align-self: flex-start; margin: 0; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 400; text-decoration: none; }
+.tasks-list button.task-earlier-toggle:hover { color: var(--ink); text-decoration: underline; }
+.tasks-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 14px 15px; overflow-y: auto; }
+.tasks-empty { margin: auto; max-width: 340px; color: var(--muted); text-align: center; }
+.task-panel { display: flex; flex-direction: column; flex: 1; gap: 12px; min-height: 0; }
+.task-header { display: flex; align-items: center; gap: 10px; }
+.tasks-back, .tasks-back-to-task { display: none; }
+.task-title { flex: 1; min-width: 0; }
+.task-title h2 { margin: 0; font: 600 13px/1.4 var(--font-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-title p { margin: 2px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.task-where { color: var(--muted); font-size: 12px; font-weight: 400; }
+.task-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.task-status { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.task-status .hint { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--muted); font-size: 12px; }
+.task-status button.link, .task-title p button.link { margin: 0; padding: 0; color: var(--muted); font-size: 12px; }
+.task-status button.link:hover, .task-title p button.link:hover { color: var(--ink); }
+.state-chip[data-state='waiting'] { background: var(--wait-soft); color: var(--wait); }
+.state-chip[data-state='working'] { background: var(--togle-soft); color: var(--togle); }
+.state-chip[data-state='idle'] { background: var(--ok-soft); color: var(--ok); }
+.state-chip[data-state='failed'] { background: var(--danger-soft); color: var(--danger); }
+/* Where it stands, then its steps folded under one quiet line, what it asks, and the reply box. */
+.task-log { display: flex; flex-direction: column; flex: 0 1 auto; gap: 12px; min-height: 0; padding: 0; overflow-y: auto; }
+.task-latest { max-width: 100%; }
+.task-agent { max-width: 100%; padding: 8px 10px; border-radius: 10px; background: var(--bg); overflow-wrap: anywhere; }
+.task-agent > :first-child { margin-top: 0; }
+.task-agent > :last-child { margin-bottom: 0; }
+.task-you { align-self: flex-end; max-width: 82%; padding: 8px 10px; border-radius: 10px; background: var(--togle-soft); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-steps > summary { padding: 0; list-style: none; color: var(--muted); font-size: 12px; cursor: pointer; }
+.task-steps > summary::-webkit-details-marker { display: none; }
+.task-steps > summary:hover { color: var(--ink); }
+.task-steps[open] { display: flex; flex-direction: column; gap: 8px; }
+.task-cmd { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--muted); font-size: 12px; }
+.task-cmd code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-family: var(--font-mono); }
+.task-cmd[data-status='running'] > span:first-child { color: var(--togle); }
+.task-cmd[data-status='finished'] > span:first-child { color: var(--ok); }
+.task-cmd[data-status='declined'] > span:first-child, .task-cmd[data-status='failed'] > span:first-child { color: var(--danger); }
+.task-note { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+/* What it asks waits for you: amber. A command that looks dangerous is marked red. */
+.task-request { display: flex; flex-direction: column; gap: 7px; padding: 9px 10px; border: 1px solid var(--wait); border-radius: 10px; background: var(--wait-soft); }
+.task-request.danger { border-color: var(--wait); background: var(--wait-soft); }
+.task-request h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.task-request p { margin: 0; }
+.task-request .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.task-command { margin: 0; padding: 0; max-height: 220px; overflow-y: auto; border: 0; background: none; color: var(--ink); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-request.danger .task-command { color: var(--danger); }
+.task-files { margin: 0; padding-left: 18px; font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.task-why { color: var(--danger); font-size: 12px; }
+.task-options { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.task-always { align-self: flex-start; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 400; text-align: left; white-space: normal; cursor: pointer; }
+.task-always:hover:not(:disabled) { color: var(--ink); text-decoration: underline; }
+/* The reply box: one field, with Send in it. */
+.task-reply { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.task-reply:focus-within { border-color: var(--togle); }
+.task-reply input { flex: 1; min-width: 0; padding: 4px 10px; border: 0; background: transparent; }
+.task-banner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 12px; }
+.task-banner .row { display: flex; gap: 6px; }
+.task-banner.signed-out { border-color: var(--wait); background: var(--wait-soft); color: var(--ink); }
+.task-banner.task-words { color: var(--ink); }
+.task-banner.task-words q { color: var(--ink); font-style: italic; overflow-wrap: anywhere; }
+.task-banner code { padding: 0; background: none; color: var(--ink); font: 12px var(--font-mono); }
+.task-terminal { display: flex; flex-direction: column; flex: 1; gap: 8px; min-height: 0; }
+.terminal-view { flex: 1; min-height: 220px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
+.terminal-view .xterm { height: 100%; }
+.no-agents { display: flex; flex-direction: column; gap: 12px; padding: 2px 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.no-agents p { margin: 0; }
+.no-agents-row { display: flex; flex-direction: column; gap: 5px; }
+.no-agents-name strong { color: var(--ink); }
+.no-agents-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.no-agents-line code { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: 11.5px/1.45 var(--font-mono); overflow-wrap: anywhere; }
+/* Other devices (Togle Studio): their tasks under their names, and the one mention at the end of the list. */
+.task-device { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.task-device > [role='list'] { display: flex; flex-direction: column; gap: 6px; }
+.task-device .empty { margin: 0; }
+.task-device-chip { margin-left: 6px; vertical-align: middle; }
+.task-devices-mention { align-items: flex-start; gap: 4px; padding: 0; }
+.task-devices-mention p { margin: 0; color: var(--ink); font-size: 12.5px; }
+.task-devices-mention button { margin-top: 2px; }
+@media (max-width: 760px) {
+  .tasks { grid-template-columns: minmax(0, 1fr); }
+  .tasks.has-detail .tasks-list, .tasks:not(.has-detail) .tasks-detail { display: none; }
+  .tasks-back { display: inline-flex; }
+}
+/* What differs from the last commit in the folder a task works in. */
+.changes { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.changes .tasks-back-to-task { display: inline-flex; }
+.changes-problem { margin: 6px 0; }
+.changes-body { display: grid; grid-template-columns: minmax(180px, 34%) minmax(0, 1fr); gap: 10px; min-height: 0; }
+.changes-files { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; max-height: 60vh; overflow-y: auto; }
+.changes-file { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 8px; width: 100%; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; font-size: 12px; font-weight: 400; text-align: left; }
+.changes-file:hover:not(:disabled) { border-color: var(--line); }
+.changes-file.on { border-color: var(--ink); }
+.changes-status { color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+.changes-file[data-status='new'] .changes-status, .changes-file[data-status='added'] .changes-status { color: var(--ok); }
+.changes-file[data-status='deleted'] .changes-status { color: var(--danger); }
+.changes-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.changes-count { font: 11px var(--font-mono); white-space: nowrap; }
+.changes-count .add { color: var(--ok); }
+.changes-count .del { color: var(--danger); }
+.changes-diff { margin: 0; padding: 8px 0; max-height: 60vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font: 12px/1.55 var(--font-mono); white-space: pre; }
+.diff-line { display: block; min-width: max-content; padding: 0 10px; }
+.diff-line.add { background: rgba(85, 211, 182, 0.1); color: var(--ok); }
+.diff-line.del { background: rgba(255, 122, 122, 0.1); color: var(--danger); }
+.diff-line.hunk { color: var(--togle); }
+.diff-line.meta { color: var(--muted); }
+@media (max-width: 760px) {
+  .changes-body { grid-template-columns: minmax(0, 1fr); }
+  .changes-files { max-height: 160px; }
+}
+
+/* ---- Meetings: the list, then a call in three stages (live, who spoke, done) ---- */
+
+.settings.meetings-page { padding: 0; overflow: visible; }
+.meetings-top { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+.meetings-top .history-search { flex: 1; min-width: 0; margin: 0; }
+.call-history-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 8px; align-items: start; }
+.call-history-list > :not(.past-call-row) { grid-column: 1 / -1; }
+.past-call-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0 9px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; }
+.past-call-row:hover:not(:disabled) { border-color: var(--muted); }
+.past-call-row.live-record { border-color: var(--line); }
+.past-call-row strong { grid-column: 2; font-size: 13px; font-weight: 600; }
+.past-call-row > span:not(.meeting-dot) { grid-column: 2; color: var(--muted); font-size: 12px; }
+.meeting-dot { grid-row: 1 / span 2; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.meeting-dot.work { background: var(--togle); }
+.meeting-dot.wait { background: var(--wait); }
+.meeting-dot.done { background: var(--ok); }
+.history-empty { padding: 20px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.history-empty h3 { margin: 0 0 4px; color: var(--ink); font-size: 13px; }
+/* A call's page: its name with Share and Give to an agent, Notes and Transcript. */
+.call-detail-head { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
+.call-detail-head h2 { flex: 1; min-width: 0; margin: 0; font: 600 13px/1.4 var(--font-body); overflow-wrap: anywhere; cursor: text; }
+.call-detail-head .rename-title { flex: 1; min-width: 0; padding: 3px 8px; font-weight: 600; }
+.call-record-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.call-record-actions button { padding: 3px 9px; font-size: 12px; }
+.call-detail-tabs { margin: 0 0 12px; gap: 14px; }
+.call-detail-tabs button { padding: 0 0 6px; font-size: 13px; }
+.call-detail-content { font-size: 13px; line-height: 1.5; }
+.meeting-notes { display: flex; flex-direction: column; gap: 10px; }
+.meeting-notes > p { margin: 0; }
+.notes-by { margin: 0; color: var(--muted); font-size: 12px; }
+/* The notes, as the design shows them: small labels over what was marked, decided and left to do. */
+.notes-text { display: flex; flex-direction: column; gap: 4px; }
+.notes-text h1, .notes-text h2, .notes-text h3, .notes-text h4 { margin: 10px 0 2px; font: 600 11px/1.4 var(--font-body); letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.notes-text > :first-child { margin-top: 0; }
+.notes-text p { margin: 0; }
+.notes-text ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 0; list-style: none; }
+.notes-text li { margin: 0; }
+.notes-foot { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.history-transcript-line { display: grid; grid-template-columns: 4.4rem minmax(0, 1fr); gap: 0 0.6rem; align-items: start; padding: 5px 8px; border: 0; border-radius: 8px; }
+.history-transcript-line .who { flex: none; color: var(--ink); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.history-transcript-line time { display: block; color: var(--muted); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.history-transcript-line p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-more { display: block; margin: 12px auto; }
+/* A call's own menu, from a right click on it: rename it or delete it. */
+.call-menu { position: fixed; z-index: 1000; min-width: 170px; padding: 5px; }
+.call-menu button { display: block; width: 100%; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; }
+.call-menu button:hover:not(:disabled), .call-menu button:focus-visible { outline: none; background: var(--raised); }
+.call-menu button.danger { color: var(--danger); }
+
+/* Live: the call's name with the time in a chip, Mark and Stop; what is heard; tell the others; who spoke; the words. */
+.live-call { display: flex; flex-direction: column; flex: 1; gap: 11px; min-height: 0; }
+.live-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.live-head h2 { margin: 0; font: 600 13px/1.4 var(--font-body); }
+.live-head > .spacer { flex: 1; }
+.live-head button { padding: 3px 9px; font-size: 12px; }
+.live-clock { background: var(--togle-soft); color: var(--togle); font-variant-numeric: tabular-nums; }
+.live-sources { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.live-meter { display: inline-flex; align-items: center; gap: 0; }
+.live-meter .bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; margin-left: 5px; }
+.live-meter .bars i { display: block; width: 3px; border-radius: 1px; background: var(--line); }
+.live-meter .bars i.on { background: var(--togle); }
+.live-meter[data-state='off'] { color: var(--danger); }
+.live-problem { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--danger); font-size: 12px; }
+.live-problem button { color: var(--ink); }
+.tell-others { display: flex; flex-direction: column; gap: 7px; padding: 9px 10px; border: 1px solid var(--wait); border-radius: 10px; background: var(--wait-soft); font-size: 13px; }
+.tell-others strong { font-size: 13px; font-weight: 600; }
+.tell-others .tell-line { margin: 0; color: var(--ink); font-size: 12.5px; line-height: 1.4; quotes: '\201C' '\201D'; user-select: text; }
+.tell-others .tell-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tell-others .tell-tick { display: inline-flex; flex-direction: row; align-items: center; gap: 7px; margin: 0; color: var(--ink); font-size: 13px; cursor: pointer; }
+/* A tick box as the design draws it: a small square, green once ticked. */
+.tell-tick input[type='checkbox'] { appearance: none; flex: none; width: 14px; height: 14px; margin: 0; padding: 0; border: 1.5px solid var(--muted); border-radius: 4px; background: transparent; cursor: pointer; }
+.tell-tick input[type='checkbox']:checked { border-color: var(--ok); background: var(--ok); }
+.tell-tick input[type='checkbox']:focus-visible { outline: 2px solid var(--togle); outline-offset: 2px; }
+@media (max-height: 700px) { .tell-others .tell-line { display: none; } }
+.notice.first-call strong { color: inherit; }
+.live-people { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* Who spoke: green once confirmed, dashed while a guess or without a name. */
+.person-chip { display: inline-flex; align-items: center; padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--ink); font-size: 12px; font-weight: 600; }
+.person-chip.ok { border-color: var(--ok); background: var(--ok-soft); color: var(--ok); }
+.person-chip.guess, .person-chip.unnamed { border-style: dashed; border-color: var(--muted); background: transparent; color: var(--muted); }
+button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(--ink); }
+.person-chip.naming { gap: 6px; padding: 2px 3px 2px 8px; }
+.person-chip.naming input { width: 140px; padding: 2px 6px; border-radius: 999px; font-size: 12px; }
+/* A long call has thousands of lines. As blocks, not flex items, they are laid out faster when the page opens on one;
+   the ones out of sight are not laid out at all until they scroll into view. */
+.live-lines { flex: 1; min-height: 140px; padding: 0; overflow: auto; }
+.live-lines > * + * { margin-top: 5px; }
+.live-lines > .hint { margin: 0; }
+/* One line said: who and when on the left, the words on the right; a marked one stands out. */
+.live-line { display: grid; grid-template-columns: 4.4rem minmax(0, 1fr); gap: 0 0.6rem; align-items: start; padding: 5px 8px; border-radius: 8px; font-size: 13px; content-visibility: auto; contain-intrinsic-size: auto 40px; }
+.live-line .who { grid-column: 1; grid-row: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-line time { grid-column: 1; grid-row: 2; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.live-line p { grid-column: 2; grid-row: 1 / span 2; margin: 0; line-height: 1.4; }
+.live-line.marked { background: var(--togle-soft); }
+.live-line.partial { opacity: 0.6; }
+.marked-tag { margin-left: 6px; vertical-align: 1px; }
+
+/* Who spoke?, its own stage after a call: who is confirmed, then each voice to confirm. */
+.confirm-names { display: flex; flex-direction: column; gap: 11px; margin: 0; padding: 0; border: 0; background: none; font-size: 13px; }
+.confirm-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.confirm-head h2, .confirm-head h4 { margin: 0; font: 600 13px/1.4 var(--font-body); }
+.confirm-head .hint { margin: 0; }
+.confirm-names .live-people.confirmed { margin: 0; }
+.confirm-voice { display: flex; flex-direction: column; gap: 5px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.confirm-voice.guess { border-color: var(--wait); background: var(--wait-soft); }
+.confirm-voice.answered { opacity: 0.7; }
+.confirm-voice-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.confirm-voice-head strong { margin-right: auto; font-size: 13px; font-weight: 600; }
+.confirm-said { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.confirm-reason { margin: 0; color: var(--muted); font-size: 12px; }
+.confirm-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.confirm-name input { flex: 1 1 140px; min-width: 0; padding: 4px 8px; font-size: 12px; }
+.confirm-names > .confirm-end { margin: 2px 0 0; }
+
+/* ---- Settings: five groups side by side, each a few rows of a name and its value ---- */
+
+.settings.settings-one { padding: 0; }
+.settings-one .settings-content { max-width: none; margin: 0; }
+.sets { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 14px 22px; align-items: start; }
+.sets > section { display: flex; flex-direction: column; gap: 4px; margin: 0; min-width: 0; }
+.sets > section:has(.setting-detail) { grid-column: 1 / -1; }
+.settings .sets .section-head { margin: 0; }
+.settings .sets .section-head h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.settings .sets .card { border: 0; border-radius: 0; background: none; }
+.settings .sets .card > * + * { border-top: 0; }
+.settings .sets .setting { min-height: 0; padding: 5px 0; border-bottom: 1px solid var(--line); column-gap: 10px; font-size: 13px; color: var(--ink); }
+.settings .sets .card > .setting:last-child, .settings .sets .card > :last-child > .setting:last-child { border-bottom: 0; }
+.settings .sets .setting > .note { font-size: 12px; color: var(--muted); }
+/* A value reads as words, muted on the right; clicked, it opens its choices. */
+.settings .sets .setting > .control > select,
+.settings .sets .setting select {
+  width: auto;
+  max-width: 11rem;
+  padding: 0 0 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+  text-align-last: right;
+  appearance: none;
+  cursor: pointer;
+}
+.settings .sets .setting select:hover, .settings .sets .setting select:focus { color: var(--ink); }
+.settings .sets .setting select option { background: var(--surface); color: var(--ink); }
+.value-button { padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 400; white-space: nowrap; }
+.value-button:hover:not(:disabled) { background: transparent; color: var(--ink); }
+.settings .setting-value, .settings .setting-value.found { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.agent-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.agent-name .av, .first-found .av { display: inline-grid; flex: none; place-items: center; width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 11px; font-weight: 700; }
+.agent-name .agent-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings .sets .setting.add-row { display: flex; padding: 6px 0 2px; border-bottom: 0; }
+/* The keys as keys. */
+.settings .sets .shortcut { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.settings .sets .shortcut .control { gap: 6px; }
+.settings .sets button.keys { min-width: 0; padding: 0.05em 0.4em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; background: var(--surface); color: var(--ink); font: 600 0.82em var(--font-mono); }
+.settings .sets button.keys.off { color: var(--muted); }
+.settings .sets button.keys.recording { border-color: var(--togle); color: var(--togle); }
+.settings .sets .shortcut .reset { font-size: 12px; }
+/* A switch as the design draws it: small, indigo when on. */
+.settings input.switch { width: 26px; height: 15px; border: 0; border-radius: 999px; background: var(--line); }
+.settings input.switch::before { top: 2px; left: 2px; width: 11px; height: 11px; background: var(--surface); }
+.settings input.switch:checked { background: var(--togle); border-color: var(--togle); }
+.settings input.switch:checked::before { transform: translateX(11px); background: var(--surface); }
+/* What a row opens (names and terms, a key, an agent to add): under it, in a dark box. */
+.settings .setting-detail { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; padding: 10px 12px; border-radius: 10px; background: var(--bg); }
+.settings .setting-detail > .setting { padding: 5px 0; border-bottom: 0; }
+.settings .setting-detail > .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.settings .setting-detail > .hint { margin: 0; }
+.settings .setting-detail input:not(.switch):not([type='checkbox']), .settings .setting-detail select { background: var(--surface); }
+.settings .ai-plan-other { margin: 2px 0 4px; font-size: 12px; }
+.settings .ai-plan .note { font-size: 12px; color: var(--muted); }
+.segmented { border-color: var(--line); border-radius: 8px; }
+.segmented button { border: 0; border-radius: 0; font-weight: 600; }
+.segmented button.on { background: var(--togle-soft); color: var(--togle); }
+.reach-code-value { font: 600 28px var(--font-mono); letter-spacing: 0.12em; color: var(--ink); }
+.reach-code .control { justify-self: start; }
+.reach-device { display: inline-flex; align-items: center; gap: 8px; }
+.reach-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.reach-dot.on { background: var(--ok); }
+.reach-acted { display: flex; flex-direction: column; gap: 2px; }
+.vocabulary-editor input, .vocabulary-editor textarea { background: var(--surface); }
+
+/* ---- The first minute, once ---- */
+
+.first-minute { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: none; margin: 0; padding: 0; }
+.first-minute header { display: flex; flex-direction: column; gap: 4px; }
+.first-minute header h2 { margin: 0; font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; line-height: 1.12; }
+.first-minute header .hint { margin: 0; }
+.first-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14.5rem), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.first-step { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); counter-increment: step; }
+.first-step h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--font-display); font-size: 1.02rem; font-weight: 650; }
+.first-step h3::before { content: counter(step); flex: none; display: inline-grid; place-items: center; width: 1.55rem; height: 1.55rem; border-radius: 50%; background: var(--togle-soft); color: var(--togle); font: 600 0.8rem var(--font-body); }
+.first-step.done h3::before { background: var(--ok-soft); color: var(--ok); }
+.first-step > p { margin: 0; font-size: 13px; line-height: 1.45; }
+.first-step .row { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The small picture in each step: what you see when it works. */
+.first-mini { display: flex; flex-direction: column; gap: 6px; margin-top: auto; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 12.5px; line-height: 1.4; }
+.first-mini b { font-weight: 600; }
+.first-mini .dim { color: var(--muted); font-size: 12px; }
+.first-tick { display: flex; align-items: center; gap: 7px; }
+.first-tick .box { flex: none; width: 14px; height: 14px; border: 1.5px solid var(--muted); border-radius: 4px; }
+.first-tick .box.x { border-color: var(--ok); background: var(--ok); }
+.first-heard { color: var(--ink); overflow-wrap: anywhere; }
+.first-download { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 10px; font-size: 12px; }
+.first-download progress { grid-column: 1; width: 100%; accent-color: var(--togle); }
+.first-download button { grid-row: 1 / span 2; grid-column: 2; }
+.first-found-list { display: flex; flex-direction: column; gap: 6px; }
+.first-found { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.first-found li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.first-found li strong { font-weight: 600; }
+.first-found span:not(.av) { color: var(--muted); font-size: 12px; }
+.first-done { display: flex; justify-content: flex-end; }
+
+/* Togle Studio, where the need shows up: one line and one button, never during a call. */
+.studio-mention { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 0 0 12px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); font-size: 12.5px; line-height: 1.4; }
+.studio-mention .dim { color: var(--muted); font-size: 12px; }
+
+/* ---- The small windows: a task's notice, a call's notice, the strip, the task box ---- */
+
+body.notice-surface { background: transparent; color: var(--ink); overflow: hidden; }
+.notice-surface #root { padding: 0; }
+.task-notice-frame { padding: 12px; }
+/* A notice as the design draws it: a card, its title by a dot, a line, its buttons. */
+.task-notice { display: flex; flex-direction: column; gap: 8px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 14px 28px -12px var(--shadow); }
+.task-notice[data-kind='done'], .task-notice[data-kind='failed'] { border-color: var(--line); background: var(--surface); }
+.task-notice p { margin: 0; }
+.task-notice-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.task-notice-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.task-notice-head .task-danger { margin-left: auto; }
+.task-notice-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--wait); }
+.task-notice[data-kind='done'] .task-notice-dot { background: var(--ok); }
+.task-notice[data-kind='failed'] .task-notice-dot { background: var(--danger); }
+.task-notice-says { color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+.task-notice-says code { padding: 0; background: none; color: var(--ink); font: 0.9em var(--font-mono); overflow-wrap: anywhere; }
+.task-notice-says code.danger { color: var(--danger); }
+.task-notice-detail { margin: 0; padding: 0; max-height: 110px; overflow: hidden; border: 0; background: none; color: var(--ink); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-notice-detail.question, .task-notice-detail.words { font-family: var(--font-body); }
+.task-notice-danger, .task-notice-error { color: var(--danger); font-size: 12px; }
+.task-notice-note, .task-notice-more { color: var(--muted); font-size: 11px; }
+.task-notice-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.call-notice { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; box-sizing: border-box; height: 100vh; padding: 11px 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); font-size: 13px; box-shadow: 0 14px 28px -12px var(--shadow); }
+.call-notice strong { font-size: 13px; font-weight: 600; }
+.call-notice > span { color: var(--muted); }
+.call-notice-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.call-notice-buttons button { padding: 3px 9px; font-size: 12px; }
+.call-notice-always { padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 400; }
+.call-notice-always:hover:not(:disabled) { color: var(--ink); text-decoration: underline; }
+
+/* The strip during a call with the window closed: a pill with the time, Mark, Stop and the amber reminder. */
+.call-strip-bar { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 100vh; padding: 0 6px 0 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 600; box-shadow: 0 8px 16px -12px var(--shadow); }
+.call-strip-live { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--togle); animation: strip-pulse 1.6s ease-in-out infinite; }
+.call-strip-clock { margin-right: auto; font: 600 12px var(--font-body); font-variant-numeric: tabular-nums; }
+.call-strip-bar button { padding: 2px 9px; border-radius: 8px; font-size: 12px; }
+.call-strip-bar button.stop { color: var(--ink); }
+.call-strip-bar button.tell { border-color: var(--wait-soft); border-radius: 999px; background: var(--wait-soft); color: var(--wait); }
+@keyframes strip-pulse { 50% { opacity: 0.35; } }
+
+/* The box over whatever is on screen: the agent and the folder as two chips, then one field with Start in it. */
+body.taskbox-surface { background: var(--surface); color: var(--ink); overflow: hidden; }
+.taskbox-surface #root { padding: 0; }
+.taskbox { display: flex; flex-direction: column; gap: 8px; height: auto; padding: 12px 14px 14px; border: 1px solid var(--line); background: var(--surface); }
+.taskbox-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.pick-chip { padding: 2px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 600; }
+.taskbox-field { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.taskbox-field:focus-within { border-color: var(--togle); }
+.taskbox textarea { flex: 1; align-self: center; min-width: 0; max-height: 140px; padding: 2px 0; border: 0; border-radius: 0; background: transparent; resize: none; font-size: 13px; line-height: 1.4; overflow-y: auto; }
+.taskbox textarea:focus { outline: none; }
+.taskbox-error { margin: 0; color: var(--danger); font-size: 12px; }
+.taskbox-none { margin: 0; padding: 12px 2px; color: var(--muted); font-size: 13px; }
+.taskbox-attach, .taskbox-todo { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--muted); font-size: 12px; }
+.taskbox-attach span, .taskbox-todo span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.taskbox-attach button, .taskbox-todo button { padding: 0 6px; border: 0; background: none; color: inherit; font-size: 15px; font-weight: 400; line-height: 1; }
+
+/* ---- F8 Show: the frozen screen, a dashed frame around the part chosen, and what is drawn on it in indigo ---- */
+
+body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: crosshair; user-select: none; }
+.show { position: fixed; inset: 0; touch-action: none; }
+.show-shot { position: absolute; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
+.show-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.35); pointer-events: none; }
+.show-part { position: absolute; border: 1.5px dashed var(--muted); border-radius: 10px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45); pointer-events: none; }
+.show-ink { position: absolute; inset: 0; width: 100vw; height: 100vh; overflow: visible; pointer-events: none; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7)); }
+.show-ink text { font: 600 15px var(--font-body); }
+/* The words being typed on the picture: where they will be drawn. */
+.show-typing { position: absolute; min-width: 2px; padding: 0; color: var(--togle); font: 600 15px var(--font-body); white-space: pre; pointer-events: none; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7)); }
+.show-typing::after { content: ''; display: inline-block; width: 1.5px; height: 1.05em; margin-left: 1px; vertical-align: -0.15em; background: var(--togle); animation: show-caret 1s steps(1) infinite; }
+@keyframes show-caret { 50% { opacity: 0; } }
+
+/* Your voice while you talk, in the first minute: a light pill with dark bars, as the design draws it. */
+.vbar { align-self: flex-start; display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 12px; border-radius: 999px; background: var(--ink); }
+.vbar i { display: block; width: 3px; border-radius: 2px; background: var(--bg); animation: vbar-talk 0.7s ease-in-out infinite alternate; }
+@keyframes vbar-talk { from { transform: scaleY(0.4); } to { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) { .vbar i { animation: none; } }
+.first-ok { margin: 0; color: var(--ok); font-size: 12.5px; }
+.call-detail-head h2:focus-visible { outline: 2px solid var(--togle); outline-offset: 2px; border-radius: 4px; }
+/* What an agent said, and a call's notes, in the window's own size, as the design writes them. */
+.task-agent .md, .meeting-notes .md { font-size: 13px; line-height: 1.45; }
+.task-agent .md p, .meeting-notes .md p { margin: 0 0 6px; }
+/* The spot the log scrolls to takes no room. */
+.task-log > div:empty:last-child { margin-top: -12px; }
+.settings .sets .card > .hint { margin: 0; padding: 2px 0 6px; }

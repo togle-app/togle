@@ -3,6 +3,8 @@ import path from 'node:path'
 import type { TaskBoxOpen } from '@shared/runner'
 
 const WIDTH = 600
+// As tall as what is in it (the two chips and one line of words, more as they grow), within these.
+const LOWEST = 84
 const HEIGHT = 268
 
 /**
@@ -20,6 +22,8 @@ export class TaskBoxWindow {
   private opened = false
   /** What it opened with (a saved call to work from, a to-do item, an agent and a folder). Gone when it is put away. */
   private opening: TaskBoxOpen | null = null
+  /** How tall its page last asked it to be. */
+  private height = LOWEST
 
   constructor(private readonly builtMain = __dirname) {}
 
@@ -57,6 +61,15 @@ export class TaskBoxWindow {
     if (win && !win.isDestroyed() && win.isVisible()) win.hide()
   }
 
+  /** As tall as its page asks, within LOWEST and HEIGHT, where it is. */
+  resize(height: number): void {
+    const win = this.window
+    if (!win || win.isDestroyed()) return
+    this.height = Math.round(Math.min(HEIGHT, Math.max(LOWEST, height)))
+    const bounds = win.getBounds()
+    if (bounds.height !== this.height) win.setBounds({ ...bounds, height: this.height })
+  }
+
   close(): void {
     this.stopped = true
     this.window?.destroy()
@@ -84,7 +97,7 @@ export class TaskBoxWindow {
     const win = this.window
     if (!win || win.isDestroyed()) return
     const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
-    win.setBounds({ x: Math.round(area.x + (area.width - WIDTH) / 2), y: Math.round(area.y + area.height * 0.16), width: WIDTH, height: HEIGHT })
+    win.setBounds({ x: Math.round(area.x + (area.width - WIDTH) / 2), y: Math.round(area.y + area.height * 0.16), width: WIDTH, height: this.height })
   }
 
   private render(): void {
@@ -101,8 +114,8 @@ export class TaskBoxWindow {
   private create(): void {
     this.ready = false
     const win = (this.window = new BrowserWindow({
-      width: WIDTH, height: HEIGHT, show: false, frame: false, thickFrame: false, resizable: false, minimizable: false, maximizable: false, skipTaskbar: true, alwaysOnTop: true,
-      title: 'Togle task', backgroundColor: '#161a21', hasShadow: true,
+      width: WIDTH, height: LOWEST, show: false, frame: false, thickFrame: false, resizable: false, minimizable: false, maximizable: false, skipTaskbar: true, alwaysOnTop: true,
+      title: 'Togle task', backgroundColor: '#171b23', hasShadow: true,
       webPreferences: { preload: path.join(this.builtMain, '../preload/index.js'), sandbox: true, contextIsolation: true, backgroundThrottling: false, offscreen: this.headless() }
     }))
     if (process.platform === 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })

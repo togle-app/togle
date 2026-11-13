@@ -30,7 +30,8 @@ interface Props {
 export function FirstMinute({ settings, stt, onDone }: Props) {
   const talkKey = useHotkeys().find((key) => key.id === 'dictate')?.keys || 'F9'
   const [heard, setHeard] = useState('')
-  const [draft, setDraft] = useState('')
+  // While F9 is held: the voice shows as a small bar, as the design draws it.
+  const [talking, setTalking] = useState(false)
   const [skipped, setSkipped] = useState(false)
   const [finishing, setFinishing] = useState(false)
   const { accounts } = useAccounts()
@@ -42,7 +43,10 @@ export function FirstMinute({ settings, stt, onDone }: Props) {
   // A dictation that finished with words: it works.
   useEffect(() => {
     void api.dictationStatus().then((state) => { if (state.lastText) setHeard(state.lastText) }, () => undefined)
-    return api.onDictation((state) => { if ((state.phase === 'done' || state.phase === 'ready') && state.lastText) setHeard(state.lastText) })
+    return api.onDictation((state) => {
+      setTalking(state.phase === 'starting' || state.phase === 'recording')
+      if ((state.phase === 'done' || state.phase === 'ready') && state.lastText) setHeard(state.lastText)
+    })
   }, [])
 
   const finish = async (): Promise<void> => {
@@ -61,22 +65,31 @@ export function FirstMinute({ settings, stt, onDone }: Props) {
         <p className="hint">One sign-in turns on the parts that need AI. The steps you have not done yet sit on your to-do list.</p>
       </header>
 
+      {/* The design's steps, side by side: what to do, and a small picture of what you see when it works. */}
       <ol className="first-steps">
         <li className={`first-step ${heard ? 'done' : ''}`} aria-label="Talk">
           <h3>Talk</h3>
           {stt.state === 'missing' ? <SpeechDownload language={settings.transcription.language} />
-            : <p>Hold <kbd>{talkKey}</kbd> and say something. Your words appear where your cursor is. This works offline.</p>}
-          <textarea aria-label="Try it here" rows={2} placeholder={`Click here, then hold ${talkKey} and talk`} value={draft} disabled={stt.state === 'missing'} onChange={(event) => setDraft(event.target.value)} />
-          {heard && <p className="first-ok" role="status">It works. Heard: “{heard}”</p>}
+            : <p>Hold <kbd>{talkKey}</kbd> and say something, and your words appear. This works offline.</p>}
+          {stt.state !== 'missing' && (
+            <div className="first-mini" aria-live="polite">
+              {heard && <span className="first-tick"><span className="box x" aria-hidden="true" /><span className="dim">Microphone allowed</span></span>}
+              <b>Hold {talkKey} and say something.</b>
+              {talking && <VoiceBar />}
+              {heard ? <span className="first-heard" role="status">{heard}</span> : !talking && <span className="dim">Your words appear here.</span>}
+            </div>
+          )}
         </li>
 
         <li className={`first-step ${signedIn ? 'done' : ''}`} aria-label="Sign in with your plan">
           <h3>Sign in with your plan</h3>
-          <p>One click opens ChatGPT in your browser. From then on Togle cleans up what you say and writes your meeting notes.</p>
-          <dl className="first-example">
-            <div><dt>As heard</dt><dd>send it to dario no wait to marta by friday</dd></div>
-            <div><dt>With your plan</dt><dd>Send it to Marta by Friday.</dd></div>
-          </dl>
+          <p>One click opens ChatGPT in your browser. From then on Togle cleans up what you say and writes your meeting notes. You can skip it.</p>
+          <div className="first-mini">
+            <span className="dim">As heard</span>
+            <span>send it to dario no wait to marta by friday</span>
+            <span className="dim">With your plan</span>
+            <b>Send it to Marta by Friday.</b>
+          </div>
           {signedIn ? <p className="first-ok" role="status">Signed in. What Togle uses counts toward your plan's limit.</p>
             : chatgpt?.signingIn || chatgpt?.pending ? <p className="hint" role="status">Finish signing in in your browser.</p>
               : skipped ? <p className="hint">Skipped. It waits on your to-do list.</p>
@@ -88,7 +101,7 @@ export function FirstMinute({ settings, stt, onDone }: Props) {
                         .then(() => api.signInAccount(chatgpt!.id))
                         .catch((failure) => setSignInError(errorText(failure)))
                     }}>Sign in with ChatGPT</button>
-                    <button className="ghost" onClick={() => setSkipped(true)}>Skip</button>
+                    <button onClick={() => setSkipped(true)}>Skip</button>
                   </div>
                 )}
           {signInError && <p className="error" role="alert">{signInError}</p>}
@@ -96,8 +109,8 @@ export function FirstMinute({ settings, stt, onDone }: Props) {
 
         <li className="first-step" aria-label="Togle finds the rest">
           <h3>Togle finds the rest</h3>
-          <Found />
-          {(api.platform === 'win32' || api.platform === 'linux' || api.platform === 'darwin') && <p className="hint">When a call starts in Zoom, Meet or Teams, Togle offers to write it down. After your first yes, it can do that by itself in that app.</p>}
+          <p>It lists the agents on your computer and what they are working on{(api.platform === 'win32' || api.platform === 'linux' || api.platform === 'darwin') ? ', and it offers to write a call down when one starts in Zoom, Meet or Teams. After your first yes, it can do that by itself in that app' : ''}.</p>
+          <div className="first-mini"><Found /></div>
         </li>
       </ol>
 
@@ -139,6 +152,11 @@ function SpeechDownload({ language }: { language: string }) {
   )
 }
 
+/** Your voice while you talk: a small light bar, as the design draws it. */
+function VoiceBar() {
+  return <span className="vbar" role="img" aria-label="Listening">{[6, 12, 16, 9, 14, 7].map((height, index) => <i key={index} style={{ height, animationDelay: `${index * 90}ms` }} />)}</span>
+}
+
 /** The coding agents on this computer, and how many tasks each has. */
 function Found() {
   const [found, setFound] = useState<{ agents: RunnerStatus[]; tasks: TaskView[] } | null>(null)
@@ -147,12 +165,12 @@ function Found() {
     void Promise.all([api.runnerStatus(), api.runnerTasks()]).then(([agents, tasks]) => { if (current) setFound({ agents, tasks }) }, () => { if (current) setFound({ agents: [], tasks: [] }) })
     return () => { current = false }
   }, [])
-  if (!found) return <p className="hint">Looking at this computer…</p>
+  if (!found) return <span className="dim">Looking at this computer…</span>
   const installed = found.agents.filter((agent) => agent.installed)
-  if (!installed.length) return <p>No coding agent on this computer yet. When you install Claude Code, Codex or Hermes, Togle finds it and lists its tasks under Agents.</p>
+  if (!installed.length) return <span>No coding agent on this computer yet. When you install Claude Code, Codex or Hermes, Togle finds it and lists its tasks under Agents.</span>
   return (
     <div className="first-found-list">
-      <span className="hint">Found on this computer</span>
+      <span className="dim">Found on this computer</span>
       <ul className="first-found" aria-label="Found on this computer">
         {installed.map((agent) => {
           const count = found.tasks.filter((task) => task.runner === agent.runner).length
