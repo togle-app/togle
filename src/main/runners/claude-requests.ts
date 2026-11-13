@@ -1,12 +1,15 @@
-// What Claude Code asks, as Togle shows it, and what Togle answers it with. Shared by the Claude Code that Togle runs
-// without a screen (claude.ts) and the one it shows as Claude Code's own screen (claude-screen.ts): both hear the same
-// permission requests through the same hook (claude-hooks.ts).
+// What Claude Code asks, as Togle shows it, and what Togle answers it with. A task (claude-job.ts) hears each request
+// through the hook (claude-hooks.ts).
 import type { AgentQuestion, PendingRequest } from '@shared/runner'
 import type { HookVerdict } from './claude-hooks'
 import { list, rec, text } from './jsonrpc'
 import type { Answer } from './task-base'
 
 export const oneLine = (value: string, longest = 90): string => value.replace(/\s+/g, ' ').trim().slice(0, longest)
+
+/** The two answers a plan has as buttons. Words of the person's own go back to Claude Code as what to change. */
+export const PLAN_APPROVE = 'Approve the plan'
+export const PLAN_REVISE = 'Keep planning'
 
 // What a tool is, for the person reading a request.
 const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
@@ -51,6 +54,11 @@ export function requestOf(id: string, event: Record<string, unknown>, fallbackFo
   const input = rec(event.tool_input)
   const offersAlways = list(event.permission_suggestions).length > 0
   const folder = text(event.cwd) || fallbackFolder
+  // A plan to approve (plan mode): shown whole, as a question with two answers and a place for words of the person's own.
+  if (tool === 'ExitPlanMode') {
+    const plan = text(input.plan).trim()
+    return { request: { id, kind: 'question', questions: [{ id: '0', text: plan || 'Claude Code has a plan for you to approve.', options: [PLAN_APPROVE, PLAN_REVISE], free: true, secret: false }], offersAlways: false } }
+  }
   if (tool === 'AskUserQuestion') {
     const questions: AgentQuestion[] = list(input.questions).map(rec).map((q, at) => ({
       id: String(at),
@@ -74,7 +82,14 @@ export function requestOf(id: string, event: Record<string, unknown>, fallbackFo
  * What Togle answers Claude Code with, for what the person answered. `refused` is the command that was refused, so the
  * task can tell that what follows is a refusal and not a failure.
  */
-export function verdictOf(answer: Answer, request: PendingRequest, rule: Record<string, unknown> | undefined, input: Record<string, unknown>): { verdict: HookVerdict; refused?: string } {
+export function verdictOf(answer: Answer, request: PendingRequest, rule: Record<string, unknown> | undefined, input: Record<string, unknown>, tool = ''): { verdict: HookVerdict; refused?: string } {
+  // A plan: approved, or sent back for Claude Code to change, with what the person said. Claude Code takes a plan as approved
+  // only when the answer gives its input back (checked with 2.1.323): a plain "allow" leaves its own question open on the
+  // screen. It then goes on in the mode that asks before each edit, as "Yes, manually approve edits" does there.
+  if (tool === 'ExitPlanMode' && answer.kind === 'text') {
+    if (answer.text === PLAN_APPROVE) return { verdict: { behavior: 'allow', updatedInput: input } }
+    return { verdict: { behavior: 'deny', message: answer.text === PLAN_REVISE ? 'The person wants the plan changed: ask what to change, then plan again.' : `The person asked for changes to the plan: ${answer.text}` } }
+  }
   if (answer.kind === 'text' && request.kind === 'question') {
     // Every question of the tool gets the words: one at a time is what a person usually asks.
     return { verdict: { behavior: 'allow', updatedInput: { ...input, answers: Object.fromEntries((request.questions ?? []).map((q) => [q.text, answer.text])) } } }

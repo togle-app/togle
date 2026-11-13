@@ -158,7 +158,7 @@ export class ClaudeBackend implements Backend {
       said: (session) => (this.options.said ?? claudeLastSaid)(session),
       over: (job) => void this.finished(job),
       openElsewhere: async (session) => {
-        const open = (await this.rows(0).catch(() => [] as AgentRow[])).find((row) => row.sessionId === session && row.kind !== 'background' && row.pid)
+        const open = (await this.rows(0, true).catch(() => [] as AgentRow[])).find((row) => row.sessionId === session && row.kind !== 'background' && row.pid)
         return open?.pid && alive(open.pid) ? STILL_OPEN : undefined
       }
     }))
@@ -190,9 +190,13 @@ export class ClaudeBackend implements Backend {
 
   // ---- What Claude Code lists ----
 
-  /** The sessions as Claude Code lists them. Asked at most once at a time, and reused for `maxAge` milliseconds. */
-  private async rows(maxAge = 0): Promise<AgentRow[]> {
-    if (this.rowsAt && Date.now() - this.rowsAt.at <= maxAge) return this.rowsAt.rows
+  /**
+   * The sessions as Claude Code lists them. Asked at most once at a time, and reused for `maxAge` milliseconds. A list that
+   * must be fresh (what decides whether a conversation may be opened) is never one that was asked before the call.
+   */
+  private async rows(maxAge = 0, fresh = false): Promise<AgentRow[]> {
+    if (!fresh && this.rowsAt && Date.now() - this.rowsAt.at <= maxAge) return this.rowsAt.rows
+    if (fresh && this.asking) await this.asking.catch(() => undefined)
     this.asking ??= (async () => {
       try {
         let rows: AgentRow[]
@@ -281,7 +285,7 @@ export class ClaudeBackend implements Backend {
   async resume(id: string, options: ResumeOptions = {}): Promise<TaskHandle> {
     await this.ready()
     const context = await this.context()
-    const rows = await this.rows(0)
+    const rows = await this.rows(0, true)
     // What the list says decides how it opens: a session in the background has its screen opened, whatever its state.
     const row = rows.filter(isJob).find((candidate) => (options.job ? candidate.id === options.job : candidate.sessionId === id))
     if (options.job && !row) throw new Error('That task is gone.')

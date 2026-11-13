@@ -295,7 +295,7 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     const answer = await asked
     // Dropped (answered on the screen, the task stopped, Togle quit): Claude Code has its answer or decides on its own screen.
     if (answer.kind === 'cancelled') return null
-    return verdictOf(answer, request, rule, rec(event.tool_input)).verdict
+    return verdictOf(answer, request, rule, rec(event.tool_input), text(event.tool_name)).verdict
   }
 
   // ---- The screen ----

@@ -15,6 +15,7 @@
 //                   keeps the request open when the answer was typed on the screen.
 //   "run2 <a> <b>"  two commands that ask one after the other in one turn
 //   "question"      a question to the person (AskUserQuestion): "Which?", red or blue
+//   "plan"          a plan to approve (ExitPlanMode), with the plan in the request: approved, or sent back with words
 //   "clear"         goes on in another session (the id with -2 after it), under the same job
 //   "bye"           ends it
 //   anything else   a message, answered "fine, <the words>"
@@ -173,6 +174,24 @@ async function session(job) {
     status('busy')
     say(`answered ${answer.words}${answer.by === 'screen' ? ' (answered here)' : ''}`)
   }
+  async function plan() {
+    say('Plan: 1. Do A, 2. Do B. Approve? (y/n)')
+    status('waiting', 'permission prompt')
+    const hook = post({ tool_name: 'ExitPlanMode', tool_input: { plan: '1. Do A\n2. Do B' } })
+    const screen = new Promise((resolve) => { typed = resolve })
+    const answer = await Promise.race([
+      hook.then((body) => {
+        const decision = body ? JSON.parse(body).hookSpecificOutput.decision : null
+        // As Claude Code does: a plan is approved by an answer that gives its input back; a plain "allow" leaves its own question open.
+        if (decision?.behavior === 'allow' && !decision.updatedInput) { say('(its own question is still open)'); return new Promise(() => {}) }
+        return decision ? { by: 'togle', approved: decision.behavior === 'allow', message: decision.message } : new Promise(() => {})
+      }),
+      screen.then((yes) => ({ by: 'screen', approved: yes }))
+    ])
+    typed = null
+    status('busy')
+    say(answer.approved ? `plan approved${answer.by === 'screen' ? ' (answered here)' : ''}` : `plan sent back: ${answer.message ?? 'no words'}`)
+  }
   let turn = Promise.resolve()
   async function handle(said) {
     if (said === 'bye') { for (const controller of open) controller.abort(); process.exit(0) }
@@ -188,6 +207,7 @@ async function session(job) {
     if (two) { await ask(two[1]); await ask(two[2]) }
     else if (run) await ask(run[1])
     else if (said === 'question') await question()
+    else if (said === 'plan') await plan()
     else say(`fine, ${said}`)
     status('idle')
     say('ready>')

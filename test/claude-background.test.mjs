@@ -310,6 +310,28 @@ test('a question is answered in words, with the choices the agent gave', { timeo
   }
 })
 
+test('a plan to approve is shown whole, with two answers and room for words, and what is answered reaches Claude Code', { timeout: 40_000 }, async () => {
+  const { backend, text } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Plans' })
+    const key = `claude:${task.id}`
+    for (const [answer, shown] of [['Approve the plan', 'plan approved'], ['Keep planning', 'plan sent back: The person wants the plan changed'], ['Add a test first', 'plan sent back: The person asked for changes to the plan: Add a test first']]) {
+      type(task, 'plan')
+      await until(() => task.pending.length === 1, 'the plan')
+      const [request] = task.pending
+      assert.equal(request.kind, 'question')
+      assert.equal(request.questions[0].text, '1. Do A\n2. Do B', 'the plan itself, whole')
+      assert.deepEqual(request.questions[0].options, ['Approve the plan', 'Keep planning'])
+      assert.equal(request.questions[0].free, true)
+      task.reply(request.id, answer)
+      await until(() => text(key).includes(shown), `"${shown}" to reach it`)
+      await until(() => task.state === 'idle' && task.pending.length === 0, 'the turn to end')
+    }
+  } finally {
+    await backend.close()
+  }
+})
+
 test('a command answered on the screen is no longer asked in Togle, once the program says it waits no more', { timeout: 40_000 }, async () => {
   const { backend, text } = claude()
   try {

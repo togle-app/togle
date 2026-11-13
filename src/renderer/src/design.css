@@ -293,7 +293,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-request { display: flex; flex-direction: column; gap: 7px; padding: 9px 10px; border: 1px solid var(--wait); border-radius: 10px; background: var(--wait-soft); }
 .task-request.danger { border-color: var(--wait); background: var(--wait-soft); }
 .task-request h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
-.task-request p { margin: 0; }
+.task-request p { margin: 0; white-space: pre-wrap; max-height: 16rem; overflow-y: auto; }
 .task-request .row { display: flex; flex-wrap: wrap; gap: 6px; }
 .task-command { margin: 0; padding: 0; max-height: 220px; overflow-y: auto; border: 0; background: none; color: var(--ink); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-request.danger .task-command { color: var(--danger); }
