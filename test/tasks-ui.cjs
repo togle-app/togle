@@ -258,15 +258,16 @@ async function checkTasks(T, agent) {
   await ui.wait("!document.querySelector('.task-banner')")
   assert.deepEqual((await ui.calls('takeOverRunnerTask')).map(call => call.args), [['claude:s4']])
 
-  // Taken over, it is the agent's own screen: no words about itself, no Stop, a Hand back, and a command that waits is shown above the screen.
+  // Taken over, it is the agent's own screen: no words about itself, a Hand back (and Stop while it works or waits), and a command that waits is shown above the screen.
   await ui.wait("!!document.querySelector('.task-terminal .term-view, .task-terminal .xterm, .task-terminal [data-terminal]') || !!document.querySelector('.task-terminal')")
   assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal .task-banner')"), false, 'the screen the person knows needs no words about itself')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-reply')"), false, 'it is answered on the screen, not in a reply box')
-  assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'no Stop: the screen has its own')
+  assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'nothing to stop: it is done')
   assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Done')
   assert.equal(await ui.evaluate("document.querySelector('.task-row[aria-current=\"true\"]').textContent.includes('Take over')"), false, 'no Take over once it is here')
   await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'r7', kind: 'command', command: 'npm run migrate', raw: 'npm run migrate', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
   await ui.wait("!!document.querySelector('.task-request')")
+  assert.deepEqual(await texts(ui, '.task-actions button'), ['Stop', 'Hand back'], 'it waits: Stop beside Hand back, as the design page has them')
   assert.deepEqual(await texts(ui, '.task-request button'), ['Allow once', 'Refuse'], 'the same card as anywhere, over the screen')
   assert.equal(await ui.evaluate("document.querySelector('.task-request .hint').textContent"), 'Or answer on the screen below. Either one is enough.', 'the screen asks too')
   assert.equal(await ui.evaluate("document.querySelector('.task-request').nextElementSibling.classList.contains('task-terminal')"), true, 'above the screen')
@@ -282,12 +283,18 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal')"), false, 'the screen is closed here')
   assert.equal(await ui.evaluate("document.querySelector('.screen-closed span').textContent"), 'Its screen is closed, and the task goes on.', 'and the task says it goes on')
   assert.deepEqual(await texts(ui, '.screen-closed button'), ['Open the screen'])
-  assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'it is still Togle\u2019s own')
+  assert.deepEqual(await texts(ui, '.task-actions button'), ['Stop', 'Hand back'], 'it is still Togle\u2019s own, and it works')
   await ui.capture('tasks-handed-back')
   await ui.click('.screen-closed button', 'Open the screen')
   await ui.wait("!!document.querySelector('.task-terminal')")
   assert.deepEqual((await ui.calls('openRunnerTask')).map(call => call.args).at(-1), ['claude:s4'], 'opened again: a new screen')
   assert.equal(await ui.evaluate("!!document.querySelector('.handed-back')"), false, 'the line is not shown once it is open here again')
+  // Stop on a task that is the agent's own screen: the same button as on any task, and the screen stays.
+  await ui.click('.task-actions button', 'Stop')
+  await ui.wait("document.querySelector('.state-chip')?.textContent==='Stopped'")
+  assert.deepEqual((await ui.calls('stopRunnerTask')).map(call => call.args).at(-1), ['claude:s4'])
+  assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'stopped: nothing left to stop')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal')"), true, 'its screen is still open')
 
   // Codex: Stop ends the turn and leaves the command, and the second press ends it.
   await ui.task('Add the status column')

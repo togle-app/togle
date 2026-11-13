@@ -463,15 +463,20 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
           </h2>
         </div>
         <div className="task-actions">
-          {task.mine && task.screen && (
-            <button className="small" onClick={onHandBack} title="Closes its screen here and gives you the line to open it in your own terminal. The task goes on.">
-              Hand back
+          {/* Stop, then what follows from it, then Hand back, as the design page has them in a header. */}
+          {task.mine && running && (
+            <button className="small" onClick={onStop} title={task.screen ? 'Ends the agent’s turn, as Esc does on its screen (Ctrl+C in Hermes).' : undefined}>
+              Stop
             </button>
           )}
-          {task.mine && running && !task.screen && <button className="small" onClick={onStop}>Stop</button>}
           {task.mine && task.commandsRunning && task.state === 'stopped' && (
             <button className="small" onClick={onEndCommands} title="Stop ended the agent's turn. The command it started is still running.">
               End the running command
+            </button>
+          )}
+          {task.mine && task.screen && (
+            <button className="small" onClick={onHandBack} title="Closes its screen here and gives you the line to open it in your own terminal. The task goes on.">
+              Hand back
             </button>
           )}
         </div>
