@@ -278,6 +278,8 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 /* Where it stands, then its steps folded under one quiet line, what it asks, and the reply box. */
 .task-log { display: flex; flex-direction: column; flex: 0 1 auto; gap: 12px; min-height: 0; padding: 0; overflow-y: auto; }
 .task-latest { max-width: 100%; }
+/* "Show earlier": its words only, in the middle. A link button has a negative side margin that would make it wider than the thread. */
+.task-earlier-turns { align-self: center; margin: 0; font-size: 12px; }
 .task-agent { max-width: 100%; padding: 8px 10px; border-radius: 10px; background: var(--bg); overflow-wrap: anywhere; }
 .task-agent > :first-child { margin-top: 0; }
 .task-agent > :last-child { margin-bottom: 0; }
@@ -701,4 +703,14 @@ body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: cross
 .give-new { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .give-words { width: 100%; }
 .give-panel .hint, .call-agents-wrap .hint { margin: 0; }
+/* The question box on a live call, and what the agents answered: under the Agents row, over the words of the call. */
+.call-ask { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.call-ask:focus-within { border-color: var(--togle); }
+.call-ask input { flex: 1; min-width: 0; padding: 4px 10px; border: 0; background: transparent; }
+.call-asked { display: flex; flex-direction: column; gap: 8px; }
+.call-answer { display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); max-height: 15rem; overflow-y: auto; }
+.call-answer-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.call-answer-head > b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.call-answer-head .link, .call-answer-head .ghost { margin: 0; flex: none; font-size: 12px; }
+.call-answer .task-agent { padding: 0; background: none; }
 .give-panel .row { display: flex; flex-wrap: wrap; gap: 6px; }

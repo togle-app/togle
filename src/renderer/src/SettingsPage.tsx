@@ -316,7 +316,7 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
       ))}
       <Row label={false} name="Tasks open in">
         <div className="segmented" role="radiogroup" aria-label="Tasks open in">
-          {(['session', 'cards'] as const).map((view) => <button key={view} type="button" role="radio" aria-checked={settings.tasks.view === view} className={settings.tasks.view === view ? 'on' : ''} title={view === 'session' ? 'The agent’s own screen. A switch on a task changes it for that task.' : 'What it said last, a card for what it asks, and a reply box. A switch on a task changes it for that task.'} onClick={() => void save({ tasks: { view } })}>{view === 'session' ? 'Session' : 'Cards'}</button>)}
+          {(['session', 'cards'] as const).map((view) => <button key={view} type="button" role="radio" aria-checked={settings.tasks.view === view} className={settings.tasks.view === view ? 'on' : ''} title={view === 'session' ? 'The agent’s own screen. A switch on a task changes it for that task.' : 'The conversation, a card for what the agent asks, and a reply box. A switch on a task changes it for that task.'} onClick={() => void save({ tasks: { view } })}>{view === 'session' ? 'Terminal' : 'Web'}</button>)}
         </div>
       </Row>
       {adding ? <AddAgent onAdded={(list) => { setFound(list); setAdding(false) }} onCancel={() => setAdding(false)} /> : (

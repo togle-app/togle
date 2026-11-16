@@ -5,6 +5,8 @@
 import { createReadStream, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { LogEntry, TaskHistory } from '@shared/runner'
+import { lastTurns } from './history-turns'
 
 /** A session in the list: its id, its title (the one Claude Code or the person gave it, else what was asked first), where it worked, when it last changed. */
 export interface ClaudeSession {
@@ -351,6 +353,170 @@ export async function claudeLastSaid(id: string): Promise<string> {
     if (bytes >= size) break
   }
   return ''
+}
+
+// ---- A session's conversation, for the Web view ----
+
+// The most of a session's file read (its end, when it is longer), the longest words or command kept, and the most entries held.
+const READ_MOST = 24 * 1048576
+const WORDS_MOST = 20_000
+const COMMAND_MOST = 2_000
+const ENTRIES_MOST = 8_000
+const CONVERSATIONS_KEPT = 6
+const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+const RUNS = new Set(['Bash', 'PowerShell'])
+// What Claude Code writes as the result of a command that was refused or interrupted.
+const REFUSED = /^(?:The user doesn't want|User rejected|The user rejected|Permission to use .{1,40} has been denied|\[Request interrupted)/i
+
+/** What is read of a session so far: its entries, and how far into its file. */
+export interface Conversation {
+  entries: LogEntry[]
+  /** Commands that wait for their result, by the id Claude Code gave the call. */
+  tools: Map<string, LogEntry>
+  next: number
+  /** Where in the file the next line starts. */
+  offset: number
+  /** Whether what came before was left out: a file longer than is read, or more entries than are kept. */
+  cut: boolean
+}
+
+export const newConversation = (): Conversation => ({ entries: [], tools: new Map(), next: 1, offset: 0, cut: false })
+
+function push(state: Conversation, kind: LogEntry['kind'], text: string, at: number, status?: LogEntry['status'], paths?: string[]): LogEntry {
+  const entry: LogEntry = { id: state.next++, at, kind, text, ...(status ? { status } : {}), ...(paths?.length ? { paths } : {}) }
+  state.entries.push(entry)
+  if (state.entries.length > ENTRIES_MOST) {
+    const dropped = state.entries.splice(0, state.entries.length - ENTRIES_MOST)
+    for (const gone of dropped) for (const [call, waiting] of state.tools) if (waiting === gone) state.tools.delete(call)
+    state.cut = true
+  }
+  return entry
+}
+
+/**
+ * Reads lines of a session's file into its conversation: what they asked, what Claude Code answered, the commands it ran (with
+ * how each ended) and the files it changed. What a helper agent did, its thinking and its other tools are left out.
+ */
+export function feedConversation(state: Conversation, lines: string[]): void {
+  for (const line of lines) {
+    const r = parse(line)
+    if (!r || r.isSidechain || !isObject(r.message)) continue
+    const stamp = Date.parse(str(r.timestamp))
+    const at = Number.isFinite(stamp) ? stamp : 0
+    const content = r.message.content
+    const blocks = Array.isArray(content) ? content.filter(isObject) : []
+    if (r.type === 'user') {
+      if (said(r)) {
+        push(state, 'you', theirWords(textOf(content)).slice(0, WORDS_MOST), at)
+        continue
+      }
+      for (const block of blocks) {
+        if (block.type !== 'tool_result') continue
+        const entry = state.tools.get(str(block.tool_use_id))
+        if (!entry) continue
+        state.tools.delete(str(block.tool_use_id))
+        entry.status = block.is_error === true ? (REFUSED.test(textOf(block.content).trim()) ? 'declined' : 'failed') : 'finished'
+      }
+    } else if (r.type === 'assistant') {
+      for (const block of blocks) {
+        if (block.type === 'text') {
+          const words = str(block.text).trim()
+          if (words && !NOT_SAID.test(words)) push(state, 'agent', words.slice(0, WORDS_MOST), at)
+        } else if (block.type === 'tool_use') {
+          const name = str(block.name)
+          const input = isObject(block.input) ? block.input : {}
+          if (RUNS.has(name) && str(input.command)) {
+            const entry = push(state, 'command', str(input.command).slice(0, COMMAND_MOST), at, 'running')
+            if (str(block.id)) state.tools.set(str(block.id), entry)
+          } else if (EDITS.has(name)) {
+            const file = str(input.file_path) || str(input.notebook_path)
+            if (file) push(state, 'files', `Changed 1 file: ${file}`, at, undefined, [file])
+          }
+        }
+      }
+    }
+  }
+}
+
+/** The last turns of what is read, or all of them (up to a limit). */
+export function snapshotConversation(state: Conversation, all: boolean): TaskHistory {
+  return lastTurns(state.entries, all, state.cut)
+}
+
+/** Reads what a session's file gained since `state.offset` (only whole lines: the last may be half written). */
+async function readInto(file: string, size: number, state: Conversation): Promise<void> {
+  const trimmed = state.offset === 0 && size > READ_MOST
+  const from = trimmed ? size - READ_MOST : state.offset
+  const handle = await fs.open(file, 'r')
+  let buffer: Buffer
+  try {
+    buffer = Buffer.alloc(size - from)
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, from)
+    buffer = buffer.subarray(0, bytesRead)
+  } finally {
+    await handle.close()
+  }
+  let end = buffer.lastIndexOf(10) + 1
+  let words = buffer.subarray(0, end).toString('utf8')
+  if (from === 0) words = words.replace(/^﻿/, '')
+  // Read from the middle of the file, its first line is cut: it is left out.
+  if (trimmed) {
+    words = words.slice(words.indexOf('\n') + 1)
+    state.cut = true
+  }
+  feedConversation(state, words.split('\n'))
+  // A last line with no newline yet that is whole already (a file that does not end with one) is taken too.
+  const rest = buffer.subarray(end).toString('utf8').trim()
+  if (rest && parse(rest)) {
+    feedConversation(state, [rest])
+    end = buffer.length
+  }
+  state.offset = from + end
+}
+
+const conversations = new Map<string, { file: string; state: Conversation }>()
+// One look at a session's file at a time: two at once would read the same lines twice.
+const reading = new Map<string, Promise<unknown>>()
+
+async function readConversation(id: string, all: boolean): Promise<TaskHistory | null> {
+  let held = conversations.get(id)
+  let file = held?.file ?? sessionFiles.get(id)
+  if (file && !(await fs.stat(file).then((stat) => stat.isFile(), () => false))) {
+    file = undefined
+    held = undefined
+    conversations.delete(id)
+    sessionFiles.delete(id)
+  }
+  if (!file) {
+    for (const home of await claudeHomes()) {
+      file = (await filesIn(path.join(home, 'projects'), 1, /\.jsonl$/i)).find((candidate) => path.basename(candidate, '.jsonl') === id)
+      if (file) break
+    }
+    if (!file) return null
+    sessionFiles.set(id, file)
+  }
+  const size = (await fs.stat(file).catch(() => null))?.size
+  if (size === undefined) return null
+  // A file that got shorter was written again: it is read from its start.
+  let state = held && held.file === file && size >= held.state.offset ? held.state : newConversation()
+  if (size > state.offset) await readInto(file, size, state)
+  conversations.delete(id)
+  conversations.set(id, { file, state })
+  while (conversations.size > CONVERSATIONS_KEPT) conversations.delete(conversations.keys().next().value!)
+  return snapshotConversation(state, all)
+}
+
+/**
+ * The conversation of a Claude Code session as the session's file keeps it, for the Web view: its last turns, or all (up to a
+ * limit). Only what the file gained since the last look is read. Null when Claude Code has kept no file under this id.
+ */
+export function claudeConversation(id: string, all = false): Promise<TaskHistory | null> {
+  const run = (reading.get(id) ?? Promise.resolve()).then(() => readConversation(id, all), () => readConversation(id, all))
+  reading.set(id, run)
+  void run.finally(() => {
+    if (reading.get(id) === run) reading.delete(id)
+  }).catch(() => undefined)
+  return run
 }
 
 /**

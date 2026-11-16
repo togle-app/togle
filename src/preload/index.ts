@@ -129,6 +129,7 @@ const api: TogleApi = {
   replyRunnerTask: (key, requestId, text) => ipcRenderer.invoke('runners:reply', key, requestId, text),
   handBackRunnerTask: key => ipcRenderer.invoke('runners:hand-back', key),
   runnerOffers: key => ipcRenderer.invoke('runners:offers', key),
+  runnerHistory: (key, all) => ipcRenderer.invoke('runners:history', key, all === true),
   stopRunnerTask: key => ipcRenderer.invoke('runners:stop', key),
   endRunnerCommands: key => ipcRenderer.invoke('runners:end-commands', key),
   closeRunnerTask: key => ipcRenderer.invoke('runners:close', key),

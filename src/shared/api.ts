@@ -205,6 +205,8 @@ export interface TogleApi {
   handBackRunnerTask(key: string): Promise<{ command: string; folder: string }>
   /** What a task's reply box lists when "/" is typed: its agent's own commands and models. */
   runnerOffers(key: string): Promise<import('./runner').TaskOffers>
+  /** A task's conversation as its agent keeps it (its last turns, or all with `all`), for the Web view; null when the agent keeps none to read. */
+  runnerHistory(key: string, all?: boolean): Promise<import('./runner').TaskHistory | null>
   /** The first press: the task starts nothing new. */
   stopRunnerTask(key: string): Promise<void>
   /** The second press: ends the commands a stopped task still has running. How many. */

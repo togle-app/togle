@@ -10,6 +10,7 @@ import { FirstMinute } from './FirstMinute'
 import { LiveCall } from './LiveCall'
 import { MeetingsPage } from './MeetingsPage'
 import { onOpenSettings, openSettings, type SettingsPart } from './open-settings'
+import { onOpenTaskFrom } from './open-task'
 import { SettingsPage } from './SettingsPage'
 import { Tasks } from './Tasks'
 import { Todo } from './Todo'
@@ -78,6 +79,8 @@ export function Shell() {
   // Voice typing follows the settings of the one agent the call part keeps.
   useEffect(() => { if (settings?.activeAgentId) void api.setDictationAgent(settings.activeAgentId).catch(() => undefined) }, [settings?.activeAgentId])
   useEffect(() => onOpenSettings((at) => { setSettingsAt(at); setView('settings') }), [])
+  // A task asked for from elsewhere in the window: the answer to a question put to it on a call.
+  useEffect(() => onOpenTaskFrom((key) => openTask(key)), [openTask])
   useEffect(() => api.onHotkey((action) => {
     if (action === 'dictation-settings') openSettings('dictation')
     // "Change keys" on the one-time offer when a key was pressed in a code editor.

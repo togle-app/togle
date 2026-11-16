@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, stepsLine, type LogEntry, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
+import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
 import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
 import { Changes } from './Changes'
 import { useReach } from './Devices'
 import { openSettings } from './open-settings'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
-import { Markdown } from './Markdown'
+import { RequestCard } from './RequestCard'
+import { Thread, useHistory } from './TaskThread'
 import { TerminalView } from './TerminalView'
 
 const api = window.togle
@@ -44,7 +45,7 @@ const SLASH_LIST_HEIGHT = 208
 const REMOTE = 'remote:'
 const remoteKey = (device: string, key: string): string => `${REMOTE}${device}:${key}`
 
-/** A task is shown as its agent's own screen (Session), or as what it said last, a card for what it asks and a reply box (Cards). */
+/** A task is shown as its agent's own screen (Terminal), or as its conversation, a card for what it asks and a reply box (Web). Kept as `session` and `cards`. */
 type View = 'cards' | 'session'
 const VIEWS = 'togle.taskviews'
 /** The view picked for each task, kept in the page between runs. */
@@ -192,7 +193,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   )
 
   // Opened from a notice that says an agent waits on its own screen (Hermes has no card for what it asks): the screen is what shows,
-  // once for each time the task is asked for from outside, so that a pick of Cards afterwards stays.
+  // once for each time the task is asked for from outside, so that a pick of Web afterwards stays.
   const showedSession = useRef(0)
   useEffect(() => {
     if (!focus?.key || showedSession.current === focus.seq) return
@@ -308,7 +309,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
             view={views.of(detail.task.key)}
             onView={(view) => {
               views.pick(detail.task.key, view)
-              // Session is the agent's own screen: picking it opens the screen when it is closed.
+              // Terminal is the agent's own screen: picking it opens the screen when it is closed.
               if (view === 'session' && detail.task.mine && detail.task.screen && !detail.task.terminal) void act(() => api.openRunnerTask(detail.task.key))
             }}
             onTakeOver={() => act(() => api.takeOverRunnerTask(detail.task.key))}
@@ -457,13 +458,17 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
   const [confirmTakeOver, setConfirmTakeOver] = useState(takeOverAsked)
   useEffect(() => { if (takeOverAsked) setConfirmTakeOver(true) }, [takeOverAsked])
   const end = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    end.current?.scrollIntoView?.({ block: 'end' })
-  }, [log.length, task.pending.length])
   const running = task.state === 'working' || task.state === 'waiting'
-  const latest = [...log].reverse().find((entry) => entry.kind === 'agent')
-  const changed = changedFiles(log)
-  const steps = stepsLine(log)
+  // The conversation as its agent keeps it, also of what was said before Togle opened the task; else what happened while Togle watched.
+  const { history, loaded: historyLoaded, all, showAll } = useHistory(task)
+  const shown = history ? history.entries : log
+  // Of the turns shown only, so a count is not given for a conversation that has older turns left out.
+  const changed = history?.more && !all ? 0 : changedFiles(shown)
+  // The thread stays at its end while new words come, unless the person scrolled up to read.
+  const stick = useRef(true)
+  useEffect(() => {
+    if (stick.current) end.current?.scrollIntoView?.({ block: 'end' })
+  }, [shown.length, task.pending.length])
   // A question the agent asks is answered from the reply box; anything else typed there goes to the task.
   const question = task.pending.find((request) => request.kind === 'question')
   const say = (message: string): void => {
@@ -480,7 +485,7 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
   // after "/model ". What the agent offers is asked when the task opens, and again when a "/" starts the reply.
   const [offers, setOffers] = useState<TaskOffers>(NO_OFFERS)
   const slashed = text.startsWith('/')
-  // Session picked and its screen is closed: what waits is answered on a card until the screen is opened.
+  // Terminal picked and its screen is closed: what waits is answered on a card until the screen is opened.
   const closedSession = task.mine && !!task.screen && view === 'session' && !task.terminal
   const cardsView = !sessionShown && !closedSession
   const answers = task.mine && cardsView
@@ -585,8 +590,8 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
         {twoViews && (
           <span className="segmented view-switch" role="group" aria-label="View">
             {(['cards', 'session'] as const).map((name) => (
-              <button key={name} type="button" className={view === name ? 'on' : ''} aria-pressed={view === name} onClick={() => onView(name)} title={name === 'cards' ? 'What the agent said last, a card for what it asks, and a reply box.' : 'The agent’s own screen.'}>
-                {name === 'cards' ? 'Cards' : 'Session'}
+              <button key={name} type="button" className={view === name ? 'on' : ''} aria-pressed={view === name} onClick={() => onView(name)} title={name === 'cards' ? 'The conversation, a card for what the agent asks, and a reply box.' : 'The agent’s own screen.'}>
+                {name === 'cards' ? 'Web' : 'Terminal'}
               </button>
             ))}
           </span>
@@ -645,7 +650,7 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
         <TerminalPanel task={task} onEnd={onEndCommands} />
       ) : closedSession ? (
         <>
-          {/* Session is picked and its screen is closed: what waits is answered here, or on the screen once it is opened. */}
+          {/* Terminal is picked and its screen is closed: what waits is answered here, or on the screen once it is opened. */}
           {task.pending.map((request) => (
             <RequestCard key={request.id} request={request} onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
           ))}
@@ -661,19 +666,12 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
         </>
       ) : (
       <>
-      <div className="task-log" role="log" aria-label="What happened">
-        {log.length === 0 && task.mine && <p className="hint">{task.screen ? 'Nothing said yet. Pick Session to see its screen.' : 'Nothing yet.'}</p>}
-        {log.length === 0 && !task.mine && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
-        {/* Where it stands first: what the agent said last. Its steps and the conversation fold under one line. */}
-        {latest && <div className="task-agent task-latest"><Markdown text={latest.text} /></div>}
-        {log.length > 0 && (
-          <details className="task-steps">
-            <summary>{steps ?? 'What was said'}</summary>
-            {log.map((entry) => (
-              <LogLine key={entry.id} entry={entry} />
-            ))}
-          </details>
-        )}
+      <div className="task-log" role="log" aria-label="The conversation" onScroll={(event) => { const box = event.currentTarget; stick.current = box.scrollHeight - box.scrollTop - box.clientHeight < 60 }}>
+        {history?.more && !all && <button type="button" className="link task-earlier-turns" onClick={showAll}>Show earlier</button>}
+        {shown.length === 0 && task.mine && <p className="hint">{task.screen ? 'Nothing said yet. Pick Terminal to see its screen.' : 'Nothing yet.'}</p>}
+        {shown.length === 0 && !task.mine && historyLoaded && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
+        {/* The whole conversation, in order: what was asked and answered in the open, and the steps between folded to a line. */}
+        <Thread entries={shown} working={task.state === 'working'} />
         <div ref={end} />
       </div>
 
@@ -686,7 +684,7 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
         <div className="task-banner" role="note">
           <span>It waits on its screen: {task.waitingFor}.</span>
           <button className="primary small" onClick={() => onView('session')}>
-            Open the session
+            Open the terminal
           </button>
         </div>
       )}
@@ -756,87 +754,6 @@ function TerminalPanel({ task, onEnd }: { task: TaskView; onEnd: () => void }) {
       )}
       <TerminalView taskKey={task.key} screenId={task.screenId} />
     </div>
-  )
-}
-
-const COMMAND_MARK: Record<NonNullable<LogEntry['status']>, string> = { running: '▶', finished: '✓', declined: '✕', failed: '✕' }
-const COMMAND_WORD: Record<NonNullable<LogEntry['status']>, string> = { running: 'running', finished: 'done', declined: 'refused', failed: 'failed' }
-
-function LogLine({ entry }: { entry: LogEntry }) {
-  switch (entry.kind) {
-    case 'you':
-      return <div className="task-you">{entry.text}</div>
-    case 'agent':
-      return (
-        <div className="task-agent">
-          <Markdown text={entry.text} />
-        </div>
-      )
-    case 'command':
-      return (
-        <div className="task-cmd" data-status={entry.status}>
-          <span aria-hidden="true">{COMMAND_MARK[entry.status ?? 'finished']}</span>
-          <code>{entry.text}</code>
-          <span className="hint">{COMMAND_WORD[entry.status ?? 'finished']}</span>
-        </div>
-      )
-    case 'asked':
-      return <div className="task-note">It asked about {entry.text}</div>
-    default:
-      return <div className="task-note">{entry.text}</div>
-  }
-}
-
-function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: { request: ViewRequest; onAllow: () => void; onAlways: () => void; onRefuse: () => void; onReply: (text: string) => void }) {
-  if (request.kind === 'question') {
-    const questions = request.questions ?? []
-    return (
-      <section className="task-request" aria-label="The agent asks you">
-        <h3>Asks</h3>
-        {questions.map((question) => (
-          <div key={question.id}>
-            <p>{question.text}</p>
-            {question.options.length > 0 && (
-              <div className="task-options">
-                {question.options.map((option) => (
-                  <button key={option} className="small" onClick={() => onReply(option)}>
-                    {option}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </section>
-    )
-  }
-  const edit = request.kind === 'edit'
-  return (
-    <section className={`task-request ${request.danger ? 'danger' : ''}`} aria-label={edit ? 'The agent wants to change files' : 'The agent wants to run a command'}>
-      <h3>
-        {edit ? 'Wants to change' : 'Wants to run'}
-        {request.danger && <span className="task-danger" title={request.danger}>Dangerous</span>}
-      </h3>
-      {edit ? (
-        <ul className="task-files">
-          {(request.files ?? []).map((file) => (
-            <li key={file}>{file}</li>
-          ))}
-        </ul>
-      ) : (
-        <pre className="task-command">{request.command}</pre>
-      )}
-      <div className="row">
-        <button className="primary small" onClick={onAllow}>
-          Allow once
-        </button>
-        <button className="small" onClick={onRefuse}>
-          Refuse
-        </button>
-      </div>
-      {/* What always reaches, in the agent's terms; never for a command that looks dangerous. */}
-      {request.always && !request.danger && (<button className="task-always" onClick={onAlways}>{request.always}</button>)}
-    </section>
   )
 }
 

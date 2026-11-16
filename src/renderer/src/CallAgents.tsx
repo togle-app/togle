@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { KNOWN_AGENTS, type CallAgents as CallAgentList, type GiveResult, type RunnerKind, type RunnerStatus, type TaskView } from '@shared/runner'
+import { KNOWN_AGENTS, stepsLine, type CallAgents as CallAgentList, type GiveResult, type RunnerKind, type RunnerStatus, type TaskView } from '@shared/runner'
+import { Markdown } from './Markdown'
 import { Menu } from './Menu'
+import { openTaskFrom } from './open-task'
+import { RequestCard } from './RequestCard'
 
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -66,10 +69,15 @@ export function CallAgentsRow({ call, live }: { call: string; live: boolean }) {
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
+  // A question for the agents on this call, and what was asked before on it (kept while the window is open).
+  const [question, setQuestion] = useState('')
+  const [asking, setAsking] = useState(false)
+  const [asked, setAsked] = useState<Asked[]>(() => askedOn.get(call) ?? [])
   useEffect(() => {
     let current = true
     setAgents({ keys: [], sent: {} })
     setMessage(null)
+    setAsked(askedOn.get(call) ?? [])
     void api.callAgents(call).then((found) => { if (current && found) setAgents(found) }, () => undefined)
     return () => { current = false }
   }, [call])
@@ -89,6 +97,24 @@ export function CallAgentsRow({ call, live }: { call: string; live: boolean }) {
       setAgents(await api.callAgents(call))
     } catch (failure) { setMessage({ ok: false, text: errorText(failure) }) } finally { setBusy(false) }
   }
+  const keepAsked = (next: Asked[]): void => { askedOn.set(call, next); setAsked(next) }
+  // The question goes to the ticked agents with where the call is saved so far. Those that could not take it are told in words, and
+  // the question stays in the box when none could.
+  const ask = async (event: FormEvent): Promise<void> => {
+    event.preventDefault()
+    const words = question.trim()
+    if (asking || !words || !ticked.length) return
+    setAsking(true); setMessage(null)
+    const at = Date.now()
+    try {
+      const results = await api.giveCall({ call, tasks: ticked, prompt: words })
+      const took = results.filter((result) => result.ok).map((result) => result.key)
+      const refused = results.filter((result) => !result.ok)
+      if (refused.length) setMessage(resultLine(refused, tasks))
+      if (took.length) { keepAsked([{ id: ++askedCount, question: words, at, keys: took }, ...(askedOn.get(call) ?? [])].slice(0, MOST_ASKS)); setQuestion('') }
+      setAgents(await api.callAgents(call))
+    } catch (failure) { setMessage({ ok: false, text: errorText(failure) }) } finally { setAsking(false) }
+  }
   return (
     <div className="call-agents-wrap">
       <div className="call-agents" role="group" aria-label={live ? 'Agents on this call' : 'Agents for the next call'}>
@@ -107,8 +133,106 @@ export function CallAgentsRow({ call, live }: { call: string; live: boolean }) {
         {live && !!agents.keys.length && <button type="button" className="primary small" disabled={busy || !ticked.length} title="Writes what was said so far to a file, and tells each ticked agent where it is" onClick={() => void send()}>{busy ? 'Sending…' : 'Send what was said'}</button>}
       </div>
       {adding && <GivePanel call={call} mode="connect" connected={agents.keys} onClose={() => setAdding(false)} onChanged={(next) => { setAgents(next); setAdding(false) }} />}
+      {live && !!agents.keys.length && (
+        <form className="call-ask" onSubmit={(event) => void ask(event)} aria-label="Ask the agents about this call">
+          <input value={question} maxLength={2000} onChange={(event) => setQuestion(event.target.value)} aria-label="Ask the agents about this call" placeholder="Ask the agents about this call, or hold F9 and say it" />
+          <button className="primary small" disabled={asking || !question.trim() || !ticked.length} title={ticked.length ? 'Sends the question and where the call is saved so far to each ticked agent' : 'Tick an agent to ask'}>{asking ? 'Asking…' : 'Ask'}</button>
+        </form>
+      )}
       {message && <p className={message.ok ? 'hint' : 'error'} role="status">{message.text}</p>}
+      {live && asked.map((entry) => (
+        <div key={entry.id} className="call-asked">
+          {entry.keys.map((key) => (
+            <CallAnswer key={key} asked={entry} task={tasks.find((item) => item.key === key)} taskKey={key} onDismiss={() => keepAsked((askedOn.get(call) ?? []).map((one) => (one.id === entry.id ? { ...one, keys: one.keys.filter((other) => other !== key) } : one)).filter((one) => one.keys.length))} />
+          ))}
+        </div>
+      ))}
     </div>
+  )
+}
+
+/** A question put to the agents on a call: when, and the tasks that took it. */
+interface Asked {
+  id: number
+  question: string
+  at: number
+  keys: string[]
+}
+// What was asked on each call, kept while the window is open: the page is drawn again when the person moves between screens.
+const askedOn = new Map<string, Asked[]>()
+let askedCount = 0
+const MOST_ASKS = 3
+// How often an answer is looked for while it is awaited, and how long after the question it is looked for at all.
+const ANSWER_EVERY_MS = 2_500
+const ANSWER_FOR_MS = 30 * 60_000
+
+/**
+ * What a task has said since a question was put to it: the last of its words after the question, and a line of what it did. Read
+ * from the agent's own record of the conversation (else from what Togle saw of the task), and again while the task works.
+ */
+function useAnswer(key: string, asked: Asked, state: TaskView['state'] | undefined): { text: string; steps: string | undefined; seen: boolean } {
+  const [found, setFound] = useState({ text: '', steps: undefined as string | undefined, seen: false })
+  // The question is found in the conversation by its first words: the message that carried it held more.
+  const mark = asked.question.replace(/\s+/g, ' ').slice(0, 60)
+  const over = state !== 'working' && state !== 'waiting'
+  const answered = found.text !== ''
+  useEffect(() => {
+    let live = true
+    const read = async (): Promise<void> => {
+      const history = await api.runnerHistory(key).catch(() => null)
+      const entries = history?.entries ?? (await api.runnerDetail(key).catch(() => null))?.log ?? []
+      if (!live) return
+      let at = -1
+      entries.forEach((entry, index) => { if (entry.kind === 'you' && entry.text.replace(/\s+/g, ' ').includes(mark)) at = index })
+      if (at < 0) return
+      const after = entries.slice(at + 1)
+      const last = [...after].reverse().find((entry) => entry.kind === 'agent')
+      setFound({ text: last?.text ?? '', steps: stepsLine(after), seen: true })
+    }
+    void read()
+    // Looked for while the task works, and while nothing was found yet: not for ever.
+    const timer = over && answered ? undefined : setInterval(() => { if (Date.now() - asked.at < ANSWER_FOR_MS) void read() }, ANSWER_EVERY_MS)
+    return () => { live = false; if (timer) clearInterval(timer) }
+  }, [key, mark, asked.at, over, answered])
+  return found
+}
+
+const ANSWER_STATE: Record<TaskView['state'], string> = { working: 'Working', waiting: 'Waiting for you', idle: 'Answered', stopped: 'Stopped', failed: 'Stopped by an error' }
+
+/**
+ * What an agent answered to a question asked on a call, under the question box: its words as it says them, and a card when it
+ * needs your Allow to go on. Other notices still wait until the call ends.
+ */
+function CallAnswer({ taskKey, asked, task, onDismiss }: { taskKey: string; asked: Asked; task: TaskView | undefined; onDismiss: () => void }) {
+  const said = useAnswer(taskKey, asked, task?.state)
+  const [error, setError] = useState('')
+  const act = async (work: () => Promise<unknown>): Promise<void> => {
+    setError('')
+    try { await work() } catch (failure) { setError(errorText(failure)) }
+  }
+  const state = task?.state
+  // Done, with nothing of its words to show: it said only steps, or its agent keeps no record Togle can read. Not said too early:
+  // a task is idle a moment before the question reaches it.
+  const finished = !!task && state !== 'working' && state !== 'waiting' && (said.seen || Date.now() - asked.at > 15_000)
+  return (
+    <section className="call-answer" aria-label={`${task ? agentOf(task) : 'The agent'} answers`}>
+      <header className="call-answer-head">
+        <b className="cut">{task ? `${agentOf(task)} · ${task.folder ? baseName(task.folder) : task.title}` : 'Gone'}</b>
+        {state && <span className="state-chip" data-state={state}>{state === 'idle' && !said.text ? 'Done' : ANSWER_STATE[state]}</span>}
+        {task && <button type="button" className="link" onClick={() => openTaskFrom(taskKey)} title="Open the task in Agents">Open</button>}
+        <button type="button" className="ghost small" aria-label="Dismiss this answer" onClick={onDismiss}>×</button>
+      </header>
+      <p className="hint call-answer-question">You asked: {asked.question}</p>
+      {said.text
+        ? <div className="task-agent"><Markdown text={said.text} /></div>
+        : <p className="hint">{!task ? 'That task is gone.' : finished ? 'It finished. Open it to read what it said.' : 'Working on it…'}</p>}
+      {said.steps && <p className="hint">{said.steps}</p>}
+      {task?.pending.map((request) => (
+        <RequestCard key={request.id} request={request} onAllow={() => void act(() => api.answerRunnerTask(taskKey, request.id, 'allow-once'))} onAlways={() => void act(() => api.answerRunnerTask(taskKey, request.id, 'allow-always'))} onRefuse={() => void act(() => api.answerRunnerTask(taskKey, request.id, 'refuse'))} onReply={(text) => void act(() => api.replyRunnerTask(taskKey, request.id, text))} />
+      ))}
+      {task?.mine && task.waitingFor && !task.pending.length && <p className="hint">It waits on its screen: {task.waitingFor}. Open it to answer.</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+    </section>
   )
 }
 

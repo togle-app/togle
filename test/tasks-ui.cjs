@@ -107,9 +107,11 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.task-request .task-command').textContent"), 'npm run migrate')
   assert.deepEqual(await texts(ui, '.task-request button'), ['Allow once', 'Refuse', 'Always allow commands that start with npm run'])
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request .task-danger')"), false)
-  assert.equal(await ui.evaluate("document.querySelector('.task-latest').textContent"), 'I will add the column and a migration.')
+  // What was said is in the open, in order, and what it did between folds to one line (and stays folded while the task waits for you).
+  assert.deepEqual(await texts(ui, '.task-log > .task-you, .task-log > .task-agent'), ['Add a status column to the orders table.', 'I will add the column and a migration.'])
   assert.equal(await ui.evaluate("document.querySelector('.task-steps > summary').textContent"), '2 steps: edited 2 files, ran 1 command')
   assert.equal(await ui.evaluate("document.querySelector('.task-steps').open"), false)
+  assert.equal(await ui.evaluate("document.querySelector('.task-log').getAttribute('aria-label')"), 'The conversation')
   assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Waiting for you')
   assert.ok((await ui.evaluate("document.querySelector('.task-status .hint').textContent")).startsWith('2 files changed'))
   assert.equal(await ui.evaluate("document.querySelector('.task-where').textContent"), ' · Codex · api-server', 'the agent and the folder beside its name')
@@ -148,6 +150,7 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await texts(ui, '.task-cmd code'), ['npm test'])
   assert.equal(await ui.evaluate("document.querySelector('.task-cmd').dataset.status"), 'running')
   assert.equal(await ui.evaluate("document.querySelector('.task-cmd .hint').textContent"), 'running')
+  assert.equal(await ui.evaluate("document.querySelector('.task-steps').open"), true, 'the stretch of work it is at stays open while it works')
   assert.equal(await ui.evaluate("document.querySelector('.task-agent strong')?.textContent"), 'Two plans', 'the agent\'s words are formatted')
   assert.deepEqual(await texts(ui, '.task-actions button'), ['Stop'])
   await ui.capture('tasks-working')
@@ -243,6 +246,31 @@ async function checkTasks(T, agent) {
   await ui.task('Rebuild the pricing page')
   await ui.wait("document.querySelector('.task-where').textContent.includes('Claude Code')")
 
+  // A task Togle does not run shows its conversation as its agent keeps it, in the open, with the steps between folded: the last turns
+  // first, and "Show earlier" brings the ones before. Nothing can be replied to: it is not Togle's to answer.
+  await ui.task('Fix the login redirect')
+  await ui.wait("document.querySelectorAll('.task-log .task-you').length===1")
+  assert.deepEqual(await texts(ui, '.task-log .task-you'), ['Fix it, and keep the tests green.'])
+  assert.deepEqual(await texts(ui, '.task-log > .task-agent'), ['I will change redirect.ts.', 'Fixed: the redirect keeps next. Tests pass.'])
+  assert.deepEqual(await texts(ui, '.task-steps > summary'), ['3 steps: edited 1 file, ran 2 commands'])
+  assert.equal(await ui.evaluate("document.querySelector('.task-steps').open"), false, 'work that is over is folded')
+  assert.deepEqual(await texts(ui, '.task-steps .task-cmd'), ['✕npm testfailed', '✓npm testdone'], 'the commands, each with how it ended')
+  assert.deepEqual(await texts(ui, '.task-earlier-turns'), ['Show earlier'])
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .hint').textContent.includes('files changed')"), false, 'no count of files while turns are left out')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-reply')"), false, 'what Togle does not run cannot be replied to')
+  assert.deepEqual(await ui.evaluate("(()=>{const box=document.querySelector('.task-log');const edge=box.getBoundingClientRect().right+0.5;return [...box.querySelectorAll('*')].filter(e=>e.getBoundingClientRect().right>edge).map(e=>e.tagName+'.'+e.className).slice(0,6)})()"), [], 'nothing in the conversation is wider than it')
+  assert.equal(await ui.evaluate("(()=>{const box=document.querySelector('.task-log');return box.scrollWidth-box.clientWidth})()"), 0, 'the conversation does not scroll sideways')
+  await ui.capture('tasks-conversation')
+  await ui.click('.task-earlier-turns', 'Show earlier')
+  await ui.wait("document.querySelectorAll('.task-log .task-you').length===2")
+  assert.deepEqual(await texts(ui, '.task-log .task-you'), ['Where does the login redirect go wrong?', 'Fix it, and keep the tests green.'], 'the older turns come first')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-earlier-turns')"), false)
+  assert.ok((await ui.evaluate("document.querySelector('.task-status .hint').textContent")).startsWith('1 file changed'), 'with all the turns shown, the count is of the whole')
+  assert.deepEqual((await ui.calls('runnerHistory')).map(call => call.args).filter(args => args[0] === 'claude:s3').at(-1), ['claude:s3', true])
+  // A task that keeps no conversation to read shows what happened while Togle watched.
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("document.querySelector('.task-where').textContent.includes('Claude Code')")
+
   // A task in a terminal can be seen and, after a warning, taken over: from the task, or from its row.
   await ui.task('Write the release notes')
   await ui.wait("!!document.querySelector('.task-banner')")
@@ -258,13 +286,13 @@ async function checkTasks(T, agent) {
   await ui.wait("!document.querySelector('.task-banner')")
   assert.deepEqual((await ui.calls('takeOverRunnerTask')).map(call => call.args), [['claude:s4']])
 
-  // Taken over, it is the agent's own screen, in the view Settings say tasks open in (Session): no words about itself, no card and no
+  // Taken over, it is the agent's own screen, in the view Settings say tasks open in (Terminal): no words about itself, no card and no
   // reply box (what it asks is answered on the screen), a Hand back, and Stop while it works or waits. The window says a screen is shown.
   await ui.wait("!!document.querySelector('.task-terminal .term-view, .task-terminal .xterm, .task-terminal [data-terminal]') || !!document.querySelector('.task-terminal')")
   assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal .task-banner')"), false, 'the screen the person knows needs no words about itself')
-  assert.deepEqual(await texts(ui, '.view-switch button'), ['Cards', 'Session'], 'two views of the task, picked with a switch')
-  assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Session', 'Session is the view tasks open in')
-  assert.equal(await ui.evaluate("!!document.querySelector('.task-reply')"), false, 'a session has no reply box: it is answered on the screen')
+  assert.deepEqual(await texts(ui, '.view-switch button'), ['Web', 'Terminal'], 'two views of the task, picked with a switch')
+  assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Terminal', 'Terminal is the view tasks open in')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-reply')"), false, 'the terminal has no reply box: it is answered on the screen')
   assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'nothing to stop: it is done')
   assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Done')
   assert.equal(await ui.evaluate("document.querySelector('.task-row[aria-current=\"true\"]').textContent.includes('Take over')"), false, 'no Take over once it is here')
@@ -274,10 +302,10 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false, 'no card over a screen that asks on its own: the notice says it')
   assert.deepEqual(await texts(ui, '.task-actions button'), ['Stop', 'Hand back'], 'it waits: Stop beside Hand back, as the design page has them')
   await ui.capture('tasks-screen')
-  // Cards: the card for what it asks, in the same task, and a reply box that takes words once it has finished.
-  await ui.click('.view-switch button', 'Cards')
+  // Web: the card for what it asks, in the same task, and a reply box that takes words once it has finished.
+  await ui.click('.view-switch button', 'Web')
   await ui.wait("!!document.querySelector('.task-request')")
-  assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal')"), false, 'Cards do not show the screen')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal')"), false, 'Web does not show the screen')
   assert.deepEqual((await ui.calls('taskSessionShown')).map(call => call.args).at(-1), [null], 'and the window says it shows none')
   assert.deepEqual(await texts(ui, '.task-request button'), ['Allow once', 'Refuse'], 'the same card as anywhere')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request .hint')"), false, 'it says nothing of a screen to answer on')
@@ -292,8 +320,8 @@ async function checkTasks(T, agent) {
   await ui.fill('.task-reply input', 'Now the footer')
   await ui.click('.task-reply button', 'Send')
   assert.deepEqual((await ui.calls('sendToRunnerTask')).map(call => call.args).at(-1), ['claude:s4', 'Now the footer'], 'a reply goes to the task, whichever view it is in')
-  // The view is picked for the task: back to Session, and the screen is there.
-  await ui.click('.view-switch button', 'Session')
+  // The view is picked for the task: back to Terminal, and the screen is there.
+  await ui.click('.view-switch button', 'Terminal')
   await ui.wait("!!document.querySelector('.task-terminal')")
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false)
   assert.deepEqual((await ui.calls('taskSessionShown')).map(call => call.args).at(-1), ['claude:s4'])
@@ -318,25 +346,25 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'stopped: nothing left to stop')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal')"), true, 'its screen is still open')
 
-  // Hermes asks on its own screen, so Cards has no card for it: they say it waits there, and the way to the session is one press. A notice
-  // that opens the task takes it to the session itself.
+  // Hermes asks on its own screen, so Web has no card for it: it says it waits there, and the way to the terminal is one press. A notice
+  // that opens the task takes it to the terminal itself.
   await ui.evaluate("window.togleUITest.terminalTask({ key: 'hermes:w1', runner: 'hermes', title: 'Waits on its screen', folder: 'C:\\\\work\\\\notes', state: 'waiting', waitingFor: 'approval or an answer', screen: true, terminal: false, line: 'Waits on its screen' }, '')")
   await ui.evaluate("window.togleUITest.terminalTask({ key: 'hermes:w2', runner: 'hermes', title: 'Waits too', folder: 'C:\\\\work\\\\notes', state: 'waiting', waitingFor: 'approval or an answer', screen: true, terminal: false, line: 'Waits too' }, '')")
   await ui.wait("[...document.querySelectorAll('.task-row strong')].some(e=>e.textContent==='Waits too')")
   await ui.task('Waits too')
-  await ui.click('.view-switch button', 'Cards')
+  await ui.click('.view-switch button', 'Web')
   await ui.wait("!!document.querySelector('.task-panel .task-banner')")
   assert.equal(await ui.evaluate("document.querySelector('.task-panel .task-banner span').textContent"), 'It waits on its screen: approval or an answer.')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false, 'Togle has no card for what Hermes asks')
-  assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Cards')
-  await ui.click('.task-panel .task-banner button', 'Open the session')
+  assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Web')
+  await ui.click('.task-panel .task-banner button', 'Open the terminal')
   await ui.wait("!!document.querySelector('.task-terminal')")
   assert.deepEqual((await ui.calls('openRunnerTask')).map(call => call.args).at(-1), ['hermes:w2'], 'the screen was closed: it is opened')
-  assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Session')
+  assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Terminal')
   await ui.evaluate("window.togleUITest.emit('onShowTask', 'hermes:w1')")
   await ui.wait("document.querySelector('.task-title h2')?.firstChild?.textContent==='Waits on its screen' && !!document.querySelector('.task-terminal')")
   assert.deepEqual((await ui.calls('openRunnerTask')).map(call => call.args).at(-1), ['hermes:w1'], 'a notice that opens the task takes it to its screen')
-  assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Session')
+  assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Terminal')
 
   // Codex: Stop ends the turn and leaves the command, and the second press ends it.
   await ui.task('Add the status column')
@@ -635,13 +663,13 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual(await texts(ui, '#settings-agents .agent-label'), ['Claude Code', 'Codex', 'Hermes'])
   assert.deepEqual(await texts(ui, '#settings-agents .agent-name .av'), ['C', 'X', 'H'], 'each agent with its letter, as the design marks them')
   assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add an agent'])
-  // Which view a task opens in, as the design's Settings has it: Session until it is changed.
-  assert.deepEqual(await texts(ui, '#settings-agents [aria-label="Tasks open in"] button'), ['Session', 'Cards'])
-  assert.equal(await ui.evaluate("document.querySelector('#settings-agents [aria-label=\"Tasks open in\"] .on').textContent"), 'Session')
-  await ui.click('#settings-agents [aria-label="Tasks open in"] button', 'Cards')
-  await ui.wait("document.querySelector('#settings-agents [aria-label=\"Tasks open in\"] .on').textContent==='Cards'")
+  // Which view a task opens in, as the design's Settings has it: Terminal until it is changed.
+  assert.deepEqual(await texts(ui, '#settings-agents [aria-label="Tasks open in"] button'), ['Terminal', 'Web'])
+  assert.equal(await ui.evaluate("document.querySelector('#settings-agents [aria-label=\"Tasks open in\"] .on').textContent"), 'Terminal')
+  await ui.click('#settings-agents [aria-label="Tasks open in"] button', 'Web')
+  await ui.wait("document.querySelector('#settings-agents [aria-label=\"Tasks open in\"] .on').textContent==='Web'")
   assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).at(-1), { tasks: { view: 'cards' } })
-  await ui.click('#settings-agents [aria-label="Tasks open in"] button', 'Session')
+  await ui.click('#settings-agents [aria-label="Tasks open in"] button', 'Terminal')
   assert.equal(await ui.evaluate("!!document.querySelector('.settings .card-note, .settings .setting > .note')"), false, 'no notes under the rows: everything fits on one screen')
   assert.deepEqual(await texts(ui, '#settings-agents .setting-value'), ['Found', 'Found', 'Not found'])
   // Remove takes an agent Togle finds off its lists, after asking: it stays installed, its tasks go on in it, and it can be added back.

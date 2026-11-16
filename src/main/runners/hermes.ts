@@ -18,13 +18,14 @@
 //   is the folder's name only), `rename` names one, `delete` removes one.
 // - Hermes tells Togle nothing else while a screen holds a session: what it asks is answered on the screen, and Togle says
 //   that it waits there. Once the screen is closed Togle knows nothing of what the session does.
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import type { TaskInfo } from '@shared/runner'
+import type { TaskHistory, TaskInfo } from '@shared/runner'
 import { exists, lines } from './acp'
+import { hermesHistory } from './hermes-history'
 import { keepJson } from './keep'
 import { TaskBase } from './task-base'
 import { cleanWords, loadPty, openTerminal, refuseCommand, TerminalTask, type TerminalChunk } from './terminal'
@@ -47,6 +48,8 @@ export interface HermesOptions {
   findMs?: number
   /** How long a reply typed on its screen waits to see Hermes take it (its window title goes to busy), in milliseconds. */
   takeMs?: number
+  /** How long a session's conversation is reused before Hermes is asked for it again, in milliseconds. Each ask starts a Python program. */
+  historyMs?: number
 }
 
 /** The program that starts Hermes, or null when it is not on this computer. `TOGLE_HERMES_PATH` names it by hand. */
@@ -122,6 +125,41 @@ const exec = (file: string, args: string[], options: { cwd?: string; env?: NodeJ
 
 /** The most words a task is started with: a Windows command line holds about 32,000 characters. */
 const MOST_WORDS = 20_000
+
+// A session's export is read whole: the biggest on this computer was 25 MB. Longer than this, or slower, it is left unread.
+const EXPORT_MOST = 64 * 1024 * 1024
+const EXPORT_MS = 30_000
+
+/** What `hermes sessions export - --session-id <id>` printed, as JSON; null when it failed (it says so on stdout, not in an exit code that is always read). */
+function exported(command: string[], env: NodeJS.ProcessEnv, id: string): Promise<unknown | null> {
+  return new Promise((resolve) => {
+    const child = spawn(command[0], [...command.slice(1), 'sessions', 'export', '-', '--session-id', id], { windowsHide: true, env, stdio: ['ignore', 'pipe', 'ignore'] })
+    const chunks: Buffer[] = []
+    let size = 0
+    let over = false
+    const timer = setTimeout(() => child.kill(), EXPORT_MS)
+    child.stdout.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > EXPORT_MOST) {
+        over = true
+        child.kill()
+      } else chunks.push(chunk)
+    })
+    child.on('error', () => {
+      clearTimeout(timer)
+      resolve(null)
+    })
+    child.on('close', () => {
+      clearTimeout(timer)
+      if (over) return resolve(null)
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+      } catch {
+        resolve(null)
+      }
+    })
+  })
+}
 
 /** The environment of a screen: this computer's, as a terminal gives it. */
 const screenEnv = (base: NodeJS.ProcessEnv): Record<string, string> => {
@@ -474,6 +512,8 @@ export class HermesBackend implements Backend {
   private resolved?: Promise<TaskContext>
   /** The name each session Togle started was started with, and the id Hermes gave it. */
   private readonly names = new Map<string, string>()
+  /** The export of the sessions asked for lately, by the id Hermes gave: what Hermes printed, and when. */
+  private readonly conversations = new Map<string, { at: number; running?: Promise<unknown | null>; session: unknown | null }>()
   private loaded?: Promise<void>
 
   constructor(private readonly options: HermesOptions) {}
@@ -542,6 +582,31 @@ export class HermesBackend implements Backend {
       found.push({ id: task.id as string, runner: 'hermes', title: task.title || 'Hermes task', folder: task.folder, state: task.state, updatedAt: Date.now(), job: task.job, ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}) })
     }
     return found.sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  /**
+   * A session's conversation as Hermes keeps it, for the Web view: what was asked, what Hermes said, the commands it ran and the
+   * files it changed. Hermes is asked with `sessions export`, which starts a Python program and takes a second or two, so a session
+   * is asked for again only after a while. Null when Hermes has no such session or the export cannot be read.
+   */
+  async history(id: string, all: boolean): Promise<TaskHistory | null> {
+    await this.ready()
+    // A session Togle started has the name it was started with as its id here; Hermes knows it by its own.
+    const real = this.names.get(id) ?? [...this.tasks].find((task) => task.id === id)?.real ?? id
+    if (!SESSION_WORD.test(real)) return null
+    const held = this.conversations.get(real)
+    if (held && (held.running || Date.now() - held.at < (this.options.historyMs ?? 8_000))) return held.running ? held.running.then((session) => (session ? hermesHistory(session, all) : null)) : held.session ? hermesHistory(held.session, all) : null
+    const command = await this.command()
+    const running = exported(command, this.options.env ?? process.env, real)
+    const entry: { at: number; running?: Promise<unknown | null>; session: unknown | null } = { at: Date.now(), running, session: null }
+    this.conversations.set(real, entry)
+    const session = await running
+    entry.running = undefined
+    entry.session = session
+    entry.at = Date.now()
+    // Only a few are kept: a session is big.
+    while (this.conversations.size > 4) this.conversations.delete(this.conversations.keys().next().value as string)
+    return session ? hermesHistory(session, all) : null
   }
 
   /** Finds the id Hermes gave a session Togle started, by the name it was started with, and gives it the name of the person's words. */

@@ -242,6 +242,16 @@ export interface TaskDetail {
   log: LogEntry[]
 }
 
+/**
+ * A task's conversation as its agent keeps it, for the Web view: the last turns of it, oldest first. It holds what was said
+ * before Togle opened the task too, which the live `log` of a task does not.
+ */
+export interface TaskHistory {
+  entries: LogEntry[]
+  /** Whether turns before these were left out: the rest can be asked for. */
+  more: boolean
+}
+
 /** A command an agent has for a task ("/model"), in the agent's own words: Togle only lists what the agent tells it. */
 export interface AgentCommand {
   /** Without the slash: "model". */

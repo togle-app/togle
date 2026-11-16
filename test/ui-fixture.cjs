@@ -261,10 +261,14 @@ module.exports = function install(fixture) {
     task('claude:s2', { title: 'Rebuild the pricing page', folder: 'C:\\work\\website', state: 'working', mine: true, line: 'Running npm test',
       log: [{ id: 7, at: 7, kind: 'you', text: 'Rebuild the pricing page with two plans.' }, { id: 8, at: 8, kind: 'agent', text: '**Two plans** it is. I will start with the table.' }, { id: 9, at: 9, kind: 'command', text: 'npm test', status: 'running' }] }),
     task('claude:s4', { title: 'Write the release notes', folder: 'C:\\work\\notes', state: 'working', pid: 4242, line: 'Working in its own window' }),
-    task('claude:s3', { title: 'Fix the login redirect', folder: 'C:\\work\\website', updatedAt: Date.now() - 5 * hour }),
+    // A task Togle does not run, with its conversation as its agent keeps it: the last turns, and the turns before (`older`).
+    task('claude:s3', { title: 'Fix the login redirect', folder: 'C:\\work\\website', updatedAt: Date.now() - 5 * hour, history: {
+      older: [{ id: 21, at: 21, kind: 'you', text: 'Where does the login redirect go wrong?' }, { id: 22, at: 22, kind: 'agent', text: 'It drops the `next` parameter.' }],
+      entries: [{ id: 23, at: 23, kind: 'you', text: 'Fix it, and keep the tests green.' }, { id: 24, at: 24, kind: 'agent', text: 'I will change `redirect.ts`.' }, { id: 25, at: 25, kind: 'command', text: 'npm test', status: 'failed' }, { id: 26, at: 26, kind: 'files', text: 'Changed 1 file: src/redirect.ts', paths: ['src/redirect.ts'] }, { id: 27, at: 27, kind: 'command', text: 'npm test', status: 'finished' }, { id: 28, at: 28, kind: 'agent', text: 'Fixed: the redirect keeps `next`. Tests pass.' }]
+    } }),
     task('codex:t9', { title: 'Port the settings screen', folder: 'C:\\work\\mobile-app', updatedAt: Date.now() - 72 * hour })
   ]
-  const runnerView = ({ log, ...view }) => view
+  const runnerView = ({ log, history, ...view }) => view
   const runnerFind = key => { const found = runnerTasks.find(item => item.key === key); if (!found) throw new Error('That task is gone.'); return found }
   const runnerRank = item => item.state === 'waiting' ? 0 : item.state === 'working' ? 1 : 2
   const runnerChanged = () => emit('onRunnersChanged')
@@ -310,6 +314,13 @@ module.exports = function install(fixture) {
   }
   api.runnerTasks = async () => clone(runnerTasks.map(runnerView)).sort((a, b) => runnerRank(a) - runnerRank(b) || b.updatedAt - a.updatedAt)
   api.runnerDetail = async key => { const found = runnerFind(key); return clone({ task: runnerView(found), log: found.log }) }
+  // A conversation as its agent keeps it: a task given `history` has it (its last turns, and with `all` the older ones too); any other has none to read.
+  api.runnerHistory = async (key, all) => {
+    record('runnerHistory', [key, all === true])
+    const found = runnerFind(key)
+    if (!found.history) return null
+    return clone({ entries: all && found.history.older ? [...found.history.older, ...found.history.entries] : found.history.entries, more: !!found.history.older && all !== true })
+  }
   let failTask = false
   api.startRunnerTask = async request => {
     record('startRunnerTask', [request])
@@ -444,6 +455,12 @@ module.exports = function install(fixture) {
   contextBridge.exposeInMainWorld('togleDev', { silentAudio: !['audio', 'start-failure'].includes(fixture.scenario), ...(fixture.scenario === 'noisy-call' ? { noiseReport } : {}) })
   contextBridge.exposeInMainWorld('togleUITest', {
     // A session that runs in a terminal asks about a command and the question is held here: it waits, and can be answered.
+    // An agent answers a question put to it on a call: the question as it was sent (with where the call is saved), and its words after.
+    answerOnCall: (key, question, answer) => {
+      const found = runnerFind(key)
+      found.history = { entries: [{ id: 400 + ++sequence, at: Date.now(), kind: 'you', text: question + '\n\nA call is saved at "C:\\calls\\live.md".' }, { id: 400 + ++sequence, at: Date.now(), kind: 'agent', text: answer }] }
+      found.state = 'idle'; runnerChanged()
+    },
     askOutside: (key, request) => { const found = runnerFind(key); found.pending = [clone(request)]; found.state = 'waiting'; found.line = 'Wants to run ' + (request.command ?? ''); runnerChanged() },
     // A task of an agent without ACP, in a terminal of Togle's own that has printed `printed` so far.
     terminalTask: (props, printed) => { const added = task(props.key, { mine: true, state: 'working', terminal: true, line: 'Working…', ...props }); runnerTasks.push(added); terminals.set(added.key, { text: printed, end: printed.length }); runnerChanged() },

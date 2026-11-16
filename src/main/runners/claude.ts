@@ -15,8 +15,8 @@ import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { TaskInfo } from '@shared/runner'
-import { claudeHasSession, claudeLastSaid, claudeSessions } from './claude-sessions'
+import type { TaskHistory, TaskInfo } from '@shared/runner'
+import { claudeConversation, claudeHasSession, claudeLastSaid, claudeSessions } from './claude-sessions'
 import { HookServer, type HookTarget } from './claude-hooks'
 import { ClaudeJob, claudeEnv, isJob, rowOf, stateOfJob, type AgentRow, type JobContext, type JobRow } from './claude-job'
 import { oneLine } from './claude-requests'
@@ -49,6 +49,8 @@ export interface ClaudeOptions {
   keep?: string
   /** What a session said last: read from its file when left out. */
   said?: (session: string) => Promise<string>
+  /** A session's conversation, for the Web view: read from its file when left out. */
+  conversation?: (session: string, all: boolean) => Promise<TaskHistory | null>
   /** How often the sessions are looked at, in milliseconds: while one works, waits or is shown, and otherwise. */
   every?: { busy: number; idle: number }
 }
@@ -311,6 +313,11 @@ export class ClaudeBackend implements Backend {
     // A session that has had no message has no conversation to open: it was left as it is, and can be used where it is.
     const kept = this.options.stored ? (await this.options.stored().catch(() => [])).some((session) => session.id === id) : await claudeHasSession(id)
     return kept ? undefined : 'This Claude Code has not had a message yet, so there is no conversation to open here. It was left as it is.'
+  }
+
+  /** A session's conversation as its file keeps it: what the Web view shows, also of what was said before Togle opened it. */
+  history(id: string, all: boolean): Promise<TaskHistory | null> {
+    return (this.options.conversation ?? claudeConversation)(id, all)
   }
 
   /** A session that is not in the background yet goes there, as the same session. */

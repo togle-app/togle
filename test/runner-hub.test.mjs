@@ -1256,3 +1256,33 @@ test('an open task says what it did in one line: steps, commands run, files chan
   assert.equal(T.stepsLine(log), '5 steps: edited 3 files, ran 2 commands, 1 refused')
   assert.equal(T.stepsLine([entry('command', { status: 'running' })]), '1 step: ran 1 command')
 })
+
+test('a task’s conversation is asked of its agent by the session the task is in now, and an agent that keeps none gives null', async () => {
+  const asked = []
+  const claude = new FakeBackend('claude', { screens: true, tasks: [info('claude', 'a', 'Fix the login redirect', 'idle', 300), info('claude', 'b', 'Port the API', 'idle', 200)] })
+  claude.history = async (id, all) => {
+    asked.push([id, all])
+    return id === 'gone' ? null : { entries: [{ id: 1, at: 1, kind: 'you', text: `asked in ${id}` }], more: all === false }
+  }
+  const codex = new FakeBackend('codex', { tasks: [info('codex', 'c', 'Write the release notes', 'idle', 100)] })
+  const { hub } = hubOf([claude, codex])
+  try {
+    // A task listed from the agent's own files is read by its own id.
+    assert.deepEqual((await hub.history('claude:b', false)).entries.map((e) => e.text), ['asked in b'])
+    assert.equal((await hub.history('claude:b', false)).more, true)
+    assert.equal((await hub.history('claude:b', true)).more, false)
+    // A task Togle runs is read by the session it is in now: a cleared conversation is another one.
+    const view = await hub.open('claude:a')
+    const owned = claude.resumed.find((task) => task.id === 'a')
+    owned.sessionNow = 'a-after-clear'
+    assert.deepEqual((await hub.history(view.key, false)).entries.map((e) => e.text), ['asked in a-after-clear'])
+    assert.deepEqual(asked.at(-1), ['a-after-clear', false])
+    // An agent that keeps no conversation to read, a task that is gone, and a failing read: nothing, not an error.
+    assert.equal(await hub.history('codex:c', false), null)
+    assert.equal(await hub.history('claude:nothing', false), null)
+    claude.history = async () => { throw new Error('the file is locked') }
+    assert.equal(await hub.history('claude:b', false), null)
+  } finally {
+    await hub.dispose()
+  }
+})

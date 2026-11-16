@@ -18,8 +18,9 @@
 import { execFile, spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { AgentQuestion, TaskInfo, TaskState } from '@shared/runner'
+import type { AgentQuestion, TaskHistory, TaskInfo, TaskState } from '@shared/runner'
 import { daemonPid, daemonState, startDaemon } from './codex-daemon'
+import { codexEntries, turnsOf } from './codex-history'
 import { WsRpcPeer } from './codex-link'
 import { type Id, JsonRpcPeer, NO_ANSWER, type PeerHandlers, RpcError, type RpcPeer, list, rec, text } from './jsonrpc'
 import { keepJson } from './keep'
@@ -48,6 +49,10 @@ const NATIVE: Record<string, { pkg: string; triple: string }> = {
   'win32-x64': { pkg: 'codex-win32-x64', triple: 'x86_64-pc-windows-msvc' },
   'win32-arm64': { pkg: 'codex-win32-arm64', triple: 'aarch64-pc-windows-msvc' }
 }
+
+// The newest turns shown with every step; and how many pages of a hundred older ones "show earlier" brings.
+const RECENT_TURNS = 10
+const OLDER_PAGES = 3
 
 const run = (file: string, args: string[]): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -762,6 +767,34 @@ export class CodexBackend implements Backend {
       rows.unshift({ id: task.id, runner: 'codex', title: task.title || 'Codex task', folder: task.folder, state: task.state, updatedAt: Date.now(), ...(server.shared ? { job: task.id } : {}) })
     }
     return rows
+  }
+
+  /**
+   * What Codex kept of a thread's conversation: its newest turns with every step, and with `all` the older ones too, with what
+   * was asked and answered (the whole thread in one call can be tens of megabytes). Null when the server has no such thread yet.
+   */
+  async history(id: string, all: boolean): Promise<TaskHistory | null> {
+    const server = await this.listing()
+    const ask = (params: Record<string, unknown>): Promise<unknown> => server.peer.request('thread/turns/list', { threadId: id, sortDirection: 'desc', ...params }, 15_000)
+    let recent: { turns: unknown[]; next: string | null }
+    try {
+      recent = turnsOf(await ask({ limit: RECENT_TURNS, itemsView: 'full' }))
+    } catch {
+      return null
+    }
+    let entries = codexEntries([...recent.turns].reverse())
+    let next = recent.next
+    if (all) {
+      const older: unknown[][] = []
+      for (let pages = 0; next && pages < OLDER_PAGES; pages++) {
+        const page = turnsOf(await ask({ limit: 100, itemsView: 'summary', cursor: next }).catch(() => ({})))
+        older.unshift([...page.turns].reverse())
+        next = page.next
+        if (!page.turns.length) break
+      }
+      entries = [...codexEntries(older.flat()), ...entries]
+    }
+    return { entries, more: !!next }
   }
 
   // ---- Starting and opening ----

@@ -172,6 +172,8 @@ function core() {
   async function runTurn(thread, turn, prompt) {
     setStatus(thread, 'active', [])
     toSubscribers(thread, 'turn/started', { threadId: thread.id, turn: { id: turn.id, status: 'inProgress', items: [] } })
+    // What was asked is the turn's first item, as Codex keeps it.
+    thread.turns.at(-1)?.items.push({ id: `um${turn.id}`, type: 'userMessage', content: [{ type: 'text', text: prompt, text_elements: [] }] })
     const finish = (status) => {
       thread.turn = null
       setStatus(thread, 'idle')
@@ -300,6 +302,20 @@ function core() {
       case 'thread/read': {
         const thread = threads.get(params.threadId)
         return thread ? reply({ thread: info(thread, params.includeTurns === true) }) : fail('no such thread')
+      }
+      case 'thread/turns/list': {
+        // Newest first, a page at a time; a "summary" turn has only what was asked and the last thing said.
+        const thread = threads.get(params.threadId)
+        if (!thread) return fail('no such thread')
+        const turns = [...(thread.turns ?? [])].reverse()
+        const from = params.cursor ? Number(params.cursor) : 0
+        const limit = Math.min(Number(params.limit) || 25, 100)
+        const data = turns.slice(from, from + limit).map((turn) => {
+          if (params.itemsView === 'summary') return { ...turn, itemsView: 'summary', items: [turn.items.find((item) => item.type === 'userMessage'), [...turn.items].reverse().find((item) => item.type === 'agentMessage')].filter(Boolean) }
+          if (params.itemsView === 'notLoaded') return { ...turn, itemsView: 'notLoaded', items: [] }
+          return { ...turn, itemsView: 'full' }
+        })
+        return reply({ data, nextCursor: from + limit < turns.length ? String(from + limit) : null, backwardsCursor: 'back' })
       }
       case 'thread/unsubscribe': {
         const thread = threads.get(params.threadId)

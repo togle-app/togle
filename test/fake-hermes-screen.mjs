@@ -66,6 +66,18 @@ function sessions() {
     for (const row of shown) console.log(`${pad(row.title.slice(0, 26), 29)}${pad(row.workspace || '—', 19)}${pad(ago(row.updatedAt), 14)}${row.id}`)
     return
   }
+  if (argv[1] === 'export') {
+    // `export - --session-id <id>`: one line of JSON for the session, with the messages a test wrote on its row. An error is said on
+    // stdout, as Hermes does, with exit 1.
+    const id = valueOf('--session-id')
+    const row = rows.find((candidate) => candidate.id === id)
+    if (!row) {
+      console.log(`Error: Session '${id}' not found.`)
+      process.exit(1)
+    }
+    console.log(JSON.stringify({ id: row.id, source: row.source ?? 'local', message_count: (row.messages ?? []).length, system_prompt: 'x'.repeat(2000), messages: row.messages ?? [] }))
+    return
+  }
   if (argv[1] === 'rename') {
     const row = rows.find((candidate) => candidate.id === argv[2])
     if (!row) return fail(`no session ${argv[2]}`)

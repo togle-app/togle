@@ -68,7 +68,7 @@ const oneLine = (text: string): string => cleanWords(text).replace(/\s*[\r\n]+\s
  * ask things there, on a screen the person does not see. Says so, in words, for the person to read.
  */
 export function refuseCommand(text: string): void {
-  if (/^[/!]/.test(oneLine(text))) throw new Error('A command is typed on the agent’s screen. Pick Session, and type it there.')
+  if (/^[/!]/.test(oneLine(text))) throw new Error('A command is typed on the agent’s screen. Pick Terminal, and type it there.')
 }
 
 /**
