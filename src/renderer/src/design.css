@@ -327,7 +327,11 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-banner.task-words { color: var(--ink); }
 .task-banner.task-words q { color: var(--ink); font-style: italic; overflow-wrap: anywhere; }
 .task-banner code { padding: 0; background: none; color: var(--ink); font: 12px var(--font-mono); }
-.task-terminal { display: flex; flex-direction: column; flex: 1; gap: 8px; min-height: 0; }
+.task-terminal { position: relative; display: flex; flex-direction: column; flex: 1; gap: 8px; min-height: 0; }
+/* Over the top of the agent's screen, so that the screen keeps its size and its prompt stays in view: what Togle kept off it, and what to do instead. */
+.terminal-note { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--wait); border-radius: 10px; background: var(--wait-soft); color: var(--ink); font-size: 12px; box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.6); }
+.terminal-note b { font-weight: 600; }
+.terminal-note button { flex: none; margin: 0; padding: 0 6px; }
 .terminal-view { flex: 1; min-height: 220px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
 .terminal-view .xterm { height: 100%; }
 .no-agents { display: flex; flex-direction: column; gap: 12px; padding: 2px 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }

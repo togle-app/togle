@@ -1,9 +1,19 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import { caughtOnEnter, CLEAR_LINE, noteFor, TypedLine } from '@shared/screen-guard'
 
 const api = window.togle
+
+/** How long the note about a kept command stays, in milliseconds, unless it is put away. */
+const NOTE_MS = 15_000
+
+/** The rows of the screen as it is drawn now, as text. */
+const visibleRows = (term: Terminal): string[] => {
+  const buffer = term.buffer.active
+  return Array.from({ length: term.rows }, (_, i) => buffer.getLine(buffer.viewportY + i)?.translateToString(true) ?? '')
+}
 
 // The terminals shown here before: what they printed then had its questions to the terminal answered.
 const shownBefore = new Set<string>()
@@ -12,9 +22,20 @@ const shownBefore = new Set<string>()
  * The terminal a task runs in, inside Togle: what the agent prints, and the person's keys sent to it, as in any terminal.
  * It starts from what was printed so far, then follows; a part it already has is not written twice. A task that opens a
  * new screen each time (one in the background) names it with `screenId`: what another screen prints is not taken.
+ *
+ * `guard` names the agent whose own screen this is (Claude Code, Codex, Hermes): /resume and /exit are not run on it. When Enter is
+ * pressed with one of them on the line (see screen-guard.ts), Enter is not sent, the line is emptied, and a note says what to do.
  */
-export function TerminalView({ taskKey, screenId }: { taskKey: string; screenId?: string }) {
+export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; screenId?: string; guard?: string }) {
   const host = useRef<HTMLDivElement>(null)
+  const [note, setNote] = useState<{ title: string; body: string } | null>(null)
+  useEffect(() => {
+    if (!note) return
+    const timer = setTimeout(() => setNote(null), NOTE_MS)
+    return () => clearTimeout(timer)
+  }, [note])
+  // Another screen starts with no note.
+  useEffect(() => setNote(null), [taskKey, screenId])
   useEffect(() => {
     const element = host.current
     if (!element) return
@@ -61,8 +82,22 @@ export function TerminalView({ taskKey, screenId }: { taskKey: string; screenId?
       },
       () => undefined
     )
+    const line = new TypedLine()
     const typed = term.onData((data) => {
-      if (!replaying) void api.terminalWrite(taskKey, data).catch(() => undefined)
+      if (replaying) return
+      // Enter with /resume or /exit on the line (or highlighted in the agent's command list): not sent. The line is emptied, so
+      // that the next Enter does not send it either, and the note says what to do instead.
+      if (guard && data === '\r') {
+        const caught = caughtOnEnter(guard, visibleRows(term), line.text())
+        if (caught) {
+          line.feed('\x15')
+          setNote(noteFor(caught))
+          void api.terminalWrite(taskKey, CLEAR_LINE).catch(() => undefined)
+          return
+        }
+      }
+      line.feed(data)
+      void api.terminalWrite(taskKey, data).catch(() => undefined)
     })
     const size = (): void => {
       try {
@@ -83,6 +118,20 @@ export function TerminalView({ taskKey, screenId }: { taskKey: string; screenId?
       observer.disconnect()
       term.dispose()
     }
-  }, [taskKey, screenId])
-  return <div className="terminal-view" ref={host} role="group" aria-label="The agent's terminal" />
+  }, [taskKey, screenId, guard])
+  return (
+    <>
+      <div className="terminal-view" ref={host} role="group" aria-label="The agent's terminal" />
+      {note && (
+        <div className="terminal-note" role="status">
+          <span>
+            <b>{note.title}</b> {note.body}
+          </span>
+          <button type="button" className="ghost small" aria-label="Put this note away" onClick={() => setNote(null)}>
+            ×
+          </button>
+        </div>
+      )}
+    </>
+  )
 }

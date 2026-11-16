@@ -93,6 +93,7 @@ export { carriedFlags, isJob, rowOf, stateOfJob, ClaudeJob } from '../src/main/r
 export { claudeConversation, claudeLastSaid } from '../src/main/runners/claude-sessions'
 export { codexEntries, turnsOf } from '../src/main/runners/codex-history'
 export { hermesEntries } from '../src/main/runners/hermes-history'
+export { caughtOnEnter, CLEAR_LINE, commandIn, hasGuard, keptBy, noteFor, readScreen, TypedLine } from '../src/shared/screen-guard'
 export { mergedPath, outputOf, pathFolders, savedPathFolders, shellPath } from '../src/main/runners/search-path'
 export { codeEditorOf, frontEditor, frontProgram, linuxEditorOf, lsappinfoBundle, macEditorOf, xpropActiveWindow, xpropClasses } from '../src/main/front-program'
 export { AcpBackend, commandWords, whereIs } from '../src/main/runners/acp'

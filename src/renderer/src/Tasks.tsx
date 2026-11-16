@@ -754,7 +754,7 @@ function TerminalPanel({ task, onEnd }: { task: TaskView; onEnd: () => void }) {
           </button>
         </div>
       )}
-      <TerminalView taskKey={task.key} screenId={task.screenId} />
+      <TerminalView taskKey={task.key} screenId={task.screenId} guard={task.screen ? task.runner : undefined} />
     </div>
   )
 }

@@ -339,6 +339,67 @@ async function checkTasks(T, agent) {
   await ui.wait("!!document.querySelector('.task-terminal')")
   assert.deepEqual((await ui.calls('openRunnerTask')).map(call => call.args).at(-1), ['claude:s4'], 'opened again: a new screen')
   assert.equal(await ui.evaluate("!!document.querySelector('.handed-back')"), false, 'the line is not shown once it is open here again')
+  // /resume and /exit are kept off an agent's own screen: Enter is not sent, the line is emptied, and a note says what to do instead.
+  // What the agent draws is sent to the window as it would be (a prompt row, and its command list over it); the keys are typed as a person types.
+  {
+    const key = 'claude:s4'
+    let at = 10_000
+    const draw = async (typed, listed) => {
+      const rule = '─'.repeat(60)
+      const data = '\x1b[2J\x1b[H' + (listed ? `  ❯ ${listed.padEnd(30)} Detach from this background session\r\n    /context${' '.repeat(26)}Visualize current context usage\r\n` : '') + `${rule}\r\n❯ ${typed}\r\n${rule}\r\n  ⏵⏵ bypass permissions on\r\n`
+      await ui.evaluate("window.togleUITest.emit('onTerminalData', " + JSON.stringify({ key, at, data }) + ")")
+      at += data.length + 10
+      await ui.paint()
+      await new Promise(resolve => setTimeout(resolve, 250))
+    }
+    const typeKeys = text => ui.evaluate("(() => { const area = document.querySelector('.terminal-view .xterm-helper-textarea'); area.focus(); for (const ch of " + JSON.stringify(text) + ") area.dispatchEvent(new InputEvent('input', { data: ch, inputType: 'insertText', bubbles: true })) })()")
+    const enter = async () => { await ui.evaluate("document.querySelector('.terminal-view .xterm-helper-textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }))"); await new Promise(resolve => setTimeout(resolve, 300)) }
+    const sentSince = async from => (await ui.calls('terminalWrite')).map(call => call.args).filter(args => args[0] === key).map(args => args[1]).slice(from)
+    const sentCount = async () => (await sentSince(0)).length
+    const note = () => ui.evaluate("document.querySelector('.terminal-note')?.textContent ?? ''")
+    const putAway = async () => { if (await ui.evaluate("!!document.querySelector('.terminal-note')")) await ui.click('.terminal-note button', 'Put this note away'); await ui.wait("!document.querySelector('.terminal-note')") }
+    // The whole command, typed and drawn on the screen: caught.
+    await draw('', null)
+    await typeKeys('/exit')
+    await draw('/exit', '/exit')
+    let from = await sentCount()
+    await enter()
+    assert.equal(await ui.evaluate("document.querySelector('.terminal-note b')?.textContent"), '/exit is not run here', 'the note names the command')
+    assert.ok((await note()).includes('Hand back closes the screen, and the task goes on.'), 'and says what to do instead')
+    assert.deepEqual(await sentSince(from), ['\x05\x15'], 'Enter was not sent: the line was emptied instead')
+    await ui.capture('tasks-exit-kept-off')
+    await putAway()
+    // /resume typed before the screen drew it: the keys are enough.
+    await draw('', null)
+    await typeKeys('/resume')
+    from = await sentCount()
+    await enter()
+    assert.equal(await ui.evaluate("document.querySelector('.terminal-note b')?.textContent"), '/resume is not run here')
+    assert.ok((await note()).includes('Continue here'))
+    assert.deepEqual((await sentSince(from)), ['\x05\x15'])
+    await putAway()
+    // Only the start typed, and the agent's list highlights /exit: Enter would run it, so it is caught from the screen alone.
+    await draw('/ex', '/exit')
+    from = await sentCount()
+    await enter()
+    assert.equal(await ui.evaluate("document.querySelector('.terminal-note b')?.textContent"), '/exit is not run here', 'caught by the highlighted item of the list')
+    assert.deepEqual(await sentSince(from), ['\x05\x15'])
+    await putAway()
+    // A command the agent offers that is not kept: Enter goes through, and there is no note.
+    await draw('/context', '/context')
+    await typeKeys('/context')
+    from = await sentCount()
+    await enter()
+    assert.deepEqual(await sentSince(from), ['\r'], 'an ordinary command is sent as it is')
+    assert.equal(await ui.evaluate("!!document.querySelector('.terminal-note')"), false)
+    // A name that only starts like a kept one goes through too.
+    await draw('/exit-codes', '/exit-codes')
+    await typeKeys('/exit-codes')
+    from = await sentCount()
+    await enter()
+    assert.deepEqual(await sentSince(from), ['\r'])
+    assert.equal(await ui.evaluate("!!document.querySelector('.terminal-note')"), false)
+  }
   // Stop on a task that is the agent's own screen: the same button as on any task, and the screen stays.
   await ui.click('.task-actions button', 'Stop')
   await ui.wait("document.querySelector('.state-chip')?.textContent==='Stopped'")
