@@ -4,7 +4,7 @@ import path from 'node:path'
 import { existsSync, readFileSync, promises as fs, watch, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
 import {
-  encodeLinkMessage, LinkLineReader, MICROPHONE_LINK_FILE, MICROPHONE_PRODUCT, MICROPHONE_PROTOCOL, readLinkFile, readLinkState,
+  encodeLinkMessage, LinkLineReader, MICROPHONE_LINK_FILE, MICROPHONE_PRODUCT, readLinkFile, readLinkState,
   type MicrophoneLaunch, type MicrophoneLinkFile, type MicrophoneLinkMethod, type MicrophoneLinkPage, type MicrophoneLinkState
 } from '@shared/microphone-link'
 import { MICROPHONE_SIGN_IN, type MicrophoneSettings, type TogleMicrophoneStatus } from '@shared/microphone'
@@ -25,9 +25,7 @@ export interface MicrophoneLinkOptions {
   client: { name: string; version: string }
   platform?: NodeJS.Platform
   /** Starts a program, detached (tests replace it). */
-  run?: (launch: MicrophoneLaunch) => void
-  /** Opens a togle-studio:// address (tests replace it). */
-  open?: (url: string) => Promise<void>
+  run?: (launch: MicrophoneLaunch) => void | Promise<void>
   /**
    * Togle runs from source: a development build of Togle Studio (Electron from a node_modules folder, given the
    * microphone app's own folder) may be started too. A packaged Togle only starts the installed app's program.
@@ -38,8 +36,6 @@ export interface MicrophoneLinkOptions {
    * watched (that would keep the renamed app from moving the folder), and only to start the renamed app.
    */
   previousFolder?: string
-  /** Whether the system has an app for togle-studio:// addresses (the app registers one when it is installed). */
-  handlesAddress?: () => boolean
   /** The installed program and how to start it, found by asking the computer (see studio-install.ts); none when it is not installed. */
   installed?: () => MicrophoneLaunch | undefined
 }
@@ -75,14 +71,14 @@ export class MicrophoneLink extends EventEmitter {
   }
 
   /**
-   * Installed means Togle can start it: the computer has it installed (the program its installer put there), its link
-   * file names a program Togle starts, or the system has an app for its address. The link file alone says nothing: it
-   * outlives the app (an uninstall, or a copy run from source and then gone) and is missing for an app that never ran.
-   * One Togle cannot start must not read as installed: Open would do nothing, and every call would try to turn it on.
+   * Installed means Togle can start it: the computer has it installed (the program its installer put there), or its link
+   * file names a real Togle Studio program. The link file alone says nothing: it outlives the app (an uninstall, or a
+   * copy run from source and then gone) and is missing for an app that never ran. An address some app registered for
+   * togle-studio:// says nothing either: it can outlive the app too. One Togle cannot start must not read as installed:
+   * Open would do nothing, and every call would try to turn it on.
    */
   private canStart(): boolean {
-    if (this.launchCommand([], true)) return true
-    try { return !!this.options.handlesAddress?.() } catch { return false }
+    return !!this.launchCommand([], true)
   }
 
   start(): void {
@@ -348,6 +344,8 @@ export class MicrophoneLink extends EventEmitter {
       if (!path.isAbsolute(launch.command) || !/\\Togle Studio\.exe$/i.test(launch.command) || !existsSync(launch.command)) return
     } else if (this.platform === 'darwin') {
       if (launch.command !== '/usr/bin/open' || launch.args[0] !== '-b' || launch.args[1] !== 'io.togle.studio') return
+      // `open -b` names no file, so the file cannot say the app is still there: the computer must have it.
+      if (!this.options.installed?.()) return
       if (extra.length && !args.includes('--args')) return { command: launch.command, args: [...args, '--args', ...extra] }
     } else if (!path.isAbsolute(launch.command) || !/togle[- ]?studio/i.test(path.basename(launch.command)) || !existsSync(launch.command)) return
     return { command: launch.command, args: [...args, ...extra] }
@@ -366,15 +364,8 @@ export class MicrophoneLink extends EventEmitter {
 
   private async launch(extra: string[], visible = false): Promise<void> {
     const launch = this.launchCommand(extra, visible)
-    if (launch) {
-      await (this.options.run ?? runDetached)(launch)
-      return
-    }
-    // Not a launch Togle can check: the app's own address starts it instead (it registers it when it runs).
-    const action = extra.includes('--start') ? 'start' : 'open'
-    if (!this.options.open) throw new Error(COULD_NOT_START)
-    try { await this.options.open(`${MICROPHONE_PROTOCOL}://${action}`) }
-    catch { throw new Error(COULD_NOT_START) }
+    if (!launch) throw new Error("Togle Studio isn't installed.")
+    await (this.options.run ?? runDetached)(launch)
   }
 }
 

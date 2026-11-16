@@ -64,7 +64,9 @@ function fakeMicrophone(dir, { token = crypto.randomBytes(32).toString('hex'), e
   }
 }
 
-const link = (dir, options = {}) => new MicrophoneLink({ folder: dir, client: { name: 'togle', version: '0.0.0-test' }, ...options })
+// On a Mac the link file's program is `open -b`, which names no file: the computer must have the app, so these tests say it does.
+const macInstalled = () => ({ command: '/usr/bin/open', args: ['-b', 'io.togle.studio', '--args', '--hidden'] })
+const link = (dir, options = {}) => new MicrophoneLink({ folder: dir, client: { name: 'togle', version: '0.0.0-test' }, ...(process.platform === 'darwin' ? { installed: macInstalled } : {}), ...options })
 const until = async (check, ms = 3000) => { const end = Date.now() + ms; while (Date.now() < end) { if (check()) return; await wait(20) } assert.fail('timed out') }
 
 test('Togle works the same without Togle Studio', async () => {
@@ -170,9 +172,9 @@ test('starts an installed Togle Studio that is not running, only through its own
   const program = process.platform === 'win32' ? path.join(dir, 'Togle Studio.exe') : process.platform === 'darwin' ? '/usr/bin/open' : path.join(dir, 'togle-microphone')
   if (process.platform !== 'darwin') fs.writeFileSync(program, '')
   const args = process.platform === 'darwin' ? ['-b', 'io.togle.studio', '--args', '--hidden'] : ['--hidden']
-  const runs = [], opened = []
+  const runs = []
   fake.writeFile({ launch: { command: program, args } })
-  const microphone = link(dir, { run: launch => { runs.push(launch); void fake.listen().then(() => fake.writeFile({ launch: { command: program, args } })) }, open: async url => { opened.push(url) } })
+  const microphone = link(dir, { run: launch => { runs.push(launch); void fake.listen().then(() => fake.writeFile({ launch: { command: program, args } })) } })
   t.after(async () => { microphone.stop(); await fake.close() })
   assert.deepEqual(await microphone.refresh(), { installed: true, running: false })
   const status = await microphone.turnOn('user')
@@ -181,55 +183,63 @@ test('starts an installed Togle Studio that is not running, only through its own
   assert.equal(runs.length, 1)
   assert.equal(runs[0].command, program)
   assert.deepEqual(runs[0].args, [...args, '--start'])
-  assert.deepEqual(opened, [])
   // Showing its window starts it without --hidden.
   await fake.close()
   await until(() => !microphone.status().running)
-  const shown = link(dir, { run: launch => runs.push(launch), open: async url => { opened.push(url) } })
+  const shown = link(dir, { run: launch => runs.push(launch) })
   await shown.show()
   assert.deepEqual(runs.at(-1).args, args.filter(arg => arg !== '--hidden'))
   shown.stop()
 })
 
-test('a launch that is not Togle Studio is never run: where the system has an app for its address, the address starts it', async () => {
-  const dir = folder(), runs = [], opened = []
+test('a launch that is not Togle Studio is never run, and no address is tried instead', async () => {
+  const dir = folder(), runs = []
   fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Studio', version: '0.1.0', pid: 1, socket: process.platform === 'win32' ? '\\\\.\\pipe\\togle-studio-00000000' : path.join(dir, 'link.sock'), token: 'b'.repeat(64), startedAt: 1,
     launch: { command: process.platform === 'win32' ? 'C:\\Windows\\System32\\cmd.exe' : '/bin/sh', args: ['-c', 'echo'] } }))
-  const microphone = link(dir, { run: launch => runs.push(launch), open: async url => { opened.push(url) }, handlesAddress: () => true })
-  assert.equal((await microphone.refresh()).installed, true)
-  await assert.rejects(microphone.turnOn('user', 300), /didn't start/)
+  const microphone = link(dir, { run: launch => runs.push(launch), installed: () => undefined })
+  assert.deepEqual(await microphone.refresh(), { installed: false, running: false })
+  await assert.rejects(microphone.turnOn('user', 300), /isn't installed/)
   assert.deepEqual(runs, [])
-  assert.deepEqual(opened, ['togle-studio://start'])
   microphone.stop()
 })
 
-test('a link file Togle cannot start from, with no app for its address, is a leftover: not installed, and nothing is tried', async () => {
+test('a link file left by an app that is gone is a leftover: not installed, and nothing is tried', async () => {
   // What is left by an app that was removed, or by a copy that was run from source.
-  const dir = folder(), runs = [], opened = []
+  const dir = folder(), runs = []
   const gone = { command: path.join(dir, 'Gone', 'Togle Studio.exe'), args: ['--hidden'] }
   fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Studio', version: '0.1.0', pid: 1, socket: process.platform === 'win32' ? '\\\\.\\pipe\\togle-studio-00000000' : path.join(dir, 'link.sock'), token: 'e'.repeat(64), startedAt: 1, launch: gone }))
-  const options = { run: launch => runs.push(launch), open: async url => { opened.push(url) } }
-  const microphone = link(dir, { ...options, handlesAddress: () => false })
+  const options = { run: launch => runs.push(launch), installed: () => undefined }
+  const microphone = link(dir, options)
   assert.deepEqual(await microphone.refresh(), { installed: false, running: false })
   assert.deepEqual(await microphone.prepareCall(MICROPHONE_DEFAULTS), { installed: false, running: false }, 'a call leaves it alone')
   await assert.rejects(microphone.show(), /isn't installed/)
   await assert.rejects(microphone.turnOn('user', 300), /isn't installed/)
-  assert.deepEqual([runs, opened], [[], []], 'nothing run, no address opened')
+  assert.deepEqual(runs, [], 'nothing was started')
   microphone.stop()
-  // An app for its address makes it installed after all; one that cannot be asked counts as none.
-  const handled = link(dir, { ...options, handlesAddress: () => true })
-  assert.equal((await handled.refresh()).installed, true)
-  handled.stop()
-  const broken = link(dir, { ...options, handlesAddress: () => { throw new Error('no answer') } })
-  assert.equal((await broken.refresh()).installed, false)
-  broken.stop()
   // The program is put back where the file says: installed again (macOS starts it by its bundle id, not by a path).
   if (process.platform !== 'darwin') {
     fs.mkdirSync(path.dirname(gone.command), { recursive: true }); fs.writeFileSync(gone.command, '')
-    const back = link(dir, { ...options, handlesAddress: () => false })
+    const back = link(dir, options)
     assert.equal((await back.refresh()).installed, true)
     back.stop()
   }
+})
+
+test('on a Mac the link file starts the app by its bundle id only while the computer has the app', async () => {
+  // `open -b` names no file, so a removed app's link file would start nothing and still read as installed.
+  const dir = folder(), runs = []
+  const launch = { command: '/usr/bin/open', args: ['-b', 'io.togle.studio', '--args', '--hidden'] }
+  fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Studio', version: '0.1.0', pid: 1, socket: path.join(dir, 'link.sock'), token: '9'.repeat(64), startedAt: 1, launch }))
+  const removed = link(dir, { platform: 'darwin', run: started => runs.push(started), installed: () => undefined })
+  assert.deepEqual(await removed.refresh(), { installed: false, running: false })
+  await assert.rejects(removed.show(), /isn't installed/)
+  assert.deepEqual(runs, [])
+  removed.stop()
+  const there = link(dir, { platform: 'darwin', run: started => runs.push(started), installed: () => launch })
+  assert.deepEqual(await there.refresh(), { installed: true, running: false })
+  await there.show()
+  assert.deepEqual(runs, [{ command: '/usr/bin/open', args: ['-b', 'io.togle.studio', '--args'] }], 'shown: without --hidden')
+  there.stop()
 })
 
 test('what the computer has installed is what counts: an app that never ran is installed, and one that is gone is not', async () => {
@@ -238,7 +248,7 @@ test('what the computer has installed is what counts: an app that never ran is i
     ? { command: '/usr/bin/open', args: ['-b', 'io.togle.studio', '--args', '--hidden'] }
     : { command: path.join(dir, 'Program Files', 'Togle Studio.exe'), args: ['--hidden'] }
   let installed = program
-  const microphone = link(dir, { run: launch => runs.push(launch), open: async () => { throw new Error('not used') }, installed: () => installed })
+  const microphone = link(dir, { run: launch => runs.push(launch), installed: () => installed })
   // No link file yet, since it never ran: the computer has it, so it is installed, and Open starts it with its window.
   assert.deepEqual(await microphone.refresh(), { installed: true, running: false })
   assert.equal((await microphone.prepareCall({ ...MICROPHONE_DEFAULTS, autoStart: false })).installed, true)
@@ -276,32 +286,28 @@ test('Open says when the program could not be started, and a program that runs o
 })
 
 test("Togle run from source can start Togle Studio's development build, and a packaged Togle can't", async () => {
-  const dir = folder(), runs = [], opened = []
+  const dir = folder(), runs = []
   const electron = path.join(dir, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron')
   const app = path.join(dir, 'app')
   fs.mkdirSync(path.dirname(electron), { recursive: true }); fs.writeFileSync(electron, '')
   fs.mkdirSync(app, { recursive: true }); fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify({ productName: 'Togle Studio' }))
   fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Studio', version: '0.1.0', pid: 1, socket: process.platform === 'win32' ? '\\\\.\\pipe\\togle-studio-00000000' : path.join(dir, 'link.sock'), token: 'c'.repeat(64), startedAt: Date.now(),
     launch: { command: electron, args: [app, '--hidden'] } }))
-  // A source copy is not an installed app for a packaged Togle: with no app for its address, it is not installed, and Open says so.
-  const unhandled = link(dir, { run: launch => runs.push(launch), open: async url => { opened.push(url) } })
-  assert.deepEqual(await unhandled.refresh(), { installed: false, running: false })
-  await assert.rejects(unhandled.show(), /isn't installed/)
-  assert.deepEqual([runs, opened], [[], []])
-  unhandled.stop()
-  const packaged = link(dir, { run: launch => runs.push(launch), open: async url => { opened.push(url) }, handlesAddress: () => true })
-  await packaged.show()
-  assert.deepEqual(runs, [], 'a packaged Togle never runs Electron from a link file')
-  assert.deepEqual(opened, ['togle-studio://open'])
+  // A source copy is not an installed app for a packaged Togle: it is not installed, Open says so, and Electron is never run from a link file.
+  const packaged = link(dir, { run: launch => runs.push(launch), installed: () => undefined })
+  assert.deepEqual(await packaged.refresh(), { installed: false, running: false })
+  await assert.rejects(packaged.show(), /isn't installed/)
+  assert.deepEqual(runs, [])
   packaged.stop()
-  const source = link(dir, { development: true, run: launch => runs.push(launch), open: async url => { opened.push(url) } })
+  const source = link(dir, { development: true, run: launch => runs.push(launch) })
+  assert.equal((await source.refresh()).installed, true)
   await source.show()
   assert.deepEqual(runs, [{ command: electron, args: [app] }], 'shown, without --hidden')
   source.stop()
   // Not the microphone app's folder: nothing runs.
   fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify({ productName: 'Something else' }))
-  const other = link(dir, { development: true, run: launch => runs.push(launch), open: async () => { throw new Error('No app for this address') }, handlesAddress: () => true })
-  await assert.rejects(other.show(), /couldn't start Togle Studio/)
+  const other = link(dir, { development: true, run: launch => runs.push(launch), installed: () => undefined })
+  await assert.rejects(other.show(), /isn't installed/)
   assert.equal(runs.length, 1)
   other.stop()
 })
@@ -314,7 +320,7 @@ test('the old Togle Microphone link file can still start the renamed app from so
   fs.mkdirSync(app, { recursive: true }); fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify({ productName: 'Togle Studio' }))
   const old = { api: 1, product: 'Togle Microphone', version: '0.1.0', pid: 1, socket: process.platform === 'win32' ? '\\.\pipe\togle-microphone-00000000' : path.join(previous, 'link.sock'), token: 'd'.repeat(64), startedAt: Date.now(), launch: { command: electron, args: [app, '--hidden'] } }
   fs.writeFileSync(path.join(previous, 'link.json'), JSON.stringify(old))
-  const microphone = link(dir, { development: true, previousFolder: previous, run: launch => runs.push(launch), open: async () => { throw new Error('No app for this address') } })
+  const microphone = link(dir, { development: true, previousFolder: previous, run: launch => runs.push(launch) })
   assert.deepEqual(await microphone.refresh(), { installed: true, running: false }, 'found through its old link file, but not talked to')
   await microphone.show()
   assert.deepEqual(runs, [{ command: electron, args: [app] }])
