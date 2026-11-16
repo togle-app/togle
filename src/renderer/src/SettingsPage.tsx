@@ -328,31 +328,22 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
 }
 
 /**
- * The name an agent is shown by, how it runs (it speaks ACP, or it runs in a terminal of Togle's own), and the command
- * that starts it, as its own docs give it.
+ * The name an agent is shown by and the command that starts it, as its own docs give it, and nothing else: a command for ACP
+ * is talked to directly and any other runs in a terminal of Togle's own (the main process tells which).
  */
 function AddAgent({ onAdded, onCancel }: { onAdded: (agents: RunnerStatus[]) => void; onCancel: () => void }) {
   const [name, setName] = useState('')
   const [command, setCommand] = useState('')
-  const [how, setHow] = useState<'acp' | 'terminal'>('acp')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   return (
     <form className="setting-detail add-agent" aria-label="Add an agent" onSubmit={(event) => {
       event.preventDefault()
       setBusy(true); setError('')
-      void api.addCodingAgent(name, command, how).then(onAdded, (failure) => setError(errorText(failure))).finally(() => setBusy(false))
+      void api.addCodingAgent(name, command).then(onAdded, (failure) => setError(errorText(failure))).finally(() => setBusy(false))
     }}>
       <Row stacked name="Name"><input aria-label="Agent name" required maxLength={40} autoFocus value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></Row>
-      <Row stacked name="How it runs">
-        <div className="segmented" role="radiogroup" aria-label="How it runs">
-          <button type="button" role="radio" aria-checked={how === 'acp'} className={how === 'acp' ? 'on' : ''} disabled={busy} onClick={() => setHow('acp')}>It speaks ACP</button>
-          <button type="button" role="radio" aria-checked={how === 'terminal'} className={how === 'terminal' ? 'on' : ''} disabled={busy} onClick={() => setHow('terminal')}>In a terminal</button>
-        </div>
-      </Row>
-      <Row stacked name="Command" note={how === 'acp'
-        ? 'The command that starts it for ACP, as its own docs give it. Togle runs it on this computer, the way a terminal would.'
-        : "The command that starts it in a terminal. Togle runs it in a terminal of its own, in the task's folder, where you see it and answer it. Put {task} where the task's words go, as in: cursor-agent {task}. Without {task}, you type them in."}>
+      <Row stacked name="Command" note="Togle runs it in a terminal of its own, where you see it and answer it. {task} stands for the task's words. A command for ACP, such as gemini --experimental-acp, is talked to directly, and Togle shows its conversation.">
         <input aria-label="Command" required maxLength={500} spellCheck={false} value={command} disabled={busy} onChange={(event) => setCommand(event.target.value)} />
       </Row>
       <div className="row">

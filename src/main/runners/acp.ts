@@ -11,7 +11,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { AgentCommand, AgentModel, PendingRequest, TaskInfo, TaskOffers } from '@shared/runner'
+import { TASK_WORDS, type AgentCommand, type AgentModel, type PendingRequest, type TaskInfo, type TaskOffers } from '@shared/runner'
 import { type Id, JsonRpcPeer, RpcError, list, rec, text } from './jsonrpc'
 import { TaskBase } from './task-base'
 import type { Backend, Detected, ResumeOptions, StartOptions, TaskHandle } from './types'
@@ -58,6 +58,19 @@ export function commandWords(line: string): string[] {
   }
   if (word || any) words.push(word)
   return words
+}
+
+/**
+ * Whether an added agent's command is for ACP: it names ACP the way an agent that speaks it has to be asked to ("gemini
+ * --experimental-acp", "goose acp", "npx @zed-industries/codex-acp"). Any other command runs in a terminal of Togle's own,
+ * and so does one with {task} in it, which only a terminal agent takes. A folder's name does not count, only the program's
+ * own name and what follows it. Nothing is started to find out: a program that is not an agent could take what is sent it
+ * for a request of its own.
+ */
+export function commandIsAcp(line: string): boolean {
+  if (line.includes(TASK_WORDS)) return false
+  const [program = '', ...rest] = commandWords(line)
+  return [program.split(/[\\/]/).pop() ?? '', ...rest].some((word) => word.toLowerCase().split(/[^a-z]+/).includes('acp'))
 }
 
 /**

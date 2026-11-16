@@ -283,7 +283,8 @@ module.exports = function install(fixture) {
   const removedKnown = new Set()
   const knownAgents = () => (['tasks', 'confirm-names'].includes(fixture.scenario) ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []).map(agent => removedKnown.has(agent.runner) ? { runner: agent.runner, name: agent.name, installed: false, removed: true } : agent)
   api.runnerStatus = async () => [...knownAgents(), ...clone(addedAgents)]
-  api.addCodingAgent = async (name, command, how) => { record('addCodingAgent', [name, command, how]); addedAgents.push({ runner: (how === 'terminal' ? 'term-' : 'acp-') + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, installed: true, added: true }); return api.runnerStatus() }
+  // The main process tells how it runs from the command: one for ACP is talked to, any other runs in a terminal (here: with acp in it, and no {task}).
+  api.addCodingAgent = async (name, command) => { record('addCodingAgent', [name, command]); const acp = !command.includes('{task}') && /(^|[^a-z])acp([^a-z]|$)/i.test(command); addedAgents.push({ runner: (acp ? 'acp-' : 'term-') + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, installed: true, added: true }); return api.runnerStatus() }
   api.removeCodingAgent = async id => { record('removeCodingAgent', [id]); if (['claude', 'codex', 'hermes'].includes(id)) removedKnown.add(id); else addedAgents.splice(addedAgents.findIndex(agent => agent.runner === id), 1); return api.runnerStatus() }
   api.restoreCodingAgent = async id => { record('restoreCodingAgent', [id]); removedKnown.delete(id); return api.runnerStatus() }
   // Reach (Togle Studio), when a check asks for it: this computer, a MacBook and a server whose task waits on a command.

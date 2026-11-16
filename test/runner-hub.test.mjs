@@ -523,6 +523,11 @@ test('what an agent ending with an error means it is signed out is told from its
   assert.deepEqual(T.SIGN_IN_COMMANDS, { claude: 'claude auth login', codex: 'codex login', hermes: 'hermes model' })
 })
 
+test('a command is for ACP when it asks for ACP, and any other runs in a terminal; nothing is started to find out', () => {
+  for (const command of ['gemini --experimental-acp', 'goose acp', 'npx @zed-industries/codex-acp', 'node C:\\tools\\agent.js --acp', '"C:\\Program Files\\Agent\\agent.exe" --acp', 'qwen --ACP']) assert.equal(T.commandIsAcp(command), true, command)
+  for (const command of ['aider', 'aider --message {task}', 'cursor-agent {task}', 'gemini --acp {task}', 'C:\\acp\\aider.exe', 'capacity --run', 'my-acpx --serve', '"C:\\Program Files\\acp tools\\agent.exe" --model fast']) assert.equal(T.commandIsAcp(command), false, command)
+})
+
 test('an agent added to run in a terminal gets a term- id, and settings keep it apart from one that speaks ACP', () => {
   assert.equal(T.agentIdOf('Aider', true), 'term-aider')
   assert.equal(T.agentIdOf('Gemini CLI'), 'acp-gemini-cli')
@@ -1178,8 +1183,14 @@ test('agents the person adds are checked, saved, worked with, and removed', asyn
     status = await handlers.get('runners:add-agent')('Gemini CLI', 'gemini --experimental-acp')
     assert.deepEqual(saved.map((agent) => agent.id), ['acp-goose', 'acp-gemini-cli'])
     assert.ok(status.some((agent) => agent.runner === 'acp-gemini-cli' && agent.name === 'Gemini CLI' && agent.added))
-    await handlers.get('runners:add-agent')('Gemini CLI', 'gemini --other')
+    await handlers.get('runners:add-agent')('Gemini CLI', 'gemini --acp')
     assert.equal(saved.at(-1).id, 'acp-gemini-cli-2', 'the same name twice gets its own id')
+    // Nothing is asked about how it runs: a command that is not for ACP runs in a terminal of Togle's own, with or without {task}.
+    status = await handlers.get('runners:add-agent')('Aider', 'aider --message {task}')
+    assert.equal(saved.at(-1).id, 'term-aider')
+    await handlers.get('runners:add-agent')('Cursor', 'cursor-agent')
+    assert.equal(saved.at(-1).id, 'term-cursor')
+    assert.ok(status.some((agent) => agent.runner === 'term-aider' && agent.added))
     await assert.rejects(handlers.get('runners:add-agent')('codex', 'codex app-server'), /Togle finds codex by itself/)
     await assert.rejects(handlers.get('runners:add-agent')('Tricky', 'agent\n--acp'), /one line/)
     await assert.rejects(handlers.get('runners:add-agent')('', 'agent'), /Give the agent a name/)
@@ -1187,7 +1198,7 @@ test('agents the person adds are checked, saved, worked with, and removed', asyn
     assert.throws(() => handlers.get('runners:start')({ runner: 'acp-nope', folder: 'x', prompt: 'y' }), /Pick an agent/)
     await assert.rejects(handlers.get('runners:remove-agent')('acp-nope'), /not on Togle’s lists/)
     status = await handlers.get('runners:remove-agent')('acp-goose')
-    assert.deepEqual(saved.map((agent) => agent.id), ['acp-gemini-cli', 'acp-gemini-cli-2'])
+    assert.deepEqual(saved.map((agent) => agent.id), ['acp-gemini-cli', 'acp-gemini-cli-2', 'term-aider', 'term-cursor'])
     assert.ok(!status.some((agent) => agent.runner === 'acp-goose'))
     assert.equal(hub.has('acp-goose'), false)
   } finally {

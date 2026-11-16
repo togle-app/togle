@@ -3,7 +3,7 @@
 import path from 'node:path'
 import { addedAgentProblem, agentIdOf, KNOWN_AGENTS, runsInTerminal, type AddedAgent, type RunnerKind, type RunnerStatus, type StartRequest, type TaskView } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
-import { AcpBackend, commandWords, whereIs } from './acp'
+import { AcpBackend, commandIsAcp, commandWords, whereIs } from './acp'
 import { ClaudeBackend } from './claude'
 import { CodexBackend } from './codex'
 import { HermesBackend } from './hermes'
@@ -143,15 +143,15 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     hub.terminalResize(word(key, 'The task'), size(cols), size(rows))
   })
   handle('runners:terminal-words', (key) => hub.typeWords(word(key, 'The task')))
-  // Settings → Agents → Add an agent: one that speaks ACP, or any other, which runs in a terminal of Togle's own; by its
-  // name and the command that starts it.
-  handle('runners:add-agent', async (name, command, how) => {
+  // Settings → Agents → Add an agent, by its name and the command that starts it. A command for ACP is talked to directly;
+  // any other runs in a terminal of Togle's own (commandIsAcp says which).
+  handle('runners:add-agent', async (name, command) => {
     const problem = addedAgentProblem(name, command)
     if (problem) throw new Error(problem)
     const given = (name as string).trim()
     if (Object.values(KNOWN_AGENTS).some((known) => known.toLowerCase() === given.toLowerCase())) throw new Error(`Togle finds ${given} by itself.`)
     const added = deps.added?.() ?? []
-    const base = agentIdOf(given, how === 'terminal')
+    const base = agentIdOf(given, !commandIsAcp((command as string).trim()))
     let id = base
     for (let n = 2; hub.has(id) || added.some((agent) => agent.id === id); n++) id = `${base}-${n}`
     const agent: AddedAgent = { id, name: given, command: (command as string).trim() }

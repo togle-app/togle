@@ -164,10 +164,10 @@ export interface TogleApi {
   /** The coding agents on this PC (Codex, Claude Code), and whether each is installed. */
   runnerStatus(): Promise<RunnerStatus[]>
   /**
-   * Adds an agent by its name and the command that starts it: one that speaks ACP, or (`terminal`) any other, which runs
-   * in a terminal of Togle's own. Answers with every agent as it is now.
+   * Adds an agent by its name and the command that starts it. A command for ACP is talked to directly; any other runs in a
+   * terminal of Togle's own. Answers with every agent as it is now.
    */
-  addCodingAgent(name: string, command: string, how?: 'acp' | 'terminal'): Promise<RunnerStatus[]>
+  addCodingAgent(name: string, command: string): Promise<RunnerStatus[]>
   /** A task in a terminal of Togle's own: what it printed so far, and where that ends among all it printed. */
   terminalRead(key: string): Promise<{ text: string; end: number }>
   /** The keys the person types into that terminal. */
