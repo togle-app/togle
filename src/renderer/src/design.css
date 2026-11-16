@@ -503,7 +503,10 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings-one .settings-content { max-width: none; margin: 0; }
 .sets { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 14px 22px; align-items: start; }
 .sets > section { display: flex; flex-direction: column; gap: 4px; margin: 0; min-width: 0; }
-.sets > section:has(.setting-detail) { grid-column: 1 / -1; max-width: var(--read); }
+.sets > section:has(.setting-detail) { grid-column: 1 / -1; }
+/* While a group is open across all the columns, the groups keep the width the design draws them at: on a wide window the
+   open one would stretch across it, and the others would be pressed into as many narrow columns as fit. */
+.sets:has(.setting-detail) { max-width: var(--read); }
 .settings .sets .section-head { margin: 0; }
 .settings .sets .section-head h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
 .settings .sets .card { border: 0; border-radius: 0; background: none; }

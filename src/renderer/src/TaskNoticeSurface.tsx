@@ -38,7 +38,8 @@ export function TaskNoticeSurface() {
   useEffect(() => {
     const shown = card.current
     if (!shown) return
-    const watch = new ResizeObserver(() => api.sizeTaskNotice(Math.ceil(shown.getBoundingClientRect().height) + 24))
+    // Not once the card is gone: taken off the page it has no height, and that is not a height to ask for.
+    const watch = new ResizeObserver(() => { if (shown.isConnected) api.sizeTaskNotice(Math.ceil(shown.getBoundingClientRect().height) + 24) })
     watch.observe(shown)
     return () => watch.disconnect()
   }, [id])

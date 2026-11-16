@@ -5,7 +5,7 @@ import type { TaskBoxOpen } from '@shared/runner'
 const WIDTH = 600
 // As tall as what is in it, within these: the two chips and one line of words; more as the words grow (with a to-do item, a
 // call and an error under them, 310); and while a list of agents or folders is open over it, as far down as the list goes
-// (the longest list is seven folders and Choose…, 346).
+// (the longest list is seven folders and Choose…, 347).
 const LOWEST = 84
 const HEIGHT = 360
 
