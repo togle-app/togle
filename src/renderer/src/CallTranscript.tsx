@@ -24,7 +24,8 @@ export const CallTranscript = memo(function CallTranscript({ record }: { record:
   const clock = useMemo(() => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }), [])
   return <>
     {!lines.length && <p className="hint">No transcript was saved for this call.</p>}
-    {lines.slice(0, shown).map(line => <div className="history-transcript-line" key={line.id}><span className="who">{speakerLabel(line)} <time title={clock.format(line.at)}>{intoCall(line.at - record.startedAt)}</time></span><p>{line.text}</p></div>)}
+    {/* Who spoke is one line over the time, as on a live call: a long name is shortened in its column, and whole on the pointer. */}
+    {lines.slice(0, shown).map(line => <div className="history-transcript-line" key={line.id}><span className="who"><span className="who-name" title={speakerLabel(line)}>{speakerLabel(line)}</span> <time title={clock.format(line.at)}>{intoCall(line.at - record.startedAt)}</time></span><p>{line.text}</p></div>)}
     {lines.length > shown && <button className="history-more" onClick={() => setShown(previous => previous + LINES_PER_PAGE)}>Show {LINES_PER_PAGE} more lines</button>}
   </>
 })

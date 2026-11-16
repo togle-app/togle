@@ -680,13 +680,13 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
             <div className={room.under ? 'slash-list under' : 'slash-list'} style={{ maxHeight: room.height }} id="slash-list" role="listbox" aria-label={listed.kind === 'models' ? `${agentOf(task)}'s models` : `${agentOf(task)}'s commands`}>
               {listed.kind === 'models'
                 ? listed.items.map((model, row) => (
-                    <button type="button" role="option" id={`slash-${row}`} aria-selected={row === at} className={row === at ? 'on' : ''} ref={row === at ? pickedRow : undefined} key={model.id} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setPicked(row)} onClick={() => choose(row)}>
+                    <button type="button" role="option" id={`slash-${row}`} aria-selected={row === at} className={row === at ? 'on' : ''} ref={row === at ? pickedRow : undefined} key={model.id} title={model.description || undefined} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setPicked(row)} onClick={() => choose(row)}>
                       <b>{model.name}</b>
                       <small>{model.description}</small>
                     </button>
                   ))
                 : listed.items.map((command, row) => (
-                    <button type="button" role="option" id={`slash-${row}`} aria-selected={row === at} className={row === at ? 'on' : ''} ref={row === at ? pickedRow : undefined} key={command.name} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setPicked(row)} onClick={() => choose(row)}>
+                    <button type="button" role="option" id={`slash-${row}`} aria-selected={row === at} className={row === at ? 'on' : ''} ref={row === at ? pickedRow : undefined} key={command.name} title={`/${command.name}${command.hint ? ` ${command.hint}` : ''}${command.description ? `\n${command.description}` : ''}`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setPicked(row)} onClick={() => choose(row)}>
                       <b>/{command.name}{command.hint && <span> {command.hint}</span>}</b>
                       <small>{command.description}</small>
                     </button>

@@ -29,6 +29,8 @@ const remember = (choice: Choice): void => {
 }
 
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+// The room a list keeps from the window's bottom (Menu.tsx keeps the same from every side).
+const LIST_EDGE = 8
 const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
 const parentName = (folder: string): string => baseName(folder.replace(/[\\/]+$/, '').split(/[\\/]/).slice(0, -1).join('/'))
 
@@ -52,6 +54,31 @@ export function TaskBox() {
   const form = useRef<HTMLFormElement>(null)
   const dictate = useHotkeys().find((key) => key.id === 'dictate')
 
+  // A list of choices (the agents, the folders) opens over the box, in the same window: how far down it reaches, so that the
+  // window is tall enough for it while it is open. A list is put on the page's body, so that is where it is looked for.
+  const [listEnds, setListEnds] = useState(0)
+  useEffect(() => {
+    let watched: HTMLElement | null = null
+    const look = (): void => {
+      const list = document.querySelector<HTMLElement>('.menu-overlay'), chip = document.querySelector<HTMLElement>('.pick-chip.open')
+      // All of the list: what is in it, and its border (and a bar under it, should it ever scroll sideways).
+      setListEnds(list && chip ? Math.ceil(chip.getBoundingClientRect().bottom + 4 + list.scrollHeight + (list.offsetHeight - list.clientHeight) + LIST_EDGE) : 0)
+    }
+    // A list is measured again whenever its box changes: before it is put in its place it is laid out narrower, so taller.
+    const sizes = new ResizeObserver(look)
+    const lists = new MutationObserver(() => {
+      const list = document.querySelector<HTMLElement>('.menu-overlay')
+      if (list !== watched) {
+        if (watched) sizes.unobserve(watched)
+        watched = list
+        if (list) sizes.observe(list)
+      }
+      look()
+    })
+    lists.observe(document.body, { childList: true })
+    return () => { lists.disconnect(); sizes.disconnect() }
+  }, [])
+
   // As the design draws it: one line, which grows with the words, and a window no taller than what is in it.
   useLayoutEffect(() => {
     const box = input.current
@@ -59,7 +86,7 @@ export function TaskBox() {
       box.style.height = 'auto'
       box.style.height = `${box.scrollHeight}px`
     }
-    if (form.current) api.sizeTaskBox(Math.ceil(form.current.getBoundingClientRect().height))
+    if (form.current) api.sizeTaskBox(Math.max(Math.ceil(form.current.getBoundingClientRect().height), listEnds))
   })
 
   const load = useCallback(async () => {

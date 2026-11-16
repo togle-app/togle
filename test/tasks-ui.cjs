@@ -509,6 +509,14 @@ async function checkTodo(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.todo-row.need:nth-child(2) .todo-line code').className"), 'danger', 'the command that looks dangerous is marked red')
   assert.ok((await ui.evaluate("document.querySelector('.todo-row.need:nth-child(2) .todo-line code').title")).startsWith('It deletes files or folders for good.'), 'and why is on it')
   await ui.capture('todo-list')
+  // In the smallest window the command still shows whole beside Allow once: its line breaks, and the two buttons go under it together.
+  ui.window.setContentSize(400, 600)
+  await ui.wait('innerWidth===400')
+  assert.equal(await ui.evaluate("(()=>{const row=document.querySelector('.todo-row.need'),line=row.querySelector('.todo-line'),box=row.getBoundingClientRect(),buttons=[...row.querySelectorAll('button')].map(b=>b.getBoundingClientRect());return line.scrollWidth<=line.clientWidth+1&&buttons.every(r=>r.left>=box.left&&r.right<=box.right&&r.bottom<=box.bottom)&&Math.abs(buttons[0].top-buttons[1].top)<2})()"), true, 'in a narrow window the command is not cut off, and Allow once and Refuse stay together inside the row')
+  assert.ok(await ui.evaluate('document.documentElement.scrollWidth<=innerWidth'), 'and nothing pushes the page sideways')
+  await ui.capture('todo-narrow')
+  ui.window.setContentSize(1024, 850)
+  await ui.wait('innerWidth===1024')
 
   // The list: open items first, the ticked one last and struck through, a chip for what an agent does with an item.
   assert.deepEqual(await todo(), ['Review the onboarding copy', 'Fix the login redirect', 'Write the release notes', 'Send the invoice to Marta'])
@@ -646,7 +654,11 @@ async function checkTaskBox(T, agent) {
   await ui.click('.pick-chip', 'Folder')
   await ui.wait("document.querySelectorAll('.menu [role^=menuitem]').length===5")
   assert.deepEqual(await menuLabels(ui), ['api-server', 'website', 'notes', 'mobile-app', 'Choose…'], 'the folders tasks were in lately, and another')
+  // The list opens in the box's own window, which is one line tall: the window is asked to be tall enough for all of it, and goes back after.
+  const lastSize = "window.togleUITest.calls().filter(call=>call.name==='sizeTaskBox').at(-1).args[0]"
+  await ui.wait(lastSize + ">=Math.ceil(document.querySelector('.pick-chip.open').getBoundingClientRect().bottom+4+document.querySelector('.menu-overlay').scrollHeight)")
   await ui.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+  await ui.wait("!document.querySelector('.menu-overlay') && " + lastSize + "<120")
   assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').placeholder"), 'Say what to do, or hold F9 and say it')
   assert.equal(await ui.evaluate("document.querySelector('.taskbox-field .primary').disabled"), true, 'nothing to start yet')
   assert.equal(await ui.evaluate("!!document.querySelector('.taskbox-foot')"), false, 'no line of instructions under the box')
@@ -729,6 +741,15 @@ async function checkTaskBox(T, agent) {
   await ui.wait("!!document.querySelector('.taskbox-attach')")
   await ui.evaluate("window.togleUITest.emit('onTaskBoxShown',null)")
   assert.equal(await ui.evaluate("!!document.querySelector('.taskbox-attach')"), true, 'opened again with F10, the call is still there')
+  // A folder with a long path, as real ones are: its path is shortened in the list (all of it is on the pointer), and the list does not scroll sideways.
+  const longFolder = 'C:\\Users\\someone-with-a-long-name\\Documents\\clients\\acme-corporation\\website-redesign-2026-final'
+  await ui.evaluate("window.togleUITest.emit('onTaskBoxShown'," + JSON.stringify({ folder: longFolder }) + ")")
+  await ui.wait("document.querySelectorAll('.pick-chip')[1].textContent==='website-redesign-2026-final'")
+  await ui.click('.pick-chip', 'Folder')
+  await ui.wait("!!document.querySelector('.menu-overlay .detail')")
+  assert.equal(await ui.evaluate("(()=>{const list=document.querySelector('.menu-overlay');return list.scrollWidth<=list.clientWidth+1})()"), true, 'the list of folders does not scroll sideways')
+  assert.equal(await ui.evaluate("document.querySelector('.menu-overlay .detail').title"), longFolder, 'and the whole path is on the pointer')
+  await ui.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -773,6 +794,21 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual(await texts(ui, '#settings-keys button.keys'), ['F9', 'F8', 'F10'])
   await ui.evaluate("document.querySelector('#settings-agents').scrollIntoView({ block: 'start' })")
   await ui.capture('settings-agents')
+  // A row's name is never broken inside a word, and a long name the person gave an agent does not run into its state:
+  // the state goes under it, and Settings does not scroll sideways.
+  const oneLine = "(()=>{const name=[...document.querySelectorAll('#settings-voice .setting > .name')].find(e=>e.textContent==='Microphone');return name.getClientRects().length===1&&name.getBoundingClientRect().height<26})()"
+  assert.equal(await ui.evaluate(oneLine), true, 'Microphone is on one line')
+  await ui.evaluate("window.togle.addCodingAgent('An agent with a forty character name xx', 'aider --message {task}')")
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.click('.shell-settings', 'Settings')
+  await ui.wait("[...document.querySelectorAll('#settings-agents .agent-label')].some(e=>e.textContent.startsWith('An agent with'))")
+  for (const width of [1024, 760, 400]) {
+    ui.window.setContentSize(width, 800)
+    await ui.wait('innerWidth===' + width)
+    assert.equal(await ui.evaluate("(()=>{const row=[...document.querySelectorAll('#settings-agents .setting')].find(r=>r.querySelector('.agent-label')?.textContent.startsWith('An agent with'));const name=row.querySelector('.agent-label').getBoundingClientRect(),state=row.querySelector('.control').getBoundingClientRect();const box=document.querySelector('.settings');return (name.right<=state.left+1||name.bottom<=state.top+1)&&box.scrollWidth<=box.clientWidth+1&&document.documentElement.scrollWidth<=innerWidth})()"), true, 'a long agent name and its state stay apart, and nothing scrolls sideways at ' + width)
+    assert.equal(await ui.evaluate(oneLine), true, 'Microphone is on one line at ' + width)
+  }
+  await ui.capture('settings-long-agent')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -891,6 +927,14 @@ async function checkNotice(T, agent) {
   await emit(waiting({ id: 'claude:s1#r4', key: 'claude:s1', requestId: 'r4', detail: 'npm run build -- --flag --flag…', canAllow: false }))
   await ui.wait("!document.querySelector('.task-notice-head .task-danger')")
   assert.deepEqual(await buttons(), ['Refuse', 'Open'])
+  // A command of four lines, the most a notice is given: all of it shows beside Allow once, and the window is asked to be as tall.
+  const four = ['psql "postgres://staging.internal.example.com:5432/orders" --command "select count(*)"', 'npm run migrate -- --database=orders --schema=public', 'npm run seed -- --only=orders,customers,invoices', 'npm test -- --runInBand --coverage=false'].join('\n')
+  await emit(waiting({ id: 'codex:t1#r6', requestId: 'r6', detail: four }))
+  await ui.wait("(document.querySelector('.task-notice-detail')?.textContent ?? '').startsWith('psql')")
+  assert.deepEqual(await buttons(), ['Allow once', 'Refuse', 'Open'])
+  assert.equal(await ui.evaluate("(()=>{const detail=document.querySelector('.task-notice-detail');return detail.scrollHeight<=detail.clientHeight+1&&detail.textContent.endsWith('--coverage=false')})()"), true, 'none of a four-line command is cut off')
+  await ui.wait("window.togleUITest.calls().filter(call=>call.name==='sizeTaskNotice').at(-1).args[0]===Math.ceil(document.querySelector('.task-notice').getBoundingClientRect().height)+24")
+  await ui.capture('tasks-notice-four-lines')
 
   // A question can only be answered in the window.
   await emit(waiting({ id: 'claude:s1#r5', key: 'claude:s1', requestId: 'r5', says: 'asks', detail: 'Which pricing table?', detailKind: 'question', canRefuse: false, canAllow: false }))
@@ -1128,6 +1172,12 @@ async function checkNarrow(T, agent) {
   await ui.capture('tasks-narrow')
   await ui.click('.tasks-back', 'Back to the list')
   await ui.wait("getComputedStyle(document.querySelector('.tasks-list')).display!=='none'")
+  // A choice the agent wrote long goes on more lines in its button, and the task still fits.
+  await ui.task('Rebuild the pricing page')
+  await ui.evaluate("window.togleUITest.askOutside('claude:s2', " + JSON.stringify({ id: 'q1', kind: 'question', questions: [{ id: 'q', text: 'Which pricing table should I show?', options: ['Two plans', 'Both, with a switch between the monthly and the yearly prices, and the discount shown first on each'] }], offersAlways: false }) + ")")
+  await ui.wait("document.querySelectorAll('.task-request .task-options button').length===2")
+  assert.ok(await fits(), 'a long choice fits a narrow window')
+  assert.equal(await ui.evaluate("(()=>{const panel=document.querySelector('.tasks-detail');return panel.scrollWidth<=panel.clientWidth+1})()"), true, 'and the task does not scroll sideways')
   assert.deepEqual(ui.errors, [])
   ui.window.destroy()
 }

@@ -256,7 +256,7 @@ function RememberedVoices({ settings, save }: { settings: Settings; save: (patch
         <div className="setting-detail remembered-people">
           <Toggle name="Remember the voices I name" note="Then Togle knows them in later calls. A voice is a person's, so ask them first. Togle keeps a voice profile, encrypted on this computer, never a recording." checked={settings.assist.rememberVoices === true} onChange={(rememberVoices) => void save({ assist: { rememberVoices } })} />
           {people.map((person) => (
-            <Row key={person.id} label={false} name={person.name} note={`Remembered ${new Date(person.createdAt).toLocaleDateString()}`}>
+            <Row key={person.id} label={false} name={<span className="free-text">{person.name}</span>} note={`Remembered ${new Date(person.createdAt).toLocaleDateString()}`}>
               <button className="ghost small" aria-label={`Forget ${person.name}'s voice`} disabled={!!busy} onClick={async () => {
                 setBusy(person.id); setError('')
                 try { await api.forgetVoice(person.id) } catch { setError('Could not forget this voice. Try again.') } finally { setBusy('') }
@@ -297,7 +297,7 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
     <Section id="settings-agents" title="Agents">
       {found === null ? <Row label={false} name="Looking…" /> : !found.length ? <Row label={false} name="No agent found" /> : found.map((agent) => (
         <Fragment key={agent.runner}>
-          <Row label={false} name={<span className="agent-name"><span className="av" aria-hidden="true">{agentLetter(agent)}</span><span className="agent-label">{agent.name}</span></span>}>
+          <Row label={false} className="agent-row" name={<span className="agent-name"><span className="av" aria-hidden="true">{agentLetter(agent)}</span><span className="agent-label">{agent.name}</span></span>}>
             <span className={`setting-value ${agent.installed ? 'found' : ''}`}>{agent.removed ? 'Removed' : agent.installed ? (agent.added ? `Added · ${runsInTerminal(agent.runner) ? 'terminal' : 'conversation'}` : 'Found') : 'Not found'}</span>
             {agent.removed
               ? <button className="ghost small" aria-label={`Add back ${agent.name}`} disabled={!!busy} onClick={() => void restore(agent)}>{busy === agent.runner ? 'Adding…' : 'Add back'}</button>

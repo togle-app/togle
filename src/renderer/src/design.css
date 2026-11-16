@@ -27,6 +27,8 @@
   /* Korean, Japanese and Chinese have their system fonts after the Latin ones, which lack them. */
   --font-body: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Malgun Gothic', 'Yu Gothic UI', 'Microsoft YaHei UI', 'Apple SD Gothic Neo', 'Hiragino Sans', 'PingFang SC', 'Noto Sans CJK KR', 'Noto Sans KR', sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+  /* The most a place of words is wide, on a window wider than the design draws. */
+  --read: 880px;
   /* The names the older parts of the window use, on the design's colors. */
   --panel: var(--surface);
   --panel-2: var(--raised);
@@ -144,6 +146,14 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 .popover.menu button { font-size: 13px; font-weight: 400; color: var(--ink); border-radius: 6px; }
 .popover.menu.menu-overlay button { font-size: 13px; }
 .popover.menu button:hover:not(:disabled), .popover.menu button:focus-visible { background: var(--raised); }
+/* A list never scrolls sideways: a long choice goes on more lines, and what is beside it (a folder's path, its keys) takes
+   the room the choice leaves and is shortened there. */
+.popover.menu { overflow-x: hidden; }
+.popover.menu.menu-overlay .label { overflow-wrap: anywhere; }
+/* A list that shows paths can be wider than one of plain choices, so that more of each path shows. */
+.popover.menu.menu-overlay:has(.detail) { max-width: min(34rem, calc(100vw - 16px)); }
+.popover.menu button:has(> .detail) > .label { flex: 0 1 auto; max-width: 62%; }
+.popover.menu .detail { flex: 1 1 0; min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; }
 .popover.menu .menu-chip { margin-left: auto; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; font-weight: 600; color: var(--muted); }
 .monitor-picker { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 22px 36px -26px var(--shadow); }
 .monitor-picker h2 { font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; }
@@ -178,7 +188,11 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .shell-nav button[aria-current='page'], .shell-nav button[aria-current='page']:hover:not(:disabled) { background: var(--togle-soft); color: var(--togle); }
 .shell-nav .nav-count { margin-left: 0; min-width: 0; padding: 0 7px; border-radius: 999px; background: var(--wait-soft); color: var(--wait); font-size: 11px; font-weight: 600; line-height: 17px; font-variant-numeric: tabular-nums; }
 .shell-nav .dot.live { margin-left: 0; flex-shrink: 0; }
-.shell-content { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; padding: 14px 16px; overflow: auto; background: var(--surface); }
+/* A word too long for its line (a path, an address, a name without spaces) breaks rather than pushing the place sideways. */
+.shell-content { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; padding: 14px 16px; overflow: auto; background: var(--surface); overflow-wrap: break-word; }
+/* On a wide window a place keeps the width it reads well at (--read), from the left, as the design draws it: To-do, a call
+   and its page, the first minute, a task's conversation. The list of calls and Settings' groups use all the width there is. */
+.live-call, .meetings.meeting-detail { max-width: var(--read); }
 /* Agents is two panes side by side, each with its own room, the line between them the window's full height. */
 .shell-content:has(> .tasks) { padding: 0; }
 @media (max-width: 560px) {
@@ -197,7 +211,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 
 /* ---- To-do ---- */
 
-.todo { display: flex; flex-direction: column; gap: 12px; max-width: none; margin: 0; padding: 0; height: auto; overflow: visible; }
+.todo { display: flex; flex-direction: column; gap: 12px; max-width: var(--read); margin: 0; padding: 0; height: auto; overflow: visible; }
 .todo-head h2 { margin: 0; font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; line-height: 1.12; }
 .todo-add { display: flex; align-items: center; gap: 10px; padding: 0 10px 0 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .todo-add:focus-within { border-color: var(--togle); }
@@ -205,25 +219,31 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .todo-add kbd { padding: 0.05em 0.4em; font: 600 0.82em var(--font-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; }
 .todo-group { display: flex; flex-direction: column; gap: 6px; }
 .todo-group > [role='list'] { display: flex; flex-direction: column; gap: 6px; }
-/* A row: a state, a name, one line and at most two buttons. */
-.todo-row { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; }
+/* A row: a state, a name, one line and at most two buttons. Where the window is too narrow for the words beside the buttons,
+   the buttons (or the chip) go under the words, at the row's end. */
+.todo-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 9px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; }
 .todo-row.need { border-color: var(--wait); background: var(--wait-soft); }
 .todo-dot { flex: none; align-self: center; width: 8px; height: 8px; margin: 0; border-radius: 50%; background: var(--wait); }
 .todo-dot.done { background: var(--ok); }
-.todo-grow { display: flex; flex-direction: column; flex: 1; gap: 0; min-width: 0; }
+/* The words keep this much room before what is beside them goes under: in the smallest window a button or a chip still
+   fits beside them, and Allow once with Refuse does not, so a command to allow has the row's whole width. */
+.todo-grow { display: flex; flex-direction: column; flex: 1 1 9.5rem; gap: 0; min-width: 0; }
 .todo-grow b { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .todo-grow small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.todo-actions { display: inline-flex; flex: none; gap: 9px; }
 .todo-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A command that can be allowed from the row shows whole, on as many lines as it needs: it is never shortened beside Allow once. */
+.todo-row.allows .todo-line { overflow: visible; white-space: normal; }
 .todo-line code { padding: 0; border-radius: 0; background: none; color: inherit; font: 0.9em var(--font-mono); }
 .todo-line code.danger { color: var(--danger); }
 .todo-offer { font-size: 13px; overflow-wrap: anywhere; }
 .todo-box { flex: none; width: 14px; height: 14px; padding: 0; border: 1.5px solid var(--muted); border-radius: 4px; background: transparent; }
 .todo-box:hover:not(:disabled) { border-color: var(--ink); }
 .todo-box[aria-checked='true'], .todo-box[aria-checked='true']:hover:not(:disabled) { border-color: var(--ok); background: var(--ok); }
-.todo-text { flex: 1; min-width: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; overflow-wrap: anywhere; cursor: text; }
+.todo-text { flex: 1 1 7.5rem; min-width: 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; overflow-wrap: anywhere; cursor: text; }
 .todo-text:hover { background: transparent; }
 .todo-item.done .todo-text { color: var(--muted); text-decoration: line-through; }
-.todo-edit { flex: 1; min-width: 0; padding: 2px 6px; border-radius: 6px; }
+.todo-edit { flex: 1 1 7.5rem; min-width: 0; padding: 2px 6px; border-radius: 6px; }
 .todo-chip { cursor: pointer; }
 .todo-chip:hover:not(:disabled) { filter: brightness(1.15); }
 .todo-chip.work { background: var(--togle-soft); color: var(--togle); }
@@ -233,7 +253,8 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 
 /* ---- Agents: the list of tasks, and the one open beside it ---- */
 
-.tasks { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 15.5rem) minmax(0, 1fr); }
+/* The list is as wide as the design draws it, and wider on a wide window, where its names would be cut short for no reason. */
+.tasks { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, clamp(15.5rem, 22vw, 22rem)) minmax(0, 1fr); }
 .tasks-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; padding: 14px 15px; border-right: 1px solid var(--line); }
 .tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .task-list { display: flex; flex-direction: column; gap: 6px; }
@@ -277,6 +298,8 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .state-chip[data-state='failed'] { background: var(--danger-soft); color: var(--danger); }
 /* Where it stands, then its steps folded under one quiet line, what it asks, and the reply box. */
 .task-log { display: flex; flex-direction: column; flex: 0 1 auto; gap: 12px; min-height: 0; padding: 0; overflow-y: auto; }
+/* The conversation keeps the width it reads well at; the agent's own screen takes all there is. */
+.task-log, .task-panel > .task-request, .task-panel > .task-banner, .task-panel > .hint, .task-reply-place { max-width: var(--read); }
 .task-latest { max-width: 100%; }
 /* "Show earlier": its words only, in the middle. A link button has a negative side margin that would make it wider than the thread. */
 .task-earlier-turns { align-self: center; margin: 0; font-size: 12px; }
@@ -305,6 +328,8 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-files { margin: 0; padding-left: 18px; font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
 .task-why { color: var(--danger); font-size: 12px; }
 .task-options { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+/* A choice is the agent's own words, as long as it wrote them: it goes on more lines rather than out of the card. */
+.task-options button { max-width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .task-always { align-self: flex-start; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 400; text-align: left; white-space: normal; cursor: pointer; }
 .task-always:hover:not(:disabled) { color: var(--ink); text-decoration: underline; }
 /* The reply box: one field, with Send in it. */
@@ -315,13 +340,15 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-reply-place { position: relative; }
 .slash-list { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 20; display: flex; flex-direction: column; gap: 1px; max-height: 208px; overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 14px 28px -18px var(--shadow); }
 .slash-list.under { top: calc(100% + 6px); bottom: auto; }
-.slash-list button { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); column-gap: 10px; align-items: baseline; flex: none; width: 100%; height: auto; min-height: 0; padding: 5px 8px; border: 0; border-radius: 7px; background: none; box-shadow: none; color: var(--ink); font-size: 12px; font-weight: 400; line-height: 1.4; text-align: left; }
+/* A command's name, with what it takes, has at most a little over half the row: what it does keeps the rest. */
+.slash-list button { display: grid; grid-template-columns: fit-content(55%) minmax(0, 1fr); column-gap: 10px; align-items: baseline; flex: none; width: 100%; height: auto; min-height: 0; padding: 5px 8px; border: 0; border-radius: 7px; background: none; box-shadow: none; color: var(--ink); font-size: 12px; font-weight: 400; line-height: 1.4; text-align: left; }
 .slash-list button.on { background: var(--togle-soft); }
 .slash-list b { overflow: hidden; font-family: var(--font-mono); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .slash-list button.on b { color: var(--togle); }
 .slash-list b span { color: var(--muted); font-weight: 400; }
 .slash-list small { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .task-banner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 12px; }
+.task-banner > span:not(.row) { min-width: 0; overflow-wrap: anywhere; }
 .task-banner .row { display: flex; gap: 6px; }
 .task-banner.signed-out { border-color: var(--wait); background: var(--wait-soft); color: var(--ink); }
 .task-banner.task-words { color: var(--ink); }
@@ -364,7 +391,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .past-call-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0 9px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; }
 .past-call-row:hover:not(:disabled) { border-color: var(--muted); }
 .past-call-row.live-record { border-color: var(--line); }
-.past-call-row strong { grid-column: 2; font-size: 13px; font-weight: 600; }
+.past-call-row strong { grid-column: 2; min-width: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .past-call-row > span:not(.meeting-dot) { grid-column: 2; color: var(--muted); font-size: 12px; }
 .meeting-dot { grid-row: 1 / span 2; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .meeting-dot.work { background: var(--togle); }
@@ -393,7 +420,8 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .notes-text li { margin: 0; }
 .notes-foot { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .history-transcript-line { display: grid; grid-template-columns: 4.4rem minmax(0, 1fr); gap: 0 0.6rem; align-items: start; padding: 5px 8px; border: 0; border-radius: 8px; }
-.history-transcript-line .who { flex: none; color: var(--ink); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.history-transcript-line .who { flex: none; min-width: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
+.history-transcript-line .who-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-transcript-line time { display: block; color: var(--muted); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
 .history-transcript-line p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .history-more { display: block; margin: 12px auto; }
@@ -409,6 +437,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .live-head h2 { margin: 0; font: 600 13px/1.4 var(--font-body); }
 .live-head > .spacer { flex: 1; }
 .live-head button { padding: 3px 9px; font-size: 12px; }
+.live-actions { display: inline-flex; gap: 8px; margin-left: auto; }
 .live-clock { background: var(--togle-soft); color: var(--togle); font-variant-numeric: tabular-nums; }
 .live-sources { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .live-meter { display: inline-flex; align-items: center; gap: 0; }
@@ -446,7 +475,7 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .live-line { display: grid; grid-template-columns: 4.4rem minmax(0, 1fr); gap: 0 0.6rem; align-items: start; padding: 5px 8px; border-radius: 8px; font-size: 13px; content-visibility: auto; contain-intrinsic-size: auto 40px; }
 .live-line .who { grid-column: 1; grid-row: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-line time { grid-column: 1; grid-row: 2; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.live-line p { grid-column: 2; grid-row: 1 / span 2; margin: 0; line-height: 1.4; }
+.live-line p { grid-column: 2; grid-row: 1 / span 2; margin: 0; line-height: 1.4; overflow-wrap: anywhere; }
 .live-line.marked { background: var(--togle-soft); }
 .live-line.partial { opacity: 0.6; }
 .marked-tag { margin-left: 6px; vertical-align: 1px; }
@@ -461,9 +490,9 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .confirm-voice.guess { border-color: var(--wait); background: var(--wait-soft); }
 .confirm-voice.answered { opacity: 0.7; }
 .confirm-voice-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.confirm-voice-head strong { margin-right: auto; font-size: 13px; font-weight: 600; }
-.confirm-said { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
-.confirm-reason { margin: 0; color: var(--muted); font-size: 12px; }
+.confirm-voice-head strong { min-width: 0; margin-right: auto; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.confirm-said { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.confirm-reason { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .confirm-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .confirm-name input { flex: 1 1 140px; min-width: 0; padding: 4px 8px; font-size: 12px; }
 .confirm-names > .confirm-end { margin: 2px 0 0; }
@@ -474,7 +503,7 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings-one .settings-content { max-width: none; margin: 0; }
 .sets { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 14px 22px; align-items: start; }
 .sets > section { display: flex; flex-direction: column; gap: 4px; margin: 0; min-width: 0; }
-.sets > section:has(.setting-detail) { grid-column: 1 / -1; }
+.sets > section:has(.setting-detail) { grid-column: 1 / -1; max-width: var(--read); }
 .settings .sets .section-head { margin: 0; }
 .settings .sets .section-head h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
 .settings .sets .card { border: 0; border-radius: 0; background: none; }
@@ -482,11 +511,21 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings .sets .setting { min-height: 0; padding: 5px 0; border-bottom: 1px solid var(--line); column-gap: 10px; font-size: 13px; color: var(--ink); }
 .settings .sets .card > .setting:last-child, .settings .sets .card > :last-child > .setting:last-child { border-bottom: 0; }
 .settings .sets .setting > .note { font-size: 12px; color: var(--muted); }
+/* A row's name stays whole (it breaks between its words, never inside one), and its value takes the room that is left: a
+   long one is shortened or goes on more lines, and never pushes the row sideways. Words the person wrote, or another
+   program gave (a name, an address), break anywhere. */
+.settings .sets .setting:not(.stacked) { grid-template-columns: minmax(min-content, 1fr) minmax(0, auto); }
+.settings .sets .setting > .name { overflow-wrap: break-word; }
+.settings .sets .setting > .note, .settings .sets .setting > .error, .settings .free-text { overflow-wrap: anywhere; }
+.settings .sets .setting > .control { flex-wrap: wrap; row-gap: 4px; min-width: 0; }
+.settings .sets .setting .menu-anchor { min-width: 0; }
 /* A value reads as words, muted on the right; clicked, it opens its choices. */
 .settings .sets .setting > .control > select,
 .settings .sets .setting select {
   width: auto;
+  min-width: 0;
   max-width: 11rem;
+  text-overflow: ellipsis;
   padding: 0 0 0 4px;
   border: 0;
   border-radius: 4px;
@@ -500,15 +539,23 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 }
 .settings .sets .setting select:hover, .settings .sets .setting select:focus { color: var(--ink); }
 .settings .sets .setting select option { background: var(--surface); color: var(--ink); }
-.value-button { padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 400; white-space: nowrap; }
+.value-button { max-width: 100%; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 400; text-align: right; white-space: normal; overflow-wrap: anywhere; }
 .value-button:hover:not(:disabled) { background: transparent; color: var(--ink); }
 .settings .setting-value, .settings .setting-value.found { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.agent-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+/* An agent's row, Togle Studio's and the AI plan's: a name and a value that can both be long (a name the person gave, a
+   status in a sentence, a service's address). They are side by side where both fit; where they do not, the value goes
+   under the name, at the row's end, and each shows whole. */
+.settings .sets .setting:is(.agent-row, .studio-row, .ai-plan:not(:has(> .note))) { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; }
+.settings .sets .setting:is(.agent-row, .studio-row, .ai-plan) > .name { flex: 0 1 auto; min-width: 0; }
+.settings .sets .setting:is(.agent-row, .studio-row, .ai-plan) > .control { flex: 0 1 auto; margin-left: auto; }
+.settings .studio-row .setting-value { min-width: 0; text-align: right; white-space: normal; overflow-wrap: anywhere; }
+.agent-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .agent-name .av, .first-found .av { display: inline-grid; flex: none; place-items: center; width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 11px; font-weight: 700; }
-.agent-name .agent-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-name .agent-label { min-width: 0; overflow-wrap: anywhere; }
 .settings .sets .setting.add-row { display: flex; padding: 6px 0 2px; border-bottom: 0; }
 /* The keys as keys. */
-.settings .sets .shortcut { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.settings .sets .shortcut { display: grid; }
+.settings .sets .shortcut-what { min-width: 0; }
 .settings .sets .shortcut .control { gap: 6px; }
 .settings .sets button.keys { min-width: 0; padding: 0.05em 0.4em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; background: var(--surface); color: var(--ink); font: 600 0.82em var(--font-mono); }
 .settings .sets button.keys.off { color: var(--muted); }
@@ -532,7 +579,8 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .segmented button.on { background: var(--togle-soft); color: var(--togle); }
 .reach-code-value { font: 600 28px var(--font-mono); letter-spacing: 0.12em; color: var(--ink); }
 .reach-code .control { justify-self: start; }
-.reach-device { display: inline-flex; align-items: center; gap: 8px; }
+.reach-device { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.reach-device .free-text { min-width: 0; }
 .reach-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
 .reach-dot.on { background: var(--ok); }
 .reach-acted { display: flex; flex-direction: column; gap: 2px; }
@@ -540,11 +588,12 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 
 /* ---- The first minute, once ---- */
 
-.first-minute { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: none; margin: 0; padding: 0; }
+.first-minute { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: var(--read); margin: 0; padding: 0; }
 .first-minute header { display: flex; flex-direction: column; gap: 4px; }
 .first-minute header h2 { margin: 0; font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; line-height: 1.12; }
 .first-minute header .hint { margin: 0; }
-.first-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14.5rem), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+/* A step is never narrower than its widest button ("Get speech recognition (670 MB)"). */
+.first-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15.5rem), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
 .first-step { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); counter-increment: step; }
 .first-step h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--font-display); font-size: 1.02rem; font-weight: 650; }
 .first-step h3::before { content: counter(step); flex: none; display: inline-grid; place-items: center; width: 1.55rem; height: 1.55rem; border-radius: 50%; background: var(--togle-soft); color: var(--togle); font: 600 0.8rem var(--font-body); }
@@ -591,7 +640,9 @@ body.notice-surface { background: transparent; color: var(--ink); overflow: hidd
 .task-notice-says { color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
 .task-notice-says code { padding: 0; background: none; color: var(--ink); font: 0.9em var(--font-mono); overflow-wrap: anywhere; }
 .task-notice-says code.danger { color: var(--danger); }
-.task-notice-detail { margin: 0; padding: 0; max-height: 110px; overflow: hidden; border: 0; background: none; color: var(--ink); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* All of what the notice was given shows: the main process gives it no more than a notice has room for, and Allow once is
+   offered only for a command that is whole. */
+.task-notice-detail { margin: 0; padding: 0; border: 0; background: none; color: var(--ink); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-notice-detail.question, .task-notice-detail.words { font-family: var(--font-body); }
 .task-notice-danger, .task-notice-error { color: var(--danger); font-size: 12px; }
 .task-notice-note, .task-notice-more { color: var(--muted); font-size: 11px; }
@@ -654,6 +705,8 @@ body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: cross
 /* What an agent said, and a call's notes, in the window's own size, as the design writes them. */
 .task-agent .md, .meeting-notes .md { font-size: 13px; line-height: 1.45; }
 .task-agent .md p, .meeting-notes .md p { margin: 0 0 6px; }
+/* A table keeps its words whole: where it is wider than the place, it scrolls sideways in its own box. */
+.md th, .md td { overflow-wrap: break-word; }
 /* The spot the log scrolls to takes no room. */
 .task-log > div:empty:last-child { margin-top: -12px; }
 .settings .sets .card > .hint { margin: 0; padding: 2px 0 6px; }

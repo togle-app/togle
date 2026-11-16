@@ -33,6 +33,15 @@ export function TaskNoticeSurface() {
   useLayoutEffect(() => {
     if (card.current) api.sizeTaskNotice(Math.ceil(card.current.getBoundingClientRect().height) + 24)
   })
+  // Also when the card changes with nothing drawn again: a typeface that arrives after the words were laid out wraps them
+  // differently, and a window sized for the first layout would cut the buttons off.
+  useEffect(() => {
+    const shown = card.current
+    if (!shown) return
+    const watch = new ResizeObserver(() => api.sizeTaskNotice(Math.ceil(shown.getBoundingClientRect().height) + 24))
+    watch.observe(shown)
+    return () => watch.disconnect()
+  }, [id])
 
   if (!notice) return null
 

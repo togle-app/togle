@@ -194,7 +194,8 @@ export function Menu({ label, className = '', title, ariaLabel, items, align = '
                   {item.label}
                   {item.note && <span className="note">{item.note}</span>}
                 </span>
-                {item.detail && <span className="detail">{item.detail}</span>}
+                {/* A long one (a folder's path) is shortened in the list: all of it is on the pointer. */}
+                {item.detail && <span className="detail" title={item.detail}>{item.detail}</span>}
               </button>
             )
           )}

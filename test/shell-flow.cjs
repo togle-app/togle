@@ -249,6 +249,7 @@ async function checkCall(T, agent) {
     ui.window.setSize(width, height)
     await ui.paint()
     await ui.fitsWidth()
+    assert.equal(await ui.evaluate("(()=>{const [mark,stop]=[...document.querySelectorAll('.live-head button')].map(b=>b.getBoundingClientRect());return Math.abs(mark.top-stop.top)<2})()"), true, 'Mark and Stop stay side by side at ' + width)
     await ui.capture('live-call-' + width)
   }
   ui.window.setSize(1024, 850)

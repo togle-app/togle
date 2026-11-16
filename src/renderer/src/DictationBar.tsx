@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DictationState } from '@shared/dictation'
+import { longDoneMessage, type DictationState } from '@shared/dictation'
 import { DictationCapture, microphoneProblem, type DictationMicrophone } from './audio/dictation'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
@@ -128,6 +128,9 @@ export function DictationBar() {
   // A line under the title while listening (what to do about the microphone, or that the call hears you too): the
   // open panel is taller for it, or the line is cut off under the handle.
   const note = recording && (micAttention || !!state.inCall)
+  // Done, the title can be a sentence or two (why the words were copied and not typed): the open panel is taller for
+  // one that does not fit on a line, and shows all of it.
+  const longDone = longDoneMessage(state)
   // Trouble shows in the bar itself, not only on hover: a muted mic, no sound, the shortcut taken.
   const takenKeys = shortcut?.keys ?? ''
   const alert = idle && shortcutBlocked ? takenKeys && takenKeys.length <= 6 ? `${takenKeys} is taken` : 'Shortcut taken' : muted ? 'Mic muted' : noSound ? 'No sound' : ''
@@ -159,7 +162,7 @@ export function DictationBar() {
   }
 
   return <main className="dictation-shell" aria-label="Togle dictation">
-    <div className={`dictation-hit ${expanded ? 'is-expanded' : ''} ${hasStatus ? 'has-status' : ''} ${recording ? 'is-recording' : ''} ${recovery ? 'is-recovery' : recording && state.inCall ? 'is-in-call' : ''} ${note ? 'has-note' : ''}`} style={!expanded && !hasStatus ? { width: pillWidth, height: pillHeight } : undefined} onMouseEnter={() => api.expandDictation(true)} onMouseLeave={() => api.expandDictation(false)}
+    <div className={`dictation-hit ${expanded ? 'is-expanded' : ''} ${hasStatus ? 'has-status' : ''} ${recording ? 'is-recording' : ''} ${recovery ? 'is-recovery' : recording && state.inCall ? 'is-in-call' : ''} ${note || longDone ? 'has-note' : ''}`} style={!expanded && !hasStatus ? { width: pillWidth, height: pillHeight } : undefined} onMouseEnter={() => api.expandDictation(true)} onMouseLeave={() => api.expandDictation(false)}
       onMouseMove={() => { if (!expanded && performance.now() >= nextHover.current) { nextHover.current = performance.now()+100; api.expandDictation(true) } }}
       onPointerDown={event => {
         if (event.button !== 0 || !(event.target as HTMLElement).closest('.dictation-handle')) return
@@ -198,7 +201,8 @@ export function DictationBar() {
           {actionError && <p className="dictation-action-error" role="alert">{actionError}</p>}
         </> : <>
           <div className="dictation-top">
-            {idle ? <span className="dictation-prompt">{shortcutBlocked ? <>{title}. <button className="link" onClick={() => void api.openDictationSettings()}>Change key</button></> : keys ? <>{hold ? 'Hold' : 'Press'} <kbd>{keys}</kbd>{keys.length <= 12 ? ' to speak' : ''}</> : 'Click to speak'}</span>
+            {/* The way out stays in view: with long keys the sentence is shortened, never the link after it. */}
+            {idle ? <span className={`dictation-prompt ${shortcutBlocked ? 'has-link' : ''}`}>{shortcutBlocked ? <><span className="dictation-cut" title={title}>{shortcut?.keys ?? 'The shortcut'} is taken.</span> <button className="link" onClick={() => void api.openDictationSettings()}>Change key</button></> : keys ? <>{hold ? 'Hold' : 'Press'} <kbd>{keys}</kbd>{keys.length <= 12 ? ' to speak' : ''}</> : 'Click to speak'}</span>
               : <><strong title={recording ? state.destination ? `Into ${state.destination} · ${microphone.name}` : microphone.name : state.message}>{title}</strong>
                 {recording && keys && !micAttention && <span className="dictation-shortcut">{state.hold ? 'Release' : 'Press'} <kbd>{keys}</kbd></span>}</>}
             {/* At rest there's no close button: the panel folds when the pointer leaves, and Settings can hide the bar. */}

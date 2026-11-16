@@ -14,6 +14,13 @@
 .dictation-top { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 28px; }
 .dictation-top strong { flex: 1; min-width: 0; font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dictation-prompt { flex: 1; color: #c9d1dd; font-size: 12px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A sentence with a link after it: the sentence is what is shortened, and the link keeps its place. */
+.dictation-prompt.has-link { display: flex; align-items: center; gap: 5px; overflow: visible; }
+.dictation-cut { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dictation-prompt.has-link .link { flex: none; }
+/* Done, with more to say than a line holds: the title goes on up to three lines, in the taller panel. */
+.dictation-bar.is-done .dictation-top { align-items: flex-start; }
+.dictation-bar.is-done .dictation-top strong { padding-top: 5px; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .dictation-shortcut { display: flex; align-items: center; gap: 5px; flex-shrink: 1; min-width: 0; color: #9eaabd; font-size: 10px; white-space: nowrap; }
 .dictation-bar kbd { display: inline-block; vertical-align: middle; max-width: 130px; overflow: hidden; text-overflow: ellipsis; font: 10px 'Segoe UI', sans-serif; color: #d5dde9; border: 1px solid #ffffff1a; background: #ffffff06; padding: 1px 4px; border-radius: 4px; }
 .dictation-bar button { white-space: nowrap; flex-shrink: 0; }

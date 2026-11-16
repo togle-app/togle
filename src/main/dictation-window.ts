@@ -2,7 +2,7 @@ import { app, BrowserWindow, screen } from 'electron'
 import path from 'node:path'
 import { readFileSync } from 'node:fs'
 import { writeFileAtomic } from './storage'
-import type { DictationState } from '@shared/dictation'
+import { longDoneMessage, type DictationState } from '@shared/dictation'
 
 /** A persistent, non-activating voice bar. The destination keeps keyboard focus, even when clicked. */
 export class DictationWindow {
@@ -86,9 +86,10 @@ export class DictationWindow {
     const phase = this.resting ? 'idle' : this.state.phase
     const recovery = phase === 'ready' || phase === 'error', status = phase !== 'idle' && phase !== 'recording'
     const width = Math.min(b.width, this.expanded ? recovery ? 352 : 280 : status ? 156 : this.pill.width)
-    // Listening, the open panel may have a line under its title (the call hears you, the microphone is muted): as tall
-    // as it is then, so the pointer on its title's buttons is inside it.
-    const height = Math.min(b.height, this.expanded ? recovery ? 264 : phase === 'recording' ? 100 : 76 : status ? 44 : this.pill.height)
+    // Listening, the open panel may have a line under its title (the call hears you, the microphone is muted), and done,
+    // its title may take three lines (why the words were copied and not typed): as tall as it is then, so the pointer on
+    // its title's buttons is inside it.
+    const height = Math.min(b.height, this.expanded ? recovery ? 264 : phase === 'recording' || (!this.resting && longDoneMessage(this.state)) ? 100 : 76 : status ? 44 : this.pill.height)
     return point.x >= b.x+(b.width-width)/2 && point.x < b.x+(b.width+width)/2 && point.y >= b.y+b.height-height && point.y < b.y+b.height
   }
   private watchPointer(): void {
@@ -201,7 +202,7 @@ export class DictationWindow {
     const status = state.phase !== 'idle' && state.phase !== 'recording'
     const current = win.getBounds()
     const width = this.forwardMouse ? current.width : Math.min(this.expanded ? recovery ? 352 : 280 : status ? 156 : this.pill.width, area.width - 16)
-    const height = this.forwardMouse ? current.height : Math.min(this.expanded ? recovery ? 264 : state.phase === 'recording' ? 100 : 76 : status ? 44 : Math.max(40, this.pill.height), area.height - 16)
+    const height = this.forwardMouse ? current.height : Math.min(this.expanded ? recovery ? 264 : state.phase === 'recording' || longDoneMessage(state) ? 100 : 76 : status ? 44 : Math.max(40, this.pill.height), area.height - 16)
     const bounds = { width, height, x: this.placement ? Math.round(area.x + area.width * this.placement.x - width / 2) : area.x + Math.round((area.width - width) / 2), y: this.placement ? Math.round(area.y + area.height * this.placement.y - height) : area.y + area.height - height - 12 }
     const layout = this.displayLayout(display)
     if (!this.forwardMouse || this.layout !== layout) {

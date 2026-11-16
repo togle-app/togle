@@ -172,6 +172,14 @@ async function run() {
   // As the design draws it: the agent and the folder as two chips, then the words.
   await wait(() => js(box, "document.querySelectorAll('.pick-chip').length===2 && document.querySelectorAll('.pick-chip')[1].textContent!=='Pick a folder'"), 'the box to show its agent and folder')
   assert.equal(await js(box, "document.querySelectorAll('.pick-chip')[0].textContent"), 'Hermes', 'the agent that is installed: here, the stand-in')
+  // A list of the box opens in the box's own window, which is as tall as its one line: the window grows for the list, so that
+  // all of it shows, and goes back when the list closes.
+  const oneLine = box.getBounds().height
+  await js(box, "document.querySelectorAll('.pick-chip')[1].click()")
+  await wait(() => js(box, "!!document.querySelector('.menu-overlay')"), 'the list of folders')
+  await wait(async () => box.getBounds().height > oneLine && await js(box, "(()=>{const list=document.querySelector('.menu-overlay');return !!list&&list.getBoundingClientRect().bottom<=innerHeight&&list.scrollHeight<=list.clientHeight+1&&list.scrollWidth<=list.clientWidth+1})()"), 'the box to grow until all of its list shows, with its long folder paths')
+  await js(box, "document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))")
+  await wait(async () => !(await js(box, "!!document.querySelector('.menu-overlay')")) && box.getBounds().height === oneLine, 'the box to be one line tall again')
   await js(box, "(() => { const area = document.querySelector('.taskbox textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(area, 'run frombox'); area.dispatchEvent(new Event('input', { bubbles: true })) })()")
   await js(box, "document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
   const fromBox = await find(async () => (await invoke('runners:list')).find((task) => task.title === 'run frombox'), 'the task from the box')

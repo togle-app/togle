@@ -63,7 +63,8 @@ export function LogLine({ entry }: { entry: LogEntry }) {
       return (
         <div className="task-cmd" data-status={entry.status}>
           <span aria-hidden="true">{COMMAND_MARK[entry.status ?? 'finished']}</span>
-          <code>{entry.text}</code>
+          {/* One line for each command it ran: a long one is shortened here and whole on the pointer. */}
+          <code title={entry.text}>{entry.text}</code>
           <span className="hint">{COMMAND_WORD[entry.status ?? 'finished']}</span>
         </div>
       )

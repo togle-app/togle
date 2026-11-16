@@ -132,7 +132,7 @@ function Member({ reach, busy, run }: PartProps) {
     <>
       <Row label={false} name="Connection" note={connectionWords(reach)} />
       {reach.devices.map((device) => (
-        <Row key={device.device} label={false} name={<span className="reach-device"><span className={`reach-dot ${device.online ? 'on' : ''}`} aria-hidden="true" />{device.name}</span>} note={device.me ? 'This computer' : `${ROLE_WORDS[device.role]}${device.online ? '' : ' · offline'}`}>
+        <Row key={device.device} label={false} name={<span className="reach-device"><span className={`reach-dot ${device.online ? 'on' : ''}`} aria-hidden="true" /><span className="free-text">{device.name}</span></span>} note={device.me ? 'This computer' : `${ROLE_WORDS[device.role]}${device.online ? '' : ' · offline'}`}>
           {!device.me && isComputer && (
             <button className="ghost small" aria-label={`Remove ${device.name}`} disabled={!!busy} onClick={() => void run(`remove-${device.device}`, () => api.reachRemove(device.device))}>
               {busy === `remove-${device.device}` ? 'Removing…' : 'Remove'}
@@ -148,7 +148,7 @@ function Member({ reach, busy, run }: PartProps) {
         } />
       )}
       {reach.account && (
-        <Row label={false} name={`Signed in to Togle Studio as ${reach.account.email}`} note="Signing out leaves this computer one of your devices.">
+        <Row label={false} name={<>Signed in to Togle Studio as <span className="free-text">{reach.account.email}</span></>} note="Signing out leaves this computer one of your devices.">
           <button className="ghost small" disabled={!!busy} onClick={() => void run('out', () => api.reachSignOut())}>Sign out</button>
         </Row>
       )}

@@ -247,7 +247,8 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
               const fits = !!request && request.kind !== 'question' && canAllowHere(request) && !detail.includes('\n') && detail.length <= ROW_FITS
               const reply = request?.kind === 'question' || (!request && task.state !== 'waiting')
               return (
-                <div key={task.key} className="todo-row need" role="listitem" data-state="waiting">
+                // What can be allowed here shows whole (`allows`): on a narrow window its line breaks, where any other is shortened.
+                <div key={task.key} className={`todo-row need ${fits ? 'allows' : ''}`} role="listitem" data-state="waiting">
                   <span className="todo-dot" aria-hidden="true" />
                   <span className="todo-grow">
                     <b>{task.title}</b>
@@ -257,22 +258,25 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
                       {detail && (code ? <> <code className={request?.danger ? 'danger' : undefined} title={request?.danger || undefined}>{detail.split('\n')[0]}</code></> : ` ${detail}`)}
                     </small>
                   </span>
-                  {fits && (
-                    <>
-                      <button className="primary small" onClick={() => void answer(() => api.answerRunnerTask(task.key, request.id, 'allow-once'))}>
-                        Allow once
+                  {/* The buttons stay together: on a narrow window they go under the words, the two of them. */}
+                  <span className="todo-actions">
+                    {fits && (
+                      <>
+                        <button className="primary small" onClick={() => void answer(() => api.answerRunnerTask(task.key, request.id, 'allow-once'))}>
+                          Allow once
+                        </button>
+                        <button className="small" onClick={() => void answer(() => api.answerRunnerTask(task.key, request.id, 'refuse'))}>
+                          Refuse
+                        </button>
+                      </>
+                    )}
+                    {/* A question, or a task Togle runs that stopped, goes on with a reply; anything else opens in Agents. */}
+                    {!fits && (
+                      <button className={`small ${reply ? 'primary' : ''}`} onClick={() => onOpenTask(task.key)}>
+                        {reply ? 'Reply' : 'Open'}
                       </button>
-                      <button className="small" onClick={() => void answer(() => api.answerRunnerTask(task.key, request.id, 'refuse'))}>
-                        Refuse
-                      </button>
-                    </>
-                  )}
-                  {/* A question, or a task Togle runs that stopped, goes on with a reply; anything else opens in Agents. */}
-                  {!fits && (
-                    <button className={`small ${reply ? 'primary' : ''}`} onClick={() => onOpenTask(task.key)}>
-                      {reply ? 'Reply' : 'Open'}
-                    </button>
-                  )}
+                    )}
+                  </span>
                 </div>
               )
             })}

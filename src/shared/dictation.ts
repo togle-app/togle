@@ -50,6 +50,11 @@ export interface DictationState {
   microphoneId?: string
   outcome?: 'inserted' | 'copied'
 }
+/**
+ * Done, with more to say than one line of the open voice bar holds (why the words were copied and not typed): the bar is
+ * taller for it. Its page and the main process, which follows the pointer over it, both go by this.
+ */
+export const longDoneMessage = (state: Pick<DictationState, 'phase' | 'message'>): boolean => state.phase === 'done' && (state.message?.length ?? 0) > 34
 /** The box dictation noted: its token for typing into it, its name, and (on Windows) its window, to put it in front again. */
 /**
  * The box a dictation goes into. `copy`: Togle cannot type into it, so the words are copied, and `copyReason` says why

@@ -88,8 +88,11 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, ca
         <h2>{title || `Call on ${new Date(since || Date.now()).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}</h2>
         <span className="live-clock" role="timer" aria-label="Time into the call">Live · <Elapsed since={since} /></span>
         <span className="spacer" />
-        <button onClick={onMark} title="Mark this moment. The notes list marked moments first.">Mark</button>
-        <button className="primary" onClick={onStop} title="Stop writing the call down">Stop</button>
+        {/* The two stay together: on a narrow window they go under the call's name, at the right. */}
+        <span className="live-actions">
+          <button onClick={onMark} title="Mark this moment. The notes list marked moments first.">Mark</button>
+          <button className="primary" onClick={onStop} title="Stop writing the call down">Stop</button>
+        </span>
       </header>
       <div className="live-sources" aria-label="What is heard">
         <Meter label="You" title="Your microphone" state={heard('me')} level={() => levels().me} />
@@ -130,7 +133,8 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, ca
 const LiveLine = memo(function LiveLine({ line, since, marked }: { line: TranscriptEntry; since: number; marked: boolean }) {
   return (
     <div className={`live-line ${line.speaker} ${marked ? 'marked' : ''}`}>
-      <span className="who">{speakerLabel(line)}</span>
+      {/* A long name is shortened in its column: all of it is on the pointer, and on the chips over the lines. */}
+      <span className="who" title={speakerLabel(line)}>{speakerLabel(line)}</span>
       <time dateTime={new Date(line.at).toISOString()} title={clock.format(line.at)}>{intoCall(line.at - since)}</time>
       <p>{line.text}{marked && <span className="marked-tag">Marked</span>}</p>
     </div>
