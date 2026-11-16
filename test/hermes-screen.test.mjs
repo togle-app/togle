@@ -176,7 +176,8 @@ test('a screen that waits on the person says so, and the task goes on once it is
     task.terminal.write('y\r')
     await until(() => task.state === 'idle', 'the task to go on and end')
     assert.equal(task.waitingFor, undefined)
-    assert.match(backend.text(task), /allowed/)
+    // The window title (which says it is idle) can reach Togle before the last words the screen printed.
+    await until(() => /allowed/.test(backend.text(task)), 'what it printed once it was answered')
   } finally {
     await backend.close()
   }
@@ -192,7 +193,7 @@ test('Stop is Ctrl+C on the screen, and what it ends is the turn', { timeout: 30
     assert.equal(task.state, 'stopped')
     await until(() => events.some((e) => e.type === 'turn-ended'), 'the turn to end')
     assert.deepEqual(events.find((e) => e.type === 'turn-ended'), { type: 'turn-ended', outcome: 'interrupted', error: null })
-    assert.match(backend.text(task), /interrupted/)
+    await until(() => /interrupted/.test(backend.text(task)), 'what the screen printed as it was interrupted')
     assert.equal(await task.endCommands(), 0, 'Hermes ends the command with the turn: nothing is left for a second press')
   } finally {
     await backend.close()
