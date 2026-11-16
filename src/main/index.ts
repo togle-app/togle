@@ -39,7 +39,7 @@ import { registerRunners } from './runners/register'
 import { registerReach } from './reach/register'
 import type { Reach } from './reach/reach'
 import { StoredRecords, StoredTitles } from './runners/titles'
-import { MICROPHONE_PRODUCT, microphonePage } from '@shared/microphone-link'
+import { MICROPHONE_PRODUCT, MICROPHONE_PROTOCOL, microphonePage } from '@shared/microphone-link'
 import { readNoiseReport, shouldSuggest } from '@shared/microphone'
 import { TogleTray } from './tray'
 import { HotkeyPress, virtualKey } from './hotkey-press'
@@ -441,6 +441,8 @@ const microphoneLink = new MicrophoneLink({
   folder: !app.isPackaged && process.env.TOGLE_MICROPHONE_FOLDER ? process.env.TOGLE_MICROPHONE_FOLDER : path.join(app.getPath('appData'), MICROPHONE_PRODUCT),
   client: { name: 'togle', version: app.getVersion() },
   open: url => shell.openExternal(url),
+  // Without an app for its address, a link file Togle cannot start from is a leftover, not an installed Togle Studio.
+  handlesAddress: () => app.getApplicationNameForProtocol(`${MICROPHONE_PROTOCOL}://`) !== '',
   // From source, Togle can start the microphone app's development build too (its link file names Electron and its folder).
   development: !app.isPackaged,
   // Before release Togle Studio was called Togle Microphone: its old link file can still start it, once.

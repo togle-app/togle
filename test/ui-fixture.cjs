@@ -53,7 +53,12 @@ module.exports = function install(fixture) {
     return clone(microphone)
   }
   api.turnOnMicrophone = async () => { record('turnOnMicrophone', []); if (!microphone.installed) throw new Error("Togle Studio isn't installed."); microphone = microphoneOn(true); microphoneChanged(); return clone(microphone) }
-  api.showMicrophone = async page => { record('showMicrophone', [page]) }
+  // Opening it can fail, as it does when the program is gone: the message comes back the way a main-process error does.
+  let showFails = ''
+  api.showMicrophone = async page => {
+    record('showMicrophone', [page])
+    if (showFails) { const failure = showFails; showFails = ''; throw new Error("Error invoking remote method 'microphone:show': Error: " + failure) }
+  }
   api.openMicrophonePage = async from => { record('openMicrophonePage', [from]) }
   api.noiseMeasured = async report => { record('noiseMeasured', [report]); return fixture.scenario === 'noisy-call' && fixture.settings.microphone?.suggestions !== false }
   const histories = new Map()
@@ -458,6 +463,7 @@ module.exports = function install(fixture) {
     // An agent answers a question put to it on a call: the question as it was sent (with where the call is saved), and its words after.
     answerOnCall: (key, question, answer) => {
       const found = runnerFind(key)
+    failNextShowMicrophone: message => { showFails = message },
       found.history = { entries: [{ id: 400 + ++sequence, at: Date.now(), kind: 'you', text: question + '\n\nA call is saved at "C:\\calls\\live.md".' }, { id: 400 + ++sequence, at: Date.now(), kind: 'agent', text: answer }] }
       found.state = 'idle'; runnerChanged()
     },

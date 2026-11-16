@@ -52,7 +52,7 @@ export { hearingStatus, keywordsOf, SpeechApi } from '../src/main/stt/speech-api
 export { download, SpeechInstaller } from '../src/main/stt/install'
 export { whisperFor, modelNameOf, MODELS } from '../src/main/stt/catalog'
 export { lastPlace, keepPlace } from '../src/main/window-place'
-export { MicrophoneLink, launchEnvironment } from '../src/main/microphone-link'
+export { MicrophoneLink, launchEnvironment, startProgram } from '../src/main/microphone-link'
 export { encodeLinkMessage, LinkLineReader, readLinkFile, readLinkState, isTogleMicrophoneLabel, microphonePage, STUDIO_SITE, MICROPHONE_LINK_API, MICROPHONE_PRODUCT, TOGLE_SITE } from '../src/shared/microphone-link'
 export { describeNoise, plainNoise, isMicrophoneOn, microphoneNeedsSignIn, noiseVerdict, readNoiseReport, shouldSuggest, MICROPHONE_DEFAULTS, MICROPHONE_SIGN_IN } from '../src/shared/microphone'
 export { NoiseCheck, noisyThreshold } from '../src/renderer/src/audio/noise-check'

@@ -586,20 +586,30 @@ function StudioRow() {
 
 function StudioApp() {
   const [status, setStatus] = useState<TogleMicrophoneStatus>()
+  const [opening, setOpening] = useState(false)
+  const [error, setError] = useState('')
   useEffect(() => {
     void api.microphoneStatus().then(setStatus, () => undefined)
     return api.onMicrophone(setStatus)
   }, [])
+  // Opening its window starts the app when it is not running. When that cannot be done, the row says why.
+  const open = async (): Promise<void> => {
+    setOpening(true); setError('')
+    try { await api.showMicrophone() } catch (failure) { setError(errorText(failure)) } finally { setOpening(false) }
+  }
   return (
-    <Row label={false} name="Togle Studio" className="studio-row">
-      {/* Not there yet: just the one button, as the design's row has it. */}
-      {status?.installed && <span className="setting-value microphone-status">{studioSummary(status)}</span>}
-      {!status?.installed
-        ? <button className="small" onClick={() => void api.openMicrophonePage('settings')}>See Togle Studio</button>
-        : microphoneNeedsSignIn(status)
-          ? <button className="primary small" onClick={() => void api.showMicrophone()}>Sign in</button>
-          : <button className="ghost small" onClick={() => void api.showMicrophone()}>Open</button>}
-    </Row>
+    <>
+      <Row label={false} name="Togle Studio" className="studio-row">
+        {/* Not there yet: just the one button, as the design's row has it. */}
+        {status?.installed && <span className="setting-value microphone-status">{studioSummary(status)}</span>}
+        {!status?.installed
+          ? <button className="small" onClick={() => void api.openMicrophonePage('settings')}>See Togle Studio</button>
+          : microphoneNeedsSignIn(status)
+            ? <button className="primary small" disabled={opening} onClick={() => void open()}>{opening ? 'Opening…' : 'Sign in'}</button>
+            : <button className="ghost small" disabled={opening} onClick={() => void open()}>{opening ? 'Opening…' : 'Open'}</button>}
+      </Row>
+      {error && <p className="error" role="alert">{error}</p>}
+    </>
   )
 }
 

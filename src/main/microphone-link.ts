@@ -38,6 +38,8 @@ export interface MicrophoneLinkOptions {
    * watched (that would keep the renamed app from moving the folder), and only to start the renamed app.
    */
   previousFolder?: string
+  /** Whether the system has an app for togle-studio:// addresses (the app registers one when it is installed). */
+  handlesAddress?: () => boolean
 }
 
 /**
@@ -67,7 +69,18 @@ export class MicrophoneLink extends EventEmitter {
 
   status(): TogleMicrophoneStatus {
     const running = this.connected && !!this.state
-    return { installed: !!this.file, running, ...(running ? { state: this.state } : {}), ...(this.forCall ? { forCall: true } : {}) }
+    return { installed: running || this.canStart(), running, ...(running ? { state: this.state } : {}), ...(this.forCall ? { forCall: true } : {}) }
+  }
+
+  /**
+   * Installed means Togle can start it: its link file names a program Togle starts, or the system has an app for its address.
+   * A link file outlives the app (an uninstall, or a copy run from source and then gone), and one Togle cannot start must
+   * not read as installed: Open would do nothing, and every call would try to turn it on.
+   */
+  private canStart(): boolean {
+    if (!this.file) return false
+    if (this.launchCommand([], true)) return true
+    try { return !!this.options.handlesAddress?.() } catch { return false }
   }
 
   start(): void {
@@ -128,7 +141,7 @@ export class MicrophoneLink extends EventEmitter {
   async turnOn(reason: 'call' | 'user' = 'user', wait = LAUNCH_WAIT_MS): Promise<TogleMicrophoneStatus> {
     if (!this.connected) await this.refresh()
     if (!this.connected) {
-      if (!this.file) throw new Error("Togle Studio isn't installed.")
+      if (!this.canStart()) throw new Error("Togle Studio isn't installed.")
       await this.launch(['--start'])
       await this.waitFor(status => status.running, wait)
       if (!this.connected) throw new Error("Togle Studio didn't start.")
@@ -156,7 +169,7 @@ export class MicrophoneLink extends EventEmitter {
   async show(page: MicrophoneLinkPage = 'settings'): Promise<void> {
     if (!this.connected) await this.refresh()
     if (this.connected) { await this.request('show', { page }); return }
-    if (!this.file) throw new Error("Togle Studio isn't installed.")
+    if (!this.canStart()) throw new Error("Togle Studio isn't installed.")
     await this.launch([], true)
   }
 
@@ -342,17 +355,18 @@ export class MicrophoneLink extends EventEmitter {
   private async launch(extra: string[], visible = false): Promise<void> {
     const launch = this.launchCommand(extra, visible)
     if (launch) {
-      (this.options.run ?? runDetached)(launch)
+      await (this.options.run ?? runDetached)(launch)
       return
     }
     // Not a launch Togle can check: the app's own address starts it instead (it registers it when it runs).
     const action = extra.includes('--start') ? 'start' : 'open'
-    const cannot = "Togle couldn't start Togle Studio. Open it from your apps, then try again."
-    if (!this.options.open) throw new Error(cannot)
+    if (!this.options.open) throw new Error(COULD_NOT_START)
     try { await this.options.open(`${MICROPHONE_PROTOCOL}://${action}`) }
-    catch { throw new Error(cannot) }
+    catch { throw new Error(COULD_NOT_START) }
   }
 }
+
+const COULD_NOT_START = "Togle couldn't start Togle Studio. Open it from your apps, then try again."
 
 /**
  * The environment Togle Studio starts with: Togle's, minus what was meant for Togle alone. Above all its development
@@ -363,8 +377,31 @@ export function launchEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.
     !/^(?:ELECTRON_RENDERER_URL|ELECTRON_RUN_AS_NODE|ELECTRON_ENABLE_LOGGING|ELECTRON_ENABLE_STACK_DUMPING|ELECTRON_NO_ATTACH_CONSOLE|NODE_ENV|NODE_OPTIONS|VITE_.*|TOGLE_.*)$/i.test(key)))
 }
 
-function runDetached(launch: MicrophoneLaunch): void {
-  const child = spawn(launch.command, launch.args, { detached: true, stdio: 'ignore', windowsHide: false, env: launchEnvironment() })
-  child.on('error', error => console.warn('[microphone] could not start Togle Studio:', error.message))
-  child.unref()
+/**
+ * Starts a program, detached. Says so when it could not be started, which Open must show: a program that is gone, or one
+ * macOS's `open` cannot find the app for (that one hands the app to the system and ends, with an error when there is none,
+ * so it is waited for). A program that runs on is started.
+ */
+export function startProgram(
+  launch: MicrophoneLaunch,
+  environment: NodeJS.ProcessEnv = launchEnvironment(),
+  waitForExit = path.basename(launch.command) === 'open'
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let child: ReturnType<typeof spawn>
+    try { child = spawn(launch.command, launch.args, { detached: true, stdio: 'ignore', windowsHide: false, env: environment }) }
+    catch (error) { console.warn('[microphone] could not start Togle Studio:', (error as Error).message); return reject(new Error(COULD_NOT_START)) }
+    const failed = (why: string): void => { console.warn('[microphone] could not start Togle Studio:', why); reject(new Error(COULD_NOT_START)) }
+    let timer: NodeJS.Timeout | undefined
+    child.once('error', error => { clearTimeout(timer); failed(error.message) })
+    if (waitForExit) {
+      timer = setTimeout(resolve, 5_000)
+      child.once('exit', code => { clearTimeout(timer); if (code) failed(`${path.basename(launch.command)} ended with ${code}`); else resolve() })
+    } else {
+      child.once('spawn', () => resolve())
+    }
+    child.unref()
+  })
 }
+
+const runDetached = (launch: MicrophoneLaunch): Promise<void> => startProgram(launch)

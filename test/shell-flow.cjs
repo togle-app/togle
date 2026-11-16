@@ -733,7 +733,24 @@ async function checkSettings(T, agent) {
   assert.equal(await ui.evaluate("!!document.querySelector('.studio-row .setting-value')"), false, 'not installed: only its one button')
   await ui.click('.studio-row button', 'See Togle Studio')
   assert.deepEqual(await ui.calls('openMicrophonePage'), [['settings']])
-  const mention = "[...document.querySelectorAll('#settings-accounts .setting')].find(row=>row.querySelector('.name')?.textContent==='Mention Togle Studio').querySelector('[role=switch]')"
+  // Installed and not running: its state in words, and Open starts it. When it cannot be started, the row says why, not nothing.
+  const opened = (await ui.calls('showMicrophone')).length
+  await ui.evaluate("window.togleUITest.microphone({ installed: true, running: false })")
+  await ui.wait("document.querySelector('.studio-row .setting-value')?.textContent==='Installed · not running'")
+  const cannot = "Togle couldn't start Togle Studio. Open it from your apps, then try again."
+  await ui.evaluate(`window.togleUITest.failNextShowMicrophone(${JSON.stringify(cannot)})`)
+  await ui.click('.studio-row button', 'Open')
+  await ui.wait("!!document.querySelector('.studio-row + .error')")
+  assert.equal(await ui.evaluate("document.querySelector('.studio-row + .error').textContent"), cannot, 'the reason, without the name of the call it came through')
+  assert.equal(await ui.evaluate("document.querySelector('.studio-row + .error').getAttribute('role')"), 'alert')
+  assert.equal(await ui.evaluate("document.querySelector('.studio-row button').textContent"), 'Open', 'the button is back')
+  await ui.click('.studio-row button', 'Open')
+  await ui.wait("!document.querySelector('.studio-row + .error')")
+  assert.equal((await ui.calls('showMicrophone')).length - opened, 2, 'Open asked twice; the second one worked and the line went')
+  // Gone again (the program was removed): only its one button.
+  await ui.evaluate("window.togleUITest.microphone({ installed: false, running: false })")
+  await ui.wait("!document.querySelector('.studio-row .setting-value')")
+  const mention ="[...document.querySelectorAll('#settings-accounts .setting')].find(row=>row.querySelector('.name')?.textContent==='Mention Togle Studio').querySelector('[role=switch]')"
   assert.equal(await ui.evaluate(mention + '.checked'), true)
   await ui.evaluate(mention + '.click()')
   await ui.wait('window.togleUITest.settings().microphone.suggestions===false')
