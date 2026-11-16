@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import type { SettingsPatch } from '@shared/api'
 import type { AIProfile, ApiConnection, LocalModelId, LocalSpeechState, ModelOption, Settings, SttStatus, SubscriptionAccount } from '@shared/types'
-import type { RunnerStatus } from '@shared/runner'
+import { runsInTerminal, type RunnerStatus } from '@shared/runner'
 import { CALL_APPS, isCallAppMode, type CallApp, type CallAppMode } from '@shared/call-apps'
 import { localModelsFor, PARAKEET_LANGUAGES, SPEECH_LANGUAGES, speechLanguageCode, speechLanguageName } from '@shared/speech'
 import { voiceAccountId } from '@shared/dictation'
@@ -298,7 +298,7 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
       {found === null ? <Row label={false} name="Looking…" /> : !found.length ? <Row label={false} name="No agent found" /> : found.map((agent) => (
         <Fragment key={agent.runner}>
           <Row label={false} name={<span className="agent-name"><span className="av" aria-hidden="true">{agentLetter(agent)}</span><span className="agent-label">{agent.name}</span></span>}>
-            <span className={`setting-value ${agent.installed ? 'found' : ''}`}>{agent.removed ? 'Removed' : agent.installed ? (agent.added ? 'Added' : 'Found') : 'Not found'}</span>
+            <span className={`setting-value ${agent.installed ? 'found' : ''}`}>{agent.removed ? 'Removed' : agent.installed ? (agent.added ? `Added · ${runsInTerminal(agent.runner) ? 'terminal' : 'conversation'}` : 'Found') : 'Not found'}</span>
             {agent.removed
               ? <button className="ghost small" aria-label={`Add back ${agent.name}`} disabled={!!busy} onClick={() => void restore(agent)}>{busy === agent.runner ? 'Adding…' : 'Add back'}</button>
               : <button className="ghost small" aria-label={`Remove ${agent.name}`} disabled={!!busy} onClick={() => { if (agent.added) void remove(agent); else setConfirming(agent.runner) }}>{busy === agent.runner ? 'Removing…' : 'Remove'}</button>}
