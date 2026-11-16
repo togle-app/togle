@@ -41,7 +41,8 @@ const alive = (pid) => {
   }
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-const until = async (check, what, ms = 10_000) => {
+// A whole run starts many programs at once, and a wait that is long enough alone has run out under that load.
+const until = async (check, what, ms = 30_000) => {
   const start = Date.now()
   while (Date.now() - start < ms) {
     const value = await check()
