@@ -69,7 +69,8 @@ export class SubscriptionAccounts {
   known(): SubscriptionAccount[] { return [...this.entries.values()].map(entry => this.snapshot(entry)) }
   async list(): Promise<SubscriptionAccount[]> { return this.known() }
   async add(provider: 'chatgpt', label: string): Promise<SubscriptionAccount> {
-    if (provider !== 'chatgpt' || typeof label !== 'string' || !label.trim()) throw new Error('Enter an account label, such as Work or Personal.')
+    if (provider !== 'chatgpt') throw new Error('Only a ChatGPT plan can be added as an account. Claude is used with an Anthropic API key.')
+    if (typeof label !== 'string' || !label.trim()) throw new Error('Enter an account label, such as Work or Personal.')
     if (this.entries.size >= 22) throw new Error('At most 20 additional accounts can be saved.')
     const entry = this.make({ id: randomUUID(), provider, label: label.trim().slice(0, 60) })
     this.register(entry)

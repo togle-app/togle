@@ -48,7 +48,8 @@ test('personal and work ChatGPT profiles keep encrypted credentials, identity an
 
 test('there is no Claude sign-in: a Claude account cannot be added, and one an earlier Togle saved is skipped', async () => {
   const accounts = fixture()
-  await assert.rejects(accounts.add('claude', 'Work'), /Enter an account label/)
+  await assert.rejects(accounts.add('claude', 'Work'), /Only a ChatGPT plan/)
+  await assert.rejects(accounts.add('chatgpt', '  '), /Enter an account label/)
   assert.deepEqual((await accounts.list()).map(account => account.provider), ['chatgpt'])
   // A saved file with a Claude account (from a Togle that had the sign-in) and a ChatGPT one: only the ChatGPT one is kept.
   const kept = '11111111-1111-4111-8111-111111111111', dropped = '22222222-2222-4222-8222-222222222222'
