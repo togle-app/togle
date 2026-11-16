@@ -232,6 +232,40 @@ test('a link file Togle cannot start from, with no app for its address, is a lef
   }
 })
 
+test('what the computer has installed is what counts: an app that never ran is installed, and one that is gone is not', async () => {
+  const dir = folder(), runs = []
+  const program = process.platform === 'darwin'
+    ? { command: '/usr/bin/open', args: ['-b', 'io.togle.studio', '--args', '--hidden'] }
+    : { command: path.join(dir, 'Program Files', 'Togle Studio.exe'), args: ['--hidden'] }
+  let installed = program
+  const microphone = link(dir, { run: launch => runs.push(launch), open: async () => { throw new Error('not used') }, installed: () => installed })
+  // No link file yet, since it never ran: the computer has it, so it is installed, and Open starts it with its window.
+  assert.deepEqual(await microphone.refresh(), { installed: true, running: false })
+  assert.equal((await microphone.prepareCall({ ...MICROPHONE_DEFAULTS, autoStart: false })).installed, true)
+  await microphone.show()
+  assert.deepEqual(runs.at(-1), { command: program.command, args: program.args.filter(arg => arg !== '--hidden') })
+  // A call, or turning it on, starts it out of sight and asks it to clean the microphone.
+  await assert.rejects(microphone.turnOn('user', 300), /didn't start/)
+  assert.deepEqual(runs.at(-1).args.slice(-2), ['--hidden', '--start'])
+  // Removed: the same lookup says no, and Open says so.
+  installed = undefined
+  assert.deepEqual(await microphone.refresh(), { installed: false, running: false })
+  await assert.rejects(microphone.show(), /isn't installed/)
+  assert.equal(runs.length, 2, 'nothing was started after it was gone')
+  microphone.stop()
+})
+
+test('the program its link file names is the one started, even when the computer has another one installed', async () => {
+  const dir = folder(), runs = []
+  const here = installedLaunch(dir)
+  const elsewhere = { command: path.join(dir, 'Other', process.platform === 'win32' ? 'Togle Studio.exe' : 'togle-studio'), args: ['--hidden'] }
+  const microphone = link(dir, { run: launch => runs.push(launch), installed: () => process.platform === 'darwin' ? here : elsewhere })
+  fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify({ api: 1, product: 'Togle Studio', version: '0.1.0', pid: 1, socket: process.platform === 'win32' ? '\\\\.\\pipe\\togle-studio-00000000' : path.join(dir, 'link.sock'), token: 'f'.repeat(64), startedAt: 1, launch: here }))
+  await microphone.show()
+  assert.equal(runs[0].command, here.command, 'the program it last ran from')
+  microphone.stop()
+})
+
 test('Open says when the program could not be started, and a program that runs on counts as started', async () => {
   const node = process.execPath
   await startProgram({ command: node, args: ['-e', 'setTimeout(() => {}, 1200)'] })

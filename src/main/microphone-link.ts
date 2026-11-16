@@ -40,6 +40,8 @@ export interface MicrophoneLinkOptions {
   previousFolder?: string
   /** Whether the system has an app for togle-studio:// addresses (the app registers one when it is installed). */
   handlesAddress?: () => boolean
+  /** The installed program and how to start it, found by asking the computer (see studio-install.ts); none when it is not installed. */
+  installed?: () => MicrophoneLaunch | undefined
 }
 
 /**
@@ -73,12 +75,12 @@ export class MicrophoneLink extends EventEmitter {
   }
 
   /**
-   * Installed means Togle can start it: its link file names a program Togle starts, or the system has an app for its address.
-   * A link file outlives the app (an uninstall, or a copy run from source and then gone), and one Togle cannot start must
-   * not read as installed: Open would do nothing, and every call would try to turn it on.
+   * Installed means Togle can start it: the computer has it installed (the program its installer put there), its link
+   * file names a program Togle starts, or the system has an app for its address. The link file alone says nothing: it
+   * outlives the app (an uninstall, or a copy run from source and then gone) and is missing for an app that never ran.
+   * One Togle cannot start must not read as installed: Open would do nothing, and every call would try to turn it on.
    */
   private canStart(): boolean {
-    if (!this.file) return false
     if (this.launchCommand([], true)) return true
     try { return !!this.options.handlesAddress?.() } catch { return false }
   }
@@ -326,8 +328,18 @@ export class MicrophoneLink extends EventEmitter {
     })
   }
 
-  /** What link.json says starts Togle Studio, if it's really Togle Studio. */
+  /** What starts Togle Studio: what its link file says, if that is really Togle Studio, else the program installed on this computer. */
   private launchCommand(extra: string[], visible: boolean): MicrophoneLaunch | undefined {
+    const fromFile = this.launchFromFile(extra, visible)
+    if (fromFile) return fromFile
+    const installed = this.options.installed?.()
+    if (!installed) return
+    const args = visible ? installed.args.filter(arg => arg !== '--hidden') : installed.args
+    return { command: installed.command, args: [...args, ...(extra.length && this.platform === 'darwin' && !args.includes('--args') ? ['--args'] : []), ...extra] }
+  }
+
+  /** What link.json says starts Togle Studio, if it's really Togle Studio. */
+  private launchFromFile(extra: string[], visible: boolean): MicrophoneLaunch | undefined {
     const launch = this.file?.launch
     if (!launch) return
     const args = visible ? launch.args.filter(arg => arg !== '--hidden') : launch.args

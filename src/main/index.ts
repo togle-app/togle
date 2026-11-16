@@ -17,6 +17,7 @@ import type { HeldKeys } from './desktop-typing'
 import { ShowWindow } from './show-window'
 import { DictationWindow } from './dictation-window'
 import { MicrophoneLink } from './microphone-link'
+import { installedStudio } from './studio-install'
 import type { CloseWarning } from '@shared/close-warning'
 import { startChannel } from './channel/register'
 import type { ChannelServer } from './channel/server'
@@ -441,7 +442,8 @@ const microphoneLink = new MicrophoneLink({
   folder: !app.isPackaged && process.env.TOGLE_MICROPHONE_FOLDER ? process.env.TOGLE_MICROPHONE_FOLDER : path.join(app.getPath('appData'), MICROPHONE_PRODUCT),
   client: { name: 'togle', version: app.getVersion() },
   open: url => shell.openExternal(url),
-  // Without an app for its address, a link file Togle cannot start from is a leftover, not an installed Togle Studio.
+  // Installed is what the computer has, not what a link file says: its installer's program (a link file outlives the app).
+  installed: () => installedStudio({ platform: process.platform, env: process.env, home: app.getPath('home'), exists: existsSync }),
   handlesAddress: () => app.getApplicationNameForProtocol(`${MICROPHONE_PROTOCOL}://`) !== '',
   // From source, Togle can start the microphone app's development build too (its link file names Electron and its folder).
   development: !app.isPackaged,
