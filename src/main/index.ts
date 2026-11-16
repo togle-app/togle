@@ -46,6 +46,7 @@ import { TogleTray } from './tray'
 import { HotkeyPress, virtualKey } from './hotkey-press'
 import { voiceAccountId } from '@shared/dictation'
 import { modelSourceId } from '@shared/model-selection'
+import { agentForgetting, settingsForgetting } from '@shared/missing-accounts'
 import { randomUUID } from 'node:crypto'
 import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -292,6 +293,8 @@ const activeProvider = (agentId?: string): LLMProvider => {
 }
 const isApiSource = (id: string): boolean => id.startsWith('api:') || id.startsWith('connection:')
 function sourceProvider(id: string): string { return isApiSource(id) ? apiConnections.get(id).provider.id : accounts.get(id).kind }
+/** Whether an account or an API connection is there under this name. */
+function sourceKnown(id: string): boolean { try { sourceProvider(id); return true } catch { return false } }
 function configuredAI(agentId?: string): AIProfile | undefined {
   const agent = agentId ? agents.get(agentId) : undefined
   return agent?.preferences?.ai || getSettings().ai ? effectiveAI(getSettings(), agent, sourceProvider) : undefined
@@ -311,7 +314,8 @@ function selectedChatGPT() {
     if (task) return accounts.get(task.sourceId)
   }
   const chosen = accountChoice(getSettings())
-  return (chosen ? accounts.get(chosen) : undefined) ?? accounts.get(defaultAccountId('chatgpt'))
+  // A chosen account that is not there (the settings are cleaned up as Togle starts) shows ChatGPT's own, not an error.
+  return (chosen && sourceKnown(chosen) ? accounts.get(chosen) : undefined) ?? accounts.get(defaultAccountId('chatgpt'))
 }
 
 // What calls belong to: one agent, with the words calls are heard with (agent-store.ts).
@@ -1684,6 +1688,9 @@ if (process.argv.includes('--togle-hook')) {
     await Promise.all([loadSettings(), auth.load(), claude.load(), compat.load(), ...Object.values(speechApis).map((api) => api.load())])
     await accounts.load()
     await apiConnections.load()
+    // Settings that name an account that is not there (the Claude sign-in an earlier Togle had) go back to the general account.
+    const forgotten = settingsForgetting(getSettings(), sourceKnown)
+    if (Object.keys(forgotten).length) { console.warn('[accounts] settings named accounts that are gone:', Object.keys(forgotten).join(', ')); await updateSettings(forgotten) }
     const accountsRead = accounts.list().catch(error => { console.warn('[accounts]', (error as Error).message); return [] })
     // Before the speech model was a choice, this PC heard every call: a Togle from then that has its speech recognition
     // keeps it (quicker, and the audio stays here); one without starts on the ChatGPT plan, as a new one does.
@@ -1692,6 +1699,10 @@ if (process.argv.includes('--togle-hook')) {
     // Apply text retention on startup, including accounts whose history screen is not opened.
     void accountsRead.then(list => Promise.all(list.map(account => dictationHistory.get(account.id)))).catch(error => console.warn('[dictation history] retention:', (error as Error).message))
     await agents.load()
+    for (const agent of agents.list()) {
+      const forgetting = agentForgetting(agent, sourceKnown)
+      if (forgetting) { console.warn('[accounts] an agent named accounts that are gone:', agent.name); await agents.update(agent.id, forgetting) }
+    }
     started.agents = Date.now()
     if (!agents.list().some((a) => a.id === getSettings().activeAgentId)) {
       await updateSettings({ activeAgentId: agents.list()[0].id })

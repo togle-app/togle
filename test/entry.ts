@@ -25,6 +25,7 @@ export { sameSpeechTurn, speechTurns, mergeSpeakers } from '../src/shared/speake
 export { Dictation } from '../src/main/dictation'
 export { SubscriptionAccounts, accountChoice, defaultAccountId } from '../src/main/auth/accounts'
 export { modelSourceId, sourceLanes, selectDefaultModel } from '../src/shared/model-selection'
+export { settingsForgetting, agentForgetting } from '../src/shared/missing-accounts'
 export { effectiveAI, effectiveSettings, validateAIProfile, validatePreferences, AI_TASKS } from '../src/shared/preferences'
 export { routedProvider, planFor } from '../src/main/providers/routed'
 export { ApiConnections } from '../src/main/auth/api-connections'

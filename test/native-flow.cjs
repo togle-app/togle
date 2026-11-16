@@ -169,12 +169,14 @@ async function run() {
   record = await invoke('calls:merge-speakers', live.id, 'native:4', 'native:1')
   assert.ok(record.transcript.filter(line => line.speaker === 'them').every(line => line.voiceId === 'native:1' && line.voiceName === 'Diana'), 'archived call corrections are saved independently of the current call')
   // Given to an agent: written as plain text beside the encrypted history, and removed with the call.
-  await invoke('calls:give', live.id)
+  // The call is written to a file first, then each picked task is told where it is: a task that is not there says so.
+  const told = await invoke('calls:give', { call: live.id, tasks: ['claude:no-such-task'] })
+  assert.equal(told.length, 1); assert.equal(told[0].ok, false)
   const given = path.join(profile, 'shared-calls', live.id + '.md')
   const givenText = fs.readFileSync(given, 'utf8')
   assert.ok(givenText.startsWith('<!-- A record of a call'))
   assert.match(givenText, /Luka: I will send it by Tuesday\./)
-  await assert.rejects(invoke('calls:give', 'no-such-call'), /no longer available/)
+  await assert.rejects(invoke('calls:give', { call: 'no-such-call', tasks: ['claude:no-such-task'] }), /no longer available/)
   assert.deepEqual((await invoke('calls:search', 'tuesday')).map(hit => hit.id), [live.id], 'the real history is searched')
   await invoke('calls:delete', live.id)
   assert.equal(fs.existsSync(given), false, 'the text copy goes with the call')
