@@ -1,8 +1,7 @@
 // What Hermes kept of a session's conversation, for the Web view: its `hermes sessions export - --session-id <id>` (one JSON
 // object, with the session's messages) made into the same entries the window shows for any task. The export holds every row,
 // including ones that were compacted away or are Hermes's own notes to itself: only the live conversation is drawn.
-import type { LogEntry, TaskHistory } from '@shared/runner'
-import { lastTurns } from './history-turns'
+import type { LogEntry } from '@shared/runner'
 import { list, rec, text } from './jsonrpc'
 
 const WORDS_MOST = 20_000
@@ -72,6 +71,3 @@ export function hermesEntries(session: unknown): LogEntry[] {
   })
   return entries
 }
-
-/** The last turns of an export, or all (up to a limit). */
-export const hermesHistory = (session: unknown, all: boolean): TaskHistory => lastTurns(hermesEntries(session), all)

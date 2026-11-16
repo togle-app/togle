@@ -50,8 +50,9 @@ const NATIVE: Record<string, { pkg: string; triple: string }> = {
   'win32-arm64': { pkg: 'codex-win32-arm64', triple: 'aarch64-pc-windows-msvc' }
 }
 
-// The newest turns shown with every step; and how many pages of a hundred older ones "show earlier" brings.
-const RECENT_TURNS = 10
+// The newest turns shown with every step (as many as the other agents' first look); and how many pages of a hundred older ones
+// "show earlier" brings.
+const RECENT_TURNS = 12
 const OLDER_PAGES = 3
 
 const run = (file: string, args: string[]): Promise<string> =>

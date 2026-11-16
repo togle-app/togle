@@ -8,16 +8,19 @@ const api = window.togle
 const READ_AGAIN_MS = 3_000
 
 /**
- * A task's conversation as its agent keeps it, read when the task changes and every few seconds while it works. `history` is
+ * A task's conversation as its agent keeps it, read when the task changes and every few seconds while it works, and only while
+ * the Web view is on screen (`on`): in Terminal nothing reads it, and a Codex or Hermes conversation is not small. `history` is
  * null when the agent keeps none to read: the window then shows what happened while Togle watched. `showAll` brings the turns
  * before the last ones.
  */
-export function useHistory(task: Pick<TaskView, 'key' | 'state' | 'updatedAt'>): { history: TaskHistory | null; loaded: boolean; all: boolean; showAll: () => void } {
+export function useHistory(task: Pick<TaskView, 'key' | 'state' | 'updatedAt'>, on: boolean): { history: TaskHistory | null; loaded: boolean; all: boolean; showAll: () => void } {
   const [history, setHistory] = useState<TaskHistory | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [all, setAll] = useState(false)
-  const working = task.state === 'working' || task.state === 'waiting'
+  // Not while it waits for you: nothing is being said then.
+  const working = task.state === 'working'
   useEffect(() => {
+    if (!on) return
     let live = true
     const read = (): void => {
       void api.runnerHistory(task.key, all).then(
@@ -39,7 +42,7 @@ export function useHistory(task: Pick<TaskView, 'key' | 'state' | 'updatedAt'>):
       live = false
       if (timer) clearInterval(timer)
     }
-  }, [task.key, task.updatedAt, all, working])
+  }, [task.key, task.updatedAt, all, working, on])
   return { history, loaded, all, showAll: () => setAll(true) }
 }
 

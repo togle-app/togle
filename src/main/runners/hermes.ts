@@ -23,9 +23,10 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import type { TaskHistory, TaskInfo } from '@shared/runner'
+import type { LogEntry, TaskHistory, TaskInfo } from '@shared/runner'
 import { exists, lines } from './acp'
-import { hermesHistory } from './hermes-history'
+import { hermesEntries } from './hermes-history'
+import { lastTurns } from './history-turns'
 import { keepJson } from './keep'
 import { TaskBase } from './task-base'
 import { cleanWords, loadPty, openTerminal, refuseCommand, TerminalTask, type TerminalChunk } from './terminal'
@@ -512,8 +513,8 @@ export class HermesBackend implements Backend {
   private resolved?: Promise<TaskContext>
   /** The name each session Togle started was started with, and the id Hermes gave it. */
   private readonly names = new Map<string, string>()
-  /** The export of the sessions asked for lately, by the id Hermes gave: what Hermes printed, and when. */
-  private readonly conversations = new Map<string, { at: number; running?: Promise<unknown | null>; session: unknown | null }>()
+  /** The conversation of the sessions asked for lately, by the id Hermes gave, and when it was read. */
+  private readonly conversations = new Map<string, { at: number; running?: Promise<LogEntry[] | null>; entries: LogEntry[] | null }>()
   private loaded?: Promise<void>
 
   constructor(private readonly options: HermesOptions) {}
@@ -595,18 +596,22 @@ export class HermesBackend implements Backend {
     const real = this.names.get(id) ?? [...this.tasks].find((task) => task.id === id)?.real ?? id
     if (!SESSION_WORD.test(real)) return null
     const held = this.conversations.get(real)
-    if (held && (held.running || Date.now() - held.at < (this.options.historyMs ?? 8_000))) return held.running ? held.running.then((session) => (session ? hermesHistory(session, all) : null)) : held.session ? hermesHistory(held.session, all) : null
+    if (held && (held.running || Date.now() - held.at < (this.options.historyMs ?? 8_000))) {
+      const entries = held.running ? await held.running : held.entries
+      return entries ? lastTurns(entries, all) : null
+    }
     const command = await this.command()
-    const running = exported(command, this.options.env ?? process.env, real)
-    const entry: { at: number; running?: Promise<unknown | null>; session: unknown | null } = { at: Date.now(), running, session: null }
+    // What is kept is the conversation as entries, never the export: an export holds every row of the session, 25 MB for the biggest here.
+    const running = exported(command, this.options.env ?? process.env, real).then((session) => (session ? hermesEntries(session) : null))
+    const entry: { at: number; running?: Promise<LogEntry[] | null>; entries: LogEntry[] | null } = { at: Date.now(), running, entries: null }
     this.conversations.set(real, entry)
-    const session = await running
+    const entries = await running
     entry.running = undefined
-    entry.session = session
+    entry.entries = entries
     entry.at = Date.now()
-    // Only a few are kept: a session is big.
+    // Only a few sessions are kept.
     while (this.conversations.size > 4) this.conversations.delete(this.conversations.keys().next().value as string)
-    return session ? hermesHistory(session, all) : null
+    return entries ? lastTurns(entries, all) : null
   }
 
   /** Finds the id Hermes gave a session Togle started, by the name it was started with, and gives it the name of the person's words. */

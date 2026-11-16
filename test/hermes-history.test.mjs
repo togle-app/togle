@@ -2,7 +2,7 @@
 // conversation, in the order Hermes wrote it), and the backend's history over the stand-in for the `hermes` program: asked for
 // again only after a while, and nothing for a session Hermes does not have.
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { after, test } from 'node:test'
@@ -16,6 +16,15 @@ after(() => {
   for (const dir of made) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
+const until = async (check, what, ms = 15_000) => {
+  const start = Date.now()
+  while (Date.now() - start < ms) {
+    const value = await check()
+    if (value) return value
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assert.fail(`timed out waiting for ${what}`)
+}
 const message = (id, role, extra = {}) => ({ id, role, content: '', timestamp: 1800000000 + id, active: 1, compacted: 0, display_kind: null, ...extra })
 const call = (id, name, args) => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } })
 const session = (...messages) => ({ id: 'S1', messages })
@@ -100,5 +109,39 @@ test('with no wait it is read again, many turns are cut to the last ones, and a 
     assert.equal(await backend.history('not a session id; rm -rf', false), null, 'only what looks like a session id is passed on')
   } finally {
     await backend.close()
+  }
+})
+
+test('a session Togle started is read by the id Hermes gave it, by its session and by the name it was started with', { timeout: 60_000 }, async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'togle-hermes-history-'))
+  const keep = mkdtempSync(path.join(os.tmpdir(), 'togle-hermes-keep-'))
+  made.push(home, keep)
+  const open = () => new T.HermesBackend({ command: [process.execPath, fake], env: { ...process.env, FAKE_HERMES_HOME: home }, told: () => undefined, findMs: 80, cacheMs: 0, historyMs: 0, keep })
+  const backend = open()
+  try {
+    const task = await backend.start({ folder: os.tmpdir(), prompt: 'say hi', title: 'A started session' })
+    const name = task.id
+    // Hermes gives the session its own id, which Togle finds and keeps beside the name.
+    const real = await until(() => task.real, 'Togle to find the id Hermes gave the session')
+    assert.notEqual(real, name)
+    const file = path.join(home, 'sessions.json')
+    const rows = JSON.parse(readFileSync(file, 'utf8'))
+    rows.find((row) => row.id === real).messages = [message(1, 'user', { content: 'say hi' }), message(2, 'assistant', { content: 'hi' })]
+    writeFileSync(file, JSON.stringify(rows))
+    // By its session (what the hub asks for a task Togle runs): the id Hermes gave it.
+    assert.equal(task.session(), real)
+    assert.deepEqual((await backend.history(task.session(), false)).entries.map((e) => e.text), ['say hi', 'hi'])
+    // By the name it was started with (what the list says of it after Togle starts again).
+    assert.deepEqual((await backend.history(name, false)).entries.map((e) => e.text), ['say hi', 'hi'])
+  } finally {
+    await backend.close()
+  }
+  // A new Togle over the same kept folder knows the name too.
+  const next = open()
+  try {
+    const listed = await until(async () => (await next.list()).find((row) => row.title === 'A started session' || row.id.startsWith('togle-')), 'the session to be listed')
+    assert.deepEqual((await next.history(listed.id, false)).entries.map((e) => e.text), ['say hi', 'hi'])
+  } finally {
+    await next.close()
   }
 })

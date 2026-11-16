@@ -104,18 +104,18 @@ test('a thread Togle runs gives back its conversation: the newest turns with the
   try {
     const task = await backend.start({ folder: os.tmpdir(), prompt: 'say one', asks: true })
     await until(() => task.state === 'idle', 'the first turn to end')
-    for (const word of ['two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']) {
+    for (const word of ['two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen']) {
       await task.send(`say ${word}`)
       await until(() => task.state === 'idle', `the turn "${word}" to end`)
     }
     const recent = await backend.history(task.id, false)
     assert.ok(recent)
-    assert.equal(recent.more, true, 'twelve turns, ten shown')
-    assert.deepEqual(recent.entries.filter((e) => e.kind === 'you').map((e) => e.text), ['say three', 'say four', 'say five', 'say six', 'say seven', 'say eight', 'say nine', 'say ten', 'say eleven', 'say twelve'])
-    assert.deepEqual(recent.entries.slice(-2).map((e) => [e.kind, e.text]), [['you', 'say twelve'], ['agent', 'ok']])
+    assert.equal(recent.more, true, 'fourteen turns, twelve shown')
+    assert.deepEqual(recent.entries.filter((e) => e.kind === 'you').map((e) => e.text), ['say three', 'say four', 'say five', 'say six', 'say seven', 'say eight', 'say nine', 'say ten', 'say eleven', 'say twelve', 'say thirteen', 'say fourteen'])
+    assert.deepEqual(recent.entries.slice(-2).map((e) => [e.kind, e.text]), [['you', 'say fourteen'], ['agent', 'ok']])
     const all = await backend.history(task.id, true)
     assert.equal(all.more, false)
-    assert.equal(all.entries.filter((e) => e.kind === 'you').length, 12)
+    assert.equal(all.entries.filter((e) => e.kind === 'you').length, 14)
     assert.deepEqual(all.entries.slice(0, 2).map((e) => [e.kind, e.text]), [['you', 'say one'], ['agent', 'ok']])
   } finally {
     await backend.close()

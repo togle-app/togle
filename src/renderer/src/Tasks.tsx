@@ -460,7 +460,9 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
   const end = useRef<HTMLDivElement>(null)
   const running = task.state === 'working' || task.state === 'waiting'
   // The conversation as its agent keeps it, also of what was said before Togle opened the task; else what happened while Togle watched.
-  const { history, loaded: historyLoaded, all, showAll } = useHistory(task)
+  // Read only while Web is what shows: the agent's screen (open, or closed with Terminal picked) needs none of it.
+  const webShown = !sessionShown && !(task.mine && !!task.screen && view === 'session' && !task.terminal)
+  const { history, loaded: historyLoaded, all, showAll } = useHistory(task, webShown)
   const shown = history ? history.entries : log
   // Of the turns shown only, so a count is not given for a conversation that has older turns left out.
   const changed = history?.more && !all ? 0 : changedFiles(shown)
