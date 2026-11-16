@@ -75,7 +75,6 @@ export { askChannel, ChannelRefused, ChannelUnavailable } from '../src/main/chan
 export { channelAddress, channelFolder, defaultDataFolder, loadSecret, readSecret } from '../src/main/channel/paths'
 export { answerMac, askMac, LineReader, line, newNonce, PROTOCOL, secretOf, welcomeMac } from '../src/main/channel/protocol'
 export { Attention } from '../src/main/runners/attention'
-export { changesIn, cutDiff, parseStatus } from '../src/main/runners/changes'
 export { orderFromProbe, paintDot } from '../src/main/tray-dot'
 export { quitQuestion } from '../src/shared/close-warning'
 export { findHermes, HermesBackend, markerOf, parseSessionList } from '../src/main/runners/hermes'

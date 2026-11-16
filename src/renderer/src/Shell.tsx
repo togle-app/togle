@@ -40,7 +40,7 @@ export function Shell() {
   const [meetingFocus, setMeetingFocus] = useState<{ id: string; seq: number }>()
   // Meetings pressed in the sidebar: back to the list, from a call's page.
   const [meetingsHome, setMeetingsHome] = useState(0)
-  const [taskFocus, setTaskFocus] = useState<{ key: string; seq: number; changes?: boolean }>({ key: '', seq: 0 })
+  const [taskFocus, setTaskFocus] = useState<{ key: string; seq: number }>({ key: '', seq: 0 })
   const [settingsAt, setSettingsAt] = useState<SettingsPart>()
   const [confirmClose, setConfirmClose] = useState<CloseWarning | null>(null)
   const [waiting, setWaiting] = useState(0)
@@ -49,7 +49,7 @@ export function Shell() {
 
   const changeSettings = useCallback(async (patch: SettingsPatch) => setSettings(await api.updateSettings(patch)), [])
   const openMeeting = useCallback((id: string) => { setLive(false); setMeetingFocus((previous) => ({ id, seq: (previous?.seq ?? 0) + 1 })); setView('meetings') }, [])
-  const openTask = useCallback((key: string, changes?: boolean) => { setTaskFocus((previous) => ({ key, seq: previous.seq + 1, changes })); setView('agents') }, [])
+  const openTask = useCallback((key: string) => { setTaskFocus((previous) => ({ key, seq: previous.seq + 1 })); setView('agents') }, [])
   const showLive = useCallback(() => { setLive(true); setView('meetings') }, [])
 
   // Writing a call down needs speech recognition on this computer; without it, Settings shows how to get it.

@@ -52,7 +52,7 @@ function asking(request: ViewRequest | undefined, task: TaskView): { says: strin
 const plain = (text: string): string => text.trim().replace(/\.$/, '').toLocaleLowerCase()
 
 /** The to-do list: what waits for the person at the top, then their own list, kept in a plain text file. */
-export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, changes?: boolean) => void; onOpenCall: (id: string) => void }) {
+export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => void; onOpenCall: (id: string) => void }) {
   const [list, setList] = useState<TodoList | null>(null)
   // What calls left for today: names to confirm, notes that are ready, and the to-dos in them that are the person's.
   const [offers, setOffers] = useState<{ calls: CallOffer[]; items: TodoOffer[] }>({ calls: [], items: [] })
@@ -209,11 +209,6 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string, cha
           {chip && (
             <button className={`todo-chip ${chip.tone}`} title="Open the task" disabled={!task} onClick={() => task && onOpenTask(task.key)}>
               {chip.text}
-            </button>
-          )}
-          {task?.state === 'idle' && !item.done && (
-            <button className="small" onClick={() => onOpenTask(task.key, true)}>
-              See changes
             </button>
           )}
           {!item.done && !item.task && !!installed.length && (

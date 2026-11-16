@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
 import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
-import { Changes } from './Changes'
 import { useReach } from './Devices'
 import { openSettings } from './open-settings'
 import { useHotkeys } from './hotkeys'
@@ -108,11 +107,9 @@ function useRemoteTasks(): DeviceTasks[] {
   return remote
 }
 
-/** `focus`: a task to show, asked for from outside (a notice, the to-do list), on what it changed if `changes`; a new `seq` asks again. */
-export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?: boolean } }) {
+/** `focus`: a task to show, asked for from outside (a notice, the to-do list); a new `seq` asks again. */
+export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   const [tasks, setTasks] = useState<TaskView[]>([])
-  // The task whose changes are shown in place of the task itself.
-  const [seeing, setSeeing] = useState<string | null>(null)
   const [status, setStatus] = useState<RunnerStatus[]>([])
   const [selected, setSelected] = useState<string | undefined>(remembered)
   const [detail, setDetail] = useState<TaskDetail | null>(null)
@@ -163,7 +160,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   }, [selected, refresh])
 
   // The window says which agent screen it shows (one with no card over it), so that a notice still comes over it.
-  const sessionKey = detail && !seeing && detail.task.mine && detail.task.terminal && (!detail.task.screen || views.of(detail.task.key) === 'session') ? detail.task.key : null
+  const sessionKey = detail && detail.task.mine && detail.task.terminal && (!detail.task.screen || views.of(detail.task.key) === 'session') ? detail.task.key : null
   useEffect(() => {
     api.taskSessionShown(sessionKey)
   }, [sessionKey])
@@ -174,8 +171,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
   useEffect(() => {
     if (!focus?.key) return
     setSelected(focus.key)
-    setSeeing(focus.changes ? focus.key : null)
-  }, [focus?.key, focus?.seq, focus?.changes])
+  }, [focus?.key, focus?.seq])
 
   /** Does something for the person, and shows what went wrong in plain words. */
   const act = useCallback(
@@ -291,14 +287,11 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number; changes?:
           <div className="tasks-empty">
             <p>That task is no longer shared by its device.</p>
           </div>
-        ) : detail && seeing === detail.task.key ? (
-          <Changes taskKey={detail.task.key} title={detail.task.title} folder={detail.task.folder} onBack={() => setSeeing(null)} />
         ) : detail ? (
           <TaskPanel
             key={detail.task.key}
             detail={detail}
             now={now}
-            onSeeChanges={() => setSeeing(detail.task.key)}
             onBack={() => setSelected(undefined)}
             onAnswer={(requestId, decision) => act(() => api.answerRunnerTask(detail.task.key, requestId, decision))}
             onReply={(requestId, text) => act(() => api.replyRunnerTask(detail.task.key, requestId, text))}
@@ -428,7 +421,6 @@ function SignedOut({ task }: { task: TaskView }) {
 interface PanelProps {
   detail: TaskDetail
   now: number
-  onSeeChanges: () => void
   onBack: () => void
   onAnswer: (requestId: string, decision: 'allow-once' | 'allow-always' | 'refuse') => void
   onReply: (requestId: string, text: string) => void
@@ -447,7 +439,7 @@ interface PanelProps {
   handedBack?: { command: string; folder: string }
 }
 
-function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack }: PanelProps) {
+function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack }: PanelProps) {
   const { task, log } = detail
   const talkKey = useHotkeys().find((key) => key.id === 'dictate')?.keys || 'F9'
   // A task whose agent has a screen Togle can show is seen in two views; any other task has the one it has.
@@ -578,17 +570,7 @@ function TaskPanel({ detail, onSeeChanges, onBack, onAnswer, onReply, onSend, on
       </header>
       <div className="task-status">
         <span className="state-chip" data-state={task.signedOut ? 'failed' : task.state}>{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
-        {(changed > 0 || task.folder) && (
-          <span className="hint">
-            {changed > 0 && `${changed} ${changed === 1 ? 'file' : 'files'} changed`}
-            {changed > 0 && task.folder && <span className="sep" aria-hidden="true">·</span>}
-            {task.folder && (
-              <button className="link" onClick={onSeeChanges} title="What differs from the last commit in this folder">
-                See changes
-              </button>
-            )}
-          </span>
-        )}
+        {changed > 0 && <span className="hint">{`${changed} ${changed === 1 ? 'file' : 'files'} changed`}</span>}
         {twoViews && (
           <span className="segmented view-switch" role="group" aria-label="View">
             {(['cards', 'session'] as const).map((name) => (

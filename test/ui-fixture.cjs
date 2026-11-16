@@ -413,19 +413,6 @@ module.exports = function install(fixture) {
   // What the corner notices showed before their pages listened, when a test gives it.
   api.callNoticeNow = async () => { record('callNoticeNow', []); return clone(fixture.callNoticeNow ?? null) }
   api.keysNoticeNow = async () => { record('keysNoticeNow', []); return clone(fixture.keysNoticeNow ?? null) }
-  // Claude Code in a terminal asking Togle: the connection, as the window is told it.
-  // What differs from the last commit: a repository for every folder but the notes one.
-  const sampleDiff = [
-    'diff --git a/src/status.ts b/src/status.ts', 'index 1111111..2222222 100644', '--- a/src/status.ts', '+++ b/src/status.ts', '@@ -1,3 +1,3 @@',
-    " export const columns = ['id', 'name']", "+export const status = 'status'", '-const old = 1', ' export default columns',
-    'diff --git a/migrations/003_add_status.sql b/migrations/003_add_status.sql', 'new file', '--- /dev/null', '+++ b/migrations/003_add_status.sql', '@@ -0,0 +1,2 @@',
-    '+ALTER TABLE orders ADD COLUMN status text;', "+UPDATE orders SET status = 'open';", ''
-  ].join('\n')
-  api.runnerChanges = async key => {
-    record('runnerChanges', [key])
-    if (runnerFind(key).folder === 'C:\\work\\notes') return { git: false, problem: 'This folder is not in a git repository, so Togle cannot tell what changed.', files: [], diff: '', truncated: false }
-    return clone({ git: true, branch: 'main', files: [{ path: 'src/status.ts', status: 'modified', added: 1, removed: 1 }, { path: 'migrations/003_add_status.sql', status: 'new', added: 2, removed: 0 }], diff: sampleDiff, truncated: false })
-  }
   // The to-do list, in memory: the lines of its file, each with the words it had when it was shown.
   const todoItems = fixture.scenario === 'tasks' ? [
     { text: 'Review the onboarding copy', done: false },
@@ -463,7 +450,6 @@ module.exports = function install(fixture) {
     // An agent answers a question put to it on a call: the question as it was sent (with where the call is saved), and its words after.
     answerOnCall: (key, question, answer) => {
       const found = runnerFind(key)
-    failNextShowMicrophone: message => { showFails = message },
       found.history = { entries: [{ id: 400 + ++sequence, at: Date.now(), kind: 'you', text: question + '\n\nA call is saved at "C:\\calls\\live.md".' }, { id: 400 + ++sequence, at: Date.now(), kind: 'agent', text: answer }] }
       found.state = 'idle'; runnerChanged()
     },
@@ -477,6 +463,7 @@ module.exports = function install(fixture) {
     // What the window is told of Claude Code's connection to Togle, changed by hand.
     failNextTask: () => { failTask = true },
     microphone: status => { microphone = clone(status); microphoneChanged() },
+    failNextShowMicrophone: message => { showFails = message },
     calls: () => clone(calls), emit, settings: () => clone(fixture.settings),
     failNextAuto: () => { rejectAuto = true }, failNextSettings: () => { rejectSettings = true }, holdNextClear: () => { holdClear = true }, releaseClear: () => { holdClear = false; releaseClear?.() },
     failNextVocabulary: () => { rejectVocabulary = true },

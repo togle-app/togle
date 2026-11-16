@@ -256,7 +256,7 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.task-steps').open"), false, 'work that is over is folded')
   assert.deepEqual(await texts(ui, '.task-steps .task-cmd'), ['✕npm testfailed', '✓npm testdone'], 'the commands, each with how it ended')
   assert.deepEqual(await texts(ui, '.task-earlier-turns'), ['Show earlier'])
-  assert.equal(await ui.evaluate("document.querySelector('.task-status .hint').textContent.includes('files changed')"), false, 'no count of files while turns are left out')
+  assert.equal(await ui.evaluate("!document.querySelector('.task-status .hint')"), true, 'no count of files while turns are left out')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-reply')"), false, 'what Togle does not run cannot be replied to')
   assert.deepEqual(await ui.evaluate("(()=>{const box=document.querySelector('.task-log');const edge=box.getBoundingClientRect().right+0.5;return [...box.querySelectorAll('*')].filter(e=>e.getBoundingClientRect().right>edge).map(e=>e.tagName+'.'+e.className).slice(0,6)})()"), [], 'nothing in the conversation is wider than it')
   assert.equal(await ui.evaluate("(()=>{const box=document.querySelector('.task-log');return box.scrollWidth-box.clientWidth})()"), 0, 'the conversation does not scroll sideways')
@@ -516,7 +516,7 @@ async function checkTodo(T, agent) {
   assert.deepEqual(await texts(ui, '.todo-chip'), ['Claude Code · working', 'Claude Code · done'])
   assert.equal(await ui.evaluate("document.querySelector('.todo-item.done .todo-text').textContent"), 'Send the invoice to Marta')
   assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.todo-item.done .todo-text')).textDecorationLine"), 'line-through')
-  assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['Give to an agent', 'See changes'], 'only an item with no agent can be given, and only one whose agent is done has changes to see')
+  assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['Give to an agent'], 'only an item with no agent can be given, and an item whose agent is done has the chip only')
   assert.equal(await ui.evaluate("!!document.querySelector('.todo-remove, .todo-file')"), false, 'no delete button on a row and no line about the file: the design has neither')
 
   // Allow once and Refuse go to the task.
@@ -569,7 +569,7 @@ async function checkTodo(T, agent) {
   await ui.wait("document.querySelectorAll('.todo-chip').length===3")
   assert.equal(await ui.evaluate("document.querySelectorAll('.todo-item').length"), 4, 'given from the list, the task is that item, not a new one')
   assert.equal(await ui.evaluate("document.querySelector('.todo-item:nth-child(1) .todo-chip').textContent"), 'Claude Code · working')
-  assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['See changes'], 'an item with an agent cannot be given again')
+  assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), [], 'an item with an agent cannot be given again')
 
   // A chip opens the task.
   await ui.click('.todo-item:nth-child(2) .todo-chip', 'Claude Code · working')
@@ -609,47 +609,19 @@ async function checkTodo(T, agent) {
   ui.window.destroy()
 }
 
-async function checkChanges(T, agent) {
+/** What a task changed is not offered anywhere: not beside a task, not on the to-do list. Only the count of files stays. */
+async function checkNoChanges(T, agent) {
   const ui = await open(T, agent, 1024)
+  const offered = "[...document.querySelectorAll('button')].some(button=>/see changes/i.test(button.textContent))"
   await ui.click('.workspace-nav button', 'Agents')
   await ui.wait("document.querySelectorAll('.task-row').length===5")
-
-  // From a task: the files, and what changed in the one that is picked.
   await ui.task('Rebuild the pricing page')
-  await ui.wait("!!document.querySelector('.task-status .link')")
-  await ui.click('.task-status .link', 'See changes')
-  await ui.wait("!!document.querySelector('.changes-file')")
-  assert.deepEqual((await ui.calls('runnerChanges')).map(call => call.args), [['claude:s2']])
-  assert.equal(await ui.evaluate("document.querySelector('.changes .task-title h2').textContent"), 'Changes in website')
-  assert.ok((await texts(ui, '.changes > .hint'))[0].startsWith('Everything in this folder that differs from the last commit on main.'))
-  assert.deepEqual(await texts(ui, '.changes-file'), ['changedsrc/status.ts+1 −1', 'newmigrations/003_add_status.sql+2 −0'])
-  assert.equal(await ui.evaluate("document.querySelector('.changes-file.on .changes-path').textContent"), 'src/status.ts', 'the first file is open')
-  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.changes-diff .diff-line')].map(line=>line.className.replace('diff-line ','')+':'+line.textContent.trim())"), [
-    'meta:diff --git a/src/status.ts b/src/status.ts', 'meta:index 1111111..2222222 100644', 'meta:--- a/src/status.ts', 'meta:+++ b/src/status.ts', 'hunk:@@ -1,3 +1,3 @@',
-    "plain:export const columns = ['id', 'name']", "add:+export const status = 'status'", 'del:-const old = 1', 'plain:export default columns', 'plain:'
-  ])
-  await ui.capture('tasks-changes')
-  await ui.click('.changes-file', 'newmigrations/003_add_status.sql+2 −0')
-  assert.equal(await ui.evaluate("document.querySelector('.changes-diff').getAttribute('aria-label')"), 'Changes in migrations/003_add_status.sql')
-  assert.equal(await ui.evaluate("document.querySelectorAll('.changes-diff .diff-line.add').length"), 2, 'the new file is all added, and its +++ line is not one of the added lines')
-  await ui.click('.changes .tasks-back-to-task', 'Back to the task')
   await ui.wait("!!document.querySelector('.task-panel')")
-  assert.equal(await ui.evaluate("document.querySelector('.task-title h2').firstChild.textContent"), 'Rebuild the pricing page')
-
-  // A folder that is not in a repository says so.
-  await ui.task('Write the release notes')
-  await ui.click('.task-status .link', 'See changes')
-  await ui.wait("!!document.querySelector('.changes-problem')")
-  assert.equal((await texts(ui, '.changes-problem'))[0], 'This folder is not in a git repository, so Togle cannot tell what changed.')
-  assert.equal(await ui.evaluate("!!document.querySelector('.changes-file')"), false)
-
-  // From the to-do list: a finished item has See changes, and it opens on them.
+  assert.equal(await ui.evaluate(offered), false, 'no See changes beside a task')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-status .link')"), false)
   await ui.click('.workspace-nav button', 'To-do')
   await ui.wait("document.querySelectorAll('.todo-item').length===4")
-  await ui.click('.todo-item .todo-row > button.small', 'See changes')
-  await ui.wait("!!document.querySelector('.changes')")
-  assert.equal(await ui.evaluate("document.querySelector('.changes .task-title p').textContent"), 'Fix the login redirect', 'the task the item was given to (a task has its own title)')
-  assert.deepEqual((await ui.calls('runnerChanges')).map(call => call.args[0]).slice(-1), ['claude:s3'])
+  assert.equal(await ui.evaluate(offered), false, 'no See changes on the to-do list, finished or not')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -1172,7 +1144,7 @@ app.whenReady().then(async () => {
     await checkQuit(T, agent)
     await checkNotice(T, agent)
     await checkTodo(T, agent)
-    await checkChanges(T, agent)
+    await checkNoChanges(T, agent)
     await checkTaskBox(T, agent)
     await checkCallNotice(T, agent)
     await checkKeysNotice(T, agent)
@@ -1182,7 +1154,7 @@ app.whenReady().then(async () => {
     await checkTerminalTask(T, agent)
     await checkAgentSettings(T, agent)
     await checkReach(T, agent)
-    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, the changes, the task box, a signed-out agent, a task in a terminal of its own, the offer to change keys, the agents in Settings and other devices’ tasks with Settings → Devices passed')
+    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, no See changes anywhere, the task box, a signed-out agent, a task in a terminal of its own, the offer to change keys, the agents in Settings and other devices’ tasks with Settings → Devices passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

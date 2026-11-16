@@ -118,7 +118,6 @@ const api: TogleApi = {
   onTerminalData: cb => subscribe('runners:terminal-data', chunk => cb(chunk as { key: string; at: number; data: string; screen?: string })),
   removeCodingAgent: (id) => ipcRenderer.invoke('runners:remove-agent', id),
   restoreCodingAgent: (id) => ipcRenderer.invoke('runners:restore-agent', id),
-  runnerChanges: key => ipcRenderer.invoke('runners:changes', key),
   runnerTasks: () => ipcRenderer.invoke('runners:list'),
   runnerDetail: key => ipcRenderer.invoke('runners:detail', key),
   startRunnerTask: request => ipcRenderer.invoke('runners:start', request),
