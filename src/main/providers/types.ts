@@ -1,4 +1,4 @@
-import type { ClaudeConnectionSelection, Lane, LaneModel, ModelOption, ReasoningEffort } from '@shared/types'
+import type { Lane, LaneModel, ModelOption, ReasoningEffort } from '@shared/types'
 
 /** Something the model can call while answering, like searching the agent's knowledge. */
 export interface Tool {
@@ -50,8 +50,6 @@ export interface CompletionInput {
   hedgeAfterMs?: number
   /** May look things up on the web (a deep answer; not Train, which edits the agent): providers that can, offer it. */
   webSearch?: boolean
-  /** Apps selected for this agent; only the matching Claude subscription can read them. */
-  claudeConnections?: ClaudeConnectionSelection
 }
 
 export interface StreamOptions {

@@ -47,7 +47,7 @@ export interface TogleApi {
   openMicrophonePage(from: 'after-call' | 'settings' | 'call-strip' | 'microphone-check'): Promise<void>
   /** A call's noise measurement (no audio): whether to show the suggestion, which then counts as shown. */
   noiseMeasured(report: NoiseReport): Promise<boolean>
-  subscriptionAccounts(refresh?: boolean): Promise<SubscriptionAccount[]>
+  subscriptionAccounts(): Promise<SubscriptionAccount[]>
   signInAccount(id: string, device?: boolean): Promise<void>
   cancelAccountSignIn(id: string): Promise<void>
   signOutAccount(id: string): Promise<void>

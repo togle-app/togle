@@ -5,20 +5,21 @@ import path from 'node:path'
 import { workDir } from './helpers.mjs'
 
 const directory = workDir('subscription-accounts')
-const { SubscriptionAccounts, accountChoice, ChatGPTAuth, ChatGPTProvider, ClaudeCodeAuth, ClaudeSubscriptionProvider, AgentStore, getSettings } = await import('./.build/togle.mjs')
+const { SubscriptionAccounts, accountChoice, ChatGPTAuth, ChatGPTProvider, AgentStore, getSettings } = await import('./.build/togle.mjs')
 const fixture = () => {
-  const openai = new ChatGPTAuth(), claude = new ClaudeCodeAuth()
-  claude.status = async () => ({ available: true, signedIn: false })
-  return new SubscriptionAccounts(openai, new ChatGPTProvider(openai), claude, new ClaudeSubscriptionProvider(claude))
+  const openai = new ChatGPTAuth()
+  return new SubscriptionAccounts(openai, new ChatGPTProvider(openai))
 }
 
 test('global default and agent overrides route explicitly, including missing profiles', async () => {
-  const settings = structuredClone(getSettings()); settings.provider = 'claude'; settings.claude.auth = 'subscription'
-  assert.equal(accountChoice(settings), 'claude-default')
+  const settings = structuredClone(getSettings()); settings.provider = 'chatgpt'
+  assert.equal(accountChoice(settings), 'chatgpt-default')
   settings.subscriptionAccountId = 'personal'
   assert.equal(accountChoice(settings), 'personal'); assert.equal(accountChoice(settings, 'work'), 'work')
   settings.provider = 'compat'
   assert.equal(accountChoice(settings), undefined); assert.equal(accountChoice(settings, 'work'), 'work')
+  settings.provider = 'claude'
+  assert.equal(accountChoice(settings), undefined, 'a Claude key is not a plan: there is no Claude sign-in')
   assert.throws(() => fixture().get('missing-work-account'), /unavailable/)
 })
 
@@ -45,22 +46,25 @@ test('personal and work ChatGPT profiles keep encrypted credentials, identity an
   assert.ok(!metadata.includes('accessToken') && !metadata.includes('refreshToken'))
 })
 
-test('each Claude account has its own official runtime and secure-storage namespace', async () => {
-  const accounts = fixture(), work = await accounts.add('claude', 'Work'), personal = await accounts.add('claude', 'Personal')
-  const workAuth = accounts.get(work.id).auth, personalAuth = accounts.get(personal.id).auth
-  workAuth.status = async () => workAuth.cachedStatus(); personalAuth.status = async () => personalAuth.cachedStatus()
-  assert.notEqual(workAuth.environment().CLAUDE_CONFIG_DIR, personalAuth.environment().CLAUDE_CONFIG_DIR)
-  assert.equal(workAuth.environment().CLAUDE_CONFIG_DIR, workAuth.environment().CLAUDE_SECURESTORAGE_CONFIG_DIR)
-  assert.equal(await workAuth.directory(), path.join(directory, 'accounts', work.id, 'claude/runtime'))
-  assert.ok(!(await accounts.list()).some(account => 'accessToken' in account || 'configDirectory' in account))
+test('there is no Claude sign-in: a Claude account cannot be added, and one an earlier Togle saved is skipped', async () => {
+  const accounts = fixture()
+  await assert.rejects(accounts.add('claude', 'Work'), /Enter an account label/)
+  assert.deepEqual((await accounts.list()).map(account => account.provider), ['chatgpt'])
+  // A saved file with a Claude account (from a Togle that had the sign-in) and a ChatGPT one: only the ChatGPT one is kept.
+  const kept = '11111111-1111-4111-8111-111111111111', dropped = '22222222-2222-4222-8222-222222222222'
+  await fs.mkdir(path.join(directory, 'accounts'), { recursive: true })
+  await fs.writeFile(path.join(directory, 'accounts/index.json'), JSON.stringify([{ id: dropped, provider: 'claude', label: 'Old Claude' }, { id: kept, provider: 'chatgpt', label: 'Kept' }]))
+  const reloaded = fixture(); await reloaded.load()
+  assert.deepEqual((await reloaded.list()).map(account => account.id).sort(), ['chatgpt-default', kept].sort())
+  assert.throws(() => reloaded.get(dropped), /unavailable/)
 })
 
 test('pinned calls keep their account and fail closed after reauthentication; user name follows the account', async () => {
-  const accounts = fixture(), account = await accounts.add('claude', 'Work'), entry = accounts.get(account.id)
-  let status = { available: true, signedIn: true, email: 'work@test.example', name: 'Luka' }
+  const accounts = fixture(), account = await accounts.add('chatgpt', 'Work'), entry = accounts.get(account.id)
+  let status = { signedIn: true, email: 'work@test.example', name: 'Luka' }
   let identity = 'work-organization'
   entry.auth.identity = () => identity
-  entry.auth.status = async () => status; entry.auth.cachedStatus = () => status
+  entry.auth.status = () => status
   const requests = []; entry.provider.stream = async input => { requests.push(input) }
   const pinned = accounts.pinned(account.id), input = { lane: 'quick', user: 'Private work call', system: 'Help the meeting.' }, options = { signal: new AbortController().signal, onDelta: () => {} }
   await accounts.add('chatgpt', 'Other profile')
@@ -76,28 +80,6 @@ test('pinned calls keep their account and fail closed after reauthentication; us
   await assert.rejects(pinned.stream(input, options), /Sign in to Work/)
 })
 
-test('a Claude account pinned before its sign-in is read (Togle reads it in the background as it starts) is pinned as it is read', async () => {
-  const accounts = fixture(), account = await accounts.add('claude', 'Startup'), entry = accounts.get(account.id)
-  let email = 'work@test.example', runs = 0
-  // The official runtime's status, without starting it.
-  entry.auth.run = async () => { runs++; await new Promise(resolve => setTimeout(resolve, 20)); return { code: 0, output: JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', email, configDirectory: entry.auth.environment().CLAUDE_CONFIG_DIR }) } }
-  const requests = []; entry.provider.stream = async input => { requests.push(input) }
-  const input = { lane: 'quick', user: 'First call after start', system: 'Help.' }, options = { signal: new AbortController().signal, onDelta: () => {} }
-  assert.equal(entry.auth.read, false)
-  const pinned = accounts.pinned(account.id)
-  await pinned.stream(input, options)
-  assert.equal(requests.length, 1, 'a sign-in not read yet is not taken for a signed-out one')
-  assert.equal(entry.auth.read, true); assert.equal(runs, 1)
-  email = 'someone-else@test.example'
-  await entry.auth.status(true)
-  await assert.rejects(pinned.stream(input, options), /identity changed/, 'pinned to the sign-in it read first')
-  assert.equal(requests.length, 1)
-  // Read before pinning, it's pinned at once, as before.
-  const now = accounts.pinned(account.id)
-  await now.stream(input, options)
-  assert.equal(requests.length, 2)
-})
-
 test("an agent's account choice survives a restart, and an empty one goes back to the general account", async () => {
   const store = new AgentStore(); await store.load()
   const agent = store.list()[0]
@@ -108,11 +90,11 @@ test("an agent's account choice survives a restart, and an empty one goes back t
 })
 
 test('prepared dictation rechecks the pinned account before delivering any text', async () => {
-  const accounts = fixture(), account = await accounts.add('claude', 'Prepared work'), entry = accounts.get(account.id)
-  const status = { available: true, signedIn: true, email: 'work@test.example' }
+  const accounts = fixture(), account = await accounts.add('chatgpt', 'Prepared work'), entry = accounts.get(account.id)
+  const status = { signedIn: true, email: 'work@test.example' }
   let identity = 'work-organization', closed = 0
   entry.auth.identity = () => identity
-  entry.auth.status = async () => status; entry.auth.cachedStatus = () => status
+  entry.auth.status = () => status
   const sent = []
   entry.provider.prepareText = async () => ({ send: async text => { sent.push(text) }, close: () => { closed++ } })
   const pinned = accounts.pinned(account.id, false)

@@ -68,7 +68,6 @@ import { hotkeyProblem, sameKeys } from '@shared/hotkeys'
 import { mergeSpeakers } from '@shared/speakers'
 import { AgentStore } from './agent-store'
 import { ChatGPTAuth } from './auth/chatgpt'
-import { ClaudeCodeAuth } from './auth/claude-code'
 import { SubscriptionAccounts, accountChoice, defaultAccountId } from './auth/accounts'
 import { CallFile } from './call-file'
 import { CallSessions, callForAgent, exportCall, exportName } from './call-sessions'
@@ -88,7 +87,6 @@ import { PerfLog } from './perf'
 import type { UsageStatus } from './plan'
 import { ChatGPTProvider } from './providers/chatgpt'
 import { ClaudeProvider } from './providers/claude'
-import { ClaudeSubscriptionProvider } from './providers/claude-subscription'
 import { CompatProvider } from './providers/compat'
 import type { LLMProvider, Usage } from './providers/types'
 import { VoiceTracker, VOICE_MODEL } from './stt/voices'
@@ -105,9 +103,7 @@ import { keepPlace, lastPlace } from './window-place'
 const auth = new ChatGPTAuth()
 const chatgpt = new ChatGPTProvider(auth)
 const claude = new ClaudeProvider()
-const claudeAuth = new ClaudeCodeAuth()
-const claudeSubscription = new ClaudeSubscriptionProvider(claudeAuth)
-const accounts = new SubscriptionAccounts(auth, chatgpt, claudeAuth, claudeSubscription)
+const accounts = new SubscriptionAccounts(auth, chatgpt)
 const compat = new CompatProvider()
 // Timings of real calls (no words), for npm run perf.
 const perf = new PerfLog(path.join(app.getPath('userData'), 'perf.jsonl'))
@@ -122,7 +118,6 @@ function logRequest(u: Usage): void {
 }
 chatgpt.onUsage = logRequest
 claude.onUsage = logRequest
-claudeSubscription.onUsage = logRequest
 compat.onUsage = logRequest
 accounts.onUsage = logRequest
 const apiConnections = new ApiConnections(claude, compat)
@@ -193,7 +188,7 @@ function callLanguage(agentId?: string): string {
 /** The API picked to hear a side; null when this PC's models hear it. */
 const speechApiFor = (speaker: Speaker, agentId?: string): SpeechApi | null => {
   const settings = speechSettings(agentId), source = settings[speaker]
-  // Neither Sign in with ChatGPT nor a Claude sign-in includes transcription: a subscription's calls are heard by this PC.
+  // Sign in with ChatGPT does not include transcription: a plan's calls are heard by this PC.
   if (source === 'local' || source === 'chatgpt') return null
   const target = source === 'openai' ? { baseUrl: OPENAI_URL, model: settings.openaiModel || OPENAI_MODEL } : { baseUrl: settings.serverUrl, model: settings.serverModel }
   const call = !agentId || agentId === currentSession?.agentId ? currentSession?.id : undefined
@@ -293,7 +288,7 @@ const activeProvider = (agentId?: string): LLMProvider => {
   const id = accountChoice(getSettings(), agentId ? agents.get(agentId).subscriptionAccountId : undefined)
   if (id) return accounts.pinned(id)
   const { provider } = getSettings()
-  return provider === 'chatgpt' ? chatgpt : provider === 'claude' ? getSettings().claude.auth === 'subscription' ? claudeSubscription : claude : compat
+  return provider === 'chatgpt' ? chatgpt : provider === 'claude' ? claude : compat
 }
 const isApiSource = (id: string): boolean => id.startsWith('api:') || id.startsWith('connection:')
 function sourceProvider(id: string): string { return isApiSource(id) ? apiConnections.get(id).provider.id : accounts.get(id).kind }
@@ -308,23 +303,15 @@ function voiceSettings() {
   const id = ongoing.isListening ? currentSession?.agentId : dictationAgentId
   return effectiveSettings(getSettings(), agents.list().find(agent => agent.id === id))
 }
-function selectedAccount(provider: 'claude' | 'chatgpt', agentId?: string) {
-  const profile = configuredAI(agentId)
-  if (profile) {
-    const task = ['deep', 'background', 'vision', 'quick'].map(lane => profile.tasks[lane as keyof typeof profile.tasks]).find(task => { if (isApiSource(task.sourceId)) return false; try { return accounts.get(task.sourceId).kind === provider } catch { return false } })
-    if (task) return accounts.get(task.sourceId)
-    if (agentId && agents.get(agentId).preferences?.ai) throw new Error(`This agent has no ${provider === 'claude' ? 'Claude' : 'ChatGPT / Codex'} subscription task. Choose an account in its AI settings.`)
-  }
-  const override = agentId ? agents.get(agentId).subscriptionAccountId : undefined
-  const chosen = accountChoice(getSettings(), override)
-  const entry = chosen ? accounts.get(chosen) : undefined
-  if (override && entry?.kind !== provider) throw new Error(`This agent uses ${entry?.kind === 'claude' ? 'Claude' : 'ChatGPT'}. Choose a Claude account to use Claude connected apps.`)
-  return entry?.kind === provider ? entry : accounts.get(defaultAccountId(provider))
-}
+/** The ChatGPT plan account in use: the one a job runs on, else the one chosen in Settings, else ChatGPT's own. */
 function selectedChatGPT() {
-  const entry = selectedAccount('chatgpt')
-  if (entry.kind !== 'chatgpt') throw new Error('Choose a ChatGPT subscription account.')
-  return entry
+  const profile = configuredAI()
+  if (profile) {
+    const task = ['deep', 'background', 'vision', 'quick'].map(lane => profile.tasks[lane as keyof typeof profile.tasks]).find(task => { if (isApiSource(task.sourceId)) return false; try { return accounts.get(task.sourceId).kind === 'chatgpt' } catch { return false } })
+    if (task) return accounts.get(task.sourceId)
+  }
+  const chosen = accountChoice(getSettings())
+  return (chosen ? accounts.get(chosen) : undefined) ?? accounts.get(defaultAccountId('chatgpt'))
 }
 
 // What calls belong to: one agent, with the words calls are heard with (agent-store.ts).
@@ -409,12 +396,12 @@ function createDictationSpeech(): DictationSpeech {
   let entry: ReturnType<typeof accounts.get>
   try { entry = accounts.get(voiceAccountId(settings, accounts.known())) }
   catch { throw new Error('Your voice typing account is unavailable. Choose another in Settings → Voice typing.') }
-  settings.provider = entry.kind; settings.claude.auth = 'subscription'; settings.dictation.speech = entry.kind
-  const openai = entry.kind === 'chatgpt' ? entry : undefined, anthropic = entry.kind === 'claude' ? entry : undefined
+  settings.provider = entry.kind; settings.dictation.speech = entry.kind
+  const openai = entry
   // Without a ChatGPT plan signed in, the key the person gave instead (the one that writes the notes) cleans up what
   // they say too, with the model it uses for quick jobs. With neither, the words go in as heard.
   const keySource = modelSourceId(getSettings())
-  const key = !settings.dictation.accountId && openai && !openai.auth.status().signedIn && isApiSource(keySource)
+  const key = !settings.dictation.accountId && !openai.auth.status().signedIn && isApiSource(keySource)
     ? (() => { try { return { provider: apiConnections.pinned(keySource), model: getSettings().ai?.tasks.quick.model } } catch { return undefined } })()
     : undefined
   const provider = accounts.pinned(entry.metadata.id, false)
@@ -425,11 +412,10 @@ function createDictationSpeech(): DictationSpeech {
       const aliases = new Set(scoped.map(item => item.heardAs.toLocaleLowerCase()))
       return { ...vocabulary, words: [...vocabulary.words.filter(item => !aliases.has(item.heardAs.toLocaleLowerCase())), ...scoped] }
     }),
-    settings: () => settings, chatgpt: provider, claude: provider, key,
-    chatgptAccount: () => openai?.auth.status() ?? { signedIn: false },
-    claudeAccount: () => anthropic?.auth.status() ?? Promise.resolve({ signedIn: false }),
-    // Every account's dictation is heard by this PC: neither sign-in includes transcription. The account cleans it up,
-    // when that's on.
+    settings: () => settings, chatgpt: provider, key,
+    chatgptAccount: () => openai.auth.status(),
+    // Every account's dictation is heard by this PC: the sign-in does not include transcription. The account cleans it
+    // up, when that's on.
     remote: (pcm, language, signal) => localDictation(pcm, language, signal)
   })
   dictationHistoryRuns.set(speech, dictationHistory.begin(entry.metadata.id).catch(error => { console.warn('[dictation history]', (error as Error).message); return undefined }))
@@ -1124,11 +1110,11 @@ function registerIpc(): void {
     if (patch.dictation?.accountId) accounts.get(patch.dictation.accountId)
     if (patch.subscriptionAccountId) {
       const entry = accounts.get(patch.subscriptionAccountId)
-      patch = { ...patch, provider: entry.kind, ...(entry.kind === 'claude' ? { claude: { ...patch.claude, auth: 'subscription' } } : {}) }
+      patch = { ...patch, provider: entry.kind }
     } else if (patch.provider && patch.provider !== getSettings().provider) patch = { ...patch, subscriptionAccountId: '' }
     const saved = updateSettings(patch)
     void saved.then(settings => send('settings:changed', settings))
-    if (patch.subscriptionAccountId !== undefined || patch.provider || patch.claude?.auth) send('auth:changed', selectedChatGPT().auth.status())
+    if (patch.subscriptionAccountId !== undefined || patch.provider) send('auth:changed', selectedChatGPT().auth.status())
     if (patch?.assist?.voiceLabels !== undefined && ongoing.isListening) { if (patch.assist.voiceLabels) void voices.start(); else voices.stop() }
     if (patch?.assist?.rememberVoices !== undefined) void voices.memoryChanged()
     if (patch?.tasks) refreshNotices()
@@ -1147,7 +1133,7 @@ function registerIpc(): void {
     return saved
   })
 
-  ipcMain.handle('accounts:list', (_e, refresh?: boolean) => accounts.list(refresh === true))
+  ipcMain.handle('accounts:list', () => accounts.list())
   ipcMain.handle('connections:list', () => apiConnections.list())
   ipcMain.handle('connections:add', (_e, input) => apiConnections.add(input))
   ipcMain.handle('connections:remove', (_e, id: string) => {
@@ -1170,7 +1156,7 @@ function registerIpc(): void {
   accounts.onChange = (status) => {
     if (quitting) return
     send('accounts:changed', undefined)
-    if (status.provider === 'chatgpt' && status.id === selectedAccount('chatgpt').metadata.id) { send('auth:changed', status); send('stt:status', sttStatus()) }
+    if (status.provider === 'chatgpt' && status.id === selectedChatGPT().metadata.id) { send('auth:changed', status); send('stt:status', sttStatus()) }
   }
   ipcMain.handle('models:list', (_event, sourceId?: string) => {
     if (sourceId === undefined) return activeProvider().listModels()
@@ -1698,8 +1684,6 @@ if (process.argv.includes('--togle-hook')) {
     await Promise.all([loadSettings(), auth.load(), claude.load(), compat.load(), ...Object.values(speechApis).map((api) => api.load())])
     await accounts.load()
     await apiConnections.load()
-    // Claude's sign-in is read by starting its runtime (claude auth status): a quarter of a second here, seconds on a
-    // slow disk. The window doesn't wait for it; what needs it waits (accounts.list(), pinned requests).
     const accountsRead = accounts.list().catch(error => { console.warn('[accounts]', (error as Error).message); return [] })
     // Before the speech model was a choice, this PC heard every call: a Togle from then that has its speech recognition
     // keeps it (quicker, and the audio stays here); one without starts on the ChatGPT plan, as a new one does.
@@ -1842,9 +1826,7 @@ if (process.argv.includes('--togle-hook')) {
       void selectedChatGPT().provider.refreshUsage()
     }
     // Claude's list says which efforts each model takes.
-    if (getSettings().provider === 'claude') {
-      if (getSettings().claude.auth !== 'subscription' && claude.hasApiKey()) void claude.listModels().catch(() => undefined)
-    }
+    if (getSettings().provider === 'claude' && claude.hasApiKey()) void claude.listModels().catch(() => undefined)
   })
 
   app.on('before-quit', event => { if (!quitting) { event.preventDefault(); void requestQuit() } })

@@ -22,9 +22,8 @@ const timeout = setTimeout(() => { console.error('Tasks UI checks timed out at '
 async function open(T, agent, width, surface, extra = {}) {
   checkpoint = 'opening at ' + width + 'px'
   const settings = structuredClone(T.getSettings())
-  settings.provider = 'claude'
-  settings.claude.auth = 'subscription'
-  settings.dictation.accountId = 'claude-default'
+  settings.provider = 'chatgpt'
+  settings.dictation.accountId = 'chatgpt-default'
   settings.transcription.language = 'en'
   settings.activeAgentId = agent.id
   settings.transcription.me = settings.transcription.them = 'local'

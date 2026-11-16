@@ -24,7 +24,6 @@ function verifyMacPackage(bundle, arch = process.arch) {
   const binaries = [
     path.join(contents, 'MacOS', info.CFBundleExecutable),
     path.join(contents, 'Frameworks/Electron Framework.framework/Versions/A/Electron Framework'),
-    path.join(native, '@anthropic-ai', `claude-agent-sdk-darwin-${arch}`, 'claude'),
     path.join(native, `sherpa-onnx-darwin-${arch}`, 'sherpa-onnx.node'),
     path.join(native, '@koromix', `koffi-darwin-${arch}`, `darwin_${arch}`, 'koffi.node')
   ]

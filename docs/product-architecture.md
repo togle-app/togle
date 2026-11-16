@@ -42,7 +42,7 @@ Togle sends nothing to an AI for the agents: each agent uses its own sign-in, wh
 
 ## Settings and accounts
 
-`settings.ts` keeps the settings in `settings.json` and checks every value as it loads. Sign in with ChatGPT (`auth/chatgpt.ts`) is the one sign-in offered; a key from Gemini, Grok, Kimi or another OpenAI-compatible service can be used instead (`auth/api-connections.ts`, each key encrypted). A Claude sign-in exists in the code (`auth/claude-code.ts`, `providers/claude-subscription.ts`) but is not offered until Anthropic allows it. `agent-store.ts` keeps what a call belongs to: one agent, with the words calls are heard with.
+`settings.ts` keeps the settings in `settings.json` and checks every value as it loads. Sign in with ChatGPT (`auth/chatgpt.ts`) is the one sign-in offered; a key from Claude (Anthropic's own API, `providers/claude.ts`), Gemini, Grok, Kimi or another OpenAI-compatible service can be used instead (`auth/api-connections.ts`, each key encrypted). Togle has no Claude sign-in: Claude Code keeps its own, which Togle never touches. `agent-store.ts` keeps what a call belongs to: one agent, with the words calls are heard with.
 
 ## What is kept where
 

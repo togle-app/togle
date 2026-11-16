@@ -390,18 +390,19 @@ function useKeyConnections(): ApiConnection[] {
   return connections
 }
 
-/** The services a key can come from, at their OpenAI-compatible addresses. */
+/** The services a key can come from: Claude's own API, and the others at their OpenAI-compatible addresses. */
 const KEY_SERVICES = [
-  { id: 'gemini', name: 'Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' },
-  { id: 'grok', name: 'Grok', baseUrl: 'https://api.x.ai/v1' },
-  { id: 'kimi', name: 'Kimi', baseUrl: 'https://api.moonshot.ai/v1' },
-  { id: 'other', name: 'Another service', baseUrl: '' }
+  { id: 'claude', name: 'Claude', kind: 'anthropic', baseUrl: '' },
+  { id: 'gemini', name: 'Gemini', kind: 'compatible', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+  { id: 'grok', name: 'Grok', kind: 'compatible', baseUrl: 'https://api.x.ai/v1' },
+  { id: 'kimi', name: 'Kimi', kind: 'compatible', baseUrl: 'https://api.moonshot.ai/v1' },
+  { id: 'other', name: 'Another service', kind: 'compatible', baseUrl: '' }
 ] as const
 
 /** A model for every job from a key's list: a quick, cheap one, not one that only embeds, draws or speaks. */
 export function pickKeyModel(models: ModelOption[]): string | undefined {
   const usable = models.filter((model) => !/embed|image|imagen|tts|audio|speech|transcri|realtime|moderation|veo|aqa/i.test(model.id))
-  return (usable.find((model) => /flash(?!-lite)|mini|fast|turbo/i.test(model.id)) ?? usable[0])?.id
+  return (usable.find((model) => /flash(?!-lite)|mini|fast|turbo|haiku/i.test(model.id)) ?? usable[0])?.id
 }
 
 /** Every job on one model of the key's service. */
@@ -438,8 +439,8 @@ function AIPlan({ settings, save }: { settings: Settings; save: (patch: Settings
         {ai.kind === 'plan' ? (
           <>
             <span className="control">
-              <Menu className="value-button" label={`${ai.account.provider === 'chatgpt' ? 'ChatGPT' : 'Claude'} · signed in`} ariaLabel="Manage the AI plan" align="right" items={[
-                ...(ai.account.provider === 'chatgpt' ? [{ label: 'Manage usage', onSelect: () => api.openExternal(MANAGE_USAGE_URL) }] : []),
+              <Menu className="value-button" label="ChatGPT · signed in" ariaLabel="Manage the AI plan" align="right" items={[
+                { label: 'Manage usage', onSelect: () => api.openExternal(MANAGE_USAGE_URL) },
                 { label: 'Sign out', disabled: busy, onSelect: () => void run(() => api.signOutAccount(ai.account.id)) }
               ]} />
             </span>
@@ -466,7 +467,7 @@ function AIPlan({ settings, save }: { settings: Settings; save: (patch: Settings
         )}
       </div>
       {ai.kind === 'none' && !waiting && !keyForm && (
-        <p className="hint ai-plan-other">No ChatGPT plan? <button className="link" onClick={() => setKeyForm(true)}>Use a key</button> from Gemini, Grok, Kimi or any other.</p>
+        <p className="hint ai-plan-other">No ChatGPT plan? <button className="link" onClick={() => setKeyForm(true)}>Use a key</button> from Claude, Gemini, Grok, Kimi or any other.</p>
       )}
       {ai.kind === 'key' && <KeyModel settings={settings} connection={ai.connection} save={save} />}
       {keyForm && <KeyForm save={save} replacing={ai.kind === 'key' ? ai.connection : undefined} onClose={() => setKeyForm(false)} />}
@@ -496,7 +497,7 @@ function KeyModel({ settings, connection, save }: { settings: Settings; connecti
 
 /** A key from another service, instead of a plan: saved encrypted, checked by listing its models, then used for every job. */
 function KeyForm({ save, replacing, onClose }: { save: (patch: SettingsPatch) => Promise<void>; replacing?: ApiConnection; onClose: () => void }) {
-  const [service, setService] = useState<(typeof KEY_SERVICES)[number]['id']>('gemini')
+  const [service, setService] = useState<(typeof KEY_SERVICES)[number]['id']>('claude')
   const [address, setAddress] = useState('')
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
@@ -506,7 +507,7 @@ function KeyForm({ save, replacing, onClose }: { save: (patch: SettingsPatch) =>
     setBusy(true); setError('')
     let added: ApiConnection | undefined
     try {
-      added = await api.addApiConnection({ kind: 'compatible', label: chosen.id === 'other' ? (safeHost(address) || 'My service') : chosen.name, baseUrl: chosen.baseUrl || address.trim(), model: '', key: key.trim() })
+      added = await api.addApiConnection({ kind: chosen.kind, label: chosen.id === 'other' ? (safeHost(address) || 'My service') : chosen.name, baseUrl: chosen.baseUrl || address.trim(), model: '', key: key.trim() })
       const model = pickKeyModel(await api.listModels(added.id))
       if (!model) throw new Error('This service lists no model Togle can use.')
       await save({ ai: keyProfile(added.id, model), provider: 'compat', subscriptionAccountId: '' })

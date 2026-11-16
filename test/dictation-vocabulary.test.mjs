@@ -62,12 +62,12 @@ test('cleanup cannot drop, duplicate, or rewrite saved snippet contents', () => 
 })
 
 function speech(library, polish = true, stream) {
-  const settings = structuredClone(getSettings()); settings.provider = 'claude'; settings.claude.auth = 'subscription'; settings.dictation.polish = polish
+  const settings = structuredClone(getSettings()); settings.provider = 'chatgpt'; settings.dictation.polish = polish
   const requests = []
   const provider = { stream: async (input, handlers) => { requests.push(input); if (stream) return stream(input, handlers); handlers.onFinal(JSON.parse(input.user).dictated_text) } }
   const account = { signedIn: true, email: 'work@example.test' }
-  const engine = new DictationSpeech({ settings: () => settings, vocabulary: Promise.resolve(library), claude: provider, chatgpt: provider,
-    claudeAccount: async () => account, chatgptAccount: () => account, remote: async () => 'toggle my signature' })
+  const engine = new DictationSpeech({ settings: () => settings, vocabulary: Promise.resolve(library), chatgpt: provider,
+    chatgptAccount: () => account, remote: async () => 'toggle my signature' })
   return { engine, requests }
 }
 

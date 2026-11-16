@@ -21,9 +21,6 @@ files:
   - '!node_modules/node-pty/**/*.pdb'
   - '!node_modules/node-pty/{deps,src,scripts,third_party,typings}/**'
   - '!node_modules/node-pty/binding.gyp'
-  # The Claude runtime the Agent SDK ships (about 285 MB, 40% of the package) is for the Claude sign-in, which waits for
-  # Anthropic's approval: it is left out until then (the user's decision, Nov 12 2026). Its code stays, and says so.
-  - '!node_modules/@anthropic-ai/claude-agent-sdk-*/**'
 # Run from beside the app archive: koffi's and sherpa-onnx's addons, and node-pty's with the console programs it starts.
 asarUnpack:
   - node_modules/@koromix/koffi-*/**

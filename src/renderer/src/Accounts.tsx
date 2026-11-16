@@ -5,7 +5,7 @@ import { modelSourceId } from '@shared/model-selection'
 const api = window.togle
 const message = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 
-/** The plan sign-ins on this computer (ChatGPT's, and Claude's where one was made before), kept up to date. */
+/** The plan sign-ins on this computer (ChatGPT's: Togle has no Claude sign-in), kept up to date. */
 export function useAccounts() {
   const [accounts, setAccounts] = useState<SubscriptionAccount[]>([])
   const [settings, setSettings] = useState<Settings>()

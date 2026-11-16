@@ -136,10 +136,6 @@ function verifyPackage(resources, root = ROOT, target = { platform: process.plat
   if (JSON.stringify(names.sort()) !== JSON.stringify(expected)) throw new Error('Packaged app contains missing or stale compiled files.')
   for (const [name, hash] of Object.entries(manifest.files)) if (digest(extractFile(archive, path.join('out', name))) !== hash) throw new Error('Packaged output differs: ' + name)
   for (const [name, hash] of Object.entries(manifest.resources)) if (digest(fs.readFileSync(path.join(resources, name))) !== hash) throw new Error('Packaged resource differs: ' + name)
-  // The Claude runtime waits for Anthropic's approval of the Claude sign-in: a package with it is too big for nothing.
-  const claudeRuntime = (name) => /(^|[\\/])node_modules[\\/]@anthropic-ai[\\/]claude-agent-sdk-[^\\/]+/.test(slash(name))
-  const unpacked = path.join(resources, 'app.asar.unpacked/node_modules/@anthropic-ai')
-  if (listPackage(archive).some(claudeRuntime) || (fs.existsSync(unpacked) && fs.readdirSync(unpacked).some(name => name.startsWith('claude-agent-sdk-')))) throw new Error('The Claude runtime is in the package; it waits for Anthropic\'s approval of the Claude sign-in.')
   const voices = path.join(resources, 'app.asar.unpacked/node_modules', `sherpa-onnx-${target.platform === 'win32' ? 'win' : target.platform}-${target.arch}`, 'sherpa-onnx.node')
   if (!fs.statSync(voices).size) throw new Error('The native speech addon is missing from the package.')
   // The terminal agents without ACP run in: node-pty's own build for this system (built on install on Linux).

@@ -1,30 +1,25 @@
-import { app } from 'electron'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Settings, SubscriptionAccount, PlanUsage } from '@shared/types'
 import { readJson, writeJson } from '../storage'
 import { ChatGPTAuth } from './chatgpt'
-import { ClaudeCodeAuth } from './claude-code'
 import { ChatGPTProvider } from '../providers/chatgpt'
-import { ClaudeSubscriptionProvider } from '../providers/claude-subscription'
 import type { LLMProvider, Usage } from '../providers/types'
 
 type Metadata = Pick<SubscriptionAccount, 'id' | 'provider' | 'label' | 'shared'>
-export type AccountRuntime = { metadata: Metadata } & (
-  { kind: 'chatgpt'; auth: ChatGPTAuth; provider: ChatGPTProvider } |
-  { kind: 'claude'; auth: ClaudeCodeAuth; provider: ClaudeSubscriptionProvider }
-)
+/** A ChatGPT plan sign-in. Togle has no other: Claude is used with an Anthropic API key (api-connections.ts). */
+export type AccountRuntime = { metadata: Metadata; kind: 'chatgpt'; auth: ChatGPTAuth; provider: ChatGPTProvider }
 const FILE = 'accounts/index.json'
-export const defaultAccountId = (provider: 'chatgpt' | 'claude'): string => `${provider}-default`
+export const defaultAccountId = (provider: 'chatgpt'): string => `${provider}-default`
 
 /** Chooses an explicit profile without ever falling back from a missing work account to a personal one. */
 export function accountChoice(settings: Settings, override?: string): string | undefined {
   if (override) return override
-  if (settings.provider !== 'chatgpt' && !(settings.provider === 'claude' && settings.claude.auth === 'subscription')) return
-  return settings.subscriptionAccountId || defaultAccountId(settings.provider as 'chatgpt' | 'claude')
+  if (settings.provider !== 'chatgpt') return
+  return settings.subscriptionAccountId || defaultAccountId('chatgpt')
 }
 
-/** Each profile owns its auth, provider, usage limits and Claude configuration. Only labels are stored here. */
+/** Each profile owns its auth, provider and usage limits. Only labels are stored here. */
 export class SubscriptionAccounts {
   private entries = new Map<string, AccountRuntime>()
   private writing: Promise<void> = Promise.resolve()
@@ -34,47 +29,35 @@ export class SubscriptionAccounts {
   onUsage: (usage: Usage) => void = () => {}
   onPlan: (id: string, usage: PlanUsage) => void = () => {}
 
-  constructor(chatgpt: ChatGPTAuth, openai: ChatGPTProvider, claude: ClaudeCodeAuth, anthropic: ClaudeSubscriptionProvider) {
+  constructor(chatgpt: ChatGPTAuth, openai: ChatGPTProvider) {
     this.register({ metadata: { id: defaultAccountId('chatgpt'), provider: 'chatgpt', label: 'ChatGPT', shared: true }, kind: 'chatgpt', auth: chatgpt, provider: openai })
-    this.register({ metadata: { id: defaultAccountId('claude'), provider: 'claude', label: 'Claude Code', shared: true }, kind: 'claude', auth: claude, provider: anthropic })
   }
 
   private snapshot(entry: AccountRuntime): SubscriptionAccount {
-    const status = entry.kind === 'claude' ? entry.auth.cachedStatus() : entry.auth.status()
-    return { ...entry.metadata, ...status, signingIn: this.loginId === entry.metadata.id || ('signingIn' in status && status.signingIn === true) }
+    const status = entry.auth.status()
+    return { ...entry.metadata, ...status, signingIn: this.loginId === entry.metadata.id || status.signingIn === true }
   }
   private register(entry: AccountRuntime): void {
     this.entries.set(entry.metadata.id, entry)
     entry.provider.onUsage = usage => this.onUsage(usage)
-    let previousEmail: string | undefined
-    const changed = (): void => {
-      const email = this.snapshot(entry).email
-      if (entry.kind === 'claude' && email !== previousEmail) entry.provider.clearConnections()
-      else if (entry.kind === 'chatgpt' && !entry.auth.status().signedIn) entry.provider.plan.clear()
-      previousEmail = email
+    entry.auth.on('changed', () => {
+      if (!entry.auth.status().signedIn) entry.provider.plan.clear()
       this.onChange(this.snapshot(entry))
-    }
-    if (entry.kind === 'claude') entry.auth.onChange = changed
-    else {
-      entry.auth.on('changed', changed)
-      entry.provider.plan.onChange = usage => this.onPlan(entry.metadata.id, usage)
-    }
+    })
+    entry.provider.plan.onChange = usage => this.onPlan(entry.metadata.id, usage)
   }
   private make(metadata: Metadata): AccountRuntime {
-    if (metadata.provider === 'claude') {
-      const auth = new ClaudeCodeAuth(undefined, undefined, path.join(app.getPath('userData'), 'accounts', metadata.id, 'claude'))
-      return { metadata, kind: 'claude', auth, provider: new ClaudeSubscriptionProvider(auth) }
-    }
     const auth = new ChatGPTAuth(path.join('accounts', metadata.id, 'chatgpt-auth.bin'))
     return { metadata, kind: 'chatgpt', auth, provider: new ChatGPTProvider(auth) }
   }
   async load(): Promise<void> {
     const saved = await readJson<Metadata[]>(FILE, [])
+    // An account an earlier Togle saved for another provider (a Claude sign-in) is not one any more: it is skipped.
     if (Array.isArray(saved)) for (const meta of saved.slice(0, 20)) {
-      if (!meta || !/^[a-f0-9-]{36}$/.test(meta.id) || !['claude', 'chatgpt'].includes(meta.provider) || typeof meta.label !== 'string' || this.entries.has(meta.id)) continue
+      if (!meta || !/^[a-f0-9-]{36}$/.test(meta.id) || meta.provider !== 'chatgpt' || typeof meta.label !== 'string' || this.entries.has(meta.id)) continue
       this.register(this.make({ id: meta.id, provider: meta.provider, label: meta.label.slice(0, 60) }))
     }
-    await Promise.all([...this.entries.values()].filter(entry => entry.kind === 'chatgpt' && !entry.metadata.shared).map(entry => (entry.auth as ChatGPTAuth).load()))
+    await Promise.all([...this.entries.values()].filter(entry => !entry.metadata.shared).map(entry => entry.auth.load()))
   }
   get(id: string): AccountRuntime {
     const entry = this.entries.get(id)
@@ -82,14 +65,11 @@ export class SubscriptionAccounts {
     return entry
   }
   identity(id: string): SubscriptionAccount { return this.snapshot(this.get(id)) }
-  /** Every account as it's known now, without reading Claude's sign-in again (list() does). */
+  /** Every account as it's known now. */
   known(): SubscriptionAccount[] { return [...this.entries.values()].map(entry => this.snapshot(entry)) }
-  async list(refresh = false): Promise<SubscriptionAccount[]> {
-    await Promise.all([...this.entries.values()].filter(entry => entry.kind === 'claude').map(entry => (entry.auth as ClaudeCodeAuth).status(refresh)))
-    return [...this.entries.values()].map(entry => this.snapshot(entry))
-  }
-  async add(provider: 'claude' | 'chatgpt', label: string): Promise<SubscriptionAccount> {
-    if (!['claude', 'chatgpt'].includes(provider) || typeof label !== 'string' || !label.trim()) throw new Error('Choose a provider and enter an account label, such as Work or Personal.')
+  async list(): Promise<SubscriptionAccount[]> { return this.known() }
+  async add(provider: 'chatgpt', label: string): Promise<SubscriptionAccount> {
+    if (provider !== 'chatgpt' || typeof label !== 'string' || !label.trim()) throw new Error('Enter an account label, such as Work or Personal.')
     if (this.entries.size >= 22) throw new Error('At most 20 additional accounts can be saved.')
     const entry = this.make({ id: randomUUID(), provider, label: label.trim().slice(0, 60) })
     this.register(entry)
@@ -101,9 +81,9 @@ export class SubscriptionAccounts {
   }
   async signIn(id: string, device = false): Promise<void> {
     const entry = this.get(id)
-    if (this.loginId || [...this.entries.values()].some(item => item.kind === 'chatgpt' && item.auth.status().pending)) throw new Error('Finish or cancel the current account sign-in first.')
+    if (this.loginId || [...this.entries.values()].some(item => item.auth.status().pending)) throw new Error('Finish or cancel the current account sign-in first.')
     this.loginId = id; this.onChange(this.snapshot(entry))
-    const task = entry.kind === 'claude' ? entry.auth.signIn() : device ? entry.auth.signInWithDeviceCode() : entry.auth.signInWithBrowser()
+    const task = device ? entry.auth.signInWithDeviceCode() : entry.auth.signInWithBrowser()
     this.login = task
     try { await task } finally {
       if (this.login === task) { this.loginId = undefined; this.login = undefined }
@@ -118,29 +98,26 @@ export class SubscriptionAccounts {
   pinned(id: string, includeName = true): LLMProvider {
     const entry = this.get(id)
     const provider: LLMProvider = entry.provider
-    const take = (): { initial: SubscriptionAccount; identity?: string } => ({ initial: this.snapshot(entry), identity: entry.auth.identity() })
-    // A Claude sign-in Togle hasn't read yet (it reads it in the background as it starts) is pinned as it's first read.
-    let pin = entry.kind === 'claude' && !entry.auth.read ? undefined : take()
-    const check = async (): Promise<void> => {
-      const status = entry.kind === 'claude' ? await entry.auth.status() : entry.auth.status()
-      pin ??= take()
+    const pin = { initial: this.snapshot(entry), identity: entry.auth.identity() }
+    const check = (): void => {
+      const status = entry.auth.status()
       const { initial, identity } = pin
       if (!initial.signedIn || !status.signedIn) throw new Error(`Sign in to ${entry.metadata.label} in Settings.`)
       if (status.email !== initial.email || entry.auth.identity() !== identity) throw new Error('The subscription identity changed. Start a new call or request with the intended account.')
     }
-    return { id: provider.id, supportsTools: provider.supportsTools, plan: entry.kind === 'chatgpt' ? entry.provider.plan : undefined,
-      listModels: async () => { await check(); return provider.listModels() },
+    return { id: provider.id, supportsTools: provider.supportsTools, plan: entry.provider.plan,
+      listModels: async () => { check(); return provider.listModels() },
       ...(provider.prepareText ? { prepareText: async (input, options) => {
-        await check(); options.signal.throwIfAborted()
+        check(); options.signal.throwIfAborted()
         const prepared = await provider.prepareText!(input, options)
         return { close: () => prepared.close(), send: async (user: string) => {
-          try { await check(); options.signal.throwIfAborted(); await prepared.send(user) }
+          try { check(); options.signal.throwIfAborted(); await prepared.send(user) }
           catch (error) { prepared.close(); throw error }
         } }
       } } : {}),
       stream: async (input, options) => {
-        await check(); options.signal.throwIfAborted()
-        const signedName = pin?.initial.name
+        check(); options.signal.throwIfAborted()
+        const signedName = pin.initial.name
         const name = includeName && typeof signedName === 'string' ? signedName.trim() : ''
         await provider.stream(name ? { ...input, system: `${input.system}\n\nThe signed-in user's display name is ${JSON.stringify(name)}. Prefer any explicit name or identity the user provides.` } : input, options)
       }

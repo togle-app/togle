@@ -69,7 +69,7 @@ F9, F8 and F10 are also debugger keys in VS Code, Visual Studio and JetBrains ID
 
 ## Your AI plan
 
-Togle has no account and no bill of its own. **Sign in with ChatGPT** (Settings → Accounts → AI plan) uses your ChatGPT plan: what Togle uses counts toward its limit. Without a ChatGPT plan, **Use a key** from Gemini, Grok, Kimi or any OpenAI-compatible service (OpenRouter, Groq, or a model on your computer with Ollama or LM Studio). Togle checks the key by listing the service's models, then uses one model for every job: the key cleans up dictation and writes the notes, as the plan would. The service bills you for it.
+Togle has no account and no bill of its own. **Sign in with ChatGPT** (Settings → Accounts → AI plan) uses your ChatGPT plan: what Togle uses counts toward its limit. Without a ChatGPT plan, **Use a key** from Claude (an Anthropic API key; Togle has no Claude sign-in), Gemini, Grok, Kimi or any OpenAI-compatible service (OpenRouter, Groq, or a model on your computer with Ollama or LM Studio). Togle checks the key by listing the service's models, then uses one model for every job: the key cleans up dictation and writes the notes, as the plan would. The service bills you for it.
 
 | | With your plan | Without it |
 | --- | --- | --- |
@@ -98,7 +98,7 @@ npm run dev             # then Settings → Voice → Install
 
 On Windows, `npm run setup:whisper` sets up a development copy in `resources/whisper` instead (~1.9 GB with an NVIDIA GPU), which Togle runs while nothing is installed from Settings. It uses the CUDA build and `large-v3-turbo` when it finds an NVIDIA GPU, otherwise the CPU build and Whisper `small`. You can override both: `npm run setup:whisper -- --cpu --model ggml-medium-q5_0.bin`. It also downloads Parakeet TDT v3 (~670 MB, skip with `--no-parakeet`; Whisper then does everything). Interrupted downloads resume where they stopped.
 
-**A key instead of a plan** (Settings → Accounts → AI plan → Use a key): Gemini, Grok and Kimi are ready to pick; **Another service** takes the address of any OpenAI-compatible one (OpenRouter, Groq, Ollama, LM Studio). A reasoning model's thinking that comes inside the answer text (`<think>…</think>`) is left out.
+**A key instead of a plan** (Settings → Accounts → AI plan → Use a key): Claude (Anthropic's own API), Gemini, Grok and Kimi are ready to pick; **Another service** takes the address of any OpenAI-compatible one (OpenRouter, Groq, Ollama, LM Studio). A reasoning model's thinking that comes inside the answer text (`<think>…</think>`) is left out.
 
 **A build to install.** Build on the system it's for. `npm run dist` makes what installs Togle: on Windows `dist\Togle Setup 0.1.0.exe`, on macOS a `.dmg` and a `.zip` for the build Mac's architecture, on Linux an AppImage and a `.deb`. `npm run pack` makes only the app, to try it (`dist\win-unpacked` on Windows), and checks the packaged code against a build manifest; `npm run open` opens that copy. Speech recognition isn't in any of them: Togle downloads it for the computer it's on. The app keeps its data where `npm run dev` does (`%APPDATA%\togle` on Windows). Nothing is signed yet: Windows SmartScreen warns before the first run, and macOS distribution needs Apple Developer ID signing and notarization; see [the Mac build guide](docs/macos.md).
 
@@ -107,10 +107,8 @@ On Windows, `npm run setup:whisper` sets up a development copy in `resources/whi
 ```
 src/main/              Electron main process
   auth/chatgpt.ts      Sign in with ChatGPT: browser PKCE, ID token checks, refresh, revocation
-  providers/           the AI: chatgpt.ts (Responses API with ChatGPT plan usage), compat.ts (Chat Completions),
-                       claude.ts (Anthropic's own API) and claude-subscription.ts (a Claude subscription through
-                       the Agent SDK): Settings offers neither for now; a Claude sign-in waits for Anthropic,
-                       and until then the packages leave out the Claude runtime the Agent SDK ships
+  providers/           the AI: chatgpt.ts (Responses API with ChatGPT plan usage), compat.ts (Chat Completions)
+                       and claude.ts (Anthropic's own API, with a key). Togle has no Claude sign-in
   plan.ts              the ChatGPT plan's usage limit
   dictation*.ts        voice typing: the shortcut, the voice bar window, cleanup, inserting the words, history
   stt/                 speech recognition on this computer: Parakeet (main), Whisper (unclear speech), downloads

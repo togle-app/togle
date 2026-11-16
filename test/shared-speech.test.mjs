@@ -104,7 +104,7 @@ test("every agent's voice typing account stays the one it used, its own choice s
 test("automatic voice typing uses the AI's own subscription account, else one signed in, else ChatGPT's", () => {
   const accounts = [
     { id: 'chatgpt-default', provider: 'chatgpt', signedIn: false },
-    { id: 'claude-default', provider: 'claude', signedIn: true },
+    { id: 'personal-gpt', provider: 'chatgpt', signedIn: false },
     { id: 'work-gpt', provider: 'chatgpt', signedIn: true }
   ]
   const settings = structuredClone(getSettings())
@@ -113,20 +113,18 @@ test("automatic voice typing uses the AI's own subscription account, else one si
   assert.equal(automaticVoiceAccount(settings, accounts), 'chatgpt-default')
   settings.subscriptionAccountId = 'work-gpt'
   assert.equal(automaticVoiceAccount(settings, accounts), 'work-gpt', 'the AI account picked')
-  settings.provider = 'claude'; settings.claude.auth = 'subscription'; settings.subscriptionAccountId = ''
-  assert.equal(automaticVoiceAccount(settings, accounts), 'claude-default')
-  settings.claude.auth = 'api-key'
-  assert.equal(automaticVoiceAccount(settings, accounts), 'claude-default', 'an API key: an account that is signed in')
+  settings.provider = 'claude'; settings.subscriptionAccountId = ''
+  assert.equal(automaticVoiceAccount(settings, accounts), 'work-gpt', 'a Claude key is not a plan: an account that is signed in')
   settings.provider = 'compat'
   assert.equal(automaticVoiceAccount(settings, accounts.map(account => ({ ...account, signedIn: false }))), 'chatgpt-default', 'none signed in: ChatGPT')
   // With a profile of jobs, the first job on a subscription of the AI's kind.
   settings.provider = 'chatgpt'
   const task = sourceId => ({ sourceId, model: 'm', effort: 'low' })
-  settings.ai = { tasks: { deep: task('api:compat'), background: task('work-gpt'), vision: task('claude-default'), quick: task('chatgpt-default') } }
+  settings.ai = { tasks: { deep: task('api:compat'), background: task('work-gpt'), vision: task('personal-gpt'), quick: task('chatgpt-default') } }
   assert.equal(automaticVoiceAccount(settings, accounts), 'work-gpt')
   assert.equal(voiceAccountId(settings, accounts), 'work-gpt')
-  settings.dictation.accountId = 'claude-default'
-  assert.equal(voiceAccountId(settings, accounts), 'claude-default', 'one picked for voice typing wins')
+  settings.dictation.accountId = 'personal-gpt'
+  assert.equal(voiceAccountId(settings, accounts), 'personal-gpt', 'one picked for voice typing wins')
 })
 
 test('a saved automatic language setting survives restart without being rewritten to English', async () => {
@@ -134,4 +132,20 @@ test('a saved automatic language setting survives restart without being rewritte
   await loadSettings()
   assert.equal(getSettings().transcription.language, 'auto')
   assert.equal(getSettings().dictation.accountId, 'chatgpt-default')
+})
+
+test('settings an earlier Togle saved for a Claude sign-in fall back: ChatGPT for the AI, automatic for voice typing, a Claude key untouched', async () => {
+  const file = path.join(work, 'settings.json')
+  const lanes = model => Object.fromEntries(['quick', 'deep', 'vision', 'background'].map(lane => [lane, { model, effort: 'low' }]))
+  writeFileSync(file, JSON.stringify({ provider: 'claude', claude: { auth: 'subscription', subscriptionLanes: lanes('opus'), lanes: lanes('claude-haiku-5-5') }, dictation: { speech: 'claude' }, subscriptionAccountId: 'claude-default' }))
+  await loadSettings()
+  assert.equal(getSettings().provider, 'chatgpt', 'the Claude plan sign-in is gone: the AI falls back to the ChatGPT plan')
+  assert.equal(getSettings().dictation.speech, 'auto')
+  assert.equal('auth' in getSettings().claude, false); assert.equal('subscriptionLanes' in getSettings().claude, false)
+  assert.equal(getSettings().claude.lanes.quick.model, 'claude-haiku-5-5', 'a key’s models are kept')
+  // A Claude API key stays the AI.
+  writeFileSync(file, JSON.stringify({ provider: 'claude', claude: { auth: 'api-key', lanes: lanes('claude-sonnet-5-5') } }))
+  await loadSettings()
+  assert.equal(getSettings().provider, 'claude')
+  assert.equal(getSettings().claude.lanes.quick.model, 'claude-sonnet-5-5')
 })

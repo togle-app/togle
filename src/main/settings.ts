@@ -27,13 +27,6 @@ export const DEFAULT_SETTINGS: Settings = {
   // One model for every job, at the effort each needs: thinking is always on, and low effort keeps it short where
   // words have to come quickly. Caches are per model, and only lanes that share one can share an entry.
   claude: {
-    auth: 'api-key',
-    subscriptionLanes: {
-      quick: { model: 'opus', effort: 'low' },
-      deep: { model: 'opus', effort: 'high' },
-      vision: { model: 'opus', effort: 'low' },
-      background: { model: 'opus', effort: 'low' }
-    },
     lanes: {
       quick: { model: 'claude-opus-5-5', effort: 'low' },
       deep: { model: 'claude-opus-5-5', effort: 'high' },
@@ -171,7 +164,13 @@ export async function loadSettings(): Promise<Settings> {
   // lanes existed (one model for everything) start from the lane defaults.
   current.chatgpt = { ...current.chatgpt, lanes: { ...DEFAULT_SETTINGS.chatgpt.lanes, ...stored.chatgpt?.lanes } }
   current.claude = { ...current.claude, lanes: { ...DEFAULT_SETTINGS.claude.lanes, ...stored.claude?.lanes } }
-  current.claude.subscriptionLanes = { ...DEFAULT_SETTINGS.claude.subscriptionLanes, ...stored.claude?.subscriptionLanes }
+  // Claude used to have a plan sign-in too. It has none now: what was set up on it falls back to ChatGPT's plan, and voice
+  // typing that Claude cleaned up goes back to the automatic account. A Claude API key is untouched.
+  const claudeSettings = (stored as { claude?: { auth?: unknown } }).claude
+  if (current.provider === 'claude' && claudeSettings?.auth === 'subscription') current.provider = 'chatgpt'
+  if ((current.dictation.speech as string) === 'claude') current.dictation = { ...current.dictation, speech: 'auto' }
+  delete (current.claude as { auth?: unknown }).auth
+  delete (current.claude as { subscriptionLanes?: unknown }).subscriptionLanes
   // Drop settings earlier versions had (watchScreen; hideFromScreenShare, which defaulted to off and is
   // replaced by window.hideFromCapture, on by default).
   for (const key of Object.keys(current)) if (!(key in DEFAULT_SETTINGS)) Reflect.deleteProperty(current, key)

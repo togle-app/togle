@@ -25,11 +25,9 @@ module.exports = function install(fixture) {
     const listeners = callbacks.get(name) || new Set(); listeners.add(callback); callbacks.set(name, listeners)
     return () => listeners.delete(callback)
   } : async (...args) => { record(name, args); return [] }]))
-  const account = { signedIn: fixture.scenario !== 'account', email: 'demo@example.com' }
+  // The plan sign-ins: ChatGPT's only. Togle has no Claude sign-in (a Claude API key is a connection, below).
   const subscriptions = [
-    { id: 'claude-default', provider: 'claude', label: 'Claude Code', shared: true, signedIn: account.signedIn, email: account.email },
-    { id: 'chatgpt-default', provider: 'chatgpt', label: 'ChatGPT', shared: true, signedIn: fixture.scenario === 'model-settings', email: fixture.scenario === 'model-settings' ? 'personal@example.test' : undefined },
-    { id: 'work-profile', provider: 'claude', label: 'Work', signedIn: true, email: 'luka@work.example', name: 'Luka' }
+    { id: 'chatgpt-default', provider: 'chatgpt', label: 'ChatGPT', shared: true, signedIn: fixture.scenario === 'model-settings', email: fixture.scenario === 'model-settings' ? 'personal@example.test' : undefined }
   ]
   api.subscriptionAccounts = async () => clone(subscriptions)
   api.signInAccount = async id => { record('signInAccount', [id]); const profile = subscriptions.find(item => item.id === id); profile.signedIn = true; profile.email ||= 'connected@example.test'; emit('onAccountsChanged') }
@@ -240,7 +238,7 @@ module.exports = function install(fixture) {
     record('updateSettings', patch)
     if (rejectSettings) { rejectSettings = false; throw new Error('Settings could not be saved') }
     if (rejectAuto && patch.assist?.auto !== undefined) { rejectAuto = false; throw new Error('Settings could not be saved') }
-    if (patch.subscriptionAccountId) { const selected = subscriptions.find(item => item.id === patch.subscriptionAccountId); if (selected) patch = { ...patch, provider: selected.provider, ...(selected.provider === 'claude' ? { claude: { ...patch.claude, auth: 'subscription' } } : {}) } }
+    if (patch.subscriptionAccountId) { const selected = subscriptions.find(item => item.id === patch.subscriptionAccountId); if (selected) patch = { ...patch, provider: selected.provider } }
     fixture.settings = merge(clone(fixture.settings), patch); if ('ai' in patch) fixture.settings.ai = clone(patch.ai); emit('onSettingsChanged', clone(fixture.settings))
     if (patch.transcription || patch.subscriptionAccountId || patch.provider) emit('onSttStatus', await api.sttStatus())
     return clone(fixture.settings)

@@ -1,12 +1,13 @@
 import type { Settings } from './types'
 
-export function dictationSource(settings: Settings, choice = settings.dictation.speech): 'chatgpt' | 'claude' | undefined {
-  if (choice === 'chatgpt' || choice === 'claude') return choice
-  return settings.provider === 'chatgpt' ? 'chatgpt' : settings.provider === 'claude' && settings.claude.auth === 'subscription' ? 'claude' : undefined
+/** The plan that cleans up voice typing, when there is one: ChatGPT's. A key, or nothing, is not a plan. */
+export function dictationSource(settings: Settings, choice = settings.dictation.speech): 'chatgpt' | undefined {
+  if (choice === 'chatgpt') return choice
+  return settings.provider === 'chatgpt' ? 'chatgpt' : undefined
 }
 
 /** A subscription account, as voice typing chooses among them. */
-export interface VoiceAccountOption { id: string; provider: 'chatgpt' | 'claude'; signedIn?: boolean }
+export interface VoiceAccountOption { id: string; provider: 'chatgpt'; signedIn?: boolean }
 
 /**
  * The subscription account voice typing uses when it's left automatic (dictation.accountId ''): the AI's own account

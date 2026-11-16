@@ -408,12 +408,12 @@ test('stream failure and silence both release prepared resources without inserti
 })
 
 test('subscription cleanup warms while recording, sends only the final text and closes its runtime', async () => {
-  const settings = structuredClone(getSettings()); settings.provider = 'claude'; settings.claude.auth = 'subscription'; settings.dictation.polish = true
+  const settings = structuredClone(getSettings()); settings.provider = 'chatgpt'; settings.dictation.polish = true
   const sent = [], heard = []
   let warmed = 0, closed = 0
   const controller = new AbortController()
-  const speech = new DictationSpeech({ settings: () => settings, claudeAccount: async () => ({ signedIn: true, email: 'work@test.example' }),
-    claude: { prepareText: async (input, options) => {
+  const speech = new DictationSpeech({ settings: () => settings, chatgptAccount: () => ({ signedIn: true, email: 'work@test.example' }),
+    chatgpt: { prepareText: async (input, options) => {
       warmed++; assert.equal(JSON.parse(input.user).dictated_text, '')
       return { send: async user => { sent.push(JSON.parse(user).dictated_text); options.onFinal('Final sentence.') }, close: () => { closed++ } }
     }, stream: () => assert.fail('Reuse the prepared process') },
@@ -428,11 +428,11 @@ test('subscription cleanup warms while recording, sends only the final text and 
 })
 
 test('a cancelled dictation closes a late cleanup runtime without sending text', async () => {
-  const settings = structuredClone(getSettings()); settings.provider = 'claude'; settings.claude.auth = 'subscription'; settings.dictation.polish = true
+  const settings = structuredClone(getSettings()); settings.provider = 'chatgpt'; settings.dictation.polish = true
   const prepared = deferred(), controller = new AbortController()
   let closed = 0
-  const speech = new DictationSpeech({ settings: () => settings, claudeAccount: async () => ({ signedIn: true, email: 'work@test.example' }),
-    claude: { prepareText: () => prepared.promise }, remote: async () => assert.fail('Cancelled before any speech') })
+  const speech = new DictationSpeech({ settings: () => settings, chatgptAccount: () => ({ signedIn: true, email: 'work@test.example' }),
+    chatgpt: { prepareText: () => prepared.promise }, remote: async () => assert.fail('Cancelled before any speech') })
   await speech.ready(controller.signal)
   controller.abort(new Error('Cancelled')); speech.dispose()
   prepared.resolve({ send: () => assert.fail('Cancelled before the final transcript'), close: () => { closed++ } })
@@ -443,24 +443,22 @@ test('a cancelled dictation closes a late cleanup runtime without sending text',
 })
 
 function speechFixture() {
-  const settings = structuredClone(getSettings()); settings.provider = 'claude'; settings.claude.auth = 'subscription'
+  const settings = structuredClone(getSettings()); settings.provider = 'chatgpt'
   let account = { signedIn: true, email: 'one@example.test' }
   const requests = [], remote = []
   const provider = id => ({ id, stream: async (input, options) => { requests.push({ id, input, options }); options.onDelta('Clean words.'); options.onFinal?.('Clean words.') } })
-  // This PC hears every account's dictation: neither sign-in includes transcription.
-  const speech = new DictationSpeech({ settings: () => settings, chatgpt: provider('chatgpt'), claude: provider('claude'),
-    chatgptAccount: () => account, claudeAccount: async () => account,
+  // This PC hears every account's dictation: the sign-in does not include transcription.
+  const speech = new DictationSpeech({ settings: () => settings, chatgpt: provider('chatgpt'),
+    chatgptAccount: () => account,
     remote: async pcm => { remote.push(pcm); return 'heard on this PC' } })
   return { speech, settings, requests, remote, account: value => { account = value } }
 }
-test("dictation: a Claude account's words are heard on this PC, and Claude only cleans them up", async () => {
+test("dictation: a plan's words are heard on this PC, and the plan only cleans them up", async () => {
   const f = speechFixture(), signal = new AbortController().signal; await f.speech.ready()
-  f.settings.provider = 'chatgpt'
   assert.equal(await f.speech.transcribe(audio(1), signal), 'heard on this PC')
   assert.equal(await f.speech.polish('uh raw words', signal), 'Clean words.')
-  assert.equal(f.remote.length, 1); assert.equal(f.requests[0].id, 'claude')
-  assert.equal(f.requests[0].input.model, 'haiku', 'Simple cleanup uses the fast subscription model independently of call answers')
-  assert.deepEqual(f.requests[0].input.tools, []); assert.equal(f.requests[0].input.history, undefined); assert.equal(f.requests[0].input.claudeConnections, undefined)
+  assert.equal(f.remote.length, 1); assert.equal(f.requests[0].id, 'chatgpt')
+  assert.deepEqual(f.requests[0].input.tools, []); assert.equal(f.requests[0].input.history, undefined)
   f.account({ signedIn: true, email: 'other@example.test' })
   await assert.rejects(f.speech.polish('secret', signal), /account changed/)
 })
@@ -468,9 +466,9 @@ test('dictation: an old local preference keeps working, and cleanup uses the sam
   const f = speechFixture(), signal = new AbortController().signal
   f.settings.dictation.speech = 'local'; await f.speech.ready()
   assert.equal(await f.speech.transcribe(audio(1), signal), 'heard on this PC')
-  f.settings.provider = 'chatgpt'; f.settings.dictation.speech = 'claude'; await f.speech.ready()
+  f.settings.provider = 'chatgpt'; f.settings.dictation.speech = 'chatgpt'; await f.speech.ready()
   assert.equal(await f.speech.transcribe(audio(1), signal), 'heard on this PC'); await f.speech.polish('hello', signal)
-  assert.equal(f.requests[0].id, 'claude')
+  assert.equal(f.requests[0].id, 'chatgpt')
 })
 test('dictation: with no plan signed in, the words are heard on this PC and go in as heard, saying why', async () => {
   const f = speechFixture(), signal = new AbortController().signal; f.account({ signedIn: false })
@@ -489,8 +487,8 @@ test('dictation: without a plan, the key that writes the notes cleans up the wor
   const requests = [], signal = new AbortController().signal
   const key = { id: 'compat', stream: async (input, options) => { requests.push(input); options.onFinal?.('Hello there.') } }
   const speech = new DictationSpeech({ settings: () => settings, key: { provider: key, model: 'gemini-flash' },
-    chatgpt: { stream: () => assert.fail('no plan') }, claude: { stream: () => assert.fail('no plan') },
-    chatgptAccount: () => ({ signedIn: false }), claudeAccount: async () => ({ signedIn: false }), remote: async () => 'uh hello there' })
+    chatgpt: { stream: () => assert.fail('no plan') },
+    chatgptAccount: () => ({ signedIn: false }), remote: async () => 'uh hello there' })
   await speech.ready()
   assert.equal(speech.polishes, true); assert.equal(speech.asHeard, undefined)
   assert.equal(await speech.polish(await speech.transcribe(audio(1), signal), signal), 'Hello there.')
@@ -504,14 +502,14 @@ test("dictation: a ChatGPT account's words are heard on this PC, and a settings 
   f.account({ signedIn: true, email: 'other@example.test' })
   await assert.rejects(f.speech.transcribe(audio(1), signal), /account changed/); await assert.rejects(f.speech.polish('secret', signal), /account changed/)
 })
-test('dictation: with the AI on an API key and no key given to dictation, the words go in as heard', async () => {
-  const f = speechFixture(), signal = new AbortController().signal; f.settings.claude.auth = 'api-key'
+test('dictation: with the AI on a Claude API key and no key given to dictation, the words go in as heard', async () => {
+  const f = speechFixture(), signal = new AbortController().signal; f.settings.provider = 'claude'
   await f.speech.ready()
-  assert.equal(await f.speech.polish('raw words', signal), 'raw words')
+  assert.equal(await f.speech.polish('raw words', signal), 'raw words', 'a key is not a plan')
   assert.equal(f.requests.length, 0)
-  f.settings.dictation.speech = 'claude'; await f.speech.ready()
+  f.settings.dictation.speech = 'chatgpt'; await f.speech.ready()
   assert.equal(await f.speech.transcribe(audio(1), signal), 'heard on this PC')
-  assert.equal(await f.speech.polish('raw words', signal), 'Clean words.', 'a subscription picked for dictation cleans up')
+  assert.equal(await f.speech.polish('raw words', signal), 'Clean words.', 'a plan picked for dictation cleans up')
 })
 test('dictation: cleanup can be disabled; abort releases a hung backend promptly', async () => {
   const f = speechFixture(); f.settings.dictation.polish = false; await f.speech.ready()

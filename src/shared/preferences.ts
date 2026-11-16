@@ -15,7 +15,7 @@ export function validateAIProfile(value: unknown): AIProfile {
     if (!task || typeof task.sourceId !== 'string' || !task.sourceId.trim() || task.sourceId.length > 100 || typeof task.model !== 'string' || !task.model.trim() || task.model.length > 200 || !EFFORTS.includes(task.effort)) throw new Error(`Choose an account, model and reasoning level for ${lane}.`)
     return [lane, { sourceId: task.sourceId, model: task.model.trim(), effort: task.effort, ...(task.fast === true ? { fast: true } : {}) }]
   })) as AIProfile['tasks']
-  return { tasks, ...(['claude', 'codex', 'mixed'].includes(profile.preset || '') ? { preset: profile.preset } : {}), ...(typeof profile.version === 'string' ? { version: profile.version.slice(0, 80) } : {}) }
+  return { tasks, ...(typeof profile.version === 'string' ? { version: profile.version.slice(0, 80) } : {}) }
 }
 
 /** Native clients still understand old settings; an explicit profile always wins. */
@@ -23,8 +23,8 @@ export function effectiveAI(settings: Settings, agent?: Agent, providerForSource
   if (agent?.preferences?.ai) return structuredClone(agent.preferences.ai)
   if (!agent?.subscriptionAccountId && settings.ai) return structuredClone(settings.ai)
   const sourceId = agent?.subscriptionAccountId || modelSourceId(settings)
-  const provider = providerForSource?.(sourceId) || (sourceId.startsWith('claude') || sourceId === 'api:claude' ? 'claude' : sourceId.startsWith('api:') ? 'compat' : settings.provider)
-  const lanes = provider === 'chatgpt' ? settings.chatgpt.lanes : provider === 'claude' ? sourceId === 'api:claude' ? settings.claude.lanes : settings.claude.subscriptionLanes : undefined
+  const provider = providerForSource?.(sourceId) || (sourceId === 'api:claude' ? 'claude' : sourceId.startsWith('api:') ? 'compat' : settings.provider)
+  const lanes = provider === 'chatgpt' ? settings.chatgpt.lanes : provider === 'claude' && sourceId === 'api:claude' ? settings.claude.lanes : undefined
   const fallback: LaneModel = { model: settings.compat.model, effort: 'low' }
   return { tasks: Object.fromEntries(AI_TASKS.map(({ lane }) => [lane, { ...(lanes?.[lane] || fallback), sourceId }])) as AIProfile['tasks'] }
 }
@@ -53,8 +53,9 @@ export function validatePreferences(value: unknown): AgentPreferences {
       if (value === undefined) continue
       const valid = ['polish', 'showBar'].includes(key) ? typeof value === 'boolean' : typeof value === 'string' && value.length <= (key === 'serverUrl' || key === 'microphoneId' ? 2000 : 200)
       if (!valid || key === 'mode' && !['hold', 'toggle'].includes(value as string) || key === 'speech' && !['auto', 'claude', 'chatgpt'].includes(value as string) || ['me', 'them'].includes(key) && !['local', 'openai', 'server', 'chatgpt', 'claude'].includes(value as string)) throw new Error(`Invalid ${section} preference: ${key}.`)
-      // Claude speech was removed (it isn't open to other apps): a side it heard is heard by this PC now.
-      clean[key] = ['me', 'them'].includes(key) && value === 'claude' ? 'local' : value
+      // Claude speech and Claude's cleaning up of voice typing were removed (there is no Claude sign-in): a side it heard is
+      // heard by this PC now, and voice typing goes back to the automatic account.
+      clean[key] = value === 'claude' ? (key === 'speech' ? 'auto' : 'local') : value
     }
     result[section] = clean as never
   }

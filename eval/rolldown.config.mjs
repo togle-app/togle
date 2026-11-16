@@ -10,7 +10,7 @@ export default [
     input: path.join(here, 'entry.ts'),
     output: { file: path.join(here, '.build/togle.cjs'), format: 'cjs' },
     platform: 'node',
-    external: ['electron', 'jszip', 'unpdf', 'mammoth', 'koffi', 'node-pty', '@anthropic-ai/sdk', '@anthropic-ai/claude-agent-sdk', 'zod', 'ws'],
+    external: ['electron', 'jszip', 'unpdf', 'mammoth', 'koffi', 'node-pty', '@anthropic-ai/sdk', 'ws'],
     resolve: { alias: { '@shared': shared } }
   },
   {

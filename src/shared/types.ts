@@ -127,16 +127,6 @@ export interface Agent {
   updatedAt: number
 }
 
-export interface ClaudeConnectionSelection {
-  account: string
-  servers: string[]
-}
-
-export interface ClaudeConnections {
-  account: string
-  apps: { name: string; label: string; status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'; readTools: number }[]
-}
-
 export type AgentPatch = Partial<Pick<Agent, 'name' | 'vocabulary' | 'subscriptionAccountId' | 'preferences'>>
 
 /** What a call taught the agent, for the user to approve in the call review. */
@@ -299,9 +289,7 @@ export const EFFORT_ORDER: ReasoningEffort[] = ['none', 'minimal', 'low', 'mediu
 export type Lane = 'quick' | 'deep' | 'vision' | 'background'
 
 export interface TaskModel extends LaneModel { sourceId: string }
-export type AIPreset = 'claude' | 'codex' | 'mixed'
 export interface AIProfile {
-  preset?: AIPreset
   version?: string
   tasks: Record<Lane, TaskModel>
 }
@@ -355,12 +343,9 @@ export interface Settings {
     /** "You're using your ChatGPT plan" was shown, after the first sign-in. */
     planIntroSeen?: boolean
   }
-  /** Claude through an API key or the official Agent SDK with a subscription sign-in. */
+  /** Claude through an Anthropic API key. There is no Claude sign-in: Togle never offers one. */
   claude: {
-    auth: 'api-key' | 'subscription'
     lanes: Record<Lane, LaneModel>
-    /** The SDK's model aliases are kept apart from the API's model IDs. */
-    subscriptionLanes: Record<Lane, LaneModel>
     /** Deep answers may search the web (a few searches each, billed by Anthropic). On unless turned off. */
     webSearch?: boolean
   }
@@ -378,9 +363,6 @@ export interface Settings {
     /** Local speaker matching, independent of the transcription provider. On unless disabled. */
     voiceLabels?: boolean
     rememberVoices?: boolean
-    /** Calendar reminders use the signed-in Claude account's calendar connector. */
-    calendarReminders?: boolean
-    calendarAgentId?: string
     /** Legacy free-form notes; migrated into the first agent's "About me". */
     context?: string
     /** A summary of each reviewed call is kept (encrypted on this PC) and recalled on later calls with the same people. On unless turned off. */
@@ -413,7 +395,7 @@ export interface Settings {
    * account that cleans up what's dictated and keeps its word list and history ('': the AI's account, see
    * automaticVoiceAccount); this computer hears the speech either way.
    */
-  dictation: { speech: 'auto' | 'local' | 'chatgpt' | 'claude'; accountId: string; mode: 'hold' | 'toggle'; polish: boolean; showBar: boolean; microphoneId: string }
+  dictation: { speech: 'auto' | 'local' | 'chatgpt'; accountId: string; mode: 'hold' | 'toggle'; polish: boolean; showBar: boolean; microphoneId: string }
   /** Shortcuts given other keys than their own (empty: turned off); the others keep theirs. */
   hotkeys: Partial<Record<HotkeyId, string>>
   /** The coding agents' tasks. */
@@ -479,18 +461,6 @@ export interface PlanUsage {
   call?: number
 }
 
-/** The official Claude Code sign-in used by the subscription SDK. No credentials cross into the window. */
-export interface ClaudeAuthStatus {
-  available: boolean
-  signedIn: boolean
-  email?: string
-  name?: string
-  plan?: string
-  signingIn?: boolean
-  url?: string
-  error?: string
-}
-
 export interface ModelOption {
   id: string
   label: string
@@ -504,7 +474,7 @@ export interface ModelOption {
 /** Public account metadata only. Tokens and account directories never cross the IPC bridge. */
 export interface SubscriptionAccount {
   id: string
-  provider: 'chatgpt' | 'claude'
+  provider: 'chatgpt'
   label: string
   shared?: boolean
   signedIn: boolean
