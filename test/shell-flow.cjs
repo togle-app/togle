@@ -718,7 +718,7 @@ async function checkSettings(T, agent) {
   const [added] = (await ui.calls('addApiConnection')).map(args => args[0])
   assert.deepEqual({ ...added, key: added.key ? 'given' : 'none' }, { kind: 'anthropic', label: 'Claude', baseUrl: '', model: '', key: 'given' }, "Anthropic's own API: no address to give")
   const ai = await ui.evaluate('window.togleUITest.settings().ai')
-  assert.deepEqual(Object.values(ai.tasks).map(task => task.model), ['local-fixture', 'local-fixture', 'local-fixture', 'local-fixture'], 'every job uses the model the service lists')
+  assert.deepEqual(Object.values(ai.tasks).map(task => task.model), ['claude-haiku-5-5', 'claude-haiku-5-5', 'claude-haiku-5-5', 'claude-haiku-5-5'], 'every job uses one model of the service, the quick and cheap one: Haiku for Claude')
   assert.equal(await ui.evaluate('window.togleUITest.settings().provider'), 'compat')
   await ui.capture('settings-key')
   // Another service's key replaces it: Gemini, at its own OpenAI-compatible address.

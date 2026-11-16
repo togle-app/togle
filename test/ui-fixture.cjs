@@ -160,6 +160,8 @@ module.exports = function install(fixture) {
   api.listModels = async sourceId => {
     record('listModels', [sourceId])
     const connection = apiConnections.find(connection => connection.id === sourceId)
+    // Anthropic lists its models, the newest first; the others here list one.
+    if (connection?.kind === 'anthropic') return ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'].map(id => ({ id, label: id, reasoningLevels: ['low', 'medium', 'high'] }))
     if (connection) return [{ id: connection.model || 'local-fixture', label: connection.model || 'Local fixture' }]
     if (fixture.scenario !== 'model-settings') return [{ id: 'haiku', label: 'Haiku', reasoningLevels: ['low', 'medium', 'high'] }]
     if (sourceId?.startsWith('chatgpt') || subscriptions.find(account => account.id === sourceId)?.provider === 'chatgpt') return [{ id: 'gpt-6-luna', label: 'GPT Luna', reasoningLevels: ['low', 'medium'] }, { id: 'gpt-6.1-sol', label: 'GPT Sol', reasoningLevels: ['low', 'medium', 'high'] }]
