@@ -70,7 +70,17 @@ function claude(options = {}) {
   })
   return { backend, home, keep, chunks, text: (key) => strip(chunks.filter((chunk) => chunk.key === key).map((chunk) => chunk.data).join('')).replace(/\s+/g, ' ') }
 }
-const job = (home, id) => JSON.parse(readFileSync(path.join(home, 'jobs', `${id}.json`), 'utf8'))
+/** The fake writes a job file in place, so a read in the middle of a write is cut short: look again until it parses. */
+const job = (home, id) => {
+  const file = path.join(home, 'jobs', `${id}.json`)
+  for (let attempt = 0; ; attempt++) {
+    try { return JSON.parse(readFileSync(file, 'utf8')) }
+    catch (error) {
+      if (!(error instanceof SyntaxError) || attempt >= 50) throw error
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
+    }
+  }
+}
 const watch = (task) => {
   const events = []
   task.on((event) => events.push(event))
