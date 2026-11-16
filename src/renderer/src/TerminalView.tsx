@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { caughtOnEnter, CLEAR_LINE, noteFor, TypedLine } from '@shared/screen-guard'
+import { caughtOnEnter, CLEAR_LINE, isLeftArrow, leftLeaves, LEFT_NOTE, noteFor, promptIsEmpty, TypedLine } from '@shared/screen-guard'
 
 const api = window.togle
 
@@ -13,6 +13,12 @@ const NOTE_MS = 15_000
 const visibleRows = (term: Terminal): string[] => {
   const buffer = term.buffer.active
   return Array.from({ length: term.rows }, (_, i) => buffer.getLine(buffer.viewportY + i)?.translateToString(true) ?? '')
+}
+
+/** Whether the cell at a row and column of the screen is drawn dim: how the programs draw a prompt's placeholder. */
+const isDim = (term: Terminal, row: number, column: number): boolean => {
+  const buffer = term.buffer.active
+  return !!buffer.getLine(buffer.viewportY + row)?.getCell(column)?.isDim()
 }
 
 // The terminals shown here before: what they printed then had its questions to the terminal answered.
@@ -85,6 +91,12 @@ export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; sc
     const line = new TypedLine()
     const typed = term.onData((data) => {
       if (replaying) return
+      // The Left arrow at an empty prompt takes Claude Code's and Codex's screens to their list of every session, as /exit does:
+      // not sent. With text in the prompt it only moves the cursor, and goes through.
+      if (guard && leftLeaves(guard) && isLeftArrow(data) && promptIsEmpty(visibleRows(term), (row, column) => isDim(term, row, column)) === true) {
+        setNote(LEFT_NOTE)
+        return
+      }
       // Enter with /resume or /exit on the line (or highlighted in the agent's command list): not sent. The line is emptied, so
       // that the next Enter does not send it either, and the note says what to do instead.
       if (guard && data === '\r') {

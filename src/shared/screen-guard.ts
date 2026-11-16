@@ -24,6 +24,17 @@ const NAMES: Readonly<Record<string, Readonly<Record<string, Kept>>>> = {
 /** Whether Togle keeps commands off this agent's screen (an agent it has measured). */
 export const hasGuard = (runner: string): boolean => Object.hasOwn(NAMES, runner)
 
+// The Left arrow at an empty prompt takes these agents' screens to their list of every session on the computer (Claude Code after a
+// second press, with "Press ← again to go back to agents" after the first; Codex at once), which is what /exit does. Hermes has no
+// such key. With text in the prompt the arrow only moves the cursor, so it is let through then.
+const LEAVES_ON_LEFT: ReadonlySet<string> = new Set(['claude', 'codex'])
+
+/** Whether the Left arrow can take this agent's screen out of the task. */
+export const leftLeaves = (runner: string): boolean => LEAVES_ON_LEFT.has(runner)
+
+/** Whether the keys are a plain Left arrow (with the terminal's cursor keys in either mode), not one with Ctrl, Alt or Shift. */
+export const isLeftArrow = (data: string): boolean => data === '\x1b[D' || data === '\x1bOD'
+
 /** The empty line: to the end of it (Ctrl+E), then everything before the cursor (Ctrl+U). */
 export const CLEAR_LINE = '\x05\x15'
 
@@ -45,8 +56,9 @@ export function keptBy(runner: string, command: string | null): Kept | null {
 
 // The live prompt: its mark at the start of a row (Claude Code and Hermes draw ❯, Codex ›), maybe after a space or two.
 const PROMPT = /^\s{0,3}[❯›]\s?(.*)$/u
-// A row of the open command list that is highlighted: the same mark, then the command, then its description after two spaces or more.
-const LISTED = /^\s{0,4}[❯›]\s+(\/[A-Za-z][\w:.-]*)\s{2,}\S/u
+// A row of the open command list that is highlighted: the same mark, then the command (Claude Code adds its other names in brackets,
+// "/exit (quit)", and a hint of what it takes can follow: "[name]", "<model>"), then its description after two spaces or more.
+const LISTED = /^\s{0,4}[❯›]\s+(\/[A-Za-z][\w:.-]*)(?:\s+(?:\([^)]*\)|\[[^\]]*\]|<[^>]*>))*\s{2,}\S/u
 const BLANK = /^[\s─━-]*$/u
 // How far above the prompt the highlighted item of a list is looked for: a list is a dozen rows or so.
 const LIST_ROWS = 14
@@ -75,6 +87,24 @@ export function readScreen(rows: readonly string[]): { prompt: string | null; li
   return { prompt, listed: null }
 }
 
+/**
+ * Whether the live prompt holds nothing the person typed: its row is empty after the mark, or shows the placeholder (a suggestion such
+ * as `Try "fix the lint errors"`), which the programs draw dim, as they do not draw what was typed. `dim(row, column)` says whether the
+ * cell there is dim. Null when the screen shows no prompt (a picker, a list of sessions): there the arrow is not left alone or kept.
+ */
+export function promptIsEmpty(rows: readonly string[], dim: (row: number, column: number) => boolean): boolean | null {
+  for (let row = rows.length - 1; row >= 0; row--) {
+    const found = PROMPT.exec(rows[row])
+    if (!found) continue
+    const body = found[1].trim()
+    if (!body) return true
+    // The first letter after the mark: the prefix is narrow characters only (spaces and the mark), so a string index is a column.
+    const column = rows[row].indexOf(body[0], rows[row].search(/[❯›]/u) + 1)
+    return column >= 0 && dim(row, column)
+  }
+  return null
+}
+
 /** A kept command that Enter is about to run: which kind, and the name as it was written. */
 export interface Caught {
   kept: Kept
@@ -89,7 +119,8 @@ export interface Caught {
 export function caughtOnEnter(runner: string, rows: readonly string[], typed: string | null): Caught | null {
   if (!hasGuard(runner)) return null
   const screen = readScreen(rows)
-  for (const line of [screen.listed, screen.prompt, typed]) {
+  // The name the person typed first, so that the note names it ("/quit"); then what the open list would run for the start of one.
+  for (const line of [screen.prompt, typed, screen.listed]) {
     const command = commandIn(line ?? '')
     const kept = keptBy(runner, command)
     if (kept && command) return { kept, command }
@@ -103,6 +134,12 @@ export function noteFor(caught: Caught): { title: string; body: string } {
   return caught.kept === 'exit'
     ? { title, body: 'Togle keeps this screen on the task. Hand back closes the screen, and the task goes on.' }
     : { title, body: 'It would put another conversation under this task. To go on with another one, pick it in the list and press Continue here.' }
+}
+
+/** What the person is told when the Left arrow is kept off an empty prompt. */
+export const LEFT_NOTE: { title: string; body: string } = {
+  title: '← is not used here',
+  body: "At an empty prompt it would take the screen to the agent's list of every session on the computer. Togle keeps this screen on the task. Hand back closes the screen, and the task goes on."
 }
 
 /**

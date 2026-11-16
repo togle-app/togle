@@ -91,6 +91,25 @@ test('the start of a command is caught when Enter would run the item the list hi
   assert.equal(T.caughtOnEnter('hermes', hermesPrompt('/ex'), null), null)
 })
 
+test('a highlighted row that names its other names in brackets is read as the command it is', () => {
+  // As Claude Code 2.1.325 draws its list for /qu, /q and /contin: the first name, then the others in brackets, then what it does.
+  const listed = (typed, row) => [rule, `  ❯ ${row}`, '    /supabase:supabase                           (supabase) Use when doing ANY task', rule, `❯ ${typed}`, rule]
+  const exit = '/exit (quit)                                 Detach from this background session (it keeps running)'
+  const resume = '/resume (continue)                           Resume a previous conversation'
+  assert.deepEqual(T.readScreen(listed('/qu', exit)), { prompt: '/qu', listed: '/exit' })
+  assert.deepEqual(T.caughtOnEnter('claude', listed('/qu', exit), null), { kept: 'exit', command: 'exit' })
+  assert.deepEqual(T.caughtOnEnter('claude', listed('/q', exit), null), { kept: 'exit', command: 'exit' })
+  assert.deepEqual(T.caughtOnEnter('claude', listed('/contin', resume), null), { kept: 'resume', command: 'resume' })
+  // Typed whole, the note names what was typed, though the list shows the first name.
+  assert.deepEqual(T.caughtOnEnter('claude', listed('/quit', exit), null), { kept: 'exit', command: 'quit' })
+  assert.deepEqual(T.caughtOnEnter('claude', listed('/continue', resume), null), { kept: 'resume', command: 'continue' })
+  assert.equal(T.caughtOnEnter('claude', listed('/con', '/config                                      Open settings'), null), null, 'the highlight is /config')
+  // A hint of what a command takes, between its name and its description.
+  assert.deepEqual(T.readScreen(listed('/re', '/rename [name]                               Rename the conversation')), { prompt: '/re', listed: '/rename' })
+  assert.deepEqual(T.readScreen(listed('/mo', '/model <model>                               Set the AI model')), { prompt: '/mo', listed: '/model' })
+  assert.equal(T.caughtOnEnter('claude', listed('/re', '/rename [name]                               Rename the conversation'), null), null)
+})
+
 test('other commands, and names that only start like a kept one, go through', () => {
   for (const line of ['/context', '/model haiku', '/compact', '/exit-codes', '/resume-notes now', '/exiting', 'exit', 'please /exit', '/exit?', '//exit', '/', '']) {
     assert.equal(T.caughtOnEnter('claude', claudeListOpen(line, line || '/context'), line), null, `claude: ${JSON.stringify(line)}`)
@@ -154,4 +173,48 @@ test('what the person is told names the command, and says what to do instead', (
   assert.deepEqual(T.noteFor({ kept: 'exit', command: 'quit' }).title, '/quit is not run here')
   assert.match(T.noteFor({ kept: 'resume', command: 'resume' }).body, /another conversation under this task.*Continue here/)
   assert.equal(T.CLEAR_LINE, '\x05\x15')
+})
+
+// ---- The Left arrow ----
+// Claude Code and Codex take it, at an empty prompt, to their list of every session on the computer. An empty prompt shows its placeholder
+// dim; typed text is not dim. `dimFrom(row, column)` is how a test says which cells the screen drew dim.
+const dimOn = (row, from) => (r, column) => r === row && column >= from
+
+test('the Left arrow is a plain Left arrow in either cursor mode, and only for the agents whose screens it takes out of the task', () => {
+  assert.equal(T.isLeftArrow('\x1b[D'), true)
+  assert.equal(T.isLeftArrow('\x1bOD'), true, 'the terminal sends this when the program asks for application cursor keys')
+  for (const other of ['\x1b[C', '\x1b[1;5D', '\x1b[1;3D', 'D', '', '\x1b', '\x1b[D\x1b[D']) assert.equal(T.isLeftArrow(other), false, JSON.stringify(other))
+  assert.equal(T.leftLeaves('claude'), true)
+  assert.equal(T.leftLeaves('codex'), true)
+  assert.equal(T.leftLeaves('hermes'), false, 'Hermes has no such key')
+  assert.equal(T.leftLeaves('aider'), false)
+  assert.equal(T.leftLeaves('constructor'), false)
+})
+
+test('a prompt is empty when it shows nothing, or only its placeholder, which is drawn dim; typed text is not', () => {
+  const promptAt = (rows) => rows.findLastIndex((row) => /^\s{0,3}[❯›]/.test(row))
+  // Claude Code: its placeholder is a suggestion.
+  assert.equal(T.promptIsEmpty(claudeIdle, dimOn(promptAt(claudeIdle), 2)), true)
+  const typed = [...claudeIdle.slice(0, 6), rule, '❯ ab', rule, '  ⏵⏵ bypass permissions on']
+  assert.equal(T.promptIsEmpty(typed, dimOn(6, 99)), false, 'text that was typed: the cells are not dim')
+  assert.equal(T.promptIsEmpty([...claudeIdle.slice(0, 6), '❯', rule], () => false), true, 'a prompt row with nothing after the mark')
+  assert.equal(T.promptIsEmpty([...claudeIdle.slice(0, 6), '❯   ', rule], () => false), true)
+  // A command typed in it is not empty, with its list open or not.
+  assert.equal(T.promptIsEmpty(claudeListOpen('/ex'), () => false), false)
+  // Codex: the same, with its own mark.
+  const codexEmpty = ['› Say only: ok', '', '• ok', '', '› Ask Codex to do anything', '', '  GPT-6.1-Sol max · C:\\work\\site', '  ← for agents · ? for shortcuts']
+  assert.equal(T.promptIsEmpty(codexEmpty, dimOn(4, 2)), true)
+  assert.equal(T.promptIsEmpty(codexEmpty, () => false), false, 'the same row drawn plain would be text')
+  // No prompt on the screen (a picker, a list of sessions): not told.
+  assert.equal(T.promptIsEmpty(['Resume a previous session', '  Filter:  Cwd  All', '  enter resume   esc exit'], () => true), null)
+  assert.equal(T.promptIsEmpty([], () => true), null)
+  // Earlier messages start with the mark too: the bottom-most row is the prompt.
+  assert.equal(T.promptIsEmpty(['❯ Say only: ok', '● ok', rule, '❯', rule], () => false), true)
+  assert.equal(T.promptIsEmpty(['❯', '● ok', rule, '❯ draft', rule], () => false), false)
+})
+
+test('what the person is told about the Left arrow says where it would have gone, and what to do instead', () => {
+  assert.equal(T.LEFT_NOTE.title, '← is not used here')
+  assert.match(T.LEFT_NOTE.body, /list of every session/)
+  assert.match(T.LEFT_NOTE.body, /Hand back closes the screen, and the task goes on\.$/)
 })

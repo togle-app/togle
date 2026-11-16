@@ -399,6 +399,39 @@ async function checkTasks(T, agent) {
     await enter()
     assert.deepEqual(await sentSince(from), ['\r'])
     assert.equal(await ui.evaluate("!!document.querySelector('.terminal-note')"), false)
+    // The Left arrow at an empty prompt takes Claude Code's screen to its list of every session, as /exit does: not sent. The empty prompt
+    // shows its placeholder, drawn dim. With text in the prompt the arrow only moves the cursor, and goes through.
+    const left = async () => { await ui.evaluate("document.querySelector('.terminal-view .xterm-helper-textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, which: 37, bubbles: true, cancelable: true }))"); await new Promise(resolve => setTimeout(resolve, 300)) }
+    const placeholder = async () => {
+      const rule = '─'.repeat(60)
+      const data = `\x1b[2J\x1b[H${rule}\r\n❯ \x1b[2mTry "create a util logging.py that..."\x1b[22m\r\n${rule}\r\n  ⏵⏵ bypass permissions on · ← for agents\r\n`
+      await ui.evaluate("window.togleUITest.emit('onTerminalData', " + JSON.stringify({ key, at, data }) + ")")
+      at += data.length + 10
+      await ui.paint()
+      await new Promise(resolve => setTimeout(resolve, 250))
+    }
+    await placeholder()
+    from = await sentCount()
+    await left()
+    assert.equal(await ui.evaluate("document.querySelector('.terminal-note b')?.textContent"), '← is not used here')
+    assert.ok((await note()).includes("list of every session"), 'the note says where it would have gone')
+    assert.deepEqual(await sentSince(from), [], 'nothing was sent')
+    await putAway()
+    await left()
+    await left()
+    assert.deepEqual(await sentSince(from), [], 'pressed again, still nothing')
+    await putAway()
+    await draw('ab', null)
+    from = await sentCount()
+    await left()
+    assert.deepEqual(await sentSince(from), ['\x1b[D'], 'with text in the prompt the arrow goes through, to move the cursor')
+    assert.equal(await ui.evaluate("!!document.querySelector('.terminal-note')"), false)
+    // Another key is not the Left arrow.
+    await placeholder()
+    from = await sentCount()
+    await ui.evaluate("document.querySelector('.terminal-view .xterm-helper-textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, which: 39, bubbles: true, cancelable: true }))")
+    await new Promise(resolve => setTimeout(resolve, 300))
+    assert.deepEqual(await sentSince(from), ['\x1b[C'])
   }
   // Stop on a task that is the agent's own screen: the same button as on any task, and the screen stays.
   await ui.click('.task-actions button', 'Stop')
@@ -421,6 +454,19 @@ async function checkTasks(T, agent) {
   await ui.click('.task-panel .task-banner button', 'Open the terminal')
   await ui.wait("!!document.querySelector('.task-terminal')")
   assert.deepEqual((await ui.calls('openRunnerTask')).map(call => call.args).at(-1), ['hermes:w2'], 'the screen was closed: it is opened')
+  // Hermes has no key that leaves its screen: the Left arrow at an empty prompt goes through there, but its /exit is kept off like the others.
+  {
+    const key = 'hermes:w2'
+    const data = '\x1b[2J\x1b[H  ❯ Try "write a test for…"\r\n'
+    await ui.evaluate("window.togleUITest.emit('onTerminalData', " + JSON.stringify({ key, at: 100, data }) + ")")
+    await ui.paint()
+    await new Promise(resolve => setTimeout(resolve, 250))
+    const before = (await ui.calls('terminalWrite')).length
+    await ui.evaluate("document.querySelector('.terminal-view .xterm-helper-textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, which: 37, bubbles: true, cancelable: true }))")
+    await new Promise(resolve => setTimeout(resolve, 300))
+    assert.deepEqual((await ui.calls('terminalWrite')).map(call => call.args).slice(before).filter(args => args[0] === key).map(args => args[1]), ['\x1b[D'])
+    assert.equal(await ui.evaluate("!!document.querySelector('.terminal-note')"), false)
+  }
   assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Terminal')
   await ui.evaluate("window.togleUITest.emit('onShowTask', 'hermes:w1')")
   await ui.wait("document.querySelector('.task-title h2')?.firstChild?.textContent==='Waits on its screen' && !!document.querySelector('.task-terminal')")
