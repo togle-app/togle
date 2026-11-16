@@ -164,6 +164,12 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
   private stopped = false
   private over = false
   private holdWorkingUntil = 0
+  /** Put to rest after a quiet day (see `rest`): its program is gone, and it is still Done, not stopped. */
+  private rested = false
+  /** When it was last seen at work, waiting, or open on a screen here; 0 until then (the session's own file says more). */
+  lastActive = 0
+  /** When resting it was last tried, so that one that cannot be put to rest is not tried at every look. */
+  restTried = 0
   closed: string | undefined
   waitingFor: string | undefined
 
@@ -222,7 +228,12 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
       this.emit({ type: 'cleared' })
     }
     const alive = typeof row.pid === 'number'
-    if (alive) this.stopped = false
+    if (alive) {
+      this.stopped = false
+      // It is running again (someone opened it): it is no longer at rest.
+      this.rested = false
+      if (row.status === 'busy' || row.status === 'waiting') this.lastActive = Date.now()
+    }
     const waiting = alive && row.status === 'waiting'
     // A request that waits goes once the program says it waits no more, after it did: it was answered on the screen.
     if (this.pending.length) {
@@ -233,7 +244,8 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     // task says what it waits for, and it is answered on its screen.
     this.waitingFor = waiting && !this.pending.length ? row.waitingFor || 'something' : undefined
     if (row.status === 'busy') this.holdWorkingUntil = 0
-    const next = stateOfJob(row, this.stopped)
+    // A task at rest has no program, as one the person stopped has not: but it is Done, and waits for nothing.
+    const next = this.rested && !alive ? 'idle' : stateOfJob(row, this.stopped)
     if (next === 'idle' && Date.now() < this.holdWorkingUntil) return
     // A turn that ended is told with what Claude Code said last, before the task is done: the notice shows those words.
     if (next === 'idle' && (this.last === 'working' || this.last === 'waiting')) {
@@ -264,7 +276,35 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
   /** The task was started with words: it works from now, before the list shows it. */
   began(): void {
     this.holdWorkingUntil = Date.now() + BEGIN_MS
+    this.lastActive = Date.now()
     this.set('working')
+  }
+
+  /**
+   * Whether it may be put to rest: its program runs and has nothing to do, no screen of Togle's is open on it, and it waits for
+   * nothing. Whether it has been quiet long enough, and whether the person has a screen of their own on it, is for the backend.
+   */
+  get restable(): boolean {
+    return !this.over && this.pid !== null && this.state === 'idle' && !this.screenTask && !this.pending.length && !this.waitingFor
+  }
+
+  /** The time it started, when its row says (in milliseconds): a session that never said a word is not quiet from before it began. */
+  get startedAt(): number {
+    return typeof this.row?.startedAt === 'number' ? this.row.startedAt : 0
+  }
+
+  /**
+   * Ends its program because it has done nothing for a long time: they pile up, and each one keeps a program and its memory. The
+   * conversation is kept, and the task stays in the list as Done: opening it brings the same session back. False when Claude Code
+   * did not end it.
+   */
+  async rest(): Promise<boolean> {
+    if (!this.restable) return false
+    const out = await this.context.run(['stop', this.job], this.folder)
+    if (!out.ok) return false
+    this.rested = true
+    this.context.look()
+    return true
   }
 
   /** The row is gone (removed with `claude rm`): the task is over. */
@@ -287,6 +327,7 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     const { request, rule } = requestOf(id, event, this.folder)
     gone.addEventListener('abort', () => this.dropRequest(id, 'cancelled'), { once: true })
     const asked = this.ask(request)
+    this.lastActive = Date.now()
     // Its own wait for the program to say it waits, from the start: what was seen of the one before does not count.
     this.sawWaiting = false
     // A turn that is asked about is a turn at work: its end is told, however quickly the list sees it.
@@ -317,6 +358,7 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
       throw new Error(`${this.closed} The task goes on: ${this.line} opens it in your own terminal.`)
     }
     this.closed = undefined
+    this.lastActive = Date.now()
     const task: AttachScreen = new AttachScreen(
       this.id ?? this.job,
       this.title,
@@ -335,6 +377,8 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     const task = this.screenTask
     if (!task) return
     this.screenTask = null
+    // The quiet starts when its screen closes.
+    this.lastActive = Date.now()
     this.emit({ type: 'screen', shown: false })
     await task.close()
   }
@@ -343,6 +387,7 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
   private screenEnded(task: AttachScreen): void {
     if (this.screenTask !== task) return
     this.screenTask = null
+    this.lastActive = Date.now()
     const said = cleanWords(task.read().text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
     if (said.some((line) => NOTICED_ELSEWHERE.test(line))) this.closed = 'It is open in another window.'
     // A screen that could not open prints a line or two and ends ("Settings file not found"); one the person closed had

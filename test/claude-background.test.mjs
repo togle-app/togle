@@ -545,6 +545,103 @@ test('Stop ends the session and closes its screen; opening it brings the same se
   }
 })
 
+test('a task that has done nothing for a day is put to rest: its program ends, it stays Done and waits for nothing, and opening it brings the same session back', { timeout: 60_000 }, async () => {
+  // A day is 600 milliseconds here, and the session's file says it was written long ago.
+  const { backend, home } = claude({ backend: { restMs: 600, written: async () => 1, every: { busy: 100, idle: 100 } } })
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Rest' })
+    const id = task.id
+    const sessionId = job(home, task.screen.job).sessionId
+    const pid = job(home, task.screen.job).pid
+    await sleep(1500)
+    assert.ok(alive(pid), 'a session with a screen of Togle open on it is left alone')
+    await task.screen.hide()
+    await until(() => !alive(pid), 'the program to end once its screen was closed and a day had passed')
+    // The list says it has no program and was stopped: for a task at rest that is still Done, not a task that waits for the person.
+    await until(() => job(home, task.screen.job).pid === undefined, 'the session to say it has no program')
+    await sleep(600)
+    assert.equal(task.state, 'idle', 'at rest, it is Done')
+    assert.equal(T.needsYou({ state: task.state, mine: true, terminal: !!task.terminal }), false, 'and it waits for nothing')
+    assert.equal(task.pending.length, 0)
+    assert.equal((await backend.list()).find((row) => row.id === id)?.state, 'idle', 'the list says Done too')
+    // Opening it, from either view, brings the same session back.
+    const again = await backend.resume(id, { folder: task.folder, job: task.screen.job })
+    assert.equal(again, task, 'the same task')
+    await until(() => alive(job(home, task.screen.job).pid), 'the session to come back')
+    assert.equal(job(home, task.screen.job).sessionId, sessionId, 'the same session and conversation')
+    assert.equal(task.screen.open, true)
+    await sleep(1200)
+    assert.ok(alive(job(home, task.screen.job).pid), 'not put to rest again while its screen is open')
+    // A reply from the Web view brings a task at rest back too, and the words reach it.
+    await task.screen.hide()
+    await until(() => !alive(job(home, task.screen.job).pid), 'it to rest again')
+    await task.send('hello again')
+    await until(() => alive(job(home, task.screen.job).pid), 'the session to come back for the reply')
+    assert.equal(job(home, task.screen.job).sessionId, sessionId, 'the same session again')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a task that waits, was written lately, or that the person has open in their own terminal is not put to rest', { timeout: 90_000 }, async () => {
+  let lately = true
+  const { backend, home } = claude({ backend: { restMs: 400, written: async () => (lately ? Date.now() : 1), every: { busy: 100, idle: 100 } } })
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Quiet' })
+    const pid = () => job(home, task.screen.job).pid
+    type(task, 'run a')
+    await until(() => task.pending.length === 1, 'the request')
+    await task.screen.hide()
+    await sleep(1500)
+    assert.ok(alive(pid()), 'a task that waits for the person is left alone')
+    task.answer(task.pending[0].id, 'allow-once')
+    await until(() => task.pending.length === 0 && task.state === 'idle', 'the turn to end')
+    await sleep(1500)
+    assert.ok(alive(pid()), 'a session written lately is left alone, however long Togle has watched')
+    // The person has it open in a terminal of their own.
+    lately = false
+    const own = spawn(process.execPath, [fakeBg, 'attach', task.screen.job], { env: { ...process.env, FAKE_CLAUDE_HOME: home }, stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true })
+    try {
+      await sleep(2500)
+      assert.ok(alive(pid()), 'a session the person has open in their own terminal is left alone')
+    } finally {
+      own.kill()
+    }
+    await until(() => !alive(pid()), 'the program to end once nothing had it open', 20_000)
+    assert.equal(task.state === 'stopped', false, 'it is not a task the person stopped')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a restart of Togle does not start the quiet day again: a session quiet since before it is put to rest as soon as it is seen', { timeout: 60_000 }, async () => {
+  // A day is 3 seconds here. The first Togle starts a session and lets go of its screen; the next starts after the day has passed.
+  const first = claude({ backend: { restMs: 3_000, written: async () => 1, every: { busy: 100, idle: 100 } } })
+  let pid
+  try {
+    const task = await first.backend.start({ folder: scratch(), prompt: '', title: 'Before' })
+    pid = job(first.home, task.screen.job).pid
+    await task.screen.hide()
+  } finally {
+    // Closing Togle leaves the session running.
+    await first.backend.close()
+  }
+  assert.ok(alive(pid), 'it goes on without Togle')
+  await sleep(3_300)
+  const next = claude({ home: first.home, keep: first.keep, backend: { restMs: 3_000, written: async () => 1, every: { busy: 100, idle: 100 } } })
+  try {
+    const taken = []
+    await next.backend.restore((task) => taken.push(task))
+    assert.equal(taken.length, 1, 'the new Togle took the session up')
+    // Counted from when it was last seen to work (never, by this Togle), when it started and when its file was written: all over
+    // a day ago, so it rests at once, and not another day after this Togle started.
+    await until(() => !alive(pid), 'the session to be put to rest', 2_000)
+    await until(() => taken[0].state === 'idle', 'it to stay Done')
+  } finally {
+    await next.backend.close()
+  }
+})
+
 test('a request that waits when the task is stopped is not answered', { timeout: 40_000 }, async () => {
   const { backend } = claude()
   try {

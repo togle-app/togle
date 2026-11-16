@@ -355,6 +355,24 @@ export async function claudeLastSaid(id: string): Promise<string> {
   return ''
 }
 
+/**
+ * When a session's file was last written, in milliseconds: the last time anything was said in it, which a restart of Togle does not
+ * change. Undefined when it has no file (a session that has had no message yet).
+ */
+export async function claudeWrittenAt(id: string): Promise<number | undefined> {
+  let file = sessionFiles.get(id)
+  if (file && !(await fs.stat(file).then((stat) => stat.isFile(), () => false))) file = undefined
+  if (!file) {
+    for (const home of await claudeHomes()) {
+      file = (await filesIn(path.join(home, 'projects'), 1, /\.jsonl$/i)).find((candidate) => path.basename(candidate, '.jsonl') === id)
+      if (file) break
+    }
+    if (!file) return undefined
+    sessionFiles.set(id, file)
+  }
+  return (await fs.stat(file).catch(() => null))?.mtimeMs
+}
+
 // ---- A session's conversation, for the Web view ----
 
 // The most of a session's file read (its end, when it is longer), the longest words or command kept, and the most entries held.

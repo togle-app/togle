@@ -16,11 +16,12 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { TaskHistory, TaskInfo } from '@shared/runner'
-import { claudeConversation, claudeHasSession, claudeLastSaid, claudeSessions } from './claude-sessions'
+import { claudeConversation, claudeHasSession, claudeLastSaid, claudeSessions, claudeWrittenAt } from './claude-sessions'
 import { HookServer, type HookTarget } from './claude-hooks'
 import { ClaudeJob, claudeEnv, isJob, rowOf, stateOfJob, type AgentRow, type JobContext, type JobRow } from './claude-job'
 import { oneLine } from './claude-requests'
 import { list, rec } from './jsonrpc'
+import { listProcesses } from './process-tree'
 import { loadPty, type TerminalChunk } from './terminal'
 import type { Backend, Detected, ResumeOptions, StartOptions, TaskHandle } from './types'
 
@@ -51,6 +52,10 @@ export interface ClaudeOptions {
   said?: (session: string) => Promise<string>
   /** A session's conversation, for the Web view: read from its file when left out. */
   conversation?: (session: string, all: boolean) => Promise<TaskHistory | null>
+  /** How long a task that Togle runs may do nothing before it is put to rest, in milliseconds: a day when left out. */
+  restMs?: number
+  /** When a session was last written (its file's time): read from the file when left out. */
+  written?: (session: string) => Promise<number | undefined>
   /** How often the sessions are looked at, in milliseconds: while one works, waits or is shown, and otherwise. */
   every?: { busy: number; idle: number }
 }
@@ -102,6 +107,9 @@ interface Known {
 const KNOWN = 'jobs.json'
 /** The most words a task is started with: a Windows command line holds about 32,000 characters. */
 const MOST_WORDS = 20_000
+/** How long a task Togle runs may do nothing before it is put to rest, and how often one that was looked at is looked at again. */
+const REST_MS = 24 * 3600_000
+const LOOK_AGAIN_MS = 60_000
 const STILL_OPEN = 'It is still open in a terminal. End that Claude Code first: a conversation goes on in one program at a time.'
 const BACKGROUNDED = /backgrounded\s+·\s+([0-9a-f]{8})/
 const COPY = /started a copy as ([0-9a-f]{8})/
@@ -477,6 +485,7 @@ export class ClaudeBackend implements Backend {
     try {
       const rows = (await this.rows(0)).filter(isJob)
       for (const task of [...this.jobs.values()]) task.seen(rows.find((row) => row.id === task.job))
+      await this.rest()
       // A task of Togle's that came back to life (the person opened it in their own terminal) is Togle's again.
       for (const known of this.known.values()) {
         const row = rows.find((candidate) => candidate.id === known.job)
@@ -489,6 +498,39 @@ export class ClaudeBackend implements Backend {
       // The list could not be asked now: the next look tries again, and nothing is taken for gone.
     }
     if (this.jobs.size || this.known.size) this.ticking()
+  }
+
+  /**
+   * A task Togle runs that has done nothing for a day is put to rest: its program ends and its conversation stays, the task is still
+   * Done in the list, and opening it brings the same session back. Without this each task Togle ever started would keep a program
+   * and its memory. Only a task that is idle, with no screen of Togle's open on it and no `claude attach` of the person's own in a
+   * terminal: ending that would end their screen under them. Quiet is counted from the latest of what Togle saw the task do, when it
+   * started, and when its file was last written, which a restart of Togle does not change.
+   */
+  private async rest(): Promise<void> {
+    const limit = this.options.restMs ?? REST_MS
+    const again = Math.min(LOOK_AGAIN_MS, limit)
+    for (const task of [...this.jobs.values()]) {
+      const now = Date.now()
+      if (!task.restable || now - task.restTried < again) continue
+      const seen = Math.max(task.lastActive, task.startedAt)
+      if (now - seen < limit) continue
+      task.restTried = now
+      try {
+        const written = await (this.options.written ?? claudeWrittenAt)(task.session()).catch(() => undefined)
+        if (now - Math.max(seen, written ?? 0) < limit) continue
+        if (await this.attachedElsewhere(task.job)) continue
+        await task.rest()
+      } catch {
+        // Not put to rest this time: it is looked at again later, and nothing is lost.
+      }
+    }
+  }
+
+  /** Whether a terminal of the person's own has the session open (`claude attach <id>`). */
+  private async attachedElsewhere(job: string): Promise<boolean> {
+    const attach = new RegExp(`\\battach\\s+${job}\\b`)
+    return (await listProcesses().catch(() => [])).some((program) => attach.test(program.command))
   }
 
   // ---- What is kept between runs ----
