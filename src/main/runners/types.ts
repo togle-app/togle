@@ -1,6 +1,6 @@
 // What the rest of the app can do with a coding agent, whichever agent it is. One backend per agent implements it:
 // see its tasks, start one, answer what it waits for, stop it, and pick it up again later.
-import type { Decision, PendingRequest, RunnerKind, TaskEvent, TaskHistory, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
+import type { Decision, PendingRequest, RunnerKind, StepDetail, TaskEvent, TaskHistory, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
 
 export interface StartOptions {
   /** The folder the task works in. */
@@ -130,6 +130,12 @@ export interface Backend {
    * none Togle can read. Left out by an agent that tells none: the window then shows what happened while Togle watched.
    */
   history?(id: string, all: boolean): Promise<TaskHistory | null>
+  /**
+   * What a step of that conversation holds, to show when it is opened (what a command printed, the words of a thought), by the
+   * key the step came with (`LogEntry.more`). Null when nothing is kept under that key. Only a key the agent's own reading of
+   * the conversation gave is looked up: the key says nothing of where to read.
+   */
+  step?(id: string, more: string): Promise<StepDetail | null>
   /** Stops using the agent's program. Tasks that run in the background go on. */
   close(): Promise<void>
 }

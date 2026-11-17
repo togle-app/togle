@@ -18,9 +18,10 @@
 import { execFile, spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { AgentQuestion, TaskHistory, TaskInfo, TaskState } from '@shared/runner'
+import type { AgentQuestion, StepDetail, TaskHistory, TaskInfo, TaskState } from '@shared/runner'
 import { daemonPid, daemonState, startDaemon } from './codex-daemon'
 import { codexEntries, turnsOf } from './codex-history'
+import { detailOf } from './step-detail'
 import { WsRpcPeer } from './codex-link'
 import { type Id, JsonRpcPeer, NO_ANSWER, type PeerHandlers, RpcError, type RpcPeer, list, rec, text } from './jsonrpc'
 import { keepJson } from './keep'
@@ -53,6 +54,8 @@ const NATIVE: Record<string, { pkg: string; triple: string }> = {
 // The newest turns shown with every step (as many as the other agents' first look); and how many pages of a hundred older ones
 // "show earlier" brings.
 const RECENT_TURNS = 12
+// For how many threads what their steps hold is kept.
+const DETAILS_KEPT = 4
 const OLDER_PAGES = 3
 
 const run = (file: string, args: string[]): Promise<string> =>
@@ -641,6 +644,8 @@ export class CodexBackend implements Backend {
   private own: Promise<CodexServer> | null = null
   private lookedAt = 0
   private readonly known = new Map<string, Known>()
+  /** What the steps of the threads read last hold to be opened, by thread. */
+  private readonly details = new Map<string, Map<string, string>>()
   private loaded?: Promise<void>
   private adopted?: (task: TaskHandle) => void
   private timer: NodeJS.Timeout | null = null
@@ -783,7 +788,12 @@ export class CodexBackend implements Backend {
     } catch {
       return null
     }
-    let entries = codexEntries([...recent.turns].reverse())
+    // What the steps of these turns hold to be opened, kept until the thread is read again (and for a few threads only).
+    const details = new Map<string, string>()
+    let entries = codexEntries([...recent.turns].reverse(), details)
+    this.details.delete(id)
+    this.details.set(id, details)
+    while (this.details.size > DETAILS_KEPT) this.details.delete(this.details.keys().next().value as string)
     let next = recent.next
     if (all) {
       const older: unknown[][] = []
@@ -796,6 +806,11 @@ export class CodexBackend implements Backend {
       entries = [...codexEntries(older.flat()), ...entries]
     }
     return { entries, more: !!next }
+  }
+
+  /** What a step of that conversation holds (what a command printed, a thought's words), as the thread's last reading gave it. */
+  async step(id: string, more: string): Promise<StepDetail | null> {
+    return detailOf(this.details.get(id)?.get(more))
   }
 
   // ---- Starting and opening ----

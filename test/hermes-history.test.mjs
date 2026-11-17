@@ -68,6 +68,53 @@ test('rows are read in the order Hermes wrote them, not by their time, and a com
   assert.deepEqual(T.hermesEntries({ messages: 'nonsense' }), [])
 })
 
+test('what else Hermes did: code it ran, files read, searches, the web, its checklist, its thinking and its other tools', () => {
+  const details = new Map()
+  const entries = T.hermesEntries(session(
+    message(301, 'user', { content: 'Tidy the notes folder.' }),
+    message(302, 'assistant', { content: '', reasoning: 'First see what is there.', tool_calls: [call('d1', 'execute_code', { code: 'import os\nprint(os.listdir("notes"))' }), call('d2', 'read_file', { path: 'notes/a.md' }), call('d3', 'read_file', { path: 'notes/b.md', limit: 40 })] }),
+    message(303, 'tool', { tool_call_id: 'd1', content: JSON.stringify({ output: "['a.md', 'b.md']\n", exit_code: 0, duration_seconds: 1.25, status: 'ok' }) }),
+    message(304, 'tool', { tool_call_id: 'd2', content: JSON.stringify({ content: 'alpha', total_lines: 1 }) }),
+    message(305, 'tool', { tool_call_id: 'd3', content: JSON.stringify({ content: 'beta', total_lines: 1 }) }),
+    message(306, 'assistant', { content: 'Two notes. I will make a list.', reasoning: null, tool_calls: JSON.stringify([call('d4', 'todo_list', { todos: [{ id: 'a', content: 'Merge the notes', status: 'in_progress' }] }), call('d5', 'search_files', { pattern: 'TODO', path: 'notes' }), call('d6', 'web_search', { query: 'markdown front matter', limit: 5 }), call('d7', 'web_extract', { urls: ['https://example.com/front-matter'] })]) }),
+    message(307, 'tool', { tool_call_id: 'd4', content: JSON.stringify({ revision: 1, summary: {}, todos: [{ id: 'a', content: 'Merge the notes', status: 'in_progress' }, { id: 'b', content: 'Delete the old ones', status: 'pending' }, { id: 'c', content: 'Called off', status: 'cancelled' }] }) }),
+    message(308, 'tool', { tool_call_id: 'd5', content: JSON.stringify({ total_count: 0 }), timestamp: 1800000309.5 }),
+    message(309, 'assistant', { content: '', reasoning: 'Now merge them.', tool_calls: [call('d8', 'terminal', { command: 'type notes\\a.md notes\\b.md > notes\\all.md' }), call('d9', 'vision_analyze', { image_url: 'x', question: 'y' }), call('d10', 'todo_list', { merge: true, todos: [{ id: 'a', content: 'Merge the notes', status: 'completed' }] })] }),
+    message(310, 'tool', { tool_call_id: 'd8', content: 'The system cannot find the file.' , timestamp: 1800000300 }),
+    message(311, 'tool', { tool_call_id: 'd10', content: JSON.stringify({ todos: [{ id: 'a', content: 'Merge the notes', status: 'completed' }, { id: 'b', content: 'Delete the old ones', status: 'pending' }] }) }),
+    message(312, 'assistant', { content: 'Merged into notes/all.md.', reasoning: '   ' })
+  ), details)
+  assert.deepEqual(entries.map((e) => [e.kind, e.step ?? null, e.text, e.status ?? null, e.took ?? null]), [
+    ['you', null, 'Tidy the notes folder.', null, null],
+    ['step', 'think', '', null, null],
+    ['command', null, 'import os\nprint(os.listdir("notes"))', 'finished', 1250],
+    ['step', 'read', 'notes/a.md', null, null],
+    ['agent', null, 'Two notes. I will make a list.', null, null],
+    ['step', 'plan', '0 of 2 done', null, null],
+    ['step', 'search', 'TODO', null, 3500],
+    ['step', 'web', 'markdown front matter', null, null],
+    ['step', 'web', 'https://example.com/front-matter', null, null],
+    ['step', 'think', '', null, null],
+    ['command', null, 'type notes\\a.md notes\\b.md > notes\\all.md', 'finished', null],
+    ['step', 'tool', 'vision_analyze', null, null],
+    ['step', 'plan', '1 of 2 done', null, null],
+    ['agent', null, 'Merged into notes/all.md.', null, null]
+  ])
+  assert.deepEqual(entries[3].paths, ['notes/a.md', 'notes/b.md'])
+  assert.deepEqual(entries[5].plan, [{ text: 'Merge the notes', state: 'doing' }, { text: 'Delete the old ones', state: 'todo' }], 'the checklist as its result gives it whole, without what was called off')
+  assert.deepEqual(entries[12].plan, [{ text: 'Merge the notes', state: 'done' }, { text: 'Delete the old ones', state: 'todo' }])
+  assert.equal(entries[10].took, undefined, 'a result whose time is before its call tells no time')
+  assert.deepEqual([...details].map(([key, words]) => [key, words]), [
+    ['think:30200', 'First see what is there.'],
+    ['d1', "['a.md', 'b.md']\n"],
+    ['think:30900', 'Now merge them.'],
+    ['d8', 'The system cannot find the file.']
+  ], 'what each step holds: a thought, what code printed, and a result that is only words')
+  assert.deepEqual(entries.filter((e) => e.more).map((e) => e.more), ['think:30200', 'd1', 'think:30900', 'd8'])
+  assert.equal(new Set(entries.map((e) => e.id)).size, entries.length, 'each entry has an id of its own')
+  assert.equal(T.hermesEntries(session(message(1, 'assistant', { content: 'Hi.', reasoning: 'A thought.' }))).length, 1, 'with nowhere to keep its words, a thought is not told')
+})
+
 const hermes = (rows, backend = {}) => {
   const home = mkdtempSync(path.join(os.tmpdir(), 'togle-hermes-history-'))
   made.push(home)

@@ -86,17 +86,64 @@ test('Codex turns become a conversation: what was asked, what it said, commands 
     ['command', 'rm -rf build', 'declined'],
     ['command', 'npm run lint', 'failed'],
     ['files', 'Changed 2 files: C:\\work\\api\\orders.ts, C:\\work\\api\\orders.sql', null],
+    ['step', 'x', null],
     ['agent', 'Added the column.', null],
     ['command', 'sleep 9', 'running']
   ])
   assert.deepEqual(entries[4].paths, ['C:\\work\\api\\orders.ts', 'C:\\work\\api\\orders.sql'])
+  assert.equal(entries[5].step, 'web', 'a search of the web is a step; a thought with no words and no time is not told')
   assert.equal(entries[0].at, 1793852271500)
-  assert.equal(entries[6].at, 1793852300000, 'an item with no time of its own takes its turn')
+  assert.equal(entries[7].at, 1793852300000, 'an item with no time of its own takes its turn')
   assert.equal(new Set(entries.map((e) => e.id)).size, entries.length)
   assert.deepEqual(T.codexEntries(turns).map((e) => e.id), entries.map((e) => e.id), 'the same item is the same id each time it is read')
   assert.deepEqual(T.turnsOf({ data: [1, 2], nextCursor: 'x' }), { turns: [1, 2], next: 'x' })
   assert.deepEqual(T.turnsOf({ data: [], nextCursor: null }), { turns: [], next: null })
   assert.deepEqual(T.turnsOf(undefined), { turns: [], next: null })
+})
+
+test('what else Codex did: its thinking, the web, a connector\'s tools, pictures it looked at; how long things took; what a step holds', () => {
+  const turns = [{
+    id: 't1',
+    startedAt: 1793852271,
+    items: [
+      { id: 'u', type: 'userMessage', content: [{ type: 'text', text: 'Why does the build fail?' }], startedAtMs: 1793852271000 },
+      { id: 'r1', type: 'reasoning', summary: [], content: [], startedAtMs: 1793852271000, completedAtMs: 1793852271400 },
+      { id: 'c1', type: 'commandExecution', command: 'npm run build', status: 'completed', exitCode: 1, durationMs: 8123.4, aggregatedOutput: 'error TS2345\n', startedAtMs: 1793852272000 },
+      { id: 'c2', type: 'commandExecution', command: 'true', status: 'completed', exitCode: 0, durationMs: 12, aggregatedOutput: null },
+      { id: 'r2', type: 'reasoning', summary: [], content: [], startedAtMs: 1793852281000, completedAtMs: 1793852284000 },
+      { id: 'r3', type: 'reasoning', summary: ['The type of the plan is wrong.'], content: [{ type: 'text', text: 'It wants a number.' }], startedAtMs: 1793852284000, completedAtMs: 1793852286500 },
+      { id: 'r4', type: 'reasoning', summary: ['Then the test.'], content: [], startedAtMs: 1793852286500, completedAtMs: 1793852287500 },
+      { id: 'w1', type: 'webSearch', query: 'TS2345 number string', action: { type: 'search', query: 'TS2345 number string', queries: [] }, results: [], startedAtMs: 1793852288000, completedAtMs: 1793852289500 },
+      { id: 'w2', type: 'webSearch', query: '', action: { type: 'open_page', url: 'https://example.com/ts2345' }, results: [] },
+      { id: 'm1', type: 'mcpToolCall', server: 'github', tool: 'get_job_logs', status: 'completed', error: null, durationMs: 640, arguments: {}, result: {} },
+      { id: 'm2', type: 'mcpToolCall', server: 'github', tool: 'get_run', status: 'failed', error: { message: 'no' }, durationMs: 90 },
+      { id: 'i1', type: 'imageView', path: 'C:\\work\\shot-1.png' },
+      { id: 'i2', type: 'imageView', path: 'C:\\work\\shot-2.png' },
+      { id: 's1', type: 'sleep', durationMs: 5000 },
+      { id: 'x1', type: 'contextCompaction' },
+      { id: 'a', type: 'agentMessage', text: 'The plan needs a number.', phase: 'final_answer' }
+    ]
+  }]
+  const details = new Map()
+  const entries = T.codexEntries(turns, details)
+  assert.deepEqual(entries.map((e) => [e.kind, e.step ?? null, e.text, e.status ?? null, e.took ?? null, e.more ?? null]), [
+    ['you', null, 'Why does the build fail?', null, null, null],
+    ['command', null, 'npm run build', 'finished', 8123, 'c1'],
+    ['command', null, 'true', 'finished', 12, null],
+    ['step', 'think', '', null, 5500, 'r3'],
+    ['step', 'think', '', null, 1000, 'r4'],
+    ['step', 'web', 'TS2345 number string', null, 1500, null],
+    ['step', 'web', 'https://example.com/ts2345', null, null, null],
+    ['step', 'tool', 'github: get_job_logs', null, 640, null],
+    ['step', 'tool', 'github: get_run', 'failed', 90, null],
+    ['step', 'read', 'C:\\work\\shot-1.png', null, null, null],
+    ['agent', null, 'The plan needs a number.', null, null, null]
+  ])
+  assert.deepEqual(entries[9].paths, ['C:\\work\\shot-1.png', 'C:\\work\\shot-2.png'])
+  assert.deepEqual([...details], [['c1', 'error TS2345\n'], ['r3', 'The type of the plan is wrong.\n\nIt wants a number.'], ['r4', 'Then the test.']], 'what a command printed and the words of a thought, by the key of the step')
+  assert.equal(JSON.stringify(entries).includes('TS2345\\n'), false, 'none of it is in the entries')
+  assert.deepEqual(T.codexEntries(turns).map((e) => e.more ?? null).filter(Boolean), [], 'with nowhere to keep it, no step says it can be opened')
+  assert.deepEqual(T.codexEntries(turns, new Map()).map((e) => e.id), entries.map((e) => e.id), 'the same ids each time, thoughts in a row keeping the first')
 })
 
 test('a thread Togle runs gives back its conversation: the newest turns with their steps, older ones asked for', { timeout: 60_000 }, async () => {

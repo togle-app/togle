@@ -2,7 +2,7 @@
 // backends (codex.ts, claude.ts) know how to talk to their agent; this joins them: the tasks they keep on this computer,
 // the ones Togle runs (with what happened in each, so the window can show it), and the actions on a task by its key.
 import { promises as fs } from 'node:fs'
-import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Decision, type LogEntry, type RunnerKind, type RunnerStatus, type StartRequest, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
+import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Decision, type LogEntry, type RunnerKind, type RunnerStatus, type StartRequest, type StepDetail, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
 import { carriedFlags } from './claude-job'
 import { endTree, listProcesses } from './process-tree'
@@ -359,13 +359,27 @@ export class RunnerHub {
    * shows what happened while Togle watched). A task Togle runs is read by the session it is in now: a cleared one is another.
    */
   async history(key: string, all: boolean): Promise<TaskHistory | null> {
+    const kept = await this.recordOf(key)
+    return (kept && (await kept.backend.history?.(kept.id, all).catch(() => null))) ?? null
+  }
+
+  /**
+   * What a step of that conversation holds, for when the person opens it in the Web view: what a command printed, or the words
+   * of a thought, by the key the step came with. Asked of the agent that keeps the conversation, and given to the window only.
+   */
+  async step(key: string, more: string): Promise<StepDetail | null> {
+    const kept = await this.recordOf(key)
+    return (kept && (await kept.backend.step?.(kept.id, more).catch(() => null))) ?? null
+  }
+
+  /** Whose record a task's conversation is in, and under which id: the session a task Togle runs is in now. */
+  private async recordOf(key: string): Promise<{ backend: Backend; id: string } | null> {
     const owned = this.owned.get(key)
     const info = owned ? undefined : (await this.infos()).find((task) => keyOf(task.runner, task.id) === key)
     const runner = owned?.handle.runner ?? info?.runner
     const id = owned ? (owned.handle.screen?.session() || owned.handle.id) : info?.id
-    if (!runner || !id) return null
     const backend = this.options.backends.find((one) => one.runner === runner)
-    return (await backend?.history?.(id, all).catch(() => null)) ?? null
+    return backend && id ? { backend, id } : null
   }
 
   /** What the tasks Togle runs need now. Asks the agents nothing, so it is cheap enough to ask at every change. */

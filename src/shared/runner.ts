@@ -131,17 +131,51 @@ export interface RunnerStatus {
   removed?: boolean
 }
 
+/**
+ * What a `step` was, when it was neither a command nor a change of files: `read` files (in `paths`), `search` in the files,
+ * `web` a page or a search of the web, `helper` another agent it gave work to, `plan` its own checklist, `think` its thinking,
+ * `tool` any other tool, by its name.
+ */
+export type StepKind = 'read' | 'search' | 'web' | 'helper' | 'plan' | 'think' | 'tool'
+
+/** One thing on an agent's own checklist, as it stood. */
+export interface PlanItem {
+  text: string
+  state: 'done' | 'doing' | 'todo'
+}
+
 /** One line of what happened in a task, for the window to show. */
 export interface LogEntry {
   id: number
   at: number
-  /** `you` said it, `agent` answered, `command` ran, `files` changed, `asked` is a request that waits, `note` is anything else worth saying. */
-  kind: 'you' | 'agent' | 'command' | 'files' | 'asked' | 'note'
+  /**
+   * `you` said it, `agent` answered, `command` ran, `files` changed, `step` is anything else the agent did (see `step`), `asked`
+   * is a request that waits, `note` is anything else worth saying.
+   */
+  kind: 'you' | 'agent' | 'command' | 'files' | 'step' | 'asked' | 'note'
   text: string
-  /** A command's outcome. */
+  /** A command's outcome, or a step's where its agent's record tells one. */
   status?: 'running' | 'finished' | 'declined' | 'failed'
-  /** The files a `files` step changed. */
+  /** The files a `files` step changed, or a `read` step read. */
   paths?: string[]
+  /** What a `step` was. */
+  step?: StepKind
+  /** How long it took, in milliseconds, where the agent's record says so or its times tell. */
+  took?: number
+  /**
+   * There is more to it that is asked for when it is opened (what a command printed, the words of its thinking): the key to
+   * ask by. Left out when there is nothing to open.
+   */
+  more?: string
+  /** The checklist as it stood after a `plan` step. */
+  plan?: PlanItem[]
+}
+
+/** What opening a step shows: what a command printed, or the words of the agent's thinking. */
+export interface StepDetail {
+  text: string
+  /** Its start was left out: only its end is kept. */
+  cut: boolean
 }
 
 /** A request as the window shows it: with Togle's mark on a command that looks dangerous. */
@@ -202,15 +236,49 @@ export function changedFiles(log: readonly LogEntry[]): number {
  * Undefined while it has done nothing but talk.
  */
 export function stepsLine(log: readonly LogEntry[]): string | undefined {
+  const count = stepCounts(log)
+  if (!count.steps) return undefined
+  const plural = (many: number, one: string, more: string): string => `${many} ${many === 1 ? one : more}`
+  const parts = [
+    ...(count.files ? [`edited ${plural(count.files, 'file', 'files')}`] : []),
+    ...(count.ran ? [`ran ${plural(count.ran, 'command', 'commands')}`] : []),
+    ...(count.refused ? [`${count.refused} refused`] : []),
+    ...(count.read ? [`read ${plural(count.read, 'file', 'files')}`] : []),
+    ...(count.searches ? [`searched ${plural(count.searches, 'time', 'times')}`] : []),
+    ...(count.web ? [`looked on the web ${plural(count.web, 'time', 'times')}`] : []),
+    ...(count.helpers ? [`asked ${plural(count.helpers, 'helper', 'helpers')}`] : []),
+    ...(count.plans ? ['kept its checklist'] : []),
+    ...(count.tools ? [`used ${plural(count.tools, 'other tool', 'other tools')}`] : [])
+  ]
+  return `${plural(count.steps, 'step', 'steps')}: ${parts.join(', ')}`
+}
+
+/** Whether an entry is something the agent did: a command, a change of files, or another step. Its thinking is not: it did nothing yet. */
+export const isWork = (entry: LogEntry): boolean => entry.kind === 'command' || entry.kind === 'files' || (entry.kind === 'step' && entry.step !== 'think')
+
+/**
+ * What a stretch of a task's log holds, counted: the steps in all, the files changed and the commands run (the refused ones
+ * and the failed ones apart), and each other kind of step. Files read are counted once each.
+ */
+export function stepCounts(log: readonly LogEntry[]): { steps: number; files: number; ran: number; refused: number; failed: number; read: number; searches: number; web: number; helpers: number; plans: number; tools: number; thought: number } {
   const commands = log.filter((entry) => entry.kind === 'command')
-  const ran = commands.filter((entry) => entry.status !== 'declined').length
-  const refused = commands.length - ran
-  const files = changedFiles(log)
-  const steps = commands.length + log.filter((entry) => entry.kind === 'files').length
-  if (!steps) return undefined
-  const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`
-  const parts = [...(files ? [`edited ${plural(files, 'file', 'files')}`] : []), ...(ran ? [`ran ${plural(ran, 'command', 'commands')}`] : []), ...(refused ? [`${refused} refused`] : [])]
-  return `${plural(steps, 'step', 'steps')}: ${parts.join(', ')}`
+  const refused = commands.filter((entry) => entry.status === 'declined').length
+  const of = (step: StepKind): LogEntry[] => log.filter((entry) => entry.kind === 'step' && entry.step === step)
+  return {
+    steps: log.filter(isWork).length,
+    files: changedFiles(log),
+    ran: commands.length - refused,
+    refused,
+    failed: commands.filter((entry) => entry.status === 'failed').length,
+    read: new Set(of('read').flatMap((entry) => entry.paths ?? [entry.text])).size,
+    searches: of('search').length,
+    web: of('web').length,
+    helpers: of('helper').length,
+    plans: of('plan').length,
+    tools: of('tool').length,
+    // How long it thought in all, in milliseconds.
+    thought: of('think').reduce((sum, entry) => sum + (entry.took ?? 0), 0)
+  }
 }
 
 export interface TaskDetail {

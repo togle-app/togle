@@ -205,6 +205,8 @@ export interface TogleApi {
   runnerOffers(key: string): Promise<import('./runner').TaskOffers>
   /** A task's conversation as its agent keeps it (its last turns, or all with `all`), for the Web view; null when the agent keeps none to read. */
   runnerHistory(key: string, all?: boolean): Promise<import('./runner').TaskHistory | null>
+  /** What a step of that conversation holds, asked for when it is opened: what a command printed, or the words of a thought. Null when nothing is kept. */
+  runnerStep(key: string, more: string): Promise<import('./runner').StepDetail | null>
   /** The first press: the task starts nothing new. */
   stopRunnerTask(key: string): Promise<void>
   /** The second press: ends the commands a stopped task still has running. How many. */

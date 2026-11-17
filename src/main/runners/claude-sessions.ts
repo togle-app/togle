@@ -5,7 +5,7 @@
 import { createReadStream, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { LogEntry, TaskHistory } from '@shared/runner'
+import type { LogEntry, PlanItem, StepKind, TaskHistory } from '@shared/runner'
 import { lastTurns } from './history-turns'
 
 /** A session in the list: its id, its title (the one Claude Code or the person gave it, else what was asked first), where it worked, when it last changed. */
@@ -381,16 +381,45 @@ const WORDS_MOST = 20_000
 const COMMAND_MOST = 2_000
 const ENTRIES_MOST = 8_000
 const CONVERSATIONS_KEPT = 6
+// The most files one run of reads names (the next read starts a new run), and the longest name of anything else it did.
+const READS_MOST = 60
+const NAME_MOST = 300
+// The longest line read again for what a step holds (what a command printed, its thinking), and the most of that given back.
+const DETAIL_LINE_MOST = 8 * 1048576
+const DETAIL_MOST = 400_000
+// A thought with no words kept is told only when it took this long, in milliseconds.
+const THOUGHT_LEAST = 1_000
 const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
-const RUNS = new Set(['Bash', 'PowerShell'])
+// Monitor runs a command too, and watches what it prints.
+const RUNS = new Set(['Bash', 'PowerShell', 'Monitor'])
+const SEARCHES = new Set(['Grep', 'Glob'])
 // What Claude Code writes as the result of a command that was refused or interrupted.
 const REFUSED = /^(?:The user doesn't want|User rejected|The user rejected|Permission to use .{1,40} has been denied|\[Request interrupted)/i
+
+/** Where a line is in a session's file, in bytes. */
+interface Place {
+  offset: number
+  length: number
+}
+
+/** A tool that waits for its result: its entry when it has one, when it was called, and what it was. */
+interface Waiting {
+  entry?: LogEntry
+  at: number
+  tool: string
+  /** For something put on the checklist: its words. */
+  subject?: string
+}
 
 /** What is read of a session so far: its entries, and how far into its file. */
 export interface Conversation {
   entries: LogEntry[]
-  /** Commands that wait for their result, by the id Claude Code gave the call. */
-  tools: Map<string, LogEntry>
+  /** Tools that wait for their result, by the id Claude Code gave the call. */
+  tools: Map<string, Waiting>
+  /** Where what a step holds is in the file (what a command printed, its thinking), by the key the step is opened with. */
+  places: Map<string, Place>
+  /** Its checklist as it stands, by the number Claude Code gave each thing on it. */
+  tasks: Map<string, PlanItem>
   next: number
   /** Where in the file the next line starts. */
   offset: number
@@ -398,27 +427,172 @@ export interface Conversation {
   cut: boolean
 }
 
-export const newConversation = (): Conversation => ({ entries: [], tools: new Map(), next: 1, offset: 0, cut: false })
+export const newConversation = (): Conversation => ({ entries: [], tools: new Map(), places: new Map(), tasks: new Map(), next: 1, offset: 0, cut: false })
 
-function push(state: Conversation, kind: LogEntry['kind'], text: string, at: number, status?: LogEntry['status'], paths?: string[]): LogEntry {
-  const entry: LogEntry = { id: state.next++, at, kind, text, ...(status ? { status } : {}), ...(paths?.length ? { paths } : {}) }
+function push(state: Conversation, kind: LogEntry['kind'], text: string, at: number, more: Partial<LogEntry> = {}): LogEntry {
+  const entry: LogEntry = { id: state.next++, at, kind, text, ...more }
   state.entries.push(entry)
   if (state.entries.length > ENTRIES_MOST) {
-    const dropped = state.entries.splice(0, state.entries.length - ENTRIES_MOST)
-    for (const gone of dropped) for (const [call, waiting] of state.tools) if (waiting === gone) state.tools.delete(call)
+    const dropped = new Set(state.entries.splice(0, state.entries.length - ENTRIES_MOST))
+    for (const [call, waiting] of state.tools) if (waiting.entry && dropped.has(waiting.entry)) state.tools.delete(call)
+    for (const gone of dropped) if (gone.more) state.places.delete(gone.more)
     state.cut = true
   }
   return entry
 }
 
+const step = (state: Conversation, kind: StepKind, text: string, at: number, more: Partial<LogEntry> = {}): LogEntry =>
+  push(state, 'step', text.slice(0, NAME_MOST), at, { step: kind, ...more })
+
+const lastOf = (state: Conversation): LogEntry | undefined => state.entries[state.entries.length - 1]
+
+/** How long it was from a call to its result, when both have a time and they are in order. */
+const spanOf = (from: number, to: number): number | undefined => (from > 0 && to >= from ? to - from : undefined)
+
+/** A tool by the name a person reads: a connector's as "server: tool", a skill with its name, any other as Claude Code names it. */
+function toolName(name: string, input: Json): string {
+  const connector = /^mcp__(.+?)__(.+)$/.exec(name)
+  if (connector) return `${connector[1]}: ${connector[2]}`
+  if (name === 'Skill' && str(input.skill)) return `Skill: ${str(input.skill)}`
+  return name
+}
+
+/** What a command printed, as its result's line has it. */
+function printed(r: Json, block: Json, alone: boolean): string {
+  const result = r.toolUseResult
+  // The line's own account of the result, when the line is of this one result.
+  if (alone && isObject(result) && (typeof result.stdout === 'string' || typeof result.stderr === 'string')) {
+    return [str(result.stdout), str(result.stderr)].filter((part) => part.trim()).join('\n')
+  }
+  return textOf(block.content)
+}
+
+/** A file read. Several one after another are one step that names them all. */
+function read(state: Conversation, file: string, at: number): void {
+  const last = lastOf(state)
+  if (last?.kind === 'step' && last.step === 'read' && last.paths && last.paths.length < READS_MOST) {
+    if (!last.paths.includes(file)) last.paths.push(file)
+  } else step(state, 'read', file, at, { paths: [file] })
+}
+
+/** The checklist as it stands now, as a step. Changes one after another are one step that holds the last of them. */
+function planned(state: Conversation, at: number): void {
+  const plan = [...state.tasks.values()].map((item) => ({ ...item }))
+  if (!plan.length) return
+  const text = `${plan.filter((item) => item.state === 'done').length} of ${plan.length} done`
+  const last = lastOf(state)
+  if (last?.kind === 'step' && last.step === 'plan') {
+    last.plan = plan
+    last.text = text
+  } else step(state, 'plan', text, at, { plan })
+}
+
+/**
+ * A thought. Its time is on its line; its words are kept by Claude Code only now and then, and are read again from the file
+ * when the step is opened. Thoughts one after another are one step, with their times added up; a short one with no words is
+ * not told at all.
+ */
+function thought(state: Conversation, r: Json, block: Json, position: number, first: boolean, at: number, place: Place | undefined): void {
+  const took = first && typeof r.thinkingDurationMs === 'number' && r.thinkingDurationMs > 0 ? Math.round(r.thinkingDurationMs) : 0
+  const key = str(block.thinking).trim() && place && str(r.uuid) ? `think:${str(r.uuid)}:${position}` : undefined
+  const last = lastOf(state)
+  if (last?.kind === 'step' && last.step === 'think' && !(key && last.more)) {
+    if (took) last.took = (last.took ?? 0) + took
+    if (key && place) {
+      last.more = key
+      state.places.set(key, place)
+    }
+    return
+  }
+  if (!key && took < THOUGHT_LEAST) return
+  step(state, 'think', '', at, { ...(took ? { took } : {}), ...(key ? { more: key } : {}) })
+  if (key && place) state.places.set(key, place)
+}
+
+/** A tool Claude Code called: the entry it becomes, and what waits for its result. */
+function called(state: Conversation, block: Json, at: number): void {
+  const name = str(block.name)
+  const input = isObject(block.input) ? block.input : {}
+  const id = str(block.id)
+  const wait = (entry?: LogEntry, subject?: string): void => {
+    if (id) state.tools.set(id, { at, tool: name, ...(entry ? { entry } : {}), ...(subject ? { subject } : {}) })
+  }
+  if (RUNS.has(name)) {
+    if (str(input.command)) wait(push(state, 'command', str(input.command).slice(0, COMMAND_MOST), at, { status: 'running' }))
+  } else if (EDITS.has(name)) {
+    const file = str(input.file_path) || str(input.notebook_path)
+    if (file) push(state, 'files', `Changed 1 file: ${file}`, at, { paths: [file] })
+  } else if (name === 'Read') {
+    if (str(input.file_path)) read(state, str(input.file_path), at)
+  } else if (SEARCHES.has(name)) {
+    if (str(input.pattern)) wait(step(state, 'search', str(input.pattern), at))
+  } else if (name === 'WebFetch' || name === 'WebSearch') {
+    const what = str(input.url) || str(input.query)
+    if (what) wait(step(state, 'web', what, at))
+  } else if (name === 'Agent') {
+    wait(step(state, 'helper', str(input.description) || 'A helper', at, { status: 'running' }))
+  } else if (name === 'TaskCreate') {
+    // Its number comes with the result: it is on the checklist from then.
+    if (str(input.subject)) wait(undefined, str(input.subject).slice(0, NAME_MOST))
+  } else if (name === 'TaskUpdate') {
+    const item = state.tasks.get(String(input.taskId))
+    const to = str(input.status)
+    if (to === 'deleted') state.tasks.delete(String(input.taskId))
+    else if (item) {
+      if (to === 'completed') item.state = 'done'
+      else if (to === 'in_progress') item.state = 'doing'
+      else if (to === 'pending') item.state = 'todo'
+      if (str(input.subject)) item.text = str(input.subject).slice(0, NAME_MOST)
+    }
+    if (item || to === 'deleted') planned(state, at)
+  } else if (name) wait(step(state, 'tool', toolName(name, input), at))
+}
+
+/** A tool's result: how its step ended, how long it took, and where what it printed is. */
+function ended(state: Conversation, call: string, waiting: Waiting, r: Json, block: Json, alone: boolean, at: number, place: Place | undefined): void {
+  const failed = block.is_error === true
+  const took = spanOf(waiting.at, at)
+  const result = alone && isObject(r.toolUseResult) ? r.toolUseResult : {}
+  if (waiting.tool === 'TaskCreate') {
+    if (failed || !waiting.subject) return
+    const task = isObject(result.task) ? result.task : {}
+    const number = typeof task.id === 'string' || typeof task.id === 'number' ? String(task.id) : /#(\d+)/.exec(textOf(block.content))?.[1]
+    if (!number) return
+    state.tasks.set(number, { text: waiting.subject, state: 'todo' })
+    planned(state, at)
+    return
+  }
+  const entry = waiting.entry
+  if (!entry) return
+  if (entry.kind === 'command') {
+    entry.status = failed ? (REFUSED.test(textOf(block.content).trim()) ? 'declined' : 'failed') : 'finished'
+    if (took !== undefined) entry.took = took
+    if (place && printed(r, block, alone).trim()) {
+      entry.more = call
+      state.places.set(call, place)
+    }
+  } else if (entry.step === 'helper') {
+    entry.status = failed ? 'failed' : 'finished'
+    // A helper sent off to work on its own answers at once: how long it then works is not told here.
+    if (took !== undefined && result.isAsync !== true) entry.took = took
+  } else {
+    if (failed) entry.status = 'failed'
+    const told = typeof result.durationMs === 'number' ? result.durationMs : typeof result.durationSeconds === 'number' ? result.durationSeconds * 1000 : took
+    if (told !== undefined && told >= 0) entry.took = Math.round(told)
+  }
+}
+
 /**
  * Reads lines of a session's file into its conversation: what they asked, what Claude Code answered, the commands it ran (with
- * how each ended) and the files it changed. What a helper agent did, its thinking and its other tools are left out.
+ * how each ended and how long it took), the files it changed, and what else it did: the files it read, its searches, what it
+ * looked up on the web, the helpers it gave work to, its checklist, its thinking, and its other tools by name. `places` says
+ * where each line is in the file, for what is read again when a step is opened. What a helper agent did itself is left out.
  */
-export function feedConversation(state: Conversation, lines: string[]): void {
-  for (const line of lines) {
+export function feedConversation(state: Conversation, lines: string[], places?: Place[]): void {
+  lines.forEach((line, index) => {
     const r = parse(line)
-    if (!r || r.isSidechain || !isObject(r.message)) continue
+    if (!r || r.isSidechain || !isObject(r.message)) return
+    const place = places?.[index]
     const stamp = Date.parse(str(r.timestamp))
     const at = Number.isFinite(stamp) ? stamp : 0
     const content = r.message.content
@@ -426,34 +600,27 @@ export function feedConversation(state: Conversation, lines: string[]): void {
     if (r.type === 'user') {
       if (said(r)) {
         push(state, 'you', theirWords(textOf(content)).slice(0, WORDS_MOST), at)
-        continue
+        return
       }
-      for (const block of blocks) {
-        if (block.type !== 'tool_result') continue
-        const entry = state.tools.get(str(block.tool_use_id))
-        if (!entry) continue
-        state.tools.delete(str(block.tool_use_id))
-        entry.status = block.is_error === true ? (REFUSED.test(textOf(block.content).trim()) ? 'declined' : 'failed') : 'finished'
+      const results = blocks.filter((block) => block.type === 'tool_result')
+      for (const block of results) {
+        const call = str(block.tool_use_id)
+        const waiting = state.tools.get(call)
+        if (!waiting) continue
+        state.tools.delete(call)
+        ended(state, call, waiting, r, block, results.length === 1, at, place)
       }
     } else if (r.type === 'assistant') {
-      for (const block of blocks) {
+      let thoughts = 0
+      blocks.forEach((block, position) => {
         if (block.type === 'text') {
           const words = str(block.text).trim()
           if (words && !NOT_SAID.test(words)) push(state, 'agent', words.slice(0, WORDS_MOST), at)
-        } else if (block.type === 'tool_use') {
-          const name = str(block.name)
-          const input = isObject(block.input) ? block.input : {}
-          if (RUNS.has(name) && str(input.command)) {
-            const entry = push(state, 'command', str(input.command).slice(0, COMMAND_MOST), at, 'running')
-            if (str(block.id)) state.tools.set(str(block.id), entry)
-          } else if (EDITS.has(name)) {
-            const file = str(input.file_path) || str(input.notebook_path)
-            if (file) push(state, 'files', `Changed 1 file: ${file}`, at, undefined, [file])
-          }
-        }
-      }
+        } else if (block.type === 'thinking') thought(state, r, block, position, thoughts++ === 0, at, place)
+        else if (block.type === 'tool_use' || block.type === 'server_tool_use') called(state, block, at)
+      })
     }
-  }
+  })
 }
 
 /** The last turns of what is read, or all of them (up to a limit). */
@@ -474,22 +641,30 @@ async function readInto(file: string, size: number, state: Conversation): Promis
   } finally {
     await handle.close()
   }
-  let end = buffer.lastIndexOf(10) + 1
-  let words = buffer.subarray(0, end).toString('utf8')
-  if (from === 0) words = words.replace(/^﻿/, '')
+  // Each whole line with where it is in the file, counted in bytes: what a step holds is read again from there.
+  const lines: string[] = []
+  const places: Place[] = []
+  // A byte order mark before the first line is not part of it.
+  let at = from === 0 && buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf ? 3 : 0
   // Read from the middle of the file, its first line is cut: it is left out.
-  if (trimmed) {
-    words = words.slice(words.indexOf('\n') + 1)
-    state.cut = true
+  let skip = trimmed
+  for (let end = buffer.indexOf(10, at); end >= 0; end = buffer.indexOf(10, at)) {
+    if (skip) skip = false
+    else {
+      lines.push(buffer.toString('utf8', at, end))
+      places.push({ offset: from + at, length: end - at })
+    }
+    at = end + 1
   }
-  feedConversation(state, words.split('\n'))
+  if (trimmed) state.cut = true
+  feedConversation(state, lines, places)
   // A last line with no newline yet that is whole already (a file that does not end with one) is taken too.
-  const rest = buffer.subarray(end).toString('utf8').trim()
-  if (rest && parse(rest)) {
-    feedConversation(state, [rest])
-    end = buffer.length
+  const rest = buffer.toString('utf8', at).trim()
+  if (!skip && rest && parse(rest)) {
+    feedConversation(state, [rest], [{ offset: from + at, length: buffer.length - at }])
+    at = buffer.length
   }
-  state.offset = from + end
+  state.offset = from + at
 }
 
 const conversations = new Map<string, { file: string; state: Conversation }>()
@@ -535,6 +710,44 @@ export function claudeConversation(id: string, all = false): Promise<TaskHistory
     if (reading.get(id) === run) reading.delete(id)
   }).catch(() => undefined)
   return run
+}
+
+/**
+ * What a step of a session holds, read again from the session's file where the conversation found it: what a command printed,
+ * or the words of a thought. `more` is the key the step came with, and only a key this conversation gave is looked up: nothing
+ * of a place in the file comes from outside. Null when the conversation is not held any more, the key is not one of its own,
+ * or the line there is not the one the key names (the file was written again).
+ */
+export async function claudeStep(id: string, more: string): Promise<string | null> {
+  const held = conversations.get(id)
+  const place = held?.state.places.get(more)
+  if (!held || !place || place.length > DETAIL_LINE_MOST) return null
+  const handle = await fs.open(held.file, 'r').catch(() => null)
+  if (!handle) return null
+  let line: string
+  try {
+    const buffer = Buffer.alloc(place.length)
+    const { bytesRead } = await handle.read(buffer, 0, place.length, place.offset)
+    line = buffer.toString('utf8', 0, bytesRead).trim()
+  } finally {
+    await handle.close()
+  }
+  const r = parse(line)
+  if (!r || !isObject(r.message) || !Array.isArray(r.message.content)) return null
+  const blocks = r.message.content.filter(isObject)
+  const thinking = /^think:(.+):(\d+)$/.exec(more)
+  let text = ''
+  if (thinking) {
+    const block = r.message.content[Number(thinking[2])]
+    if (str(r.uuid) !== thinking[1] || !isObject(block) || block.type !== 'thinking') return null
+    text = str(block.thinking)
+  } else {
+    const results = blocks.filter((block) => block.type === 'tool_result')
+    const block = results.find((one) => str(one.tool_use_id) === more)
+    if (!block) return null
+    text = printed(r, block, results.length === 1)
+  }
+  return text.trim() ? text.slice(-DETAIL_MOST) : null
 }
 
 /**

@@ -15,13 +15,14 @@ import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { TaskHistory, TaskInfo } from '@shared/runner'
-import { claudeConversation, claudeHasSession, claudeLastSaid, claudeSessions, claudeWrittenAt } from './claude-sessions'
+import type { StepDetail, TaskHistory, TaskInfo } from '@shared/runner'
+import { claudeConversation, claudeHasSession, claudeLastSaid, claudeSessions, claudeStep, claudeWrittenAt } from './claude-sessions'
 import { HookServer, type HookTarget } from './claude-hooks'
 import { ClaudeJob, claudeEnv, isJob, rowOf, stateOfJob, type AgentRow, type JobContext, type JobRow } from './claude-job'
 import { oneLine } from './claude-requests'
 import { list, rec } from './jsonrpc'
 import { listProcesses } from './process-tree'
+import { detailOf } from './step-detail'
 import { loadPty, type TerminalChunk } from './terminal'
 import type { Backend, Detected, ResumeOptions, StartOptions, TaskHandle } from './types'
 
@@ -326,6 +327,11 @@ export class ClaudeBackend implements Backend {
   /** A session's conversation as its file keeps it: what the Web view shows, also of what was said before Togle opened it. */
   history(id: string, all: boolean): Promise<TaskHistory | null> {
     return (this.options.conversation ?? claudeConversation)(id, all)
+  }
+
+  /** What a step of that conversation holds (what a command printed, a thought's words), read again from the session's file. */
+  async step(id: string, more: string): Promise<StepDetail | null> {
+    return detailOf(await claudeStep(id, more).catch(() => null))
   }
 
   /** A session that is not in the background yet goes there, as the same session. */

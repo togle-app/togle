@@ -8,8 +8,8 @@ const TURNS_ALL = 400
 
 /**
  * The last turns of a conversation (all of them, up to a limit, with `all`). `cut` says that what came before `entries` was left
- * out already, so that there is more than these even when all of them are shown. A command with no result, when something was asked
- * after it, was cut short (its session ended under it): it is not shown as running.
+ * out already, so that there is more than these even when all of them are shown. A command (or a helper) with no result, when
+ * something was asked after it, was cut short (its session ended under it): it is not shown as running.
  */
 export function lastTurns(entries: readonly LogEntry[], all: boolean, cut = false): TaskHistory {
   const turns = all ? TURNS_ALL : TURNS_SHOWN
@@ -23,7 +23,7 @@ export function lastTurns(entries: readonly LogEntry[], all: boolean, cut = fals
   const shown = entries.slice(start)
   const lastAsked = shown.map((entry) => entry.kind).lastIndexOf('you')
   return {
-    entries: shown.map((entry, index) => (entry.kind === 'command' && entry.status === 'running' && index < lastAsked ? { ...entry, status: 'failed' as const } : { ...entry })),
+    entries: shown.map((entry, index) => ((entry.kind === 'command' || entry.kind === 'step') && entry.status === 'running' && index < lastAsked ? { ...entry, status: 'failed' as const } : { ...entry })),
     more: start > 0 || cut
   }
 }

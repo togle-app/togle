@@ -23,10 +23,11 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import type { LogEntry, TaskHistory, TaskInfo } from '@shared/runner'
+import type { LogEntry, StepDetail, TaskHistory, TaskInfo } from '@shared/runner'
 import { exists, lines } from './acp'
 import { hermesEntries } from './hermes-history'
 import { lastTurns } from './history-turns'
+import { detailOf } from './step-detail'
 import { keepJson } from './keep'
 import { TaskBase } from './task-base'
 import { cleanWords, loadPty, openTerminal, refuseCommand, TerminalTask, type TerminalChunk } from './terminal'
@@ -514,7 +515,7 @@ export class HermesBackend implements Backend {
   /** The name each session Togle started was started with, and the id Hermes gave it. */
   private readonly names = new Map<string, string>()
   /** The conversation of the sessions asked for lately, by the id Hermes gave, and when it was read. */
-  private readonly conversations = new Map<string, { at: number; running?: Promise<LogEntry[] | null>; entries: LogEntry[] | null }>()
+  private readonly conversations = new Map<string, { at: number; running?: Promise<LogEntry[] | null>; entries: LogEntry[] | null; details: Map<string, string> }>()
   private loaded?: Promise<void>
 
   constructor(private readonly options: HermesOptions) {}
@@ -592,8 +593,7 @@ export class HermesBackend implements Backend {
    */
   async history(id: string, all: boolean): Promise<TaskHistory | null> {
     await this.ready()
-    // A session Togle started has the name it was started with as its id here; Hermes knows it by its own.
-    const real = this.names.get(id) ?? [...this.tasks].find((task) => task.id === id)?.real ?? id
+    const real = this.sessionOf(id)
     if (!SESSION_WORD.test(real)) return null
     const held = this.conversations.get(real)
     if (held && (held.running || Date.now() - held.at < (this.options.historyMs ?? 8_000))) {
@@ -602,8 +602,10 @@ export class HermesBackend implements Backend {
     }
     const command = await this.command()
     // What is kept is the conversation as entries, never the export: an export holds every row of the session, 25 MB for the biggest here.
-    const running = exported(command, this.options.env ?? process.env, real).then((session) => (session ? hermesEntries(session) : null))
-    const entry: { at: number; running?: Promise<LogEntry[] | null>; entries: LogEntry[] | null } = { at: Date.now(), running, entries: null }
+    // With the entries, what their steps hold to be opened (what a command printed, a thought's words): kept as long as they are.
+    const details = new Map<string, string>()
+    const running = exported(command, this.options.env ?? process.env, real).then((session) => (session ? hermesEntries(session, details) : null))
+    const entry: { at: number; running?: Promise<LogEntry[] | null>; entries: LogEntry[] | null; details: Map<string, string> } = { at: Date.now(), running, entries: null, details }
     this.conversations.set(real, entry)
     const entries = await running
     entry.running = undefined
@@ -612,6 +614,16 @@ export class HermesBackend implements Backend {
     // Only a few sessions are kept.
     while (this.conversations.size > 4) this.conversations.delete(this.conversations.keys().next().value as string)
     return entries ? lastTurns(entries, all) : null
+  }
+
+  /** What a step of that conversation holds (what a command printed, a thought's words), as the session's last export gave it. */
+  async step(id: string, more: string): Promise<StepDetail | null> {
+    return detailOf(this.conversations.get(this.sessionOf(id))?.details.get(more))
+  }
+
+  /** A session by the id Hermes knows it by: one Togle started has the name it was started with as its id here. */
+  private sessionOf(id: string): string {
+    return this.names.get(id) ?? [...this.tasks].find((task) => task.id === id)?.real ?? id
   }
 
   /** Finds the id Hermes gave a session Togle started, by the name it was started with, and gives it the name of the person's words. */
