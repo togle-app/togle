@@ -331,11 +331,15 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
           )}
         </Fragment>
       ))}
-      {/* A choice like the others on this screen: Terminal is the agent's own screen, Web the conversation with a card for what it asks. */}
+      {/* Where tasks open: a switch of two, the same one a task has on its own line, so that the two read as one thing.
+          Terminal is the agent's own screen, Web the conversation with a card for what it asks. */}
       <Row label={false} name="Tasks open in">
-        <Choice<'session' | 'cards'> label="Tasks open in" title="Terminal is the agent’s own screen. Web is the conversation, a card for what the agent asks, and a reply box. A switch on a task changes it for that task."
-          value={settings.tasks.view === 'cards' ? 'cards' : 'session'} onChange={(view) => void save({ tasks: { view } })}
-          options={[{ value: 'session', label: 'Terminal' }, { value: 'cards', label: 'Web' }]} />
+        <span className="segmented view-switch" role="radiogroup" aria-label="Tasks open in" title="Terminal is the agent’s own screen. Web is the conversation, a card for what the agent asks, and a reply box. A switch on a task changes it for that task.">
+          {(['cards', 'session'] as const).map((name) => {
+            const on = (settings.tasks.view === 'cards' ? 'cards' : 'session') === name
+            return <button key={name} type="button" role="radio" aria-checked={on} className={on ? 'on' : ''} onClick={() => { if (!on) void save({ tasks: { view: name } }) }}>{name === 'cards' ? 'Web' : 'Terminal'}</button>
+          })}
+        </span>
       </Row>
       {/* The button stays where it is while its form is open under it, over the page. */}
       <div className="setting add-row"><button className="small" aria-expanded={adding} title="Any other agent: one that speaks ACP, or any that runs in a terminal" onClick={() => { setError(''); setAdding(!adding) }}>Add an agent</button></div>

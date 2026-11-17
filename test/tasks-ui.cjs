@@ -779,19 +779,18 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual(await texts(ui, '#settings-agents .agent-label'), ['Claude Code', 'Codex', 'Hermes'])
   assert.deepEqual(await texts(ui, '#settings-agents .agent-name .av'), ['C', 'X', 'H'], 'each agent with its letter, as the design marks them')
   assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add an agent'])
-  // Which view a task opens in: a choice like the others in Settings, Terminal until it is changed.
-  assert.equal(await ui.evaluate("!!document.querySelector('#settings-agents [data-choice=\"Tasks open in\"]')"), true)
-  await openChoice(ui, 'Tasks open in')
-  assert.deepEqual(await texts(ui, '.menu-overlay [role=menuitemradio]'), ['Terminal', 'Web'])
-  assert.deepEqual(await texts(ui, '.menu-overlay [aria-checked=true]'), ['Terminal'], 'the one in use is ticked')
-  await closeChoice(ui)
-  assert.equal(await ui.evaluate(shownChoice('Tasks open in')), 'Terminal')
-  assert.equal(await ui.evaluate("!!document.querySelector('#settings-agents .segmented, #settings-agents [role=radio], #settings-agents select')"), false, 'one kind of choice in Settings: a button that opens Togle\'s own list')
-  await pickChoice(ui, 'Tasks open in', 'Web')
-  await ui.wait(shownChoice('Tasks open in') + "==='Web'")
+  // Which view a task opens in: a switch of two, the same as a task has on its own line, Terminal until it is changed.
+  const viewSwitch = '#settings-agents [role=radiogroup][aria-label="Tasks open in"]'
+  const pickedView = "document.querySelector(" + JSON.stringify(viewSwitch + ' [aria-checked=true]') + ")?.textContent"
+  assert.deepEqual(await texts(ui, viewSwitch + ' [role=radio]'), ['Web', 'Terminal'], 'in the order of the switch on a task')
+  assert.equal(await ui.evaluate(pickedView), 'Terminal')
+  assert.equal(await ui.evaluate("(()=>{const on=document.querySelector(" + JSON.stringify(viewSwitch + ' [aria-checked=true]') + "),off=document.querySelector(" + JSON.stringify(viewSwitch + ' [aria-checked=false]') + ");return getComputedStyle(on).backgroundColor!==getComputedStyle(off).backgroundColor})()"), true, 'the one in use is the light one')
+  assert.equal(await ui.evaluate("!!document.querySelector('#settings-agents select, #settings-agents [data-choice]')"), false, 'not a list: two buttons, both in view')
+  await ui.click(viewSwitch + ' [role=radio]', 'Web')
+  await ui.wait(pickedView + "==='Web'")
   assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).at(-1), { tasks: { view: 'cards' } })
-  await pickChoice(ui, 'Tasks open in', 'Terminal')
-  await ui.wait(shownChoice('Tasks open in') + "==='Terminal'")
+  await ui.click(viewSwitch + ' [role=radio]', 'Terminal')
+  await ui.wait(pickedView + "==='Terminal'")
   assert.equal(await ui.evaluate("!!document.querySelector('.settings .card-note, .settings .setting > .note')"), false, 'no notes under the rows: everything fits on one screen')
   assert.deepEqual(await texts(ui, '#settings-agents .setting-value'), ['Found', 'Found', 'Not found'])
   // Remove takes an agent Togle finds off its lists, after asking: it stays installed, its tasks go on in it, and it can be added back.
