@@ -620,6 +620,11 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings .setting-detail > .setting { padding: 5px 0; border-bottom: 0; }
 .settings .setting-detail .row { display: flex; flex-wrap: wrap; gap: 6px; }
 .settings .setting-detail .hint { margin: 0; }
+/* Brought into view in a low window, it keeps a little room from the window's edge: its last line is not on the edge. A
+   card laid over the page can end lower than the page does, where there is nothing to scroll to: a part of no size that
+   reaches 12px under it gives the page that much more to scroll. */
+.settings .setting-detail { scroll-margin-block: 12px; }
+.settings .setting-detail.over::after { content: ''; position: absolute; top: 100%; left: 0; width: 1px; height: 12px; pointer-events: none; }
 /* A form to type in (an agent to add, a key, a sign-in, a device's code) is one card as wide as Settings, as the design
    draws it, so that a command or an address has room. It opens under its button and over the page: nothing on the page
    moves. (Its place down the page is where it would be in the flow; its width is all of the two columns.) */
