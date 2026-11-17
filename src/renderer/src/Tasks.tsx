@@ -733,6 +733,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
             const left = box.scrollHeight - box.scrollTop - box.clientHeight
             stick.current = left < 60
             setAway(left > 160)
+            // Scrolled while earlier turns were on their way: the place they were asked from is not gone back to.
+            kept.current = null
           }}
         >
           {history?.more && !all && <button type="button" className="link task-earlier-turns" onClick={showEarlierTurns}>Show earlier</button>}

@@ -373,6 +373,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .fold-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; background: var(--raised); color: var(--ink); font-size: 11.5px; font-weight: 500; line-height: 1.4; white-space: nowrap; }
 .fold-chip svg { color: var(--muted); }
 .fold-chip.bad { background: var(--danger-soft); color: var(--danger); }
+.fold-label { flex: none; }
 .fold-took { flex: none; font-variant-numeric: tabular-nums; }
 /* Open, the work is on a rail: each thing the agent did is a line with a round mark, and what it said along the way is beside the rail. */
 .fold-body { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 4px 0 2px; }

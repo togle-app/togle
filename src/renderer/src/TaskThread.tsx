@@ -188,9 +188,10 @@ const count = (many: number, one: string, more: string): string => `${many} ${ma
 /**
  * Work folded to one line of small chips: the files it changed, the commands it ran (and how many failed or were refused) and,
  * when it is known, how long it took. Read out, it is the one sentence ("3 steps: edited 1 file, ran 2 commands"). It opens and
- * closes as the person chooses; until they do, it is open only while it is the work going on now.
+ * closes as the person chooses; until they do, it is open only while it is the work going on now. `label` says in words what
+ * is folded, where the chips alone would not ("Earlier in this turn").
  */
-function Fold({ work, time, open: byDefault, children }: { work: LogEntry[]; time?: string; open: boolean; children: ReactNode }): ReactNode {
+function Fold({ work, label, time, open: byDefault, children }: { work: LogEntry[]; label?: string; time?: string; open: boolean; children: ReactNode }): ReactNode {
   const [chosen, setChosen] = useState<boolean | undefined>(undefined)
   const open = chosen ?? byDefault
   const commands = work.filter((entry) => entry.kind === 'command')
@@ -209,6 +210,7 @@ function Fold({ work, time, open: byDefault, children }: { work: LogEntry[]; tim
     >
       <summary>
         <Icon name="chevron" size={12} />
+        {label && <span className="fold-label">{label}</span>}
         <span className="fold-words sr-only">{stepsLine(work)}</span>
         <span className="fold-chips" aria-hidden="true">
           {files > 0 && (
@@ -283,26 +285,37 @@ function turnsOf(entries: readonly LogEntry[]): Turn[] {
   return turns
 }
 
-/** What the agent said, in the open, and between its words each stretch of what it did. `stretch` draws a stretch. */
-function inOrder(entries: LogEntry[], stretch: (run: LogEntry[], last: boolean) => ReactNode): ReactNode[] {
-  const blocks: ReactNode[] = []
+/** A part of a turn: one thing the agent said, or one stretch of what it did between its words. */
+interface Part {
+  key: string
+  said?: LogEntry
+  run?: LogEntry[]
+}
+
+function partsOf(entries: readonly LogEntry[]): Part[] {
+  const parts: Part[] = []
   let run: LogEntry[] = []
-  const flush = (last: boolean): void => {
+  const flush = (): void => {
     if (!run.length) return
-    blocks.push(stretch(run, last))
+    parts.push({ key: `steps-${run[0].id}`, run })
     run = []
   }
   for (const entry of entries) {
     if (entry.kind === 'agent') {
-      flush(false)
-      blocks.push(<Said key={entry.id} entry={entry} />)
+      flush()
+      parts.push({ key: `said-${entry.id}`, said: entry })
     } else run.push(entry)
   }
-  flush(true)
-  return blocks
+  flush()
+  return parts
 }
 
-const plain = (run: LogEntry[]): ReactNode => <Steps key={`steps-${run[0].id}`} entries={run} />
+/** Parts as they are in an opened fold: what the agent said, and its steps on the rail, with nothing folded. */
+const flat = (parts: Part[]): ReactNode[] => parts.map((part) => (part.said ? <Said key={part.key} entry={part.said} /> : <Steps key={part.key} entries={part.run ?? []} />))
+
+// How many of a turn's latest parts are in the open while it goes on. Measured on real conversations, a turn at work has 3 parts
+// at the median and more than 40 one time in ten: the parts before the latest are behind one line.
+const PARTS_SHOWN = 8
 
 /** The turn a conversation is at, by what it starts with: to tell a new turn from the one that was there. */
 export function lastTurnKey(entries: readonly LogEntry[]): number | undefined {
@@ -314,7 +327,8 @@ export function lastTurnKey(entries: readonly LogEntry[]): number | undefined {
  * A conversation as a thread. A turn that is over and was answered shows what was asked, one line for all the work between
  * (its steps and what the agent said along the way, to open) and the answer, with when it came and a way to copy it. The turn
  * going on now, and one that ended with no answer, show what the agent said in the open, with each stretch of steps folded to a
- * line; the stretch it is at stays open while it works.
+ * line; the stretch it is at stays open while it works. Of a long turn only the latest parts are in the open, and the ones
+ * before them are behind one line.
  *
  * `settled` is the turn that was the last one when the task last stood still. A reply makes the task work at once, and the
  * agent's record has the reply a moment later: until then the turn that was over is drawn as over, so nothing unfolds and
@@ -363,30 +377,40 @@ export function Thread({ entries, state, settled }: { entries: LogEntry[]; state
     const after = turn.rest.slice(cut)
     const answer = after.filter((entry) => entry.kind === 'agent')
     const answered = !live && answer.length > 0
-    if (work.length) {
-      if (answered) {
-        const done = answer[0].at
-        const time = asked !== undefined && realTime(done) && done - asked >= 1000 ? took(done - asked) : undefined
+    if (work.length && answered) {
+      // How long the turn took: from what was asked to the last thing in it (an answer can be several things said).
+      const end = [...after].reverse().find((entry) => realTime(entry.at))?.at
+      const time = asked !== undefined && end !== undefined && end - asked >= 1000 ? took(end - asked) : undefined
+      blocks.push(
+        <Fold key={`work-${work[0].id}`} work={work} time={time} open={false}>
+          {flat(partsOf(work))}
+        </Fold>,
+        ...flat(partsOf(after))
+      )
+    } else {
+      const parts = partsOf(turn.rest)
+      const early = parts.slice(0, Math.max(0, parts.length - PARTS_SHOWN))
+      if (early.length) {
         blocks.push(
-          <Fold key={`work-${work[0].id}`} work={work} time={time} open={false}>
-            {inOrder(work, plain)}
+          <Fold key={`early-${turn.key}`} label="Earlier in this turn" work={early.flatMap((part) => part.run ?? [])} open={false}>
+            {flat(early)}
           </Fold>
         )
-      } else {
-        blocks.push(
-          ...inOrder(work, (run, lastRun) => {
-            // Only notes in between ("You allowed it."): said as they are, with nothing to fold.
-            if (!stepsLine(run)) return plain(run)
-            return (
-              <Fold key={`steps-${run[0].id}`} work={run} open={lastRun && !after.length && live && state === 'working'}>
-                <Steps entries={run} />
-              </Fold>
-            )
-          })
-        )
       }
+      const shown = parts.slice(early.length)
+      shown.forEach((part, at) => {
+        if (part.said) blocks.push(<Said key={part.key} entry={part.said} />)
+        // Only notes in between ("You allowed it."): said as they are, with nothing to fold.
+        else if (!part.run || !stepsLine(part.run)) blocks.push(<Steps key={part.key} entries={part.run ?? []} />)
+        else {
+          blocks.push(
+            <Fold key={part.key} work={part.run} open={at === shown.length - 1 && live && state === 'working'}>
+              <Steps entries={part.run} />
+            </Fold>
+          )
+        }
+      })
     }
-    blocks.push(...inOrder(after, plain))
     if (answered) {
       const end = answer[answer.length - 1]
       blocks.push(<Meta key={`meta-${end.id}`} at={realTime(end.at) ? end.at : undefined} text={answer.map((entry) => entry.text).join('\n\n')} />)
