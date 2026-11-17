@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReachDevice, ReachState } from '@shared/reach'
-import { Row, Section, Toggle } from './Rows'
+import { Field, FormOver, Row, Section, Toggle, useOneOpen } from './Rows'
 
 // Settings → Devices: this computer among the person's devices (Reach, part of Togle Studio). The list of devices, adding
 // one by its code and Remove live here, in Togle, which is open: never in the Studio app. Only in development runs with a
@@ -82,29 +82,30 @@ function NotYet({ reach, busy, run }: PartProps) {
 }
 
 /** Signing in with a code sent by email: the first computer you sign in on starts your devices. */
-export function SignIn({ busy, run }: Pick<PartProps, 'busy' | 'run'>) {
+export function SignIn({ busy, run, onCancel }: Pick<PartProps, 'busy' | 'run'> & { onCancel: () => void }) {
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
   const [sent, setSent] = useState(false)
-  const submit = (event: FormEvent): void => {
-    event.preventDefault()
+  const submit = (): void => {
     if (!sent) void run('send', async () => { await api.reachSendCode(email); setSent(true) })
     else void run('verify', () => api.reachSignIn(email, code))
   }
   return (
-    <form className="setting-detail" aria-label="Sign in to Togle Studio" onSubmit={submit}>
-      <Row stacked name="Sign in to Togle Studio" note={sent ? `A code is on its way to ${email}. Type its six digits.` : 'The first computer you sign in on starts your devices. A server and a phone never sign in: you add them from here.'}>
+    <FormOver label="Sign in to Togle Studio" busy={!!busy} onClose={onCancel} onSubmit={submit}>
+      <span className="tasks-label">Sign in to Togle Studio</span>
+      <Field name={sent ? 'Code' : 'Email'} note={sent ? <>A code is on its way to <span className="free-text">{email}</span>. Type its six digits.</> : 'The first computer you sign in on starts your devices. A server and a phone never sign in: you add them from here.'}>
         {sent
           ? <input aria-label="Code from the email" inputMode="numeric" autoComplete="one-time-code" maxLength={10} autoFocus value={code} disabled={!!busy} onChange={(event) => setCode(event.target.value)} />
           : <input aria-label="Email address" type="email" autoComplete="email" maxLength={200} value={email} disabled={!!busy} onChange={(event) => setEmail(event.target.value)} />}
-      </Row>
+      </Field>
       <div className="row">
         <button className="primary" disabled={!!busy || (sent ? code.replace(/\s/g, '').length < 6 : !email.includes('@'))}>
           {busy === 'send' ? 'Sending…' : busy === 'verify' ? 'Signing in…' : sent ? 'Sign in' : 'Email me a code'}
         </button>
         {sent && <button type="button" className="ghost" disabled={!!busy} onClick={() => { setSent(false); setCode('') }}>Use another address</button>}
+        <button type="button" className="ghost" disabled={!!busy} onClick={onCancel}>Cancel</button>
       </div>
-    </form>
+    </FormOver>
   )
 }
 
@@ -134,7 +135,7 @@ function Member({ reach, busy, run }: PartProps) {
       {reach.devices.map((device) => (
         <Row key={device.device} label={false} name={<span className="reach-device"><span className={`reach-dot ${device.online ? 'on' : ''}`} aria-hidden="true" /><span className="free-text">{device.name}</span></span>} note={device.me ? 'This computer' : `${ROLE_WORDS[device.role]}${device.online ? '' : ' · offline'}`}>
           {!device.me && isComputer && (
-            <button className="ghost small" aria-label={`Remove ${device.name}`} disabled={!!busy} onClick={() => void run(`remove-${device.device}`, () => api.reachRemove(device.device))}>
+            <button className="quiet-action" aria-label={`Remove ${device.name}`} disabled={!!busy} onClick={() => void run(`remove-${device.device}`, () => api.reachRemove(device.device))}>
               {busy === `remove-${device.device}` ? 'Removing…' : 'Remove'}
             </button>
           )}
@@ -169,7 +170,7 @@ function connectionWords(reach: ReachState): string {
 /** Add a device: type the code it shows, read what joins and as what, then say yes. */
 function AddDevice({ reach, busy, run }: PartProps) {
   const [code, setCode] = useState('')
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useOneOpen()
   const adding = reach.adding
   if (adding?.stage === 'confirm' || adding?.stage === 'adding') {
     return (
@@ -183,26 +184,26 @@ function AddDevice({ reach, busy, run }: PartProps) {
       </div>
     )
   }
-  if (!open && adding?.stage !== 'joining') {
-    return (
-      <Row label={false} name="Add a device" note={adding?.stage === 'added' ? `${adding.name} was added.` : adding?.stage === 'failed' ? adding.message : 'Install Togle there. It shows a code: type it here.'}>
-        <button className="ghost small" disabled={!!busy || reach.connection !== 'on' || reach.link !== 'member'} onClick={() => { setCode(''); setOpen(true) }}>Add a device</button>
-      </Row>
-    )
-  }
-  const submit = (event: FormEvent): void => {
-    event.preventDefault()
-    void run('add', async () => { await api.reachAdd(code); setOpen(false) })
-  }
+  const shown = open || adding?.stage === 'joining'
+  const cancel = (): void => { setOpen(false); if (adding) void run('cancel-add', () => api.reachCancelAdd()) }
+  // The row stays where it is while its form is open under it, over the page.
   return (
-    <form className="setting-detail" aria-label="Add a device" onSubmit={submit}>
-      <Row stacked name="The code the other device shows" note={adding?.stage === 'joining' ? 'Checking the code with the other device…' : 'Eight letters and digits, like 7F3K-92QD.'}>
-        <input aria-label="Code" autoFocus maxLength={12} spellCheck={false} autoComplete="off" value={code} disabled={!!busy || adding?.stage === 'joining'} onChange={(event) => setCode(event.target.value.toUpperCase())} />
+    <>
+      <Row label={false} name="Add a device" note={adding?.stage === 'added' ? `${adding.name} was added.` : adding?.stage === 'failed' ? adding.message : 'Install Togle there. It shows a code: type it here.'}>
+        <button className="ghost small" aria-expanded={shown} disabled={!!busy || reach.connection !== 'on' || reach.link !== 'member'} onClick={() => { if (shown) cancel(); else { setCode(''); setOpen(true) } }}>Add a device</button>
       </Row>
-      <div className="row">
-        <button className="primary" disabled={!!busy || code.replace(/[\s-]/g, '').length !== 8}>{busy === 'add' ? 'Checking…' : 'Next'}</button>
-        <button type="button" className="ghost" disabled={!!busy} onClick={() => { setOpen(false); if (adding) void run('cancel-add', () => api.reachCancelAdd()) }}>Cancel</button>
-      </div>
-    </form>
+      {shown && (
+        <FormOver label="Add a device" busy={!!busy} onClose={cancel} onSubmit={() => void run('add', async () => { await api.reachAdd(code); setOpen(false) })}>
+          <span className="tasks-label">Add a device</span>
+          <Field name="Its code" note={adding?.stage === 'joining' ? 'Checking the code with the other device…' : 'The other device shows it: eight letters and digits, like 7F3K-92QD.'}>
+            <input aria-label="Code" maxLength={12} spellCheck={false} autoComplete="off" value={code} disabled={!!busy || adding?.stage === 'joining'} onChange={(event) => setCode(event.target.value.toUpperCase())} />
+          </Field>
+          <div className="row">
+            <button className="primary" disabled={!!busy || code.replace(/[\s-]/g, '').length !== 8}>{busy === 'add' ? 'Checking…' : 'Next'}</button>
+            <button type="button" className="ghost" disabled={!!busy} onClick={cancel}>Cancel</button>
+          </div>
+        </FormOver>
+      )}
+    </>
   )
 }

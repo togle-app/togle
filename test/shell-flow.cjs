@@ -372,6 +372,7 @@ async function checkMeetings(T, agent) {
   assert.equal(await ui.evaluate(rowOf('Write the release notes') + ".querySelector('input').disabled"), true)
   assert.equal(await ui.evaluate(rowOf('Check refunds') + ".querySelector('small').textContent"), 'Claude Code · Open it in Agents first', 'a task Togle does not run is not written to')
   assert.equal(await ui.evaluate("document.querySelector('.give-panel .primary').disabled"), true, 'nothing is ticked: nothing to give')
+  assert.equal(await ui.evaluate("document.querySelector('.give-field .primary')===document.querySelector('.give-panel .primary')&&!!document.querySelector('.give-field .give-words')"), true, 'the words and the button that gives the call share one box, as the design draws it')
   await ui.evaluate(rowOf('Rebuild the pricing page') + ".querySelector('input').click()")
   await ui.wait("document.querySelector('.give-panel .primary').textContent==='Give to 1'")
   await ui.fill('.give-words', 'Draft the follow-up email')
@@ -412,6 +413,9 @@ async function checkMeetings(T, agent) {
   await ui.click('.call-menu button', 'Delete call')
   await ui.wait("!!document.querySelector('.meetings .notice.ask')")
   assert.ok((await ui.evaluate("document.querySelector('.meetings .notice.ask').textContent")).includes('This can’t be undone.'))
+  // It is asked over the page, where the menu was: the page under it does not move, and the first button keeps the call.
+  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.meetings .notice.ask')).position"), 'fixed')
+  assert.equal(await ui.evaluate("document.activeElement?.textContent"), 'Keep call')
   await ui.click('.meetings .notice.ask button', 'Keep call')
   assert.deepEqual(await ui.calls('deleteCallSession'), [], 'nothing is deleted unless asked twice')
   await ui.click('.meeting-row', 'Open call: Design check')
@@ -630,6 +634,20 @@ async function checkFirstMinute(T, agent) {
   await fresh.wait("!!document.querySelector('.first-minute')")
   assert.deepEqual(await fresh.evaluate("[...document.querySelectorAll('.first-step')].map(step=>step.getAttribute('aria-label'))"), ['Talk', 'Sign in with your plan', 'Togle finds the rest'])
   assert.equal(await fresh.evaluate("!!document.querySelector('.todo')"), false, 'the first minute comes before the list')
+  // The three steps: one under another in a narrow window, side by side in a wide one, and between the two the third is as
+  // wide as the first two together. It once stood alone under them, beside a gap.
+  const steps = "(()=>{const list=document.querySelector('.first-steps').getBoundingClientRect();return [...document.querySelectorAll('.first-step')].map(step=>{const r=step.getBoundingClientRect();return [Math.round(r.left-list.left),Math.round(r.top-list.top),Math.round(r.width),Math.round(list.width)]})})()"
+  const firstSize = fresh.window.getContentSize()
+  for (const [width, shape] of [[640, 'one'], [800, 'two'], [1024, 'three']]) {
+    fresh.window.setContentSize(width, firstSize[1])
+    await fresh.wait('innerWidth===' + width)
+    const [first, second, third] = await fresh.evaluate(steps)
+    if (shape === 'one') assert.ok(first[2] === first[3] && second[1] > first[1] && third[1] > second[1], 'one under another at ' + width)
+    if (shape === 'two') assert.ok(second[1] === first[1] && second[0] > first[0] && third[1] > first[1] && third[0] === 0 && third[2] === third[3], 'two side by side, the third as wide as both, at ' + width)
+    if (shape === 'three') assert.ok(second[1] === first[1] && third[1] === first[1] && third[0] > second[0], 'three side by side at ' + width)
+  }
+  fresh.window.setContentSize(firstSize[0], firstSize[1])
+  await fresh.wait('innerWidth===' + firstSize[0])
   await fresh.wait("[...document.querySelectorAll('.first-step button')].some(b=>b.textContent.startsWith('Get speech recognition'))")
   assert.equal(await fresh.evaluate('window.togleUITest.calls().filter(call=>call.name===\'installLocalSpeech\').length'), 0, 'nothing is downloaded unasked')
   await fresh.capture('first-minute-download')
@@ -677,7 +695,8 @@ async function checkSettings(T, agent) {
   const ui = await open(T, agent, 'settings', 1024)
   await ui.click('.workspace-nav button', 'Settings')
   await ui.wait("!!document.querySelector('#settings-accounts .ai-plan')")
-  assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Voice', 'Meetings', 'Agents', 'Accounts'])
+  // Column by column, as they are read and reached with Tab: Keys, Meetings and Accounts in the first, Voice and Agents in the second.
+  assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Meetings', 'Accounts', 'Voice', 'Agents'])
   assert.deepEqual(await texts(ui, '#settings-keys .shortcut-what'), ['Talk', 'Show', 'Task'])
   assert.deepEqual(await texts(ui, '#settings-keys button.keys'), ['F9', 'F8', 'F10'])
   const names = await texts(ui, '#settings-voice .setting > .name')
@@ -775,6 +794,9 @@ async function checkSettings(T, agent) {
   assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add an agent'])
   await ui.click('#settings-agents button', 'Add an agent')
   await ui.wait("!!document.querySelector('form.add-agent')")
+  // A form as the design draws one: a small name over it, and each field with its name inside its box.
+  assert.equal(await ui.evaluate("document.querySelector('form.add-agent .tasks-label').textContent"), 'Add an agent')
+  assert.deepEqual(await texts(ui, 'form.add-agent label.field .field-name'), ['Name', 'Command'])
   await ui.fill('form.add-agent input[aria-label="Agent name"]', 'Gemini CLI')
   await ui.fill('form.add-agent input[aria-label=Command]', 'gemini --acp')
   await ui.capture('settings-add-agent')

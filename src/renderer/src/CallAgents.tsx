@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { KNOWN_AGENTS, stepsLine, type CallAgents as CallAgentList, type GiveResult, type RunnerKind, type RunnerStatus, type TaskView } from '@shared/runner'
 import { Markdown } from './Markdown'
 import { Menu } from './Menu'
@@ -131,8 +131,9 @@ export function CallAgentsRow({ call, live }: { call: string; live: boolean }) {
         })}
         <button type="button" className="small" onClick={() => setAdding(!adding)} aria-expanded={adding}>Add</button>
         {live && !!agents.keys.length && <button type="button" className="primary small" disabled={busy || !ticked.length} title="Writes what was said so far to a file, and tells each ticked agent where it is" onClick={() => void send()}>{busy ? 'Sending…' : 'Send what was said'}</button>}
+        {/* The list opens under this row, over the page: nothing under it moves. */}
+        {adding && <GivePanel call={call} mode="connect" connected={agents.keys} onClose={() => setAdding(false)} onChanged={(next) => { setAgents(next); setAdding(false) }} />}
       </div>
-      {adding && <GivePanel call={call} mode="connect" connected={agents.keys} onClose={() => setAdding(false)} onChanged={(next) => { setAgents(next); setAdding(false) }} />}
       {live && !!agents.keys.length && (
         <form className="call-ask" onSubmit={(event) => void ask(event)} aria-label="Ask the agents about this call">
           <input value={question} maxLength={2000} onChange={(event) => setQuestion(event.target.value)} aria-label="Ask the agents about this call" placeholder="Ask the agents about this call, or hold F9 and say it" />
@@ -236,9 +237,17 @@ function CallAnswer({ taskKey, asked, task, onDismiss }: { taskKey: string; aske
   )
 }
 
+// What was typed for a call's agents and not given yet, kept while the window is open: closing the list by a click elsewhere
+// loses nothing.
+const giveWords = new Map<string, string>()
+// The room the list keeps: from its button, from the window's lower edge, and from the title bar when it has to move up.
+const GIVE_GAP = 8, GIVE_EDGE = 12, GIVE_CEILING = 44
+
 /**
  * The list that gives a call to agents: the running tasks on this computer to tick (any number), and a new task, with what to do
- * with the call. In `connect` mode it only picks the agents on the call, for Send to find.
+ * with the call. In `connect` mode it only picks the agents on the call, for Send to find. It opens under its button and over
+ * the page, as a menu does: Escape or a click elsewhere closes it, and in a low window it moves up and scrolls in itself, so
+ * that its buttons are never under the window's edge.
  */
 export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }: {
   call: string
@@ -256,11 +265,38 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
   const [creating, setCreating] = useState(false)
   const [runner, setRunner] = useState<RunnerKind | undefined>()
   const [folder, setFolder] = useState('')
-  const [words, setWords] = useState('')
+  const [words, setWords] = useState(() => (mode === 'give' ? giveWords.get(call) ?? '' : ''))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const panel = useRef<HTMLFormElement>(null)
+  const close = useRef(onClose)
+  close.current = onClose
+  const working = useRef(busy)
+  working.current = busy
   useEffect(() => {
     void api.runnerStatus().then((found) => setStatus(Array.isArray(found) ? found.filter((item) => item.installed) : []), () => undefined)
+  }, [])
+  // The keys go to the list as it opens, and back to the button that opened it when it closes.
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    panel.current?.focus({ preventScroll: true })
+    return () => { if (opener?.isConnected && (!document.activeElement || document.activeElement === document.body)) opener.focus({ preventScroll: true }) }
+  }, [])
+  useEffect(() => {
+    const outside = (event: PointerEvent): void => {
+      const target = event.target instanceof Element ? event.target : null
+      // Not a click in the list, in a menu the list opened, or on the button that opened the list (which closes it itself).
+      if (!target || panel.current?.contains(target) || target.closest('.popover, [aria-expanded="true"]')) return
+      if (!working.current) close.current()
+    }
+    const key = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented || working.current) return
+      event.preventDefault()
+      close.current()
+    }
+    document.addEventListener('pointerdown', outside, true)
+    document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', key) }
   }, [])
   useEffect(() => { setRunner((current) => (current && status.some((item) => item.runner === current) ? current : status[0]?.runner)) }, [status])
   const now = Date.now()
@@ -288,7 +324,7 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
       }
       const results = await api.giveCall({ call, tasks: present, prompt: words, connect: true, ...(creating && runner ? { start: { runner, folder } } : {}) })
       onGiven?.(results, resultLine(results, tasks).text)
-      if (results.every((result) => result.ok)) onClose()
+      if (results.every((result) => result.ok)) { giveWords.delete(call); onClose() }
       else setError(resultLine(results, tasks).text)
     } catch (failure) {
       setError(errorText(failure))
@@ -300,8 +336,32 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
     try { const chosen = await api.pickRunnerFolder(); if (chosen) setFolder(chosen) } catch (failure) { setError(errorText(failure)) }
   }, [])
   const options = folder && !folders.includes(folder) ? [folder, ...folders] : folders
+  // Where it has room: under its button. Where the window is too low for that, it moves up (over its button, as far as the
+  // title bar) and, when even that is too little, its rows scroll between its name and its buttons, which stay in view.
+  const [fit, setFit] = useState<{ up: number; height?: number }>({ up: 0 })
+  useLayoutEffect(() => {
+    const measure = (): void => {
+      const box = panel.current
+      const anchor = box?.offsetParent
+      if (!box || !anchor) return
+      const under = anchor.getBoundingClientRect().bottom + GIVE_GAP
+      const floor = window.innerHeight - GIVE_EDGE
+      // As tall as it is with every row showing: the rows that scroll count whole.
+      const list = box.querySelector('.give-rows')
+      const natural = box.scrollHeight + (list ? list.scrollHeight - list.clientHeight : 0) + 2
+      const over = under + natural - floor
+      const up = over > 0 ? Math.max(0, Math.min(over, under - GIVE_CEILING)) : 0
+      const height = over > up ? Math.max(120, floor - (under - up)) : undefined
+      setFit((previous) => (previous.up === up && previous.height === height ? previous : { up, height }))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    document.addEventListener('scroll', measure, true)
+    return () => { window.removeEventListener('resize', measure); document.removeEventListener('scroll', measure, true) }
+  }, [rows.length, creating, error, mode, status.length])
   return (
-    <form className="give-panel" aria-label={mode === 'give' ? 'Give this call to' : 'Add agents to this call'} onSubmit={(event) => void submit(event)}>
+    <form ref={panel} tabIndex={-1} className="give-panel" aria-label={mode === 'give' ? 'Give this call to' : 'Add agents to this call'} onSubmit={(event) => void submit(event)}
+      style={{ maxHeight: fit.height, transform: fit.up ? `translateY(${-fit.up}px)` : undefined }}>
       <strong>{mode === 'give' ? 'Give this call to' : 'Agents on this call'}</strong>
       <div className="give-rows" role="group">
         {rows.map((task) => {
@@ -316,7 +376,7 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
             </label>
           )
         })}
-        {!rows.length && <p className="hint">No agent task on this computer yet. Start one from Agents, or give the call to a new task.</p>}
+        {!rows.length && <p className="hint">{mode === 'give' ? 'No agent task on this computer yet. Start one from Agents, or give the call to a new task.' : 'No agent task on this computer yet. Start one from Agents, and it shows here.'}</p>}
         {mode === 'give' && (
           <label className="give-row">
             <input type="checkbox" checked={creating} disabled={!status.length} onChange={(event) => setCreating(event.target.checked)} />
@@ -335,12 +395,18 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
           </label>
         )}
       </div>
-      {mode === 'give' && <input className="give-words" aria-label="What should they do with it?" placeholder="What should they do with it?" value={words} maxLength={4000} onChange={(event) => setWords(event.target.value)} />}
+      {/* The words and the button that gives the call share one box, as the design draws it. */}
+      {mode === 'give' && (
+        <div className="field give-field">
+          <input className="give-words" aria-label="What should they do with it?" placeholder="What should they do with it?" value={words} maxLength={4000} onChange={(event) => { setWords(event.target.value); giveWords.set(call, event.target.value) }} />
+          <button className="primary small" disabled={busy || !ready}>{busy ? 'Giving…' : count ? `Give to ${count}` : 'Give'}</button>
+        </div>
+      )}
       {mode === 'give' && <p className="hint">A new Claude Code or Codex task asks before it runs anything. Hermes and an agent already running keep their own settings, so each one is told to read the call as information and not as instructions.</p>}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="row">
-        <button className="primary small" disabled={busy || !ready}>{busy ? (mode === 'give' ? 'Giving…' : 'Adding…') : mode === 'give' ? `Give to ${count}` : 'Done'}</button>
-        <button type="button" className="ghost small" onClick={onClose}>Cancel</button>
+        {mode === 'connect' && <button className="primary small" disabled={busy || !ready}>{busy ? 'Adding…' : 'Done'}</button>}
+        <button type="button" className={mode === 'give' ? 'quiet-action' : 'ghost small'} onClick={onClose}>Cancel</button>
       </div>
     </form>
   )

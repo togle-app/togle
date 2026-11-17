@@ -190,12 +190,19 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .shell-nav .dot.live { margin-left: 0; flex-shrink: 0; }
 /* A word too long for its line (a path, an address, a name without spaces) breaks rather than pushing the place sideways. */
 .shell-content { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; padding: 14px 16px; overflow: auto; background: var(--surface); overflow-wrap: break-word; }
-/* On a wide window a place keeps the width it reads well at (--read), from the left, as the design draws it: To-do, the
-   calls and a call's page, a live call, the first minute, a task's conversation, Settings. Only the agent's own screen
-   takes all the width there is. */
-.live-call, .meetings { max-width: var(--read); }
+/* The room for the scroll bar is always kept, so that nothing changes width or moves sideways when a place grows longer
+   than the window (a form opens, a list gets a row). The bar's 8px are taken from the padding on its side. */
+.shell-content { scrollbar-gutter: stable; padding-right: 8px; }
+/* On a wide window a place keeps the width it reads well at (--read), in the middle of the room it has: To-do, the calls
+   and a call's page, a live call, the first minute, a task's conversation, Settings. Only the agent's own screen takes
+   all the width there is. */
+.todo, .first-minute, .live-call, .meetings { box-sizing: border-box; width: 100%; max-width: var(--read); margin-inline: auto; }
+/* What Togle says over a place (quit?, a call's warning) is as wide as the place under it. Over the two panes of Agents it
+   has the panes' own room around it. */
+.shell-content > .notice { box-sizing: border-box; width: 100%; max-width: var(--read); margin-inline: auto; }
+.shell-content:has(> .tasks) > .notice { width: auto; max-width: none; margin: 14px 15px 0; }
 /* Agents is two panes side by side, each with its own room, the line between them the window's full height. */
-.shell-content:has(> .tasks) { padding: 0; }
+.shell-content:has(> .tasks) { padding: 0; scrollbar-gutter: auto; }
 @media (max-width: 560px) {
   .shell-layout { grid-template-columns: 52px minmax(0, 1fr); }
   .shell-nav button { justify-content: center; padding: 8px 0; }
@@ -203,7 +210,8 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
   .shell-nav button > span:not(.nav-count):not(.dot) { display: none; }
   .shell-nav .nav-count { position: absolute; top: 1px; right: 2px; padding: 0 5px; line-height: 16px; font-size: 10px; }
   .shell-nav .dot.live { position: absolute; top: 6px; right: 8px; width: 7px; height: 7px; }
-  .shell-content { padding: 12px; }
+  .shell-content { padding: 12px 4px 12px 12px; }
+  .shell-content:has(> .tasks) { padding: 0; }
 }
 
 /* A dot says how something stands: indigo works, amber waits for you, green is done. */
@@ -212,7 +220,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 
 /* ---- To-do ---- */
 
-.todo { display: flex; flex-direction: column; gap: 12px; max-width: var(--read); margin: 0; padding: 0; height: auto; overflow: visible; }
+.todo { display: flex; flex-direction: column; gap: 12px; margin-block: 0; padding: 0; height: auto; overflow: visible; }
 .todo-head h2 { margin: 0; font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; line-height: 1.12; }
 .todo-add { display: flex; align-items: center; gap: 10px; padding: 0 10px 0 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .todo-add:focus-within { border-color: var(--togle); }
@@ -256,7 +264,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 
 /* The list is as wide as the design draws it, and wider on a wide window, where its names would be cut short for no reason. */
 .tasks { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, clamp(15.5rem, 22vw, 22rem)) minmax(0, 1fr); }
-.tasks-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; padding: 14px 15px; border-right: 1px solid var(--line); }
+.tasks-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 14px 7px 14px 15px; border-right: 1px solid var(--line); }
 .tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .task-list { display: flex; flex-direction: column; gap: 6px; }
 .task-item { position: relative; }
@@ -279,14 +287,21 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .tasks-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 14px 15px; overflow-y: auto; }
 .tasks-empty { margin: auto; max-width: 340px; color: var(--muted); text-align: center; }
 .task-panel { display: flex; flex-direction: column; flex: 1; gap: 12px; min-height: 0; }
-.task-header { display: flex; align-items: center; gap: 10px; }
+/* The task's name, then its buttons. Where the window is too narrow for both (a second button shows after Stop), the
+   buttons go under the name, at the line's end, and the name keeps its line. */
+.task-header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .tasks-back, .tasks-back-to-task { display: none; }
-.task-title { flex: 1; min-width: 0; }
+.task-title { flex: 1 1 13rem; min-width: 0; }
 .task-title h2 { margin: 0; font: 600 13px/1.4 var(--font-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-title p { margin: 2px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .task-where { color: var(--muted); font-size: 12px; font-weight: 400; }
-.task-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.task-status { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.task-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
+.task-actions:empty { display: none; }
+/* How it stands, at the start of its line. The switch between its two views is at the line's end, with how many files
+   changed before it, as the design draws them; without a switch, the files are said right after how it stands. */
+.task-status { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
+.task-status .hint:has(+ .view-switch) { margin-left: auto; }
+.task-status .hint + .view-switch { margin-left: 0; }
 .task-status .hint { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--muted); font-size: 12px; }
 .task-status button.link, .task-title p button.link { margin: 0; padding: 0; color: var(--muted); font-size: 12px; }
 .task-status button.link:hover, .task-title p button.link:hover { color: var(--ink); }
@@ -298,9 +313,12 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .state-chip[data-state='idle'] { background: var(--ok-soft); color: var(--ok); }
 .state-chip[data-state='failed'] { background: var(--danger-soft); color: var(--danger); }
 /* Where it stands, then its steps folded under one quiet line, what it asks, and the reply box. */
-.task-log { display: flex; flex-direction: column; flex: 0 1 auto; gap: 12px; min-height: 0; padding: 0; overflow-y: auto; }
-/* The conversation keeps the width it reads well at; the agent's own screen takes all there is. */
-.task-log, .task-panel > .task-request, .task-panel > .task-banner, .task-panel > .hint, .task-reply-place { max-width: var(--read); }
+/* The conversation scrolls across the whole pane, its bar at the window's edge with the room for it always kept (the pane's
+   15px at that side: 8 for the bar, 7 beside it), and its words in a column in the middle, as wide as they read well. */
+.task-log { display: flex; flex-direction: column; flex: 0 1 auto; gap: 12px; min-height: 0; margin-right: -15px; padding: 0 calc(7px + max(0px, (100% - var(--read)) / 2)) 0 max(0px, calc((100% - var(--read)) / 2)); overflow-y: auto; scrollbar-gutter: stable; }
+/* The task's name, how it stands, what is asked, a note and the reply box are in that same column: a conversation has one
+   left edge. With the agent's own screen open, which takes all the width there is, they are as wide as the screen. */
+.task-panel:not(:has(> .task-terminal)) > :is(.task-header, .task-status, .task-request, .task-banner, .hint), .task-reply-place { box-sizing: border-box; width: 100%; max-width: var(--read); margin-inline: auto; }
 .task-latest { max-width: 100%; }
 /* "Show earlier": its words only, in the middle. A link button has a negative side margin that would make it wider than the thread. */
 .task-earlier-turns { align-self: center; margin: 0; font-size: 12px; }
@@ -391,12 +409,16 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .settings.meetings-page { padding: 0; overflow: visible; }
 .meetings-top { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
 .meetings-top .history-search { flex: 1; min-width: 0; margin: 0; }
-.call-history-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 8px; align-items: start; }
+/* The calls in a row are as tall as the tallest of them. */
+.call-history-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 8px; align-items: stretch; }
+/* The agents for the next call have the same room under them as the search box over them. */
+.meetings > .call-agents-wrap { margin-bottom: 10px; }
 .call-history-list > :not(.past-call-row) { grid-column: 1 / -1; }
-.past-call-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0 9px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; }
+.past-call-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; align-content: start; gap: 0 9px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; }
 .past-call-row:hover:not(:disabled) { border-color: var(--muted); }
 .past-call-row.live-record { border-color: var(--line); }
-.past-call-row strong { grid-column: 2; min-width: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+/* A call's name has two lines at most in the list (its page shows it whole, and so does pointing at it). */
+.past-call-row strong { grid-column: 2; min-width: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .past-call-row > span:not(.meeting-dot) { grid-column: 2; color: var(--muted); font-size: 12px; }
 .meeting-dot { grid-row: 1 / span 2; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .meeting-dot.work { background: var(--togle); }
@@ -435,12 +457,16 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .call-menu button { display: block; width: 100%; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; }
 .call-menu button:hover:not(:disabled), .call-menu button:focus-visible { outline: none; background: var(--raised); }
 .call-menu button.danger { color: var(--danger); }
+/* A question about a call (delete it?), asked where its menu was: over the page, so that nothing on it moves. */
+.notice.ask.call-confirm { position: fixed; z-index: 1000; box-sizing: border-box; width: min(21rem, calc(100vw - 16px)); box-shadow: 0 14px 28px -12px var(--shadow); }
 
 /* Live: the call's name with the time in a chip, Mark and Stop; what is heard; tell the others; who spoke; the words. */
 .live-call { display: flex; flex-direction: column; flex: 1; gap: 11px; min-height: 0; }
 .live-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .live-head h2 { margin: 0; font: 600 13px/1.4 var(--font-body); }
-.live-head > .spacer { flex: 1; }
+/* Mark and Stop are at the line's end by their own margin. The empty part between is not needed, and the room it took
+   decided, in a narrow window, whether they fit beside the call's name: they did at 4:17, and not at 4:19. */
+.live-head > .spacer { display: none; }
 .live-head button { padding: 3px 9px; font-size: 12px; }
 .live-actions { display: inline-flex; gap: 8px; margin-left: auto; }
 .live-clock { background: var(--togle-soft); color: var(--togle); font-variant-numeric: tabular-nums; }
@@ -506,12 +532,20 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 
 /* The place scrolls, not Settings inside it: the bar is then at the window's edge, clear of the values. */
 .settings.settings-one { padding: 0; overflow: visible; }
-/* Two groups side by side at most, as the design draws Settings (Keys beside Voice, Meetings beside Agents, Accounts under
-   them), each as wide as drawn, so that a value stays near its name. A wider window does not add columns or stretch them. */
-.settings-one .settings-content { max-width: 36rem; margin: 0; }
-.sets { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 14px 22px; align-items: start; }
-.sets > section { display: flex; flex-direction: column; gap: 4px; margin: 0; min-width: 0; }
-.sets > section:has(.setting-detail) { grid-column: 1 / -1; }
+/* Two columns at most, as the design draws Settings (Keys beside Voice, then Meetings and Agents, then Accounts), each as
+   wide as drawn, so that a value stays near its name. A wider window does not add columns or stretch them. Each column is
+   its own: what opens in a group pushes down only what is under it, and nothing crosses to the other side or changes width. */
+.settings-one .settings-content { max-width: 36rem; margin: 0 auto; }
+.sets { position: relative; display: flex; align-items: flex-start; gap: 14px 22px; }
+.sets-col { display: flex; flex: 1 1 0; flex-direction: column; gap: 14px; min-width: 0; }
+.sets section { display: flex; flex-direction: column; gap: 4px; margin: 0; min-width: 0; }
+/* Too narrow for two (under 27rem of room for them): the second column goes under the first, so the groups are read, and
+   reached with Tab, in the same order as in a wide window (Keys, Meetings, Accounts, then Voice, Agents, Devices). By the
+   window's width, not the room's own: a room that is measured cannot let a form laid over it add to what scrolls. */
+@media (max-width: 592px) {
+  .sets { flex-direction: column; align-items: stretch; }
+  .sets-col { flex: none; }
+}
 .settings .sets .section-head { margin: 0; }
 .settings .sets .section-head h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
 .settings .sets .card { border: 0; border-radius: 0; background: none; }
@@ -561,8 +595,8 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings .studio-row .setting-value { min-width: 0; text-align: right; white-space: normal; overflow-wrap: anywhere; }
 /* What a row can do besides (take an agent off Togle's lists, put it back): quiet words after its value, which stand out
    under the pointer. The design draws the row as a name and how it stands, and that is what it reads as. */
-.settings .quiet-action { padding: 0; margin-left: 4px; border: 0; border-radius: 4px; background: none; color: var(--muted); font-size: 12px; font-weight: 400; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
-.settings .quiet-action:hover:not(:disabled), .settings .quiet-action:focus-visible { color: var(--ink); text-decoration-color: currentColor; }
+.quiet-action { flex: none; padding: 0; margin-left: 4px; border: 0; border-radius: 4px; background: none; color: var(--muted); font-size: 12px; font-weight: 400; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.quiet-action:hover:not(:disabled), .quiet-action:focus-visible { border-color: transparent; color: var(--ink); text-decoration-color: currentColor; }
 .agent-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .agent-name .av, .first-found .av { display: inline-grid; flex: none; place-items: center; width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 11px; font-weight: 700; }
 .agent-name .agent-label { min-width: 0; overflow-wrap: anywhere; }
@@ -580,12 +614,32 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings input.switch::before { top: 2px; left: 2px; width: 11px; height: 11px; background: var(--surface); }
 .settings input.switch:checked { background: var(--togle); border-color: var(--togle); }
 .settings input.switch:checked::before { transform: translateX(11px); background: var(--surface); }
-/* What a row opens (names and terms, a key, an agent to add): under it, in a dark box. */
-.settings .setting-detail { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; padding: 10px 12px; border-radius: 10px; background: var(--bg); }
+/* What a row opens in its place (names and terms, remembered voices, a question): right under it and as wide as its group,
+   a card as the design draws one. What is under it in its column moves down, and nothing else moves. */
+.settings .setting-detail { display: flex; flex-direction: column; gap: 7px; margin: 6px 0 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: none; }
 .settings .setting-detail > .setting { padding: 5px 0; border-bottom: 0; }
-.settings .setting-detail > .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.settings .setting-detail > .hint { margin: 0; }
-.settings .setting-detail input:not(.switch):not([type='checkbox']), .settings .setting-detail select { background: var(--surface); }
+.settings .setting-detail .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings .setting-detail .hint { margin: 0; }
+/* A form to type in (an agent to add, a key, a sign-in, a device's code) is one card as wide as Settings, as the design
+   draws it, so that a command or an address has room. It opens under its button and over the page: nothing on the page
+   moves. (Its place down the page is where it would be in the flow; its width is all of the two columns.) */
+/* A card over the page has a narrow rim of the page's own color around it: what it covers is cut off clean, with no letter
+   showing at its round corners. */
+.settings .setting-detail.over { position: absolute; left: 0; right: 0; z-index: 30; margin: 6px 0 0; background: var(--surface); box-shadow: 0 0 0 4px var(--surface), 0 14px 28px -12px var(--shadow); }
+/* A field, as the design draws one: its name and what is typed in it in one dark box, the name on the left, the words on
+   the right. A field of several lines has its name over them. */
+.field, .settings label.field { display: flex; flex-direction: row; align-items: center; gap: 10px; min-width: 0; margin: 0; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 13px; cursor: text; }
+.field:focus-within { border-color: var(--togle); }
+.field .field-name { flex: none; color: var(--muted); }
+.field input, .field select, .field textarea { flex: 1 1 0; width: auto; min-width: 0; padding: 7px 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); font-size: 13px; text-align: right; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: none; }
+/* A choice in a field has a small arrow after it, which says it opens. */
+.field select { padding-right: 16px; text-align-last: right; appearance: none; cursor: pointer; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23a0a7bc' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") right center / 10px 6px no-repeat; }
+.field select option { background: var(--surface); color: var(--ink); }
+.field.tall, .settings label.field.tall { flex-direction: column; align-items: stretch; gap: 2px; padding: 7px 10px; }
+/* Its lines keep their height: as a part that only takes the room left, a box of several lines had none. */
+.field.tall textarea { flex: none; width: 100%; min-height: 4.6rem; padding: 0; text-align: left; line-height: 1.4; resize: vertical; }
+.field-note { overflow-wrap: anywhere; }
 .settings .ai-plan-other { margin: 2px 0 4px; font-size: 12px; }
 .settings .ai-plan .note { font-size: 12px; color: var(--muted); }
 .segmented { border-color: var(--line); border-radius: 8px; }
@@ -599,16 +653,37 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .reach-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
 .reach-dot.on { background: var(--ok); }
 .reach-acted { display: flex; flex-direction: column; gap: 2px; }
-.vocabulary-editor input, .vocabulary-editor textarea { background: var(--surface); }
+/* Names and terms: two short lists in the card, each a small name with its Add beside it, then its rows. */
+.vocabulary-editor { display: flex; flex-direction: column; gap: 6px; padding: 0; }
+.vocabulary-heading { margin: 2px 0 0; }
+.vocabulary-heading h4 { margin: 0; }
+.vocabulary-list li { gap: 6px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.vocabulary-list li:last-child { border-bottom: 0; }
+.vocabulary-list strong { font-weight: 600; }
+.vocabulary-list small { font-size: 12px; overflow-wrap: anywhere; }
+.vocabulary-list .snippet-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; white-space: pre-wrap; }
+.vocabulary-form { display: flex; flex-direction: column; gap: 7px; padding: 4px 0 0; }
+/* While a word or a snippet is being typed, its own Save and Cancel are the card's only buttons. */
+.settings .setting-detail:has(.vocabulary-form) > .row { display: none; }
 
 /* ---- The first minute, once ---- */
 
-.first-minute { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: var(--read); margin: 0; padding: 0; }
+.first-minute { display: flex; flex-direction: column; gap: 14px; margin-block: 0; padding: 0; }
 .first-minute header { display: flex; flex-direction: column; gap: 4px; }
 .first-minute header h2 { margin: 0; font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; line-height: 1.12; }
 .first-minute header .hint { margin: 0; }
-/* A step is never narrower than its widest button ("Get speech recognition (670 MB)"). */
-.first-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15.5rem), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+/* Three steps side by side. A step is never narrower than its widest button ("Get speech recognition (670 MB)"), about
+   15.5rem: where the window has room for two of that (676 to 935px wide), the third is as wide as both, not alone beside a
+   gap; narrower, they are one under another. */
+.first-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+@media (max-width: 935px) {
+  .first-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .first-step:nth-child(3):last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 675px) {
+  .first-steps { grid-template-columns: minmax(0, 1fr); }
+  .first-step:nth-child(3):last-child { grid-column: auto; }
+}
 .first-step { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); counter-increment: step; }
 .first-step h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--font-display); font-size: 1.02rem; font-weight: 650; }
 .first-step h3::before { content: counter(step); flex: none; display: inline-grid; place-items: center; width: 1.55rem; height: 1.55rem; border-radius: 50%; background: var(--togle-soft); color: var(--togle); font: 600 0.8rem var(--font-body); }
@@ -737,8 +812,19 @@ body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: cross
 .agent-chip .cut { min-width: 0; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-chip button { padding: 0 7px; border: 0; background: none; color: var(--muted); font-size: 14px; line-height: 1.3; }
 .agent-chip button:hover { color: var(--ink); }
-.give-panel { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); max-width: 36rem; }
-.give-rows { display: flex; flex-direction: column; gap: 6px; }
+/* The list that gives a call to agents: a card as wide as the design draws it, right under the button that opened it and
+   over the page, so that nothing under it moves (Give to an agent is at the end of a call's head: there it opens at that
+   end). In a low window it moves up, and its rows scroll (CallAgents.tsx measures the room it has). */
+.call-agents, .call-detail-head { position: relative; }
+.give-panel { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; width: 100%; max-width: 24rem; margin: 0; padding: 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 4px var(--surface), 0 14px 28px -12px var(--shadow); font-weight: 400; cursor: default; }
+.call-detail-head > .give-panel { left: auto; right: 0; }
+.give-panel:focus { outline: none; }
+.give-panel > strong { font-size: 13px; font-weight: 600; }
+/* Its name, its field and its buttons keep their place; the rows between them scroll when there are more than fit, their
+   bar in the card's own margin. */
+.give-panel > * { flex: none; }
+.give-panel > .give-rows { display: flex; flex: 0 1 auto; flex-direction: column; gap: 6px; min-height: 3.2rem; margin-right: -10px; padding-right: 2px; overflow-y: auto; scrollbar-gutter: stable; }
+.give-rows > * { flex: none; }
 .give-panel .give-row { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; margin: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); font-size: 13px; cursor: pointer; }
 .give-row[aria-disabled='true'] { opacity: 0.55; cursor: default; }
 .give-row input[type='checkbox'] { margin-top: 3px; }
@@ -747,7 +833,10 @@ body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: cross
 .give-row small { color: var(--muted); font-size: 12px; }
 .give-row .cut { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .give-new { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.give-words { width: 100%; }
+/* What they should do with it, and the button that gives the call, in one box: the words are typed from its left. */
+.give-field { padding: 4px 4px 4px 10px; cursor: text; }
+.give-field .give-words { width: auto; padding: 4px 0; text-align: left; }
+.give-field button { flex: none; }
 .give-panel .hint, .call-agents-wrap .hint { margin: 0; }
 /* The question box on a live call, and what the agents answered: under the Agents row, over the words of the call. */
 .call-ask { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }

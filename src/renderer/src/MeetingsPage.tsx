@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Agent, CallSearchHit, CallSession, CallSessionSummary } from '@shared/types'
 import { namesToConfirm } from '@shared/confirm-names'
 import { CallAgentsRow, GivePanel } from './CallAgents'
@@ -80,7 +80,8 @@ export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown,
   const [hits, setHits] = useState<CallSearchHit[] | null>(null)
   const [searching, setSearching] = useState(false)
   const [menu, setMenu] = useState<{ at: Point; call: CallSessionSummary } | null>(null)
-  const [deleting, setDeleting] = useState<CallSessionSummary | null>(null)
+  // Delete picked from a call's menu: the question is asked where the menu was.
+  const [deleting, setDeleting] = useState<{ at: Point; call: CallSessionSummary } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const open = openId
@@ -120,16 +121,16 @@ export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown,
       </div>
       {callKey && !liveId && <CallAgentsRow call={callKey} live={false} />}
       {deleting && (
-        <div className="notice ask" role="alert">
-          <span>Delete “{meetingTitle(deleting)}”, its notes and its transcript, from this computer? This can’t be undone.</span>
-          <div className="row"><button disabled={busy} onClick={() => setDeleting(null)}>Keep call</button><button className="primary stop" disabled={busy} onClick={() => void remove(deleting)}>Delete call</button></div>
-        </div>
+        <CallConfirm at={deleting.at} label={`Delete ${meetingTitle(deleting.call)}?`} onClose={() => setDeleting(null)}>
+          <span>Delete “{meetingTitle(deleting.call)}”, its notes and its transcript, from this computer? This can’t be undone.</span>
+          <div className="row"><button disabled={busy} onClick={() => setDeleting(null)}>Keep call</button><button className="primary stop" disabled={busy} onClick={() => void remove(deleting.call)}>Delete call</button></div>
+        </CallConfirm>
       )}
       {hits ? (
         <div className="call-history-list" aria-label="Search results">
           {searching && <p className="hint" role="status">Searching…</p>}
           {hits.map(hit => (
-            <button key={hit.id} className="past-call-row meeting-row" aria-label={`Open call: ${meetingTitle(hit)}`} onClick={() => { setOpenId(hit.id); setRenaming(false); setOpenTab(hit.lines.length ? 'transcript' : 'notes') }}>
+            <button key={hit.id} className="past-call-row meeting-row" aria-label={`Open call: ${meetingTitle(hit)}`} title={meetingTitle(hit)} onClick={() => { setOpenId(hit.id); setRenaming(false); setOpenTab(hit.lines.length ? 'transcript' : 'notes') }}>
               <span className="meeting-dot done" aria-hidden="true" />
               <strong>{meetingTitle(hit)}</strong>
               <span>{whenText(hit.startedAt, now)}</span>
@@ -141,7 +142,7 @@ export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown,
       ) : calls === null ? <p className="hint" role="status">Loading calls…</p> : (
         <div className="call-history-list">
           {rows.map(call => (
-            <button key={call.id} className={`past-call-row meeting-row ${call.status === 'live' ? 'live-record' : ''}`} aria-label={`Open call: ${meetingTitle(call)}`}
+            <button key={call.id} className={`past-call-row meeting-row ${call.status === 'live' ? 'live-record' : ''}`} aria-label={`Open call: ${meetingTitle(call)}`} title={meetingTitle(call)}
               onClick={() => call.status === 'live' && call.id === liveId ? onOpenLive() : (setOpenId(call.id), setRenaming(false), setOpenTab('notes'))}
               onContextMenu={event => { if (call.status === 'live') return; event.preventDefault(); setMenu({ at: { x: event.clientX, y: event.clientY }, call }) }}>
               <span className={`meeting-dot ${meetingDot(call, now)}`} aria-hidden="true" />
@@ -154,7 +155,7 @@ export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown,
       )}
       {menu && <CallMenu at={menu.at} label={`${meetingTitle(menu.call)}: rename or delete`} onClose={() => setMenu(null)} items={[
         { label: 'Rename', onSelect: () => { setOpenId(menu.call.id); setOpenTab('notes'); setRenaming(true) } },
-        { label: 'Delete call', danger: true, onSelect: () => setDeleting(menu.call) }
+        { label: 'Delete call', danger: true, onSelect: () => setDeleting(menu) }
       ]} />}
       {error && <p className="error" role="status">{error}</p>}
     </div>
@@ -185,6 +186,36 @@ function CallMenu({ at, label, items, onClose }: { at: Point; label: string; ite
   )
 }
 
+/**
+ * A question about a call (delete it?), asked where its menu was, over the page: nothing on the page moves, and it is in
+ * view however far down the list the call is. Escape or a click elsewhere keeps the call.
+ */
+function CallConfirm({ at, label, onClose, children }: { at: Point; label: string; onClose: () => void; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null)
+  const [place, setPlace] = useState(at)
+  const close = useRef(onClose)
+  close.current = onClose
+  useEffect(() => {
+    const card = box.current
+    if (!card) return
+    // Whole inside the window, also after the window is made smaller with the question open.
+    const fit = (): void => {
+      const { width, height } = card.getBoundingClientRect()
+      setPlace({ x: Math.max(8, Math.min(at.x, innerWidth - width - 8)), y: Math.max(8, Math.min(at.y, innerHeight - height - 8)) })
+    }
+    fit()
+    // The first button keeps the call: Enter by habit deletes nothing.
+    card.querySelector('button')?.focus()
+    const outside = (event: PointerEvent): void => { if (!card.contains(event.target as Node)) close.current() }
+    const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') { event.preventDefault(); close.current() } }
+    document.addEventListener('pointerdown', outside, true)
+    document.addEventListener('keydown', key, true)
+    window.addEventListener('resize', fit)
+    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', key, true); window.removeEventListener('resize', fit) }
+  }, [at.x, at.y])
+  return <div ref={box} className="notice ask call-confirm" role="alertdialog" aria-label={label} style={{ left: place.x, top: place.y }}>{children}</div>
+}
+
 function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDeleted }: { id: string; noise?: NoiseFinding; microphone?: TogleMicrophoneStatus; agents: Agent[]; tab: 'notes' | 'transcript'; onTab: (tab: 'notes' | 'transcript') => void; renameAsked?: boolean; onDeleted: () => void }) {
   const [record, setRecord] = useState<CallSession | null>(null)
   const [error, setError] = useState('')
@@ -192,7 +223,7 @@ function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDelet
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState('')
   const [menu, setMenu] = useState<Point | null>(null)
-  const [deleting, setDeleting] = useState(false)
+  const [deleting, setDeleting] = useState<Point | null>(null)
   const [copied, setCopied] = useState(false)
   // Giving the call to agents: the list that does it, the agents already on the call, and what giving did.
   const [giving, setGiving] = useState(false)
@@ -250,14 +281,20 @@ function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDelet
             ]} />
             <button className="primary" disabled={busy || !ended} title={ended ? 'Give this call to a new agent task, or to agents that are running' : 'End the call first'} aria-expanded={giving} onClick={() => { setGiven(''); setGiving(!giving) }}>Give to an agent</button>
           </div>
+          {/* The list opens under its button, over the page: the notes under it do not move. */}
+          {giving && <GivePanel call={record.id} mode="give" connected={connected} onClose={() => setGiving(false)} onGiven={(_results, line) => setGiven(line)} />}
         </div>
-        {giving && <GivePanel call={record.id} mode="give" connected={connected} onClose={() => setGiving(false)} onGiven={(_results, line) => setGiven(line)} />}
         {given && <p className="hint" role="status">{given}</p>}
         {menu && <CallMenu at={menu} label={`${meetingTitle(record)}: rename or delete`} onClose={() => setMenu(null)} items={[
           { label: 'Rename', onSelect: () => { setTitle(record.title); setEditing(true) } },
-          { label: 'Delete call', danger: true, onSelect: () => setDeleting(true) }
+          { label: 'Delete call', danger: true, onSelect: () => setDeleting(menu) }
         ]} />}
-        {deleting && <div className="notice ask" role="alert"><span>Delete this call’s notes and transcript from this computer? This can’t be undone.</span><div className="row"><button disabled={busy} onClick={() => setDeleting(false)}>Keep call</button><button className="primary stop" disabled={busy} onClick={() => void run(async () => { await api.deleteCallSession(record.id); onDeleted() })}>Delete call</button></div></div>}
+        {deleting && (
+          <CallConfirm at={deleting} label="Delete this call?" onClose={() => setDeleting(null)}>
+            <span>Delete this call’s notes and transcript from this computer? This can’t be undone.</span>
+            <div className="row"><button disabled={busy} onClick={() => setDeleting(null)}>Keep call</button><button className="primary stop" disabled={busy} onClick={() => void run(async () => { await api.deleteCallSession(record.id); onDeleted() })}>Delete call</button></div>
+          </CallConfirm>
+        )}
         {ended && noise && <NoisyMicrophone finding={noise} microphone={microphone} minutes={((record.endedAt ?? record.startedAt) - record.startedAt) / 60_000} />}
         <div className="tabs call-detail-tabs" role="tablist" aria-label="Call details">
           {(['notes', 'transcript'] as const).map(name => <button key={name} role="tab" id={`meeting-tab-${name}`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => onTab(name)}>{name === 'notes' ? 'Notes' : 'Transcript'}</button>)}

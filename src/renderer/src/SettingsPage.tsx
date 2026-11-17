@@ -12,7 +12,7 @@ import { MANAGE_USAGE_URL } from '@shared/plan'
 import { isMicrophoneOn, microphoneNeedsSignIn, type TogleMicrophoneStatus } from '@shared/microphone'
 import { useHotkeys } from './hotkeys'
 import { Shortcut } from './Shortcut'
-import { Row, Section, Toggle } from './Rows'
+import { Field, FormOver, openedInView, Row, Section, Toggle, useOneOpen } from './Rows'
 import { useAccounts } from './Accounts'
 import { Menu } from './Menu'
 import { VocabularyEditor } from './DictationVocabulary'
@@ -55,13 +55,20 @@ export function SettingsPage({ settings, stt, at, onChange }: Props) {
       <div className="settings-content">
         {saveError && <p className="error" role="alert">{saveError}</p>}
         <Update />
+        {/* Two columns, each its own: a list or a question that opens in a group pushes down only what is under it in its
+            column, and nothing jumps to the other side. (A form to type in is laid over both: see FormOver.) In a narrow window
+            the second column goes under the first, so the groups are read, and reached with Tab, in the order they are here. */}
         <div className="sets">
-          <Keys />
-          <Voice settings={settings} stt={stt} save={save} />
-          <Meetings settings={settings} save={save} />
-          <Agents settings={settings} save={save} />
-          <Accounts settings={settings} save={save} />
-          <Devices />
+          <div className="sets-col">
+            <Keys />
+            <Meetings settings={settings} save={save} />
+            <Accounts settings={settings} save={save} />
+          </div>
+          <div className="sets-col">
+            <Voice settings={settings} stt={stt} save={save} />
+            <Agents settings={settings} save={save} />
+            <Devices />
+          </div>
         </div>
       </div>
     </div>
@@ -205,7 +212,7 @@ function NamesAndTerms({ accountId }: { accountId: string }) {
       <Row label={false} name="Names and terms">
         <button className="value-button" aria-expanded={open} title="Names and terms spelled your way, and phrases that type a longer text" onClick={() => setOpen(!open)}>{count === undefined ? '…' : count ? `${count} ${count === 1 ? 'entry' : 'entries'}` : 'None'}</button>
       </Row>
-      {open && <div className="setting-detail"><VocabularyEditor accountId={accountId} /><div className="row"><button className="ghost small" onClick={() => setOpen(false)}>Done</button></div></div>}
+      {open && <div ref={openedInView} className="setting-detail"><VocabularyEditor accountId={accountId} /><div className="row"><button className="ghost small" onClick={() => setOpen(false)}>Done</button></div></div>}
     </>
   )
 }
@@ -253,11 +260,11 @@ function RememberedVoices({ settings, save }: { settings: Settings; save: (patch
         <button className="value-button" aria-expanded={open} onClick={() => setOpen(!open)}>{people.length ? `${people.length} ${people.length === 1 ? 'person' : 'people'}` : 'None'}</button>
       </Row>
       {open && (
-        <div className="setting-detail remembered-people">
+        <div ref={openedInView} className="setting-detail remembered-people">
           <Toggle name="Remember the voices I name" note="Then Togle knows them in later calls. A voice is a person's, so ask them first. Togle keeps a voice profile, encrypted on this computer, never a recording." checked={settings.assist.rememberVoices === true} onChange={(rememberVoices) => void save({ assist: { rememberVoices } })} />
           {people.map((person) => (
             <Row key={person.id} label={false} name={<span className="free-text">{person.name}</span>} note={`Remembered ${new Date(person.createdAt).toLocaleDateString()}`}>
-              <button className="ghost small" aria-label={`Forget ${person.name}'s voice`} disabled={!!busy} onClick={async () => {
+              <button className="quiet-action" aria-label={`Forget ${person.name}'s voice`} disabled={!!busy} onClick={async () => {
                 setBusy(person.id); setError('')
                 try { await api.forgetVoice(person.id) } catch { setError('Could not forget this voice. Try again.') } finally { setBusy('') }
               }}>{busy === person.id ? 'Forgetting…' : 'Forget'}</button>
@@ -277,7 +284,7 @@ const agentLetter = (agent: RunnerStatus): string => (agent.runner === 'codex' ?
 /** The coding agents Togle found on this computer, and the ones the person added: any agent that speaks ACP. */
 function Agents({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
   const [found, setFound] = useState<RunnerStatus[] | null>(null)
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useOneOpen()
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   useEffect(() => {
@@ -305,7 +312,7 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
               : <button className="quiet-action" aria-label={`Remove ${agent.name}`} disabled={!!busy} onClick={() => { if (agent.added) void remove(agent); else setConfirming(agent.runner) }}>{busy === agent.runner ? 'Removing…' : 'Remove'}</button>}
           </Row>
           {confirming === agent.runner && (
-            <div className="setting-detail" role="group" aria-label={`Remove ${agent.name} from Togle?`}>
+            <div ref={openedInView} className="setting-detail" role="group" aria-label={`Remove ${agent.name} from Togle?`}>
               <p className="hint">Togle stops showing {agent.name}’s tasks. They keep running in {agent.name}, which stays installed, and you can add it back here.</p>
               <div className="row">
                 <button className="primary small" onClick={() => void remove(agent)}>Remove</button>
@@ -322,9 +329,9 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
           <option value="cards">Web</option>
         </select>
       </Row>
-      {adding ? <AddAgent onAdded={(list) => { setFound(list); setAdding(false) }} onCancel={() => setAdding(false)} /> : (
-        <div className="setting add-row"><button className="small" title="Any other agent: one that speaks ACP, or any that runs in a terminal" onClick={() => { setError(''); setAdding(true) }}>Add an agent</button></div>
-      )}
+      {/* The button stays where it is while its form is open under it, over the page. */}
+      <div className="setting add-row"><button className="small" aria-expanded={adding} title="Any other agent: one that speaks ACP, or any that runs in a terminal" onClick={() => { setError(''); setAdding(!adding) }}>Add an agent</button></div>
+      {adding && <AddAgent onAdded={(list) => { setFound(list); setAdding(false) }} onCancel={() => setAdding(false)} />}
       {error && <p className="error" role="alert">{error}</p>}
     </Section>
   )
@@ -340,21 +347,20 @@ function AddAgent({ onAdded, onCancel }: { onAdded: (agents: RunnerStatus[]) => 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   return (
-    <form className="setting-detail add-agent" aria-label="Add an agent" onSubmit={(event) => {
-      event.preventDefault()
+    <FormOver className="add-agent" label="Add an agent" busy={busy} onClose={onCancel} onSubmit={() => {
       setBusy(true); setError('')
       void api.addCodingAgent(name, command).then(onAdded, (failure) => setError(errorText(failure))).finally(() => setBusy(false))
     }}>
-      <Row stacked name="Name"><input aria-label="Agent name" required maxLength={40} autoFocus value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></Row>
-      <Row stacked name="Command" note="Togle runs it in a terminal of its own, where you see it and answer it. {task} stands for the task's words. A command for ACP, such as gemini --experimental-acp, is talked to directly, and Togle shows its conversation.">
-        <input aria-label="Command" required maxLength={500} spellCheck={false} value={command} disabled={busy} onChange={(event) => setCommand(event.target.value)} />
-      </Row>
+      <span className="tasks-label">Add an agent</span>
+      <Field name="Name"><input aria-label="Agent name" required maxLength={40} value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></Field>
+      <Field name="Command"><input aria-label="Command" required maxLength={500} spellCheck={false} value={command} disabled={busy} onChange={(event) => setCommand(event.target.value)} /></Field>
+      <p className="hint">Togle runs it in a terminal of its own, where you see it and answer it. {'{task}'} stands for the task's words. A command for ACP, such as gemini --experimental-acp, is talked to directly, and Togle shows its conversation.</p>
       <div className="row">
         <button className="primary" disabled={busy || !name.trim() || !command.trim()}>{busy ? 'Adding…' : 'Add'}</button>
         <button type="button" className="ghost" disabled={busy} onClick={onCancel}>Cancel</button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
-    </form>
+    </FormOver>
   )
 }
 
@@ -417,7 +423,7 @@ function AIPlan({ settings, save }: { settings: Settings; save: (patch: Settings
   const ai = useAI(settings)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [keyForm, setKeyForm] = useState(false)
+  const [keyForm, setKeyForm] = useOneOpen()
   const chatgpt = accounts.find((account) => account.id === 'chatgpt-default') ?? accounts.find((account) => account.provider === 'chatgpt')
   const run = async (action: () => Promise<unknown>): Promise<void> => {
     setBusy(true); setError('')
@@ -460,8 +466,9 @@ function AIPlan({ settings, save }: { settings: Settings; save: (patch: Settings
           </span>
         )}
       </div>
-      {ai.kind === 'none' && !waiting && !keyForm && (
-        <p className="hint ai-plan-other">No ChatGPT plan? <button className="link" onClick={() => setKeyForm(true)}>Use a key</button> from Claude, Gemini, Grok, Kimi or any other.</p>
+      {/* The line stays where it is while the form it opens is under it, over the page. */}
+      {ai.kind === 'none' && !waiting && (
+        <p className="hint ai-plan-other">No ChatGPT plan? <button className="link" aria-expanded={keyForm} onClick={() => setKeyForm(!keyForm)}>Use a key</button> from Claude, Gemini, Grok, Kimi or any other.</p>
       )}
       {ai.kind === 'key' && <KeyModel settings={settings} connection={ai.connection} save={save} />}
       {keyForm && <KeyForm save={save} replacing={ai.kind === 'key' ? ai.connection : undefined} onClose={() => setKeyForm(false)} />}
@@ -514,26 +521,27 @@ function KeyForm({ save, replacing, onClose }: { save: (patch: SettingsPatch) =>
     } finally { setBusy(false) }
   }
   return (
-    <form className="setting-detail ai-key-form" aria-label="Use a key" onSubmit={(event) => { event.preventDefault(); void submit() }}>
-      <Row name="Service">
+    <FormOver className="ai-key-form" label="Use a key" busy={busy} onClose={onClose} onSubmit={() => void submit()}>
+      <span className="tasks-label">Use a key</span>
+      <Field name="Service">
         <select aria-label="Service" value={service} disabled={busy} onChange={(event) => setService(event.target.value as typeof service)}>
           {KEY_SERVICES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
-      </Row>
+      </Field>
       {service === 'other' && (
-        <Row stacked name="Address" note="An OpenAI-compatible service, such as OpenRouter, Groq, or a model on this computer with Ollama.">
+        <Field name="Address" note="An OpenAI-compatible service, such as OpenRouter, Groq, or a model on this computer with Ollama.">
           <input aria-label="Address" type="url" required placeholder="https://openrouter.ai/api/v1" value={address} disabled={busy} onChange={(event) => setAddress(event.target.value)} />
-        </Row>
+        </Field>
       )}
-      <Row stacked name="Key" note="Saved encrypted on this computer. The service bills you for what Togle uses.">
+      <Field name="Key" note="Saved encrypted on this computer. The service bills you for what Togle uses.">
         <input aria-label="Key" type="password" autoComplete="off" required={service !== 'other'} value={key} disabled={busy} onChange={(event) => setKey(event.target.value)} />
-      </Row>
+      </Field>
       <div className="row">
         <button className="primary" disabled={busy || (service !== 'other' && !key.trim()) || (service === 'other' && !address.trim())}>{busy ? 'Checking the key…' : 'Use this key'}</button>
         <button type="button" className="ghost" disabled={busy} onClick={onClose}>Cancel</button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
-    </form>
+    </FormOver>
   )
 }
 
@@ -556,7 +564,7 @@ function studioSummary(status: TogleMicrophoneStatus | undefined): string {
  */
 function StudioRow() {
   const reach = useReach()
-  const [signingIn, setSigningIn] = useState(false)
+  const [signingIn, setSigningIn] = useOneOpen()
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   if (reach?.available) {
@@ -571,7 +579,7 @@ function StudioRow() {
             ? <Menu className="value-button" label={reach.account.email} ariaLabel="Togle Studio account" align="right" items={[{ label: 'Sign out', onSelect: () => void run('out', () => api.reachSignOut()) }]} />
             : <button className="small" aria-expanded={signingIn} onClick={() => setSigningIn(!signingIn)}>Sign in</button>}
         </Row>
-        {signingIn && !reach.account && <div className="setting-detail"><SignIn busy={busy} run={run} /></div>}
+        {signingIn && !reach.account && <SignIn busy={busy} run={run} onCancel={() => setSigningIn(false)} />}
         {error && <p className="error" role="alert">{error}</p>}
       </>
     )
