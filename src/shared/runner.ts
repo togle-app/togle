@@ -13,8 +13,8 @@ export type RunnerKind = string
  */
 export const asksEveryTime = (runner: RunnerKind): boolean => !(runner in KNOWN_AGENTS) && !runsInTerminal(runner)
 
-/** The agents Togle knows by name, before any is added. */
-export const KNOWN_AGENTS: Readonly<Record<string, string>> = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
+/** The agents Togle knows by name, before any is added, in the order the design lists them everywhere. */
+export const KNOWN_AGENTS: Readonly<Record<string, string>> = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes' }
 
 /**
  * How to get each agent Togle knows: the one line its maker gives to install it, for PowerShell on Windows and for a

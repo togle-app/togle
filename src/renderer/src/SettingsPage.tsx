@@ -299,9 +299,10 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
         <Fragment key={agent.runner}>
           <Row label={false} className="agent-row" name={<span className="agent-name"><span className="av" aria-hidden="true">{agentLetter(agent)}</span><span className="agent-label">{agent.name}</span></span>}>
             <span className={`setting-value ${agent.installed ? 'found' : ''}`}>{agent.removed ? 'Removed' : agent.installed ? (agent.added ? `Added · ${runsInTerminal(agent.runner) ? 'terminal' : 'conversation'}` : 'Found') : 'Not found'}</span>
+            {/* Quiet, as the design draws the row (a name and how it stands): removing an agent is rare, and is not what the screen is about. */}
             {agent.removed
-              ? <button className="ghost small" aria-label={`Add back ${agent.name}`} disabled={!!busy} onClick={() => void restore(agent)}>{busy === agent.runner ? 'Adding…' : 'Add back'}</button>
-              : <button className="ghost small" aria-label={`Remove ${agent.name}`} disabled={!!busy} onClick={() => { if (agent.added) void remove(agent); else setConfirming(agent.runner) }}>{busy === agent.runner ? 'Removing…' : 'Remove'}</button>}
+              ? <button className="quiet-action" aria-label={`Add back ${agent.name}`} disabled={!!busy} onClick={() => void restore(agent)}>{busy === agent.runner ? 'Adding…' : 'Add back'}</button>
+              : <button className="quiet-action" aria-label={`Remove ${agent.name}`} disabled={!!busy} onClick={() => { if (agent.added) void remove(agent); else setConfirming(agent.runner) }}>{busy === agent.runner ? 'Removing…' : 'Remove'}</button>}
           </Row>
           {confirming === agent.runner && (
             <div className="setting-detail" role="group" aria-label={`Remove ${agent.name} from Togle?`}>
@@ -314,10 +315,12 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
           )}
         </Fragment>
       ))}
-      <Row label={false} name="Tasks open in">
-        <div className="segmented" role="radiogroup" aria-label="Tasks open in">
-          {(['session', 'cards'] as const).map((view) => <button key={view} type="button" role="radio" aria-checked={settings.tasks.view === view} className={settings.tasks.view === view ? 'on' : ''} title={view === 'session' ? 'The agent’s own screen. A switch on a task changes it for that task.' : 'The conversation, a card for what the agent asks, and a reply box. A switch on a task changes it for that task.'} onClick={() => void save({ tasks: { view } })}>{view === 'session' ? 'Terminal' : 'Web'}</button>)}
-        </div>
+      {/* A value that opens its choices, like the others on this screen: Terminal is the agent's own screen, Web the conversation with a card for what it asks. */}
+      <Row name="Tasks open in">
+        <select aria-label="Tasks open in" title="Terminal is the agent’s own screen. Web is the conversation, a card for what the agent asks, and a reply box. A switch on a task changes it for that task." value={settings.tasks.view} onChange={(event) => void save({ tasks: { view: event.target.value === 'cards' ? 'cards' : 'session' } })}>
+          <option value="session">Terminal</option>
+          <option value="cards">Web</option>
+        </select>
       </Row>
       {adding ? <AddAgent onAdded={(list) => { setFound(list); setAdding(false) }} onCancel={() => setAdding(false)} /> : (
         <div className="setting add-row"><button className="small" title="Any other agent: one that speaks ACP, or any that runs in a terminal" onClick={() => { setError(''); setAdding(true) }}>Add an agent</button></div>

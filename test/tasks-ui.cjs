@@ -762,13 +762,18 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual(await texts(ui, '#settings-agents .agent-label'), ['Claude Code', 'Codex', 'Hermes'])
   assert.deepEqual(await texts(ui, '#settings-agents .agent-name .av'), ['C', 'X', 'H'], 'each agent with its letter, as the design marks them')
   assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add an agent'])
-  // Which view a task opens in, as the design's Settings has it: Terminal until it is changed.
-  assert.deepEqual(await texts(ui, '#settings-agents [aria-label="Tasks open in"] button'), ['Terminal', 'Web'])
-  assert.equal(await ui.evaluate("document.querySelector('#settings-agents [aria-label=\"Tasks open in\"] .on').textContent"), 'Terminal')
-  await ui.click('#settings-agents [aria-label="Tasks open in"] button', 'Web')
-  await ui.wait("document.querySelector('#settings-agents [aria-label=\"Tasks open in\"] .on').textContent==='Web'")
+  // Which view a task opens in, as the design's Settings has it: a value like the others, Terminal until it is changed.
+  const view = '#settings-agents select[aria-label="Tasks open in"]'
+  const shownView = "document.querySelector(" + JSON.stringify(view) + ").selectedOptions[0].textContent"
+  const pickView = value => ui.evaluate("(()=>{const el=document.querySelector(" + JSON.stringify(view) + ");Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(el," + JSON.stringify(value) + ");el.dispatchEvent(new Event('change',{bubbles:true}))})()")
+  assert.deepEqual(await texts(ui, view + ' option'), ['Terminal', 'Web'])
+  assert.equal(await ui.evaluate(shownView), 'Terminal')
+  assert.equal(await ui.evaluate("!!document.querySelector('#settings-agents .segmented, #settings-agents [role=radio]')"), false, 'not a pair of buttons: the design draws the value in words')
+  await pickView('cards')
+  await ui.wait(shownView + "==='Web'")
   assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).at(-1), { tasks: { view: 'cards' } })
-  await ui.click('#settings-agents [aria-label="Tasks open in"] button', 'Terminal')
+  await pickView('session')
+  await ui.wait(shownView + "==='Terminal'")
   assert.equal(await ui.evaluate("!!document.querySelector('.settings .card-note, .settings .setting > .note')"), false, 'no notes under the rows: everything fits on one screen')
   assert.deepEqual(await texts(ui, '#settings-agents .setting-value'), ['Found', 'Found', 'Not found'])
   // Remove takes an agent Togle finds off its lists, after asking: it stays installed, its tasks go on in it, and it can be added back.
@@ -809,6 +814,17 @@ async function checkAgentSettings(T, agent) {
     assert.equal(await ui.evaluate(oneLine), true, 'Microphone is on one line at ' + width)
   }
   await ui.capture('settings-long-agent')
+  // Two groups side by side at most, as the design draws them, however wide the window: Keys beside Voice, Meetings beside
+  // Agents, Accounts under them. A wide window once made three, four or five columns of them, or one thin strip.
+  for (const width of [1024, 1600]) {
+    ui.window.setContentSize(width, 900)
+    await ui.wait('innerWidth===' + width)
+    assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.sets')).gridTemplateColumns.split(' ').length"), 2, 'two columns at ' + width)
+    assert.equal(await ui.evaluate("(()=>{const top=id=>Math.round(document.getElementById(id).getBoundingClientRect().top);return top('settings-keys')===top('settings-voice')&&top('settings-meetings')===top('settings-agents')&&top('settings-meetings')>top('settings-keys')&&top('settings-accounts')>top('settings-meetings')})()"), true, 'the groups pair up as drawn at ' + width)
+    assert.ok(await ui.evaluate("document.querySelector('.sets').getBoundingClientRect().width<=580"), 'and stay as wide as drawn at ' + width)
+  }
+  // Removing an agent is quiet words on its row, not a button: the row reads as a name and how it stands.
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('#settings-agents button[aria-label^=\"Remove \"]')].every(b=>getComputedStyle(b).borderTopWidth==='0px'&&getComputedStyle(b).fontWeight==='400')"), true)
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }

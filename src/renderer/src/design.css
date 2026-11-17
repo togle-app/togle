@@ -500,10 +500,11 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 
 /* ---- Settings: five groups side by side, each a few rows of a name and its value ---- */
 
-.settings.settings-one { padding: 0; }
-/* Settings keeps the width the design draws it at, like the other places: on a wide window its groups stay three in a row,
-   as drawn, where they would stretch into one thin strip across the window with each value far from its name. */
-.settings-one .settings-content { max-width: var(--read); margin: 0; }
+/* The place scrolls, not Settings inside it: the bar is then at the window's edge, clear of the values. */
+.settings.settings-one { padding: 0; overflow: visible; }
+/* Two groups side by side at most, as the design draws Settings (Keys beside Voice, Meetings beside Agents, Accounts under
+   them), each as wide as drawn, so that a value stays near its name. A wider window does not add columns or stretch them. */
+.settings-one .settings-content { max-width: 36rem; margin: 0; }
 .sets { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 14px 22px; align-items: start; }
 .sets > section { display: flex; flex-direction: column; gap: 4px; margin: 0; min-width: 0; }
 .sets > section:has(.setting-detail) { grid-column: 1 / -1; }
@@ -528,6 +529,8 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
   width: auto;
   min-width: 0;
   max-width: 11rem;
+  /* As wide as the value it shows, not as its longest choice: "Ask" then leaves its row's name all the room. */
+  field-sizing: content;
   text-overflow: ellipsis;
   padding: 0 0 0 4px;
   border: 0;
@@ -552,6 +555,10 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings .sets .setting:is(.agent-row, .studio-row, .ai-plan) > .name { flex: 0 1 auto; min-width: 0; }
 .settings .sets .setting:is(.agent-row, .studio-row, .ai-plan) > .control { flex: 0 1 auto; margin-left: auto; }
 .settings .studio-row .setting-value { min-width: 0; text-align: right; white-space: normal; overflow-wrap: anywhere; }
+/* What a row can do besides (take an agent off Togle's lists, put it back): quiet words after its value, which stand out
+   under the pointer. The design draws the row as a name and how it stands, and that is what it reads as. */
+.settings .quiet-action { padding: 0; margin-left: 4px; border: 0; border-radius: 4px; background: none; color: var(--muted); font-size: 12px; font-weight: 400; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.settings .quiet-action:hover:not(:disabled), .settings .quiet-action:focus-visible { color: var(--ink); text-decoration-color: currentColor; }
 .agent-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .agent-name .av, .first-found .av { display: inline-grid; flex: none; place-items: center; width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 11px; font-weight: 700; }
 .agent-name .agent-label { min-width: 0; overflow-wrap: anywhere; }
