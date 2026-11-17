@@ -54,7 +54,6 @@ export function SettingsPage({ settings, stt, at, onChange }: Props) {
     <div className="settings settings-one">
       <div className="settings-content">
         {saveError && <p className="error" role="alert">{saveError}</p>}
-        <Update />
         {/* Columns, each its own: a list or a question that opens in a group pushes down only what is under it in its column,
             and nothing jumps to the other side. (A form to type in is laid over the page: see FormOver.) Two columns as the
             design draws them; on a wide window the stylesheet makes three of their four parts (the two middle parts share a
@@ -63,6 +62,8 @@ export function SettingsPage({ settings, stt, at, onChange }: Props) {
         <div className="sets">
           <div className="sets-col">
             <div className="sets-part">
+              {/* An update to tell of is the first group, a group like the others: it is not there otherwise. */}
+              <Update />
               <Keys />
               <Meetings settings={settings} save={save} />
             </div>
