@@ -15,8 +15,9 @@ export function RequestCard({ request, onAllow, onAlways, onRefuse, onReply }: {
             <p>{question.text}</p>
             {question.options.length > 0 && (
               <div className="task-options">
-                {question.options.map((option) => (
-                  <button key={option} className="small" onClick={() => onReply(option)}>
+                {/* The first choice is the light one, as the design draws a question's choices. */}
+                {question.options.map((option, index) => (
+                  <button key={option} className={index === 0 ? 'primary small' : 'small'} onClick={() => onReply(option)}>
                     {option}
                   </button>
                 ))}

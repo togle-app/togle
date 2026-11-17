@@ -304,13 +304,17 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-latest { max-width: 100%; }
 /* "Show earlier": its words only, in the middle. A link button has a negative side margin that would make it wider than the thread. */
 .task-earlier-turns { align-self: center; margin: 0; font-size: 12px; }
-.task-agent { max-width: 100%; padding: 8px 10px; border-radius: 10px; background: var(--bg); overflow-wrap: anywhere; }
+/* What the agent said is plain words on the place, as the design draws a conversation: only what you said is in a bubble. */
+.task-agent { max-width: 100%; padding: 0; overflow-wrap: anywhere; }
 .task-agent > :first-child { margin-top: 0; }
 .task-agent > :last-child { margin-bottom: 0; }
 .task-you { align-self: flex-end; max-width: 82%; padding: 8px 10px; border-radius: 10px; background: var(--togle-soft); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-steps > summary { padding: 0; list-style: none; color: var(--muted); font-size: 12px; cursor: pointer; }
 .task-steps > summary::-webkit-details-marker { display: none; }
 .task-steps > summary:hover { color: var(--ink); }
+/* The small arrow the design draws before a line of steps: it points down while they are open. */
+.task-steps > summary::before { content: '\25B8'; display: inline-block; width: 0.8em; margin-right: 0.35rem; font-size: 10px; }
+.task-steps[open] > summary::before { content: '\25BE'; }
 .task-steps[open] { display: flex; flex-direction: column; gap: 8px; }
 .task-cmd { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--muted); font-size: 12px; }
 .task-cmd code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-family: var(--font-mono); }
@@ -586,7 +590,8 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings .ai-plan .note { font-size: 12px; color: var(--muted); }
 .segmented { border-color: var(--line); border-radius: 8px; }
 .segmented button { border: 0; border-radius: 0; font-weight: 600; }
-.segmented button.on { background: var(--togle-soft); color: var(--togle); }
+/* The one picked is light with dark words, as the design draws the switch between a task's two views. */
+.segmented button.on, .segmented button.on:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
 .reach-code-value { font: 600 28px var(--font-mono); letter-spacing: 0.12em; color: var(--ink); }
 .reach-code .control { justify-self: start; }
 .reach-device { display: flex; align-items: center; gap: 8px; min-width: 0; }
