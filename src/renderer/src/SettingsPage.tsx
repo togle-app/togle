@@ -20,6 +20,7 @@ import { VocabularyEditor } from './DictationVocabulary'
 import { Devices, SignIn, useReach } from './Devices'
 import { useRememberedVoices } from './VoiceMemory'
 import type { SettingsPart } from './open-settings'
+import { AGENTS_FOUND, keepAnswer, keptAnswer } from './kept'
 
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -30,7 +31,8 @@ interface Props {
   stt: SttStatus
   /** Opened to fix something: the part that does. */
   at?: SettingsPart
-  onChange: (settings: Settings) => void
+  /** Saves a change: the window shows it at once, and the promise fails when Togle refused it. */
+  onSave: (patch: SettingsPatch) => Promise<void>
 }
 
 /**
@@ -38,11 +40,11 @@ interface Props {
  * few rows of a name and its value. Every setting has a default that works, so nobody has to come here. A row that opens
  * something to change (names and terms, a key, an agent to add) widens its group while it is open.
  */
-export function SettingsPage({ settings, stt, at, onChange }: Props) {
+export function SettingsPage({ settings, stt, at, onSave }: Props) {
   const [saveError, setSaveError] = useState('')
   const save = async (patch: SettingsPatch): Promise<void> => {
     setSaveError('')
-    try { onChange(await api.updateSettings(patch)) } catch (error) { setSaveError(`Could not save: ${errorText(error)}`) }
+    try { await onSave(patch) } catch (error) { setSaveError(`Could not save: ${errorText(error)}`) }
   }
   // Opened to fix something: at the part that does, ready to use.
   useEffect(() => {
@@ -211,11 +213,16 @@ function RecentDictations({ accountId }: { accountId: string }) {
 /** Names and terms Togle spells right, and phrases that stand for a longer text: how many, and a way to change them. */
 function NamesAndTerms({ accountId }: { accountId: string }) {
   const [open, setOpen] = useState(false)
-  const [count, setCount] = useState<number>()
+  // The count read last shows at once while it is read again (see kept.tsx).
+  const [count, setCount] = useState<number | undefined>(() => keptAnswer<number>(`vocabulary.${accountId}`))
   useEffect(() => {
     if (open) return
     let current = true
-    void api.dictationVocabulary(accountId).then((value) => { if (current) setCount(value.words.length + value.snippets.length) }, () => undefined)
+    void api.dictationVocabulary(accountId).then((value) => {
+      const found = value.words.length + value.snippets.length
+      keepAnswer(`vocabulary.${accountId}`, found)
+      if (current) setCount(found)
+    }, () => undefined)
     return () => { current = false }
   }, [accountId, open])
   return (
@@ -292,20 +299,22 @@ const agentLetter = (agent: RunnerStatus): string => (agent.runner === 'codex' ?
 
 /** The coding agents Togle found on this computer, and the ones the person added: any agent that speaks ACP. */
 function Agents({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
-  const [found, setFound] = useState<RunnerStatus[] | null>(null)
+  // The agents found last (here or on the Agents screen) show at once, and are looked for again behind them.
+  const [found, setFound] = useState<RunnerStatus[] | null>(() => keptAnswer<RunnerStatus[]>(AGENTS_FOUND) ?? null)
+  const take = (list: RunnerStatus[]): void => { keepAnswer(AGENTS_FOUND, list); setFound(list) }
   const [adding, setAdding] = useOneOpen()
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   useEffect(() => {
     let current = true
-    void api.runnerStatus().then((list) => { if (current) setFound(list) }, () => { if (current) setFound([]) })
+    void api.runnerStatus().then((list) => { if (current) take(list) }, () => { if (current) setFound((was) => was ?? []) })
     return () => { current = false }
   }, [])
   // An agent Togle finds by itself is asked about before it is taken off the lists; one the person added is forgotten at once.
   const [confirming, setConfirming] = useState('')
   const change = async (agent: RunnerStatus, work: () => Promise<RunnerStatus[]>): Promise<void> => {
     setBusy(agent.runner); setError(''); setConfirming('')
-    try { setFound(await work()) } catch (failure) { setError(errorText(failure)) } finally { setBusy('') }
+    try { take(await work()) } catch (failure) { setError(errorText(failure)) } finally { setBusy('') }
   }
   const remove = (agent: RunnerStatus): Promise<void> => change(agent, () => api.removeCodingAgent(agent.runner))
   const restore = (agent: RunnerStatus): Promise<void> => change(agent, () => api.restoreCodingAgent(agent.runner))
@@ -343,7 +352,7 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
       </Row>
       {/* The button stays where it is while its form is open under it, over the page. */}
       <div className="setting add-row"><button className="small" aria-expanded={adding} title="Any other agent: one that speaks ACP, or any that runs in a terminal" onClick={() => { setError(''); setAdding(!adding) }}>Add an agent</button></div>
-      {adding && <AddAgent onAdded={(list) => { setFound(list); setAdding(false) }} onCancel={() => setAdding(false)} />}
+      {adding && <AddAgent onAdded={(list) => { take(list); setAdding(false) }} onCancel={() => setAdding(false)} />}
       {error && <p className="error" role="alert">{error}</p>}
     </Section>
   )

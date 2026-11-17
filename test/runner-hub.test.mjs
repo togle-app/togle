@@ -439,6 +439,81 @@ test('an agent not found is looked for again once what a terminal would see is a
   }
 })
 
+test('the agents are looked for once at a time; after the first look the last answer comes at once, and a new look that differs is told', async () => {
+  const claude = new FakeBackend('claude')
+  let looks = 0
+  let open
+  let gate = new Promise((resolve) => { open = resolve })
+  claude.detect = async () => { looks++; await gate; return claude.installed ? { installed: true, command: 'claude', version: '1.0' } : { installed: false } }
+  const { hub, changes } = hubOf([claude], { statusMs: 0 })
+  try {
+    // Two asks while the first look runs: one look answers both.
+    const both = Promise.all([hub.status(), hub.status()])
+    open()
+    const [one, two] = await both
+    assert.equal(looks, 1, 'one look for both')
+    assert.deepEqual(one, two)
+    // Older than statusMs: the last answer at once, and a look behind it, which finds the agent gone and tells the window.
+    gate = new Promise((resolve) => { open = resolve })
+    claude.installed = false
+    const at = Date.now()
+    const again = await hub.status()
+    assert.ok(Date.now() - at < 50, 'not waited for')
+    assert.equal(again[0].installed, true, 'the last answer')
+    open()
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    assert.ok(changes.length > 0, 'the window is told')
+    assert.equal((await hub.status())[0].installed, false, 'what the look behind it found')
+  } finally {
+    await hub.dispose()
+  }
+})
+
+test('a look for the agents begun before one was added is not kept', async () => {
+  const claude = new FakeBackend('claude')
+  let open
+  const gate = new Promise((resolve) => { open = resolve })
+  claude.detect = async () => { await gate; return { installed: true, command: 'claude', version: '1.0' } }
+  const { hub } = hubOf([claude])
+  try {
+    const early = hub.status()
+    hub.addBackend(new FakeBackend('codex'))
+    open()
+    assert.deepEqual((await early).map((s) => s.runner), ['claude'], 'the look began with Claude Code alone')
+    assert.deepEqual((await hub.status()).map((s) => s.runner), ['claude', 'codex'], 'looked for again, with the one added')
+  } finally {
+    await hub.dispose()
+  }
+})
+
+test('the tasks are listed once at a time, a listing begun before a change is not kept, and a task\'s log comes from the list read last', async () => {
+  const claude = new FakeBackend('claude', { tasks: [info('claude', 'a', 'Fix the login redirect', 'idle', 300)] })
+  const { hub } = hubOf([claude], { cacheMs: 0 })
+  try {
+    await hub.status()
+    // The window asks for the list and a task at once: one listing.
+    await Promise.all([hub.list(), hub.list(), hub.detail('claude:a')])
+    assert.equal(claude.lists, 1, 'one listing for all three')
+    // A task's log: from the list read last, though it is old (cacheMs 0), not from a new listing.
+    assert.equal((await hub.detail('claude:a')).task.title, 'Fix the login redirect')
+    assert.equal(claude.lists, 1, 'not listed again for a log')
+    await assert.rejects(hub.detail('claude:nope'), /gone/)
+    // A listing under way when an agent is added is not kept: the next list asks again.
+    let open
+    const gate = new Promise((resolve) => { open = resolve })
+    claude.list = async () => { claude.lists++; await gate; return claude.tasks }
+    const early = hub.list()
+    hub.addBackend(new FakeBackend('codex'))
+    open()
+    await early
+    const before = claude.lists
+    await hub.list()
+    assert.equal(claude.lists, before + 1, 'listed again after the change')
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('a task is named by the first line of the words it was given, never by an agent\'s stand-in or a saved call\'s note', async () => {
   // An agent that names a new task by itself the way Codex does, until it is given a name.
   class StandIn extends FakeBackend {

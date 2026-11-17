@@ -40,6 +40,8 @@ export interface HubOptions {
   records?: RecordStore
   /** How long the agents' lists are reused, in milliseconds. */
   cacheMs?: number
+  /** How long the agents found count as found before they are looked for again (behind the last answer), in milliseconds. */
+  statusMs?: number
   /** How long quitting waits for the commands of stopped tasks to end, in milliseconds. */
   quitWaitMs?: number
   /** A task was started here, from whichever place: told with what it was started from. */
@@ -97,14 +99,32 @@ export class RunnerHub {
   private disposed = false
   private disposing: Promise<void> | null = null
   private readonly cacheMs: number
+  /** The look for the agents under way, and the listing of their tasks under way, each with the generation it began in. */
+  private looking: { generation: number; promise: Promise<RunnerStatus[]> } | null = null
+  private listing: { generation: number; promise: Promise<TaskInfo[]> } | null = null
+  private agentsGeneration = 0
+  private listGeneration = 0
 
   constructor(private readonly options: HubOptions) {
     this.cacheMs = options.cacheMs ?? 4_000
   }
 
-  /** Which agents are on this computer. */
+  /**
+   * Which agents are on this computer. Looking runs each agent's program (`hermes --version` alone takes a second), so once
+   * Togle has looked, the last answer is given at once, and one older than 20 seconds is looked for again behind it: the
+   * window is told when that changes anything.
+   */
   async status(): Promise<RunnerStatus[]> {
-    if (this.found && Date.now() - this.found.at < 20_000) return this.found.status
+    const found = this.found
+    if (!found) return this.lookForAgents()
+    if (Date.now() - found.at >= (this.options.statusMs ?? 20_000)) void this.lookForAgents().catch(() => undefined)
+    return found.status
+  }
+
+  /** One look at a time. A look begun before the agents Togle works with changed does not keep what it found. */
+  private lookForAgents(): Promise<RunnerStatus[]> {
+    if (this.looking?.generation === this.agentsGeneration) return this.looking.promise
+    const generation = this.agentsGeneration
     const detect = (): Promise<RunnerStatus[]> =>
       Promise.all(
         this.options.backends.map(async (backend): Promise<RunnerStatus> => {
@@ -112,16 +132,37 @@ export class RunnerHub {
           return { runner: backend.runner, name: this.nameOf(backend.runner), installed: detected.installed, ...(detected.version ? { version: detected.version } : {}), ...(backend.runner in KNOWN_AGENTS ? {} : { added: true }) }
         })
       )
-    let status = await detect()
-    // One not found may have been installed after Togle started, or where only a terminal looks: look again once more is known.
-    if (status.some((item) => !item.installed) && (await this.options.widenPath?.().catch(() => false))) status = await detect()
-    this.found = { at: Date.now(), status }
-    return status
+    const promise = (async (): Promise<RunnerStatus[]> => {
+      let status = await detect()
+      // One not found may have been installed after Togle started, or where only a terminal looks: look again once more is known.
+      if (status.some((item) => !item.installed) && (await this.options.widenPath?.().catch(() => false))) status = await detect()
+      if (generation === this.agentsGeneration && !this.disposed) {
+        const before = this.found?.status
+        this.found = { at: Date.now(), status }
+        if (before && JSON.stringify(before) !== JSON.stringify(status)) this.fresh()
+      }
+      return status
+    })()
+    const look = { generation, promise }
+    this.looking = look
+    void promise.finally(() => { if (this.looking === look) this.looking = null }).catch(() => undefined)
+    return promise
+  }
+
+  /** The agents Togle works with changed: what was found of them is looked for again, and a look under way is not kept. */
+  private agentsChanged(): void {
+    this.found = null
+    this.agentsGeneration++
   }
 
   async list(): Promise<TaskView[]> {
+    return this.viewsOf(await this.infos())
+  }
+
+  /** The tasks as the window shows them: what the agents list, with the tasks Togle runs over them. */
+  private viewsOf(infos: TaskInfo[]): TaskView[] {
     const views = new Map<string, TaskView>()
-    for (const info of await this.infos()) views.set(keyOf(info.runner, info.id), this.viewOfInfo(info))
+    for (const info of infos) views.set(keyOf(info.runner, info.id), this.viewOfInfo(info))
     for (const owned of this.owned.values()) views.set(owned.key, this.viewOfOwned(owned, views.get(owned.key)))
     return [...views.values()].map((view) => ({ ...view, agent: this.nameOf(view.runner) })).sort(order)
   }
@@ -143,7 +184,7 @@ export class RunnerHub {
   addBackend(backend: Backend, restore = false): void {
     if (this.disposed || this.has(backend.runner)) return
     this.options.backends.push(backend)
-    this.found = null
+    this.agentsChanged()
     this.fresh()
     if (restore) void this.restoreOf(backend)
   }
@@ -157,7 +198,7 @@ export class RunnerHub {
     const at = this.options.backends.findIndex((backend) => backend.runner === runner)
     if (at < 0) return
     const [backend] = this.options.backends.splice(at, 1)
-    this.found = null
+    this.agentsChanged()
     for (const [key, owned] of [...this.owned]) {
       if (owned.handle.runner !== runner || !(runner in KNOWN_AGENTS)) continue
       this.owned.delete(key)
@@ -168,8 +209,13 @@ export class RunnerHub {
     this.fresh()
   }
 
+  /**
+   * A task, with Togle's own log of it. The window takes the task from the list and asks this for the log when a task is
+   * picked, so the list read last serves here however old it is: the agents are not asked again (which can take seconds) for
+   * a log Togle has.
+   */
   async detail(key: string): Promise<TaskDetail> {
-    const task = (await this.list()).find((view) => view.key === key)
+    const task = this.viewsOf(this.cache?.infos ?? (await this.infos())).find((view) => view.key === key)
     if (!task) throw new Error('That task is gone.')
     return { task, log: [...(this.owned.get(key)?.log ?? [])] }
   }
@@ -239,7 +285,7 @@ export class RunnerHub {
    * Code, and only for the program that was listed for it.
    */
   async takeOver(key: string): Promise<TaskView> {
-    this.cache = null
+    this.forgetList()
     const info = (await this.infos()).find((task) => keyOf(task.runner, task.id) === key)
     if (!info) throw new Error('That task is gone.')
     if (this.owned.has(key) || !info.pid) return this.open(key)
@@ -256,7 +302,7 @@ export class RunnerHub {
       if (!(await listProcesses()).some((proc) => proc.pid === info.pid)) break
       await new Promise((resolve) => setTimeout(resolve, 200))
     }
-    this.cache = null
+    this.forgetList()
     try {
       return await this.open(key, flags)
     } catch (error) {
@@ -469,23 +515,39 @@ export class RunnerHub {
     return owned
   }
 
-  private async infos(): Promise<TaskInfo[]> {
-    if (this.cache && Date.now() - this.cache.at < this.cacheMs) return this.cache.infos
-    const installed = new Set((await this.status()).filter((status) => status.installed).map((status) => status.runner))
-    const lists = await Promise.allSettled(this.options.backends.filter((backend) => installed.has(backend.runner)).map((backend) => backend.list()))
-    const infos = lists.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
-    // What the agents do not list themselves, from the record of what Togle started.
-    for (const record of this.options.records?.all() ?? []) {
-      if (installed.has(record.runner) && !infos.some((info) => info.runner === record.runner && info.id === record.id)) {
-        infos.push({ id: record.id, runner: record.runner, title: record.title, folder: record.folder, state: 'idle', updatedAt: record.at })
+  /** The tasks the agents list. One listing at a time: the window asks for the list and a task's detail at once. */
+  private infos(): Promise<TaskInfo[]> {
+    if (this.cache && Date.now() - this.cache.at < this.cacheMs) return Promise.resolve(this.cache.infos)
+    if (this.listing?.generation === this.listGeneration) return this.listing.promise
+    const generation = this.listGeneration
+    const promise = (async (): Promise<TaskInfo[]> => {
+      const installed = new Set((await this.status()).filter((status) => status.installed).map((status) => status.runner))
+      const lists = await Promise.allSettled(this.options.backends.filter((backend) => installed.has(backend.runner)).map((backend) => backend.list()))
+      const infos = lists.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+      // What the agents do not list themselves, from the record of what Togle started.
+      for (const record of this.options.records?.all() ?? []) {
+        if (installed.has(record.runner) && !infos.some((info) => info.runner === record.runner && info.id === record.id)) {
+          infos.push({ id: record.id, runner: record.runner, title: record.title, folder: record.folder, state: 'idle', updatedAt: record.at })
+        }
       }
-    }
-    this.cache = { at: Date.now(), infos }
-    return infos
+      // A listing begun before something changed is not kept: the next one is asked for again.
+      if (generation === this.listGeneration) this.cache = { at: Date.now(), infos }
+      return infos
+    })()
+    const listing = { generation, promise }
+    this.listing = listing
+    void promise.finally(() => { if (this.listing === listing) this.listing = null }).catch(() => undefined)
+    return promise
+  }
+
+  /** The list is read again next time, and a listing under way is not kept. */
+  private forgetList(): void {
+    this.cache = null
+    this.listGeneration++
   }
 
   private fresh(): void {
-    this.cache = null
+    this.forgetList()
     this.changedSoon()
   }
 

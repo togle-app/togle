@@ -8,43 +8,57 @@ const api = window.togle
 /** How often the conversation of a task that works is read again, in milliseconds. */
 const READ_AGAIN_MS = 3_000
 
+/** The conversations read last, by task (and whether all of it was read): one opened again shows at once and is read again behind it. */
+const readBefore = new Map<string, TaskHistory | null>()
+/** How many are kept: a long conversation is not small. */
+const KEEP_READINGS = 8
+function keepReading(key: string, history: TaskHistory | null): void {
+  readBefore.delete(key)
+  readBefore.set(key, history)
+  while (readBefore.size > KEEP_READINGS) readBefore.delete(readBefore.keys().next().value as string)
+}
+
 /**
  * A task's conversation as its agent keeps it, read when the task changes and every few seconds while it works, and only while
  * the Chat view is on screen (`on`): in Terminal nothing reads it, and a Codex or Hermes conversation is not small. `history` is
  * null when the agent keeps none to read: the window then shows what happened while Togle watched. `showAll` brings the turns
- * before the last ones.
+ * before the last ones. A conversation read before shows at once (`loaded`) while it is read again; a read that fails keeps
+ * what is shown.
  */
 export function useHistory(task: Pick<TaskView, 'key' | 'state' | 'updatedAt'>, on: boolean): { history: TaskHistory | null; loaded: boolean; all: boolean; showAll: () => void } {
-  const [history, setHistory] = useState<TaskHistory | null>(null)
-  const [loaded, setLoaded] = useState(false)
   const [all, setAll] = useState(false)
+  const reading = `${task.key}${all ? ' all' : ''}`
+  const [read, setRead] = useState<{ reading: string; history: TaskHistory | null } | null>(() => (readBefore.has(reading) ? { reading, history: readBefore.get(reading) ?? null } : null))
   // Not while it waits for you: nothing is being said then.
   const working = task.state === 'working'
   useEffect(() => {
     if (!on) return
     let live = true
-    const read = (): void => {
+    const again = (): void => {
       void api.runnerHistory(task.key, all).then(
         (found) => {
           if (!live) return
-          setHistory(found && Array.isArray(found.entries) ? found : null)
-          setLoaded(true)
+          const history = found && Array.isArray(found.entries) ? found : null
+          keepReading(reading, history)
+          setRead({ reading, history })
         },
         () => {
+          // Kept as it is: what was read before stays, and with nothing read before, there is nothing to show.
           if (!live) return
-          setHistory(null)
-          setLoaded(true)
+          setRead((was) => was ?? { reading, history: null })
         }
       )
     }
-    read()
-    const timer = working ? setInterval(read, READ_AGAIN_MS) : undefined
+    again()
+    const timer = working ? setInterval(again, READ_AGAIN_MS) : undefined
     return () => {
       live = false
       if (timer) clearInterval(timer)
     }
-  }, [task.key, task.updatedAt, all, working, on])
-  return { history, loaded, all, showAll: () => setAll(true) }
+  }, [task.key, task.updatedAt, all, working, on, reading])
+  // Asked for all of it: the turns shown stay until all of it is read, unless all of it was read before.
+  const shown = read?.reading === reading ? read : readBefore.has(reading) ? { reading, history: readBefore.get(reading) ?? null } : read
+  return { history: shown?.history ?? null, loaded: !!shown, all, showAll: () => setAll(true) }
 }
 
 // ---- Times ----

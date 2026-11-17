@@ -510,6 +510,8 @@ export class HermesBackend implements Backend {
   readonly screens = true
   private readonly tasks = new Set<HermesTask>()
   private cache: { at: number; rows: StoredRow[] } | null = null
+  /** Hermes asked for its list again, behind the list it gave last. */
+  private asking: Promise<void> | null = null
   private closed = false
   private resolved?: Promise<TaskContext>
   /** The name each session Togle started was started with, and the id Hermes gave it. */
@@ -566,13 +568,30 @@ export class HermesBackend implements Backend {
       .sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
+  /** Asks Hermes for its list behind the one it gave last: once at a time, and not kept if the list was dropped meanwhile. */
+  private askAgain(): void {
+    if (this.asking) return
+    const kept = this.cache
+    this.asking = this.stored()
+      .then((rows) => {
+        if (this.cache === kept && !this.closed) this.cache = { at: Date.now(), rows }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.asking = null
+      })
+  }
+
   async list(): Promise<TaskInfo[]> {
     await this.ready()
     const live = [...this.tasks].filter((task) => task.id)
-    // Asking Hermes for its list starts a Python program each time: it is asked again after a while, or when something changed.
-    if (!this.cache || Date.now() - this.cache.at > (this.options.cacheMs ?? 20_000)) {
+    // Asking Hermes for its list starts two Python programs (about two seconds): it is asked again after a while, or when
+    // something changed. Once it has answered, the list it gave is used while it is asked again behind it, so that the list of
+    // tasks does not wait two seconds each time. When something changed (no list kept), it is waited for.
+    const maxAge = this.options.cacheMs ?? 20_000
+    if (!this.cache || (maxAge <= 0 && Date.now() - this.cache.at > maxAge)) {
       this.cache = { at: Date.now(), rows: await this.stored().catch(() => [] as StoredRow[]) }
-    }
+    } else if (Date.now() - this.cache.at > maxAge) this.askAgain()
     const mine = new Set(live.map((task) => task.real).filter((id): id is string => !!id))
     // A session Togle started is listed under the name it was started with, as its task was: a to-do line that names the task finds it.
     const startedAs = new Map([...this.names].map(([name, id]) => [id, name]))

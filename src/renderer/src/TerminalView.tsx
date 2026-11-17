@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { caughtOnEnter, CLEAR_LINE, isLeftArrow, leftLeaves, LEFT_NOTE, noteFor, promptIsEmpty, TypedLine } from '@shared/screen-guard'
+import { WaitLine } from './kept'
 
 const api = window.togle
 
@@ -35,6 +36,8 @@ const shownBefore = new Set<string>()
 export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; screenId?: string; guard?: string }) {
   const host = useRef<HTMLDivElement>(null)
   const [note, setNote] = useState<{ title: string; body: string } | null>(null)
+  // Until what the screen printed so far has come: a quiet sign that it is on its way, instead of a black screen.
+  const [drawn, setDrawn] = useState(false)
   useEffect(() => {
     if (!note) return
     const timer = setTimeout(() => setNote(null), NOTE_MS)
@@ -76,6 +79,7 @@ export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; sc
     const again = shownBefore.has(shown)
     shownBefore.add(shown)
     let replaying = false
+    setDrawn(false)
     void api.terminalRead(taskKey).then(
       (printed) => {
         if (!alive) return
@@ -85,8 +89,11 @@ export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; sc
         })
         end = printed.end
         for (const chunk of early.splice(0)) write(chunk.at, chunk.data)
+        setDrawn(true)
       },
-      () => undefined
+      () => {
+        if (alive) setDrawn(true)
+      }
     )
     const line = new TypedLine()
     const typed = term.onData((data) => {
@@ -133,6 +140,7 @@ export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; sc
   }, [taskKey, screenId, guard])
   return (
     <>
+      <WaitLine waiting={!drawn} label="Opening the screen" words="Opening the screen…" />
       <div className="terminal-view" ref={host} role="group" aria-label="The agent's terminal" />
       {note && (
         <div className="terminal-note" role="status">

@@ -141,6 +141,26 @@ const hermes = (rows, backend = {}) => {
 }
 const row = (id, messages) => ({ id, title: 'A task', workspace: 'site', updatedAt: Date.now(), source: 'local', messages })
 
+test('the list Hermes gave last is given at once while Hermes is asked again behind it, once at a time', { timeout: 30_000 }, async () => {
+  const backend = hermes([row('local-one', [message(1, 'user', { content: 'One.' })])], { cacheMs: 1 })
+  try {
+    assert.deepEqual((await backend.list()).map((task) => task.id), ['local-one'], 'the first list is waited for')
+    backend.write([row('local-one', [message(1, 'user', { content: 'One.' })]), row('local-two', [message(2, 'user', { content: 'Two.' })])])
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const at = Date.now()
+    assert.deepEqual((await backend.list()).map((task) => task.id), ['local-one'], 'the last list, at once')
+    assert.ok(Date.now() - at < 200, 'not waited for')
+    let ids = []
+    for (let n = 0; n < 200 && ids.length < 2; n++) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      ids = (await backend.list()).map((task) => task.id)
+    }
+    assert.deepEqual(ids.sort(), ['local-one', 'local-two'], 'what Hermes answered behind it')
+  } finally {
+    await backend.close()
+  }
+})
+
 test('a session is read from `sessions export`, and asked for again only after a while', { timeout: 30_000 }, async () => {
   const backend = hermes([row('local-abc', [message(1, 'user', { content: 'First question.' }), message(2, 'assistant', { content: 'First answer.' })])], { historyMs: 60_000 })
   try {

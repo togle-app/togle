@@ -451,6 +451,22 @@ module.exports = function install(fixture) {
   api.showPicture = async () => fixture.showPicture ?? null
   api.showDone = png => { const view = new DataView(png.buffer, png.byteOffset, png.byteLength); record('showDone', [{ head: [...png.slice(0, 8)], width: view.getUint32(16), height: view.getUint32(20) }]) }
   api.showCancel = () => { record('showCancel', []) }
+  // How long main takes to answer, per call, in milliseconds (`fixture.slow`, or later togleUITest.slow), and a call that fails
+  // once (togleUITest.failNext): the waits of the real app, made visible. A call neither slowed nor failing answers as before.
+  const slow = { ...(fixture.slow ?? {}) }
+  const failOnce = new Set()
+  for (const name of Object.keys(api)) {
+    const answer = api[name]
+    if (typeof answer !== 'function' || name.startsWith('on')) continue
+    api[name] = (...args) => {
+      if (!slow[name] && !failOnce.has(name)) return answer(...args)
+      const failing = failOnce.delete(name)
+      return new Promise((resolve, reject) => setTimeout(() => {
+        if (failing) return reject(new Error('It did not answer.'))
+        try { Promise.resolve(answer(...args)).then(resolve, reject) } catch (error) { reject(error) }
+      }, slow[name] ?? 0))
+    }
+  }
   contextBridge.exposeInMainWorld('togle', api)
   // A noisy call's measurement, as the capture's noise check reports it when the call ends (the audio here is silent).
   const noiseReport = () => ({ analyzedMs: 600000, speechMs: 180000, quietMs: 360000, noisyMs: 162000, bursts: 41, floorDb: -47, peakDb: -38, speechDb: -24, snrDb: 23, verdict: 'noisy', sample: new Float32Array(1600) })
@@ -485,6 +501,7 @@ module.exports = function install(fixture) {
     failNextAuto: () => { rejectAuto = true }, failNextSettings: () => { rejectSettings = true }, holdNextClear: () => { holdClear = true }, releaseClear: () => { holdClear = false; releaseClear?.() },
     failNextVocabulary: () => { rejectVocabulary = true },
     failNextHistory: () => { rejectHistory = true }, failNextNotes: () => { rejectNotes = true },
+    slow: (name, ms) => { if (ms) slow[name] = ms; else delete slow[name] }, failNext: name => { failOnce.add(name) },
     dictationEntry: (id, text) => { const history = historyOf(id); if (!history.enabled) return; history.entries.unshift({ id: 'dictation-' + ++sequence, revision: 'entry-' + sequence, text, originalText: text, startedAt: Date.now() - 3000, finishedAt: Date.now(), destination: 'Slack', outcome: 'inserted' }); histories.set(id, history) },
     notesChanged: (id, text) => { const session = needSession(id); session.summary = text; session.minutes = { state: 'ready', template: 'concise', revision: 'remote-' + ++sequence }; emit('onCallSessions', { id }) }
   })

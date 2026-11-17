@@ -12,6 +12,7 @@ import { MeetingsPage } from './MeetingsPage'
 import { onOpenSettings, openSettings, type SettingsPart } from './open-settings'
 import { onOpenTaskFrom } from './open-task'
 import { SettingsPage } from './SettingsPage'
+import { withPatch } from './settings-patch'
 import { Tasks } from './Tasks'
 import { Todo } from './Todo'
 import { useCall } from './useCall'
@@ -47,7 +48,30 @@ export function Shell() {
   const keepGoing = useRef<HTMLButtonElement>(null)
   const call = useCall(settings)
 
-  const changeSettings = useCallback(async (patch: SettingsPatch) => setSettings(await api.updateSettings(patch)), [])
+  // Settings as main last sent them, with the changes asked for and not saved yet laid over them: a switch moves when it is
+  // pressed, and word from main about something else does not move it back. A change main refuses is gone again, and the
+  // promise fails with why.
+  const fromMain = useRef<SettingsData | null>(null)
+  const unsaved = useRef<{ patch: SettingsPatch }[]>([])
+  const take = useCallback((value: SettingsData) => {
+    fromMain.current = value
+    setSettings(unsaved.current.reduce((laid, change) => withPatch(laid, change.patch), value))
+  }, [])
+  const changeSettings = useCallback(async (patch: SettingsPatch): Promise<void> => {
+    const change = { patch }
+    unsaved.current = [...unsaved.current, change]
+    if (fromMain.current) take(fromMain.current)
+    try {
+      const saved = await api.updateSettings(patch)
+      unsaved.current = unsaved.current.filter((one) => one !== change)
+      take(saved)
+    } catch (error) {
+      unsaved.current = unsaved.current.filter((one) => one !== change)
+      const now = await api.getSettings().catch(() => fromMain.current)
+      if (now) take(now)
+      throw error
+    }
+  }, [take])
   const openMeeting = useCallback((id: string) => { setLive(false); setMeetingFocus((previous) => ({ id, seq: (previous?.seq ?? 0) + 1 })); setView('meetings') }, [])
   const openTask = useCallback((key: string) => { setTaskFocus((previous) => ({ key, seq: previous.seq + 1 })); setView('agents') }, [])
   const showLive = useCallback(() => { setLive(true); setView('meetings') }, [])
@@ -61,12 +85,12 @@ export function Shell() {
   }, [call, stt.state, showLive])
 
   useEffect(() => {
-    void api.getSettings().then(setSettings)
+    void api.getSettings().then(take)
     void api.authStatus().then(setAuth)
     void api.sttStatus().then(setStt)
     void api.microphoneStatus().then(setMicrophone, () => undefined)
     const subs = [
-      api.onSettingsChanged(setSettings),
+      api.onSettingsChanged(take),
       api.onAuthChanged(setAuth),
       api.onSttStatus(setStt),
       api.onMicrophone(setMicrophone),
@@ -176,7 +200,7 @@ export function Shell() {
             ? <LiveCall settings={settings} title={call.title} since={call.since} transcript={call.transcript} flags={call.flags} inputs={call.inputs} levels={call.levels} callKey={call.callKey}
                 onMark={() => void api.markCall().catch(() => undefined)} onStop={() => void call.stop()} onReconnect={() => void call.reconnect()} onFirstCallSeen={() => void changeSettings({ meetings: { ...settings.meetings, introSeen: true } })} />
             : <div className="settings meetings-page"><MeetingsPage agents={[]} callKey={call.callKey} liveId={call.listening ? call.callKey : undefined} onOpenLive={showLive} onWriteDown={() => void writeDown()} focus={meetingFocus} home={meetingsHome} noise={call.noise && !call.listening ? { callId: call.callKey, finding: call.noise } : undefined} microphone={microphone} /></div>)}
-          {view === 'settings' && settings && <SettingsPage settings={settings} stt={stt} at={settingsAt} onChange={setSettings} />}
+          {view === 'settings' && settings && <SettingsPage settings={settings} stt={stt} at={settingsAt} onSave={changeSettings} />}
         </main>
       </div>
     </div>

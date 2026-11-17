@@ -1416,6 +1416,73 @@ async function checkNarrow(T, agent) {
   ui.window.destroy()
 }
 
+// Main slow to answer, as it is while it looks at the agents and their sessions: a press shows its task at once, from the
+// list; a conversation read before shows at once with no sign, one not read yet with a quiet sign; the Agents screen opened
+// again shows what it had; a switch in Settings moves when pressed, and a change main refuses goes back, with why.
+async function checkSlowMain(T, agent) {
+  const ui = await open(T, agent, 1024, undefined, { slow: { runnerDetail: 900, runnerHistory: 700, runnerTasks: 900, runnerStatus: 900, updateSettings: 400 } })
+  const pause = (ms) => ui.evaluate('new Promise(r=>setTimeout(r,' + ms + '))')
+  const press = (title) => ui.evaluate("[...document.querySelectorAll('.task-row')].find(e=>e.querySelector('strong').textContent===" + JSON.stringify(title) + ").click()")
+  const shown = "document.querySelector('.tasks-detail .task-title h2')?.textContent ?? ''"
+  const said = "document.querySelectorAll('.tasks-detail .task-log .task-you').length"
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  await press('Fix the login redirect')
+  await pause(60)
+  assert.ok((await ui.evaluate(shown)).startsWith('Fix the login redirect'), 'a task picked shows at once, from its row')
+  await pause(250)
+  assert.equal(await ui.evaluate("document.querySelector('.thread-place .wait-words')?.textContent"), 'Reading the conversation…', 'with a quiet sign while its conversation is read')
+  assert.equal(await ui.evaluate("!!document.querySelector('.thread-place .wait-line')"), true)
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-log .hint')"), false, 'and not "nothing said" meanwhile')
+  await ui.wait(said + '===1')
+  assert.equal(await ui.evaluate("!!document.querySelector('.wait-line')"), false, 'the sign goes when the words come')
+  await press('Rebuild the pricing page')
+  await pause(60)
+  assert.ok((await ui.evaluate(shown)).startsWith('Rebuild the pricing page'), 'the task before is not left on screen')
+  await press('Fix the login redirect')
+  await pause(60)
+  assert.deepEqual([(await ui.evaluate(shown)).startsWith('Fix the login redirect'), await ui.evaluate(said)], [true, 1], 'read before: its conversation at once')
+  await pause(250)
+  assert.equal(await ui.evaluate("!!document.querySelector('.wait-line')"), false, 'with no sign over it')
+  // An answer waits for the agent: Allow says so at once and takes no second press, and the card goes when the agent has it.
+  await ui.evaluate("window.togleUITest.slow('answerRunnerTask', 600)")
+  await press('Add the status column')
+  await ui.wait("!!document.querySelector('.task-request')")
+  await ui.evaluate("[...document.querySelectorAll('.task-request button')].find(b=>b.textContent.trim()==='Allow once').click()")
+  await pause(40)
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.task-request .row button')].map(b=>[b.textContent.trim(),b.disabled])"), [['Allowing…', true], ['Refuse', true]], 'Allow says it is on its way, and nothing else on the card can be pressed')
+  await ui.wait("!document.querySelector('.task-request')")
+  assert.equal((await ui.calls('answerRunnerTask')).length, 1, 'one answer sent')
+  await ui.evaluate("window.togleUITest.slow('answerRunnerTask', 0)")
+  await press('Fix the login redirect')
+  await ui.wait(said + '===1')
+  // Away and back: what the screen had, at once, while it is read again.
+  await ui.click('.workspace-nav button', 'Meetings')
+  await ui.evaluate("document.querySelector('.workspace-nav button[aria-label=Agents]').click()")
+  await pause(60)
+  assert.deepEqual([await ui.evaluate("document.querySelectorAll('.task-row').length"), (await ui.evaluate(shown)).startsWith('Fix the login redirect'), await ui.evaluate(said)], [5, true, 1], 'the list, the task and its conversation at once')
+  // Settings: the agents found show at once, and a switch moves when it is pressed.
+  await ui.evaluate("document.querySelector('.workspace-nav button[aria-label=Settings]').click()")
+  await pause(60)
+  assert.ok(await ui.evaluate("document.querySelectorAll('#settings-agents .agent-row').length") >= 2, 'the agents found, at once')
+  const polish = "[...document.querySelectorAll('input[role=switch]')].find(e=>e.closest('.setting')?.textContent.includes('Clean up what I say'))"
+  const was = await ui.evaluate(polish + '.checked')
+  await ui.evaluate(polish + '.click()')
+  await pause(40)
+  assert.equal(await ui.evaluate(polish + '.checked'), !was, 'a switch moves when it is pressed')
+  await pause(600)
+  assert.equal(await ui.evaluate(polish + '.checked'), !was, 'and stays once it is saved')
+  assert.equal((await ui.evaluate('window.togleUITest.settings()')).dictation.polish, !was)
+  await ui.evaluate("window.togleUITest.failNext('updateSettings')")
+  await ui.evaluate(polish + '.click()')
+  await pause(40)
+  assert.equal(await ui.evaluate(polish + '.checked'), was, 'moves when pressed, though main will refuse it')
+  await ui.wait(polish + '.checked===' + !was)
+  assert.ok((await ui.evaluate("document.querySelector('.settings [role=alert]')?.textContent ?? ''")).startsWith('Could not save'), 'refused, it goes back and says why')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 app.whenReady().then(async () => {
   try {
     const T = await import(pathToFileURL(path.join(__dirname, '.build/togle.mjs')).href)
@@ -1424,6 +1491,7 @@ app.whenReady().then(async () => {
     const agent = store.list()[0]
     await checkTasks(T, agent)
     await checkNarrow(T, agent)
+    await checkSlowMain(T, agent)
     await checkQuit(T, agent)
     await checkNotice(T, agent)
     await checkTodo(T, agent)
@@ -1437,7 +1505,7 @@ app.whenReady().then(async () => {
     await checkTerminalTask(T, agent)
     await checkAgentSettings(T, agent)
     await checkReach(T, agent)
-    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, no See changes anywhere, the task box, a signed-out agent, a task in a terminal of its own, the offer to change keys, the agents in Settings and other devices’ tasks with Settings → Devices passed')
+    console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, no See changes anywhere, the task box, a signed-out agent, a task in a terminal of its own, the offer to change keys, the agents in Settings, other devices’ tasks with Settings → Devices, and the window with main slow to answer passed')
     clearTimeout(timeout)
     app.quit()
   } catch (error) {

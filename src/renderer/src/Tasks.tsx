@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
+import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, type LogEntry, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
 import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
 import { useReach } from './Devices'
 import { openSettings } from './open-settings'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
+import { AGENTS_FOUND, keepAnswer, keptAnswer, WaitLine } from './kept'
 import { RequestCard } from './RequestCard'
 import { clock, currentPlan, lastTurnKey, PlanCard, Thread, turnStart, useHistory } from './TaskThread'
 import { TerminalView } from './TerminalView'
@@ -20,6 +21,17 @@ const REFRESH_MS = 4_000
 const RECENT_MS = 24 * 3600_000
 // The task looked at last, for when the screen is opened again.
 let remembered: string | undefined
+// What the screen read last, for when it is opened again (see kept.tsx): the list of tasks, the agents, and the view tasks open in.
+const KEPT_TASKS = 'agents.tasks'
+const KEPT_STATUS = AGENTS_FOUND
+const KEPT_OPENS = 'agents.opens'
+// What Togle saw of each task it runs (its own log), read last: a task opened again shows it at once. A few dozen at most.
+const logs = new Map<string, LogEntry[]>()
+function keepLog(key: string, entries: LogEntry[]): void {
+  logs.delete(key)
+  logs.set(key, entries)
+  while (logs.size > 24) logs.delete(logs.keys().next().value as string)
+}
 
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
@@ -66,12 +78,15 @@ const keepViews = (views: Record<string, View>): void => {
 
 /** Which view each task is shown in: the one picked for it, else the one Settings says tasks open in. */
 function useTaskViews(): { of: (key: string) => View; pick: (key: string, view: View) => void } {
-  const [opens, setOpens] = useState<View>('session')
+  // The one known last, while Settings is read again: a task does not open in Terminal for a moment and then in Chat.
+  const [opens, setOpens] = useState<View>(() => keptAnswer<View>(KEPT_OPENS) ?? 'session')
   const [picked, setPicked] = useState<Record<string, View>>(readViews)
   useEffect(() => {
     let live = true
     const take = (settings: { tasks?: { view?: unknown } } | undefined): void => {
-      if (live) setOpens(settings?.tasks?.view === 'cards' ? 'cards' : 'session')
+      const view: View = settings?.tasks?.view === 'cards' ? 'cards' : 'session'
+      keepAnswer(KEPT_OPENS, view)
+      if (live) setOpens(view)
     }
     void api.getSettings().then(take, () => undefined)
     const off = api.onSettingsChanged(take)
@@ -109,12 +124,16 @@ function useRemoteTasks(): DeviceTasks[] {
 
 /** `focus`: a task to show, asked for from outside (a notice, the to-do list); a new `seq` asks again. */
 export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
-  const [tasks, setTasks] = useState<TaskView[]>([])
-  const [status, setStatus] = useState<RunnerStatus[]>([])
+  // Opened again, the screen starts from what it read last (see kept.tsx), and reads again behind it.
+  const [tasks, setTasks] = useState<TaskView[]>(() => keptAnswer<TaskView[]>(KEPT_TASKS) ?? [])
+  const [status, setStatus] = useState<RunnerStatus[]>(() => keptAnswer<RunnerStatus[]>(KEPT_STATUS) ?? [])
   const [selected, setSelected] = useState<string | undefined>(remembered)
-  const [detail, setDetail] = useState<TaskDetail | null>(null)
+  // Togle's own log of the task shown, read behind it: the task itself is its row in the list.
+  const [log, setLog] = useState<{ key: string; entries: LogEntry[] } | null>(() => (remembered && logs.has(remembered) ? { key: remembered, entries: logs.get(remembered) ?? [] } : null))
+  // A task picked that the list does not have yet (one just started): the list is read for it.
+  const [lookingFor, setLookingFor] = useState<string>()
   const [error, setError] = useState('')
-  const [loaded, setLoaded] = useState(false)
+  const [loaded, setLoaded] = useState(() => keptAnswer(KEPT_TASKS) !== undefined)
   const [now, setNow] = useState(Date.now())
   const [showEarlier, setShowEarlier] = useState(false)
   // Take over pressed on a row: the task opens with the question that confirms it.
@@ -125,24 +144,51 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   const views = useTaskViews()
   const selectedNow = useRef(selected)
   selectedNow.current = selected
+  const tasksNow = useRef(tasks)
+  tasksNow.current = tasks
+  // Answers are taken in the order they were asked for: one that comes after a newer one is not shown over it.
+  const turns = useRef({ list: 0, listShown: 0, status: 0, statusShown: 0, log: 0 })
 
-  const refresh = useCallback(async () => {
-    try {
-      const [list, found] = await Promise.all([api.runnerTasks(), api.runnerStatus()])
-      setTasks(Array.isArray(list) ? list : [])
-      setStatus(Array.isArray(found) ? found : [])
-      const key = selectedNow.current
-      if (key && !key.startsWith(REMOTE)) {
-        const next: unknown = await api.runnerDetail(key).catch(() => null)
-        setDetail(isDetail(next) && next.task.key === key ? next : null)
-      } else setDetail(null)
-    } catch (caught) {
-      setError(errorText(caught))
-    } finally {
+  /** Togle's own log of a task, read behind it. Taken only for the task still shown, and only the newest answer; one that fails keeps what is shown. */
+  const readLog = useCallback(async (key: string | undefined): Promise<void> => {
+    if (!key || key.startsWith(REMOTE)) return
+    const turn = ++turns.current.log
+    const next: unknown = await api.runnerDetail(key).catch(() => null)
+    if (!isDetail(next) || next.task.key !== key || selectedNow.current !== key || turn !== turns.current.log) return
+    keepLog(key, next.log)
+    setLog({ key, entries: next.log })
+  }, [])
+
+  /** The list and the agents, each taken when it comes (one does not wait for the other), and the log of the task shown. */
+  const refresh = useCallback(async (): Promise<void> => {
+    const listTurn = ++turns.current.list
+    const statusTurn = ++turns.current.status
+    const list = api.runnerTasks().then(
+      (found) => {
+        if (listTurn < turns.current.listShown) return
+        turns.current.listShown = listTurn
+        const next = Array.isArray(found) ? found : []
+        keepAnswer(KEPT_TASKS, next)
+        setTasks(next)
+        setLookingFor(undefined)
+      },
+      (caught) => setError(errorText(caught))
+    ).finally(() => {
       setNow(Date.now())
       setLoaded(true)
-    }
-  }, [])
+    })
+    const agents = api.runnerStatus().then(
+      (found) => {
+        if (statusTurn < turns.current.statusShown) return
+        turns.current.statusShown = statusTurn
+        const next = Array.isArray(found) ? found : []
+        keepAnswer(KEPT_STATUS, next)
+        setStatus(next)
+      },
+      () => undefined
+    )
+    await Promise.all([list, agents, readLog(selectedNow.current)])
+  }, [readLog])
 
   useEffect(() => {
     void refresh()
@@ -154,10 +200,21 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
     }
   }, [refresh])
 
+  // A task picked shows at once, from its row in the list and what was read of it before; its log is read behind it, and the
+  // list too when it does not have the task yet.
   useEffect(() => {
     remembered = selected
-    void refresh()
-  }, [selected, refresh])
+    setLog(selected && logs.has(selected) ? { key: selected, entries: logs.get(selected) ?? [] } : null)
+    if (selected && !selected.startsWith(REMOTE) && !tasksNow.current.some((task) => task.key === selected)) {
+      setLookingFor(selected)
+      void refresh()
+    } else void readLog(selected)
+  }, [selected, refresh, readLog])
+
+  // The task shown: its row in the list, and Togle's own log of it.
+  const listed = selected && !selected.startsWith(REMOTE) ? tasks.find((task) => task.key === selected) : undefined
+  const detail: TaskDetail | null = listed ? { task: listed, log: log?.key === listed.key ? log.entries : [] } : null
+  const logRead = !!listed && (log?.key === listed.key || !listed.mine)
 
   // The window says which agent screen it shows (one with no card over it), so that a notice still comes over it.
   const sessionKey = detail && detail.task.mine && detail.task.terminal && (!detail.task.screen || views.of(detail.task.key) === 'session') ? detail.task.key : null
@@ -228,6 +285,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   return (
     <div className={`tasks ${selected ? 'has-detail' : ''}`} aria-label="Tasks">
       <aside className="tasks-list" aria-label={remote.length ? 'Agent tasks on your devices' : 'Agent tasks on this computer'}>
+        <WaitLine waiting={!loaded} label="Reading the tasks" />
         <div className="tasks-head">
           <span className="tasks-label">This computer</span>
           <button className="primary small" disabled={!installed.length} onClick={() => void api.openTaskBox({}).catch((caught) => setError(errorText(caught)))}>
@@ -309,7 +367,12 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             takeOverAsked={takingOver === detail.task.key}
             onHandBack={() => act(async () => setHandedBack({ key: detail.task.key, ...(await api.handBackRunnerTask(detail.task.key)) }))}
             handedBack={handedBack?.key === detail.task.key ? handedBack : undefined}
+            logRead={logRead}
           />
+        ) : selected && (!loaded || lookingFor === selected) ? (
+          <div className="tasks-empty tasks-opening">
+            <WaitLine waiting label="Opening the task" words="Opening the task…" />
+          </div>
         ) : (
           <div className="tasks-empty">
             <p>Pick a task, or start a new one.</p>
@@ -460,9 +523,11 @@ interface PanelProps {
   onHandBack: () => void
   /** The task was just handed back: the line that goes on in the person's own terminal. */
   handedBack?: { command: string; folder: string }
+  /** Whether Togle's own log of the task has been read (a task it does not run has none). */
+  logRead: boolean
 }
 
-function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack }: PanelProps) {
+function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack, logRead }: PanelProps) {
   const { task, log } = detail
   const talkKey = useHotkeys().find((key) => key.id === 'dictate')?.keys || 'F9'
   // A task whose agent has a screen Togle can show is seen in two views; any other task has the one it has.
@@ -470,6 +535,14 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
   // The agent's own screen is on screen: no card over it and no reply box, because what it asks is answered on it.
   const sessionShown = task.terminal && (!task.screen || view === 'session')
   const [text, setText] = useState('')
+  // Stop pressed: it says so until the task stops (or, if it did not, for a few seconds), and takes no second press.
+  const [stopping, setStopping] = useState(false)
+  useEffect(() => setStopping(false), [task.state])
+  useEffect(() => {
+    if (!stopping) return
+    const timer = setTimeout(() => setStopping(false), 4_000)
+    return () => clearTimeout(timer)
+  }, [stopping])
   const [confirmTakeOver, setConfirmTakeOver] = useState(takeOverAsked)
   useEffect(() => { if (takeOverAsked) setConfirmTakeOver(true) }, [takeOverAsked])
   const logBox = useRef<HTMLDivElement>(null)
@@ -478,7 +551,10 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
   // Read only while Chat is what shows: the agent's screen (open, or closed with Terminal picked) needs none of it.
   const webShown = !sessionShown && !(task.mine && !!task.screen && view === 'session' && !task.terminal)
   const { history, loaded: historyLoaded, all, showAll } = useHistory(task, webShown)
-  const shown = history ? history.entries : log
+  // Until the agent's record is read (the first time), nothing is shown rather than Togle's own log for a moment: the record is
+  // what stays. With no record to read, Togle's own log is the conversation.
+  const shown = history ? history.entries : historyLoaded ? log : []
+  const readingConversation = webShown && (!historyLoaded || (!history && !logRead))
   // Of the turns shown only, so a count is not given for a conversation that has older turns left out.
   const changed = history?.more && !all ? 0 : changedFiles(shown)
   // The thread stays at its end while new words come, unless the person scrolled up to read: then a button brings the latest back.
@@ -639,8 +715,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
         <div className="task-actions">
           {/* Stop, then what follows from it, then Hand back, as the design page has them in a header. */}
           {task.mine && running && (
-            <button className="small" onClick={onStop} title={task.screen ? 'Ends the agent’s turn, as Esc does on its screen (Ctrl+C in Hermes).' : undefined}>
-              Stop
+            <button className="small" disabled={stopping} onClick={() => { setStopping(true); onStop() }} title={task.screen ? 'Ends the agent’s turn, as Esc does on its screen (Ctrl+C in Hermes).' : undefined}>
+              {stopping ? 'Stopping…' : 'Stop'}
             </button>
           )}
           {task.mine && task.commandsRunning && task.state === 'stopped' && (
@@ -739,6 +815,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
       <>
       {/* The conversation has the room between the task's lines and the reply box, which is at the foot of the pane. */}
       <div className="thread-place">
+        <WaitLine waiting={readingConversation} label="Reading the conversation" words="Reading the conversation…" />
         <div
           className="task-log thread"
           role="log"
@@ -754,8 +831,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
           }}
         >
           {history?.more && !all && <button type="button" className="link task-earlier-turns" onClick={showEarlierTurns}>Show earlier</button>}
-          {shown.length === 0 && task.mine && <p className="hint">{task.screen ? 'Nothing said yet. Pick Terminal to see its screen.' : 'Nothing yet.'}</p>}
-          {shown.length === 0 && !task.mine && historyLoaded && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
+          {shown.length === 0 && !readingConversation && task.mine && <p className="hint">{task.screen ? 'Nothing said yet. Pick Terminal to see its screen.' : 'Nothing yet.'}</p>}
+          {shown.length === 0 && !readingConversation && !task.mine && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
           {/* The whole conversation, in order: a turn that is over as what was asked, a line for the work and the answer; the turn going on in the open. */}
           <Thread entries={shown} state={task.state} settled={settledTurn.current} taskKey={task.key} known={known} stepsRun={running || task.commandsRunning} />
           {/* That it works, and for how long this turn has run: when no step of it runs, which has its own clock. */}
