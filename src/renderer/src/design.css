@@ -531,11 +531,13 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings-one .settings-content { max-width: none; margin: 0; }
 /* What went wrong saving stands over the groups, with a group's room under it. */
 .settings-one .settings-content > .error { margin: 0 0 0.9rem; }
-.sets { position: relative; display: flex; align-items: flex-start; gap: 0.9rem clamp(1.4rem, 2.4vw, 2.6rem); }
+.sets { position: relative; display: flex; align-items: flex-start; gap: 0.9rem; }
 .sets-col { display: flex; flex: 1 1 0; flex-direction: column; gap: 0.9rem; min-width: 0; }
 /* Each column is in two parts, which only three columns tell apart. */
 .sets-part { display: contents; }
-.sets section { display: flex; flex-direction: column; gap: 0.3rem; margin: 0; min-width: 0; }
+/* Each group is a card of its own: a line around it, and the window's darker color in it. Where one group ends and the
+   next begins is then plain, also for two groups one under the other in a column. */
+.sets section { display: flex; flex-direction: column; gap: 0.3rem; box-sizing: border-box; margin: 0; min-width: 0; padding: 0.75rem 0.9rem 0.55rem; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); }
 /* Three columns, from the width where each of two would pass about 30rem. The first part of the first column and the last
    part of the second have a column each; the two parts between them share the middle one. The parts with a column of their
    own reach over a last row that takes what is left: growing, they do not make the middle column's rows taller, so a list
@@ -639,11 +641,12 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings .setting-detail.over::after { content: ''; position: absolute; top: 100%; left: 0; width: 1px; height: 12px; pointer-events: none; }
 /* A form to type in (an agent to add, a key, a sign-in, a device's code) is one card as wide as the design draws it
    (36rem, or the place where that is narrower), so that a command or an address has room. It opens under its button and
-   over the page: nothing on the page moves. It starts where it would be in the flow, at its group's left edge; in the last
-   column it ends at the place's right edge instead, so that it stays inside the place. */
+   over the page: nothing on the page moves. It starts where it would be in the flow, moved out by the room and the line
+   of its group's card, so that its left edge is the card's own (as wide as the place, it then fits the place exactly); in
+   the last column it ends at the place's right edge instead, so that it stays inside the place. */
 /* While it is open the page under it is dimmed, as far as the place reaches: the form is the one thing to act on, and a row
    it half covers reads as behind it, not as cut off. (The dimming is the card's own wide shadow, so it follows the card.) */
-.settings .setting-detail.over { position: absolute; z-index: 30; box-sizing: border-box; width: min(36rem, 100%); margin: 6px 0 0; background: var(--surface); box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--stage) 60%, transparent), 0 14px 28px -12px var(--shadow); }
+.settings .setting-detail.over { position: absolute; z-index: 30; box-sizing: border-box; width: min(36rem, 100%); margin: 6px 0 0 calc(-0.9rem - 1px); background: var(--surface); box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--stage) 60%, transparent), 0 14px 28px -12px var(--shadow); }
 .sets-col:last-child .setting-detail.over { right: 0; }
 @media (min-width: 1150px) {
   .sets-col:last-child > .sets-part:first-child .setting-detail.over { right: auto; }

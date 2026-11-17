@@ -835,6 +835,8 @@ async function checkAgentSettings(T, agent) {
       assert.ok(accounts.top === keys.top && agents.top === keys.top && accounts.left >= keys.left + keys.width && agents.left >= accounts.left + accounts.width, 'Keys, Accounts and Agents side by side, in three columns, at ' + width)
       assert.ok(meetings.left === keys.left && meetings.top > keys.top && voice.left === accounts.left && voice.top > accounts.top, 'Meetings under Keys and Voice under Accounts at ' + width)
     }
+    // Each group is a card of its own, with room between it and the next: where one ends and the next begins is plain.
+    assert.ok(await ui.evaluate("(()=>{const cards=[...document.querySelectorAll('.sets section')];const boxes=cards.map(c=>c.getBoundingClientRect());return cards.every(c=>getComputedStyle(c).borderTopWidth==='1px'&&parseFloat(getComputedStyle(c).borderTopLeftRadius)>=10)&&boxes.every((a,i)=>boxes.every((b,j)=>i===j||a.right+8<=b.left||b.right+8<=a.left||a.bottom+8<=b.top||b.bottom+8<=a.top))})()"), 'each group is a card apart from the others at ' + width)
     // As wide as the place: from its left edge to its right one, on a wide window too.
     assert.ok(await ui.evaluate("(()=>{const all=document.querySelector('.sets').getBoundingClientRect(),place=document.querySelector('.shell-content');const pad=getComputedStyle(place);return Math.abs(all.left-(place.getBoundingClientRect().left+parseFloat(pad.paddingLeft)))<=1&&Math.abs(all.width-(place.clientWidth-parseFloat(pad.paddingLeft)-parseFloat(pad.paddingRight)))<=1})()"), 'the groups are as wide as the place at ' + width)
     // A form to type in (an agent to add, a key) is one card as wide as the design draws it (36rem), under the
@@ -884,6 +886,12 @@ async function checkAgentSettings(T, agent) {
   ui.window.setContentSize(420, 900)
   await ui.wait('innerWidth===420')
   const narrow = await ui.evaluate(places)
+  // A form over the page is as wide as the place there, and no wider: the page does not scroll sideways under it.
+  await ui.click('.ai-plan-other button', 'Use a key')
+  await ui.wait("!!document.querySelector('form.ai-key-form')")
+  assert.ok(await ui.evaluate("(()=>{const place=document.querySelector('.shell-content'),f=document.querySelector('form.ai-key-form').getBoundingClientRect(),all=document.querySelector('.sets').getBoundingClientRect();return place.scrollWidth<=place.clientWidth&&Math.abs(f.left-all.left)<=1&&Math.abs(f.right-all.right)<=1})()"), 'the key form fits the place in a narrow window')
+  await ui.click('form.ai-key-form button', 'Cancel')
+  await ui.wait("!document.querySelector('form.ai-key-form')")
   const stacked = ['settings-keys', 'settings-meetings', 'settings-accounts', 'settings-voice', 'settings-agents']
   assert.ok(stacked.every((id, n) => narrow[id].left === narrow[stacked[0]].left && (n === 0 || narrow[id].top > narrow[stacked[n - 1]].top)), 'one column in a narrow window')
   assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Meetings', 'Accounts', 'Voice', 'Agents'], 'and it is the order they are in the page')
