@@ -81,6 +81,26 @@ const SHAPES = {
       <path d="m3 6 1.5 1.5L7 4.5M3 12l1.5 1.5L7 10.5M3 18l1.5 1.5L7 16.5" />
     </>
   ),
+  // A command an agent ran: a terminal's prompt.
+  terminal: <path d="m5 17 6-5-6-5M13 18h7" />,
+  // A file an agent changed: a pencil.
+  pencil: <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />,
+  // Copy what was said.
+  copy: (
+    <>
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </>
+  ),
+  // Down to the latest words.
+  down: <path d="M12 5v14M19 12l-7 7-7-7" />,
+  // A command that was refused: a circle with a line through it.
+  refused: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m5.6 5.6 12.8 12.8" />
+    </>
+  ),
   // The agent market: a shop's front.
   store: (
     <>

@@ -6,7 +6,7 @@ import { openSettings } from './open-settings'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { RequestCard } from './RequestCard'
-import { Thread, useHistory } from './TaskThread'
+import { clock, lastTurnKey, Thread, turnStart, useHistory } from './TaskThread'
 import { TerminalView } from './TerminalView'
 
 const api = window.togle
@@ -418,6 +418,29 @@ function SignedOut({ task }: { task: TaskView }) {
   )
 }
 
+/**
+ * At the end of the conversation of a task that works: what it does now, and how long this turn has run. The clock is for the
+ * eye only: read out, it would speak every second.
+ */
+function NowLine({ line, since }: { line: string; since?: number }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  return (
+    <div className="task-now">
+      <span className="now-mark" aria-hidden="true" />
+      <span className="now-words">{line || 'Working…'}</span>
+      {since !== undefined && now >= since && (
+        <span className="now-clock" aria-hidden="true">
+          {clock(now - since)}
+        </span>
+      )}
+    </div>
+  )
+}
+
 interface PanelProps {
   detail: TaskDetail
   now: number
@@ -449,7 +472,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
   const [text, setText] = useState('')
   const [confirmTakeOver, setConfirmTakeOver] = useState(takeOverAsked)
   useEffect(() => { if (takeOverAsked) setConfirmTakeOver(true) }, [takeOverAsked])
-  const end = useRef<HTMLDivElement>(null)
+  const logBox = useRef<HTMLDivElement>(null)
   const running = task.state === 'working' || task.state === 'waiting'
   // The conversation as its agent keeps it, also of what was said before Togle opened the task; else what happened while Togle watched.
   // Read only while Web is what shows: the agent's screen (open, or closed with Terminal picked) needs none of it.
@@ -458,11 +481,48 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
   const shown = history ? history.entries : log
   // Of the turns shown only, so a count is not given for a conversation that has older turns left out.
   const changed = history?.more && !all ? 0 : changedFiles(shown)
-  // The thread stays at its end while new words come, unless the person scrolled up to read.
+  // The thread stays at its end while new words come, unless the person scrolled up to read: then a button brings the latest back.
   const stick = useRef(true)
+  const [away, setAway] = useState(false)
+  const toEnd = useCallback((): void => {
+    const box = logBox.current
+    if (box) box.scrollTop = box.scrollHeight
+  }, [])
+  // Also when a step ends where it stands, and when the task starts or stops working: the line that says what it does now comes and goes.
+  const lastShown = shown[shown.length - 1]
+  // "Show earlier" brings turns in above what is in view, and what is in view stays where it is: the first part of the
+  // conversation, and where it was in the window, are kept until the earlier turns are in.
+  const kept = useRef<{ part: Element; top: number } | null>(null)
+  const showEarlierTurns = (): void => {
+    const part = logBox.current?.querySelector('.you-row, .task-agent, .task-steps, .steps')
+    if (part) kept.current = { part, top: part.getBoundingClientRect().top }
+    showAll()
+  }
+  useLayoutEffect(() => {
+    const box = logBox.current
+    if (box && kept.current) {
+      if (kept.current.part.isConnected) box.scrollTop += kept.current.part.getBoundingClientRect().top - kept.current.top
+      kept.current = null
+    } else if (stick.current) toEnd()
+  }, [shown.length, lastShown?.id, lastShown?.status, task.pending.length, task.state, toEnd])
+  // The turn that was the last one when the task last stood still. A reply makes the task work at once and the agent's
+  // record has the reply a moment later: until then that turn is drawn as over, and the clock waits for the new turn.
+  const turnKey = lastTurnKey(shown)
+  const settledTurn = useRef<number | undefined>(undefined)
   useEffect(() => {
-    if (stick.current) end.current?.scrollIntoView?.({ block: 'end' })
-  }, [shown.length, task.pending.length])
+    if (!running) settledTurn.current = turnKey
+  }, [running, turnKey])
+  const newTurn = running && turnKey !== settledTurn.current
+  // And when its place gets shorter or taller: a card for what the agent asks, more lines in the reply box, the window.
+  useEffect(() => {
+    const box = logBox.current
+    if (!box || typeof ResizeObserver === 'undefined') return
+    const watch = new ResizeObserver(() => {
+      if (box.isConnected && stick.current) toEnd()
+    })
+    watch.observe(box)
+    return () => watch.disconnect()
+  }, [toEnd, webShown])
   // A question the agent asks is answered from the reply box; anything else typed there goes to the task.
   const question = task.pending.find((request) => request.kind === 'question')
   const say = (message: string): void => {
@@ -485,6 +545,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
   const answers = task.mine && cardsView
   // An agent that can only be written to on its screen takes words when its turn has ended; Codex takes them while it works too.
   const holdsReply = !!task.screen && task.runner !== 'codex' && (task.state === 'working' || task.state === 'waiting' || !!task.waitingFor) && !task.pending.some((request) => request.kind === 'question')
+  const replyHint = holdsReply ? 'Reply when it has finished' : 'Reply, or hold ' + talkKey + ' and talk'
   useEffect(() => {
     if (!answers) { setOffers(NO_OFFERS); return }
     let live = true
@@ -527,8 +588,18 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
     if (command.name === 'model' && offers.models.length) setText('/model ')
     else say(`/${command.name}`)
   }
-  const keyed = (event: KeyboardEvent<HTMLInputElement>): void => {
-    if (!listed) return
+  const keyed = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
+    // Words still being put together (Korean, Japanese, Chinese): Enter picks them there, and sends nothing.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
+    if (!listed) {
+      // In the box of several lines, Enter sends and Shift+Enter starts a new line. (A password's box sends as any form does.)
+      if (event.key === 'Enter' && !event.shiftKey && event.currentTarget instanceof HTMLTextAreaElement) {
+        event.preventDefault()
+        const message = text.trim()
+        if (message) say(message)
+      }
+      return
+    }
     const count = listed.items.length
     if (event.key === 'ArrowDown') { event.preventDefault(); setPicked((at + 1) % count) }
     else if (event.key === 'ArrowUp') { event.preventDefault(); setPicked((at + count - 1) % count) }
@@ -650,13 +721,43 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
         </>
       ) : (
       <>
-      <div className="task-log" role="log" aria-label="The conversation" onScroll={(event) => { const box = event.currentTarget; stick.current = box.scrollHeight - box.scrollTop - box.clientHeight < 60 }}>
-        {history?.more && !all && <button type="button" className="link task-earlier-turns" onClick={showAll}>Show earlier</button>}
-        {shown.length === 0 && task.mine && <p className="hint">{task.screen ? 'Nothing said yet. Pick Terminal to see its screen.' : 'Nothing yet.'}</p>}
-        {shown.length === 0 && !task.mine && historyLoaded && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
-        {/* The whole conversation, in order: what was asked and answered in the open, and the steps between folded to a line. */}
-        <Thread entries={shown} working={task.state === 'working'} />
-        <div ref={end} />
+      {/* The conversation has the room between the task's lines and the reply box, which is at the foot of the pane. */}
+      <div className="thread-place">
+        <div
+          className="task-log thread"
+          role="log"
+          aria-label="The conversation"
+          ref={logBox}
+          onScroll={(event) => {
+            const box = event.currentTarget
+            const left = box.scrollHeight - box.scrollTop - box.clientHeight
+            stick.current = left < 60
+            setAway(left > 160)
+          }}
+        >
+          {history?.more && !all && <button type="button" className="link task-earlier-turns" onClick={showEarlierTurns}>Show earlier</button>}
+          {shown.length === 0 && task.mine && <p className="hint">{task.screen ? 'Nothing said yet. Pick Terminal to see its screen.' : 'Nothing yet.'}</p>}
+          {shown.length === 0 && !task.mine && historyLoaded && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
+          {/* The whole conversation, in order: a turn that is over as what was asked, a line for the work and the answer; the turn going on in the open. */}
+          <Thread entries={shown} state={task.state} settled={settledTurn.current} />
+          {/* What it does now, and for how long this turn has run. A command it runs is on its own line just above, turning:
+              the line under it then says only that it works. */}
+          {task.state === 'working' && <NowLine line={lastShown?.kind === 'command' && lastShown.status === 'running' ? '' : task.line} since={newTurn ? turnStart(shown) : undefined} />}
+        </div>
+        {away && (
+          <button
+            type="button"
+            className="thread-jump"
+            aria-label="Go to the latest"
+            title="Go to the latest"
+            onClick={() => {
+              stick.current = true
+              logBox.current?.scrollTo({ top: logBox.current.scrollHeight, behavior: 'smooth' })
+            }}
+          >
+            <Icon name="down" size={14} />
+          </button>
+        )}
       </div>
 
       {task.pending.map((request) => (
@@ -694,8 +795,13 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
             </div>
           )}
           <form className="task-reply" onSubmit={send}>
-            <input value={text} disabled={holdsReply} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={holdsReply ? 'Reply when it has finished' : 'Reply, or hold ' + talkKey + ' and talk'} aria-label="Reply to the agent" type={question?.questions?.[0]?.secret ? 'password' : 'text'} role="combobox" aria-autocomplete="list" aria-expanded={!!listed} aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
-            <button className="small" disabled={holdsReply || !text.trim()}>
+            {/* A box that grows with what is typed: Enter sends, Shift+Enter starts a new line. A password is one line, and not shown. */}
+            {question?.questions?.[0]?.secret ? (
+              <input value={text} disabled={holdsReply} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" type="password" />
+            ) : (
+              <textarea rows={1} value={text} disabled={holdsReply} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" aria-autocomplete="list" aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
+            )}
+            <button className={!holdsReply && text.trim() ? 'primary small' : 'small'} disabled={holdsReply || !text.trim()}>
               Send
             </button>
           </form>

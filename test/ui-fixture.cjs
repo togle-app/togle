@@ -254,22 +254,24 @@ module.exports = function install(fixture) {
   api.installLocalSpeech = async models => { record('installLocalSpeech', models); local = { ...local, installed: models }; emit('onLocalSpeech', clone(local)); emit('onSttStatus', { state: 'ready' }); return clone(local) }
   // The coding agents' tasks (the Tasks screen), in memory so that a test can answer, stop and start them.
   const hour = 3600000
+  // When something in a task's conversation was said: so many seconds ago, as an agent's record keeps it.
+  const ago = seconds => Date.now() - seconds * 1000
   // (`terminals` is further down: Take over writes into it when it is called, long after both exist.)
   const task = (key, props) => ({ key, runner: key.split(':')[0], id: key.split(':')[1], folder: 'C:\\work\\site', state: 'idle', updatedAt: Date.now(), mine: false, line: '', pending: [], commandsRunning: false, log: [], ...props })
   const runnerTasks = fixture.scenario !== 'tasks' ? [] : [
     task('codex:t1', { title: 'Add the status column', folder: 'C:\\work\\api-server', state: 'waiting', updatedAt: Date.now() - 60000, mine: true, line: 'Wants to run npm run migrate',
       pending: [{ id: 'r1', kind: 'command', command: 'npm run migrate', raw: 'npm run migrate', folder: 'C:\\work\\api-server', offersAlways: true, always: 'Always allow commands that start with npm run' }],
-      log: [{ id: 1, at: 1, kind: 'you', text: 'Add a status column to the orders table.' }, { id: 2, at: 2, kind: 'agent', text: 'I will add the column and a migration.' }, { id: 3, at: 3, kind: 'command', text: 'git status', status: 'finished' }, { id: 4, at: 4, kind: 'files', text: 'Changed 2 files: src/db/orders.ts, migrations/004.sql', paths: ['src/db/orders.ts', 'migrations/004.sql'] }] }),
+      log: [{ id: 1, at: ago(180), kind: 'you', text: 'Add a status column to the orders table.' }, { id: 2, at: ago(172), kind: 'agent', text: 'I will add the column and a migration.' }, { id: 3, at: ago(160), kind: 'command', text: 'git status', status: 'finished' }, { id: 4, at: ago(140), kind: 'files', text: 'Changed 2 files: src/db/orders.ts, migrations/004.sql', paths: ['src/db/orders.ts', 'migrations/004.sql'] }] }),
     task('claude:s5', { title: 'Clean the build folder', folder: 'C:\\work\\website', state: 'waiting', updatedAt: Date.now() - 120000, mine: true, line: 'Wants to run rm -rf build',
       pending: [{ id: 'r2', kind: 'command', command: 'rm -rf build', raw: 'rm -rf build', folder: 'C:\\work\\website', offersAlways: true, always: 'Always allow this command in website', danger: 'It deletes files or folders for good.' }],
-      log: [{ id: 5, at: 5, kind: 'you', text: 'Clean up the build folder.' }, { id: 6, at: 6, kind: 'asked', text: 'rm -rf build' }] }),
+      log: [{ id: 5, at: ago(130), kind: 'you', text: 'Clean up the build folder.' }, { id: 6, at: ago(124), kind: 'asked', text: 'rm -rf build' }] }),
     task('claude:s2', { title: 'Rebuild the pricing page', folder: 'C:\\work\\website', state: 'working', mine: true, line: 'Running npm test',
-      log: [{ id: 7, at: 7, kind: 'you', text: 'Rebuild the pricing page with two plans.' }, { id: 8, at: 8, kind: 'agent', text: '**Two plans** it is. I will start with the table.' }, { id: 9, at: 9, kind: 'command', text: 'npm test', status: 'running' }] }),
+      log: [{ id: 7, at: ago(48), kind: 'you', text: 'Rebuild the pricing page with two plans.' }, { id: 8, at: ago(41), kind: 'agent', text: '**Two plans** it is. I will start with the table.' }, { id: 9, at: ago(12), kind: 'command', text: 'npm test', status: 'running' }] }),
     task('claude:s4', { title: 'Write the release notes', folder: 'C:\\work\\notes', state: 'working', pid: 4242, line: 'Working in its own window' }),
     // A task Togle does not run, with its conversation as its agent keeps it: the last turns, and the turns before (`older`).
     task('claude:s3', { title: 'Fix the login redirect', folder: 'C:\\work\\website', updatedAt: Date.now() - 5 * hour, history: {
-      older: [{ id: 21, at: 21, kind: 'you', text: 'Where does the login redirect go wrong?' }, { id: 22, at: 22, kind: 'agent', text: 'It drops the `next` parameter.' }],
-      entries: [{ id: 23, at: 23, kind: 'you', text: 'Fix it, and keep the tests green.' }, { id: 24, at: 24, kind: 'agent', text: 'I will change `redirect.ts`.' }, { id: 25, at: 25, kind: 'command', text: 'npm test', status: 'failed' }, { id: 26, at: 26, kind: 'files', text: 'Changed 1 file: src/redirect.ts', paths: ['src/redirect.ts'] }, { id: 27, at: 27, kind: 'command', text: 'npm test', status: 'finished' }, { id: 28, at: 28, kind: 'agent', text: 'Fixed: the redirect keeps `next`. Tests pass.' }]
+      older: [{ id: 21, at: ago(5 * 3600 + 1200), kind: 'you', text: 'Where does the login redirect go wrong?' }, { id: 22, at: ago(5 * 3600 + 1180), kind: 'agent', text: 'It drops the `next` parameter.' }],
+      entries: [{ id: 23, at: ago(5 * 3600 + 600), kind: 'you', text: 'Fix it, and keep the tests green.' }, { id: 24, at: ago(5 * 3600 + 592), kind: 'agent', text: 'I will change `redirect.ts`.' }, { id: 25, at: ago(5 * 3600 + 570), kind: 'command', text: 'npm test', status: 'failed' }, { id: 26, at: ago(5 * 3600 + 530), kind: 'files', text: 'Changed 1 file: src/redirect.ts', paths: ['src/redirect.ts'] }, { id: 27, at: ago(5 * 3600 + 500), kind: 'command', text: 'npm test', status: 'finished' }, { id: 28, at: ago(5 * 3600 + 466), kind: 'agent', text: 'Fixed: the redirect keeps `next`. Tests pass.' }]
     } }),
     task('codex:t9', { title: 'Port the settings screen', folder: 'C:\\work\\mobile-app', updatedAt: Date.now() - 72 * hour })
   ]
@@ -453,6 +455,13 @@ module.exports = function install(fixture) {
       const found = runnerFind(key)
       found.history = { entries: [{ id: 400 + ++sequence, at: Date.now(), kind: 'you', text: question + '\n\nA call is saved at "C:\\calls\\live.md".' }, { id: 400 + ++sequence, at: Date.now(), kind: 'agent', text: answer }] }
       found.state = 'idle'; runnerChanged()
+    },
+    // An agent's own record of a task gains entries (what was said to it, what it did), as it does a moment after a reply is sent.
+    // An entry with an id the record already has takes its place (a command that ended).
+    recorded: (key, entries) => {
+      const found = runnerFind(key), kept = [...(found.history?.entries ?? [])]
+      for (const entry of clone(entries)) { const at = kept.findIndex(one => one.id === entry.id); if (at < 0) kept.push(entry); else kept[at] = entry }
+      found.history = { ...found.history, entries: kept }; found.updatedAt = Date.now(); runnerChanged()
     },
     askOutside: (key, request) => { const found = runnerFind(key); found.pending = [clone(request)]; found.state = 'waiting'; found.line = 'Wants to run ' + (request.command ?? ''); runnerChanged() },
     // A task of an agent without ACP, in a terminal of Togle's own that has printed `printed` so far.
