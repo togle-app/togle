@@ -51,7 +51,7 @@ export interface ClaudeOptions {
   keep?: string
   /** What a session said last: read from its file when left out. */
   said?: (session: string) => Promise<string>
-  /** A session's conversation, for the Web view: read from its file when left out. */
+  /** A session's conversation, for the Chat view: read from its file when left out. */
   conversation?: (session: string, all: boolean) => Promise<TaskHistory | null>
   /** How long a task that Togle runs may do nothing before it is put to rest, in milliseconds: a day when left out. */
   restMs?: number
@@ -324,7 +324,7 @@ export class ClaudeBackend implements Backend {
     return kept ? undefined : 'This Claude Code has not had a message yet, so there is no conversation to open here. It was left as it is.'
   }
 
-  /** A session's conversation as its file keeps it: what the Web view shows, also of what was said before Togle opened it. */
+  /** A session's conversation as its file keeps it: what the Chat view shows, also of what was said before Togle opened it. */
   history(id: string, all: boolean): Promise<TaskHistory | null> {
     return (this.options.conversation ?? claudeConversation)(id, all)
   }

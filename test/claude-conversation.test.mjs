@@ -1,4 +1,4 @@
-// A Claude Code session's conversation, read from the session's file for the Web view (here, in a scratch folder set up as its
+// A Claude Code session's conversation, read from the session's file for the Chat view (here, in a scratch folder set up as its
 // own): what was asked and answered, the commands run with how each ended and how long each took, the files changed, what else
 // it did (files read, searches, the web, helpers, its checklist, its thinking, other tools), and nothing of what a helper agent
 // did itself, of reminders or of results. It is read again as the file grows, and a line that is half written waits. What a step

@@ -329,6 +329,12 @@ module.exports = function install(fixture) {
     if (!found.history) return null
     return clone({ entries: all && found.history.older ? [...found.history.older, ...found.history.entries] : found.history.entries, more: !!found.history.older && all !== true })
   }
+  // What a step holds (what a command printed, a thought's words), as a task given `history.details` keeps it by the step's key.
+  api.runnerStep = async (key, more) => {
+    record('runnerStep', [key, more])
+    const text = runnerFind(key).history?.details?.[more]
+    return typeof text === 'string' ? clone({ text, cut: text.length > 24000 }) : null
+  }
   let failTask = false
   api.startRunnerTask = async request => {
     record('startRunnerTask', [request])

@@ -583,7 +583,7 @@ test('a task that has done nothing for a day is put to rest: its program ends, i
     assert.equal(task.screen.open, true)
     await sleep(1200)
     assert.ok(alive(job(home, task.screen.job).pid), 'not put to rest again while its screen is open')
-    // A reply from the Web view brings a task at rest back too, and the words reach it.
+    // A reply from the Chat view brings a task at rest back too, and the words reach it.
     await task.screen.hide()
     await until(() => !alive(job(home, task.screen.job).pid), 'it to rest again')
     await task.send('hello again')

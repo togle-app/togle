@@ -94,6 +94,36 @@ const SHAPES = {
   ),
   // Down to the latest words.
   down: <path d="M12 5v14M19 12l-7 7-7-7" />,
+  // A file an agent read.
+  file: (
+    <>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5" />
+    </>
+  ),
+  // The web: a page opened, or a search of it.
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+    </>
+  ),
+  // Another tool an agent used: a plug.
+  plug: <path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5" />,
+  // An agent's thinking: a cloud of thought.
+  thought: (
+    <>
+      <path d="M7 17a4 4 0 0 1-.6-7.95A5 5 0 0 1 16 7.5a4.5 4.5 0 0 1 1 8.9V17z" />
+      <circle cx="6" cy="20.5" r="1" />
+    </>
+  ),
+  // Something that went wrong: a circle with a mark in it.
+  alert: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7.5v5.5M12 16.5h.01" />
+    </>
+  ),
   // A command that was refused: a circle with a line through it.
   refused: (
     <>

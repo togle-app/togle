@@ -373,7 +373,7 @@ export async function claudeWrittenAt(id: string): Promise<number | undefined> {
   return (await fs.stat(file).catch(() => null))?.mtimeMs
 }
 
-// ---- A session's conversation, for the Web view ----
+// ---- A session's conversation, for the Chat view ----
 
 // The most of a session's file read (its end, when it is longer), the longest words or command kept, and the most entries held.
 const READ_MOST = 24 * 1048576
@@ -700,7 +700,7 @@ async function readConversation(id: string, all: boolean): Promise<TaskHistory |
 }
 
 /**
- * The conversation of a Claude Code session as the session's file keeps it, for the Web view: its last turns, or all (up to a
+ * The conversation of a Claude Code session as the session's file keeps it, for the Chat view: its last turns, or all (up to a
  * limit). Only what the file gained since the last look is read. Null when Claude Code has kept no file under this id.
  */
 export function claudeConversation(id: string, all = false): Promise<TaskHistory | null> {

@@ -355,7 +355,7 @@ export class RunnerHub {
   }
 
   /**
-   * A task's conversation as its agent keeps it, for the Web view; null when the agent keeps none Togle can read (the window then
+   * A task's conversation as its agent keeps it, for the Chat view; null when the agent keeps none Togle can read (the window then
    * shows what happened while Togle watched). A task Togle runs is read by the session it is in now: a cleared one is another.
    */
   async history(key: string, all: boolean): Promise<TaskHistory | null> {
@@ -364,7 +364,7 @@ export class RunnerHub {
   }
 
   /**
-   * What a step of that conversation holds, for when the person opens it in the Web view: what a command printed, or the words
+   * What a step of that conversation holds, for when the person opens it in the Chat view: what a command printed, or the words
    * of a thought, by the key the step came with. Asked of the agent that keeps the conversation, and given to the window only.
    */
   async step(key: string, more: string): Promise<StepDetail | null> {

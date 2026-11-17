@@ -587,7 +587,7 @@ export class HermesBackend implements Backend {
   }
 
   /**
-   * A session's conversation as Hermes keeps it, for the Web view: what was asked, what Hermes said, the commands it ran and the
+   * A session's conversation as Hermes keeps it, for the Chat view: what was asked, what Hermes said, the commands it ran and the
    * files it changed. Hermes is asked with `sessions export`, which starts a Python program and takes a second or two, so a session
    * is asked for again only after a while. Null when Hermes has no such session or the export cannot be read.
    */

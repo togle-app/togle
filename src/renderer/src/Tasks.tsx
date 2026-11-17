@@ -6,7 +6,7 @@ import { openSettings } from './open-settings'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { RequestCard } from './RequestCard'
-import { clock, lastTurnKey, Thread, turnStart, useHistory } from './TaskThread'
+import { clock, currentPlan, lastTurnKey, PlanCard, Thread, turnStart, useHistory } from './TaskThread'
 import { TerminalView } from './TerminalView'
 
 const api = window.togle
@@ -44,7 +44,7 @@ const SLASH_LIST_HEIGHT = 208
 const REMOTE = 'remote:'
 const remoteKey = (device: string, key: string): string => `${REMOTE}${device}:${key}`
 
-/** A task is shown as its agent's own screen (Terminal), or as its conversation, a card for what it asks and a reply box (Web). Kept as `session` and `cards`. */
+/** A task is shown as its agent's own screen (Terminal), or as its conversation, a card for what it asks and a reply box (Chat). Kept as `session` and `cards`. */
 type View = 'cards' | 'session'
 const VIEWS = 'togle.taskviews'
 /** The view picked for each task, kept in the page between runs. */
@@ -189,7 +189,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   )
 
   // Opened from a notice that says an agent waits on its own screen (Hermes has no card for what it asks): the screen is what shows,
-  // once for each time the task is asked for from outside, so that a pick of Web afterwards stays.
+  // once for each time the task is asked for from outside, so that a pick of Chat afterwards stays.
   const showedSession = useRef(0)
   useEffect(() => {
     if (!focus?.key || showedSession.current === focus.seq) return
@@ -419,10 +419,10 @@ function SignedOut({ task }: { task: TaskView }) {
 }
 
 /**
- * At the end of the conversation of a task that works: what it does now, and how long this turn has run. The clock is for the
- * eye only: read out, it would speak every second.
+ * At the end of the conversation of a task that works, when no step of it is running (a step that runs has its own clock):
+ * that it works, and how long this turn has run. The clock is for the eye only: read out, it would speak every second.
  */
-function NowLine({ line, since }: { line: string; since?: number }) {
+function NowLine({ since }: { since?: number }) {
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000)
@@ -431,7 +431,7 @@ function NowLine({ line, since }: { line: string; since?: number }) {
   return (
     <div className="task-now">
       <span className="now-mark" aria-hidden="true" />
-      <span className="now-words">{line || 'Working…'}</span>
+      <span className="now-words">Working…</span>
       {since !== undefined && now >= since && (
         <span className="now-clock" aria-hidden="true">
           {clock(now - since)}
@@ -475,7 +475,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
   const logBox = useRef<HTMLDivElement>(null)
   const running = task.state === 'working' || task.state === 'waiting'
   // The conversation as its agent keeps it, also of what was said before Togle opened the task; else what happened while Togle watched.
-  // Read only while Web is what shows: the agent's screen (open, or closed with Terminal picked) needs none of it.
+  // Read only while Chat is what shows: the agent's screen (open, or closed with Terminal picked) needs none of it.
   const webShown = !sessionShown && !(task.mine && !!task.screen && view === 'session' && !task.terminal)
   const { history, loaded: historyLoaded, all, showAll } = useHistory(task, webShown)
   const shown = history ? history.entries : log
@@ -494,7 +494,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
   // conversation, and where it was in the window, are kept until the earlier turns are in.
   const kept = useRef<{ part: Element; top: number } | null>(null)
   const showEarlierTurns = (): void => {
-    const part = logBox.current?.querySelector('.you-row, .task-agent, .task-steps, .steps')
+    const part = logBox.current?.querySelector('.turn, .thread-day')
     if (part) kept.current = { part, top: part.getBoundingClientRect().top }
     showAll()
   }
@@ -513,6 +513,22 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
     if (!running) settledTurn.current = turnKey
   }, [running, turnKey])
   const newTurn = running && turnKey !== settledTurn.current
+  // The entries drawn before, from the same reading (the agent's record, all of it or its last turns, or Togle's own log): an
+  // entry not among them comes in with a little motion, once. A reading of its own draws all it has at once, still.
+  const reading = `${history ? 'record' : 'log'}${all ? ' all' : ''}`
+  const drawn = useRef<{ reading: string; ids: Set<number> } | null>(null)
+  const known = drawn.current?.reading === reading ? drawn.current.ids : null
+  useEffect(() => {
+    if (!historyLoaded && !shown.length) return
+    const ids = drawn.current?.reading === reading ? drawn.current.ids : new Set<number>()
+    for (const entry of shown) ids.add(entry.id)
+    drawn.current = { reading, ids }
+  })
+  // A step of this turn that runs has its own clock: the line that says it works then waits.
+  const turnBegan = shown.map((entry) => entry.kind).lastIndexOf('you')
+  const stepRuns = shown.slice(turnBegan + 1).some((entry) => entry.status === 'running')
+  // The agent's own checklist for the turn at hand, by the reply box.
+  const plan = currentPlan(shown)
   // And when its place gets shorter or taller: a card for what the agent asks, more lines in the reply box, the window.
   useEffect(() => {
     const box = logBox.current
@@ -646,7 +662,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
           <span className="segmented view-switch" role="group" aria-label="View">
             {(['cards', 'session'] as const).map((name) => (
               <button key={name} type="button" className={view === name ? 'on' : ''} aria-pressed={view === name} onClick={() => onView(name)} title={name === 'cards' ? 'The conversation, a card for what the agent asks, and a reply box.' : 'The agent’s own screen.'}>
-                {name === 'cards' ? 'Web' : 'Terminal'}
+                {name === 'cards' ? 'Chat' : 'Terminal'}
               </button>
             ))}
           </span>
@@ -741,23 +757,23 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
           {shown.length === 0 && task.mine && <p className="hint">{task.screen ? 'Nothing said yet. Pick Terminal to see its screen.' : 'Nothing yet.'}</p>}
           {shown.length === 0 && !task.mine && historyLoaded && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
           {/* The whole conversation, in order: a turn that is over as what was asked, a line for the work and the answer; the turn going on in the open. */}
-          <Thread entries={shown} state={task.state} settled={settledTurn.current} />
-          {/* What it does now, and for how long this turn has run. A command it runs is on its own line just above, turning:
-              the line under it then says only that it works. */}
-          {task.state === 'working' && <NowLine line={lastShown?.kind === 'command' && lastShown.status === 'running' ? '' : task.line} since={newTurn ? turnStart(shown) : undefined} />}
+          <Thread entries={shown} state={task.state} settled={settledTurn.current} taskKey={task.key} known={known} />
+          {/* That it works, and for how long this turn has run: when no step of it runs, which has its own clock. */}
+          {task.state === 'working' && !stepRuns && <NowLine since={newTurn ? turnStart(shown) : undefined} />}
         </div>
         {away && (
           <button
             type="button"
             className="thread-jump"
             aria-label="Go to the latest"
-            title="Go to the latest"
             onClick={() => {
               stick.current = true
-              logBox.current?.scrollTo({ top: logBox.current.scrollHeight, behavior: 'smooth' })
+              const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+              logBox.current?.scrollTo({ top: logBox.current.scrollHeight, behavior: still ? 'auto' : 'smooth' })
             }}
           >
-            <Icon name="down" size={14} />
+            <Icon name="down" size={13} />
+            Latest
           </button>
         )}
       </div>
@@ -776,6 +792,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
         </div>
       )}
       {task.mine && task.screen && !task.terminal && task.screenClosed && <p className="hint">{task.screenClosed}</p>}
+
+      {/* The agent's own checklist for the turn at hand, on top of the reply box. */}
+      {plan && <PlanCard key={`${task.key} ${lastTurnKey(shown) ?? ''}`} plan={plan} />}
 
       {task.mine && (
         <div className="task-reply-place" ref={replyPlace}>
@@ -803,8 +822,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
             ) : (
               <textarea rows={1} value={text} disabled={holdsReply} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" aria-autocomplete="list" aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
             )}
-            <button className={!holdsReply && text.trim() ? 'primary small' : 'small'} disabled={holdsReply || !text.trim()}>
-              Send
+            <button className={!holdsReply && text.trim() ? 'reply-send primary' : 'reply-send'} disabled={holdsReply || !text.trim()} aria-label="Send">
+              <Icon name="send" size={14} />
             </button>
           </form>
         </div>

@@ -247,14 +247,16 @@ export function stepsLine(log: readonly LogEntry[]): string | undefined {
     ...(count.searches ? [`searched ${plural(count.searches, 'time', 'times')}`] : []),
     ...(count.web ? [`looked on the web ${plural(count.web, 'time', 'times')}`] : []),
     ...(count.helpers ? [`asked ${plural(count.helpers, 'helper', 'helpers')}`] : []),
-    ...(count.plans ? ['kept its checklist'] : []),
     ...(count.tools ? [`used ${plural(count.tools, 'other tool', 'other tools')}`] : [])
   ]
   return `${plural(count.steps, 'step', 'steps')}: ${parts.join(', ')}`
 }
 
-/** Whether an entry is something the agent did: a command, a change of files, or another step. Its thinking is not: it did nothing yet. */
-export const isWork = (entry: LogEntry): boolean => entry.kind === 'command' || entry.kind === 'files' || (entry.kind === 'step' && entry.step !== 'think')
+/**
+ * Whether an entry is something the agent did: a command, a change of files, or another step. Its thinking is not (it did nothing
+ * yet), nor is its checklist (what it means to do).
+ */
+export const isWork = (entry: LogEntry): boolean => entry.kind === 'command' || entry.kind === 'files' || (entry.kind === 'step' && entry.step !== 'think' && entry.step !== 'plan')
 
 /**
  * What a stretch of a task's log holds, counted: the steps in all, the files changed and the commands run (the refused ones
@@ -287,7 +289,7 @@ export interface TaskDetail {
 }
 
 /**
- * A task's conversation as its agent keeps it, for the Web view: the last turns of it, oldest first. It holds what was said
+ * A task's conversation as its agent keeps it, for the Chat view: the last turns of it, oldest first. It holds what was said
  * before Togle opened the task too, which the live `log` of a task does not.
  */
 export interface TaskHistory {

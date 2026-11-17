@@ -1,4 +1,4 @@
-// What Hermes kept of a session's conversation, for the Web view: its `sessions export` made into entries (only the live
+// What Hermes kept of a session's conversation, for the Chat view: its `sessions export` made into entries (only the live
 // conversation, in the order Hermes wrote it), and the backend's history over the stand-in for the `hermes` program: asked for
 // again only after a while, and nothing for a session Hermes does not have.
 import assert from 'node:assert/strict'

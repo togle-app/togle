@@ -1,4 +1,4 @@
-// What Codex kept of a thread's conversation, for the Web view: its turns made into entries, and the backend's history over the
+// What Codex kept of a thread's conversation, for the Chat view: its turns made into entries, and the backend's history over the
 // stand-in for Codex's shared server (the newest turns with every step, older ones asked for, a thread it does not have).
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'

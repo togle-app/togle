@@ -312,100 +312,152 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
    at the window's edge, the room for the bar always kept (the pane's 15px at that side: 8 for the bar, 7 beside it). */
 .task-log { display: flex; flex-direction: column; flex: 0 1 auto; gap: 12px; min-height: 0; margin-right: -15px; padding: 0 7px 0 0; overflow-y: auto; scrollbar-gutter: stable; }
 .task-latest { max-width: 100%; }
-/* The conversation of a task (the Web view) has the room between the task's lines and the reply box, so that the box is at
-   the foot of the pane. It scrolls there with its bar at the window's edge, and the button that brings the latest words
-   back lies over it. */
-/* (In a window too low for all of a task, the frame keeps the height of a few lines and the pane scrolls.) */
-.thread-place { position: relative; display: flex; flex-direction: column; flex: 1 1 0; min-height: 4.5rem; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: clip; }
-/* Its own room at the sides: 16px, of which the room kept for the bar is 8 at the right. */
-/* (It is the place its parts are laid out from: words kept for a screen reader are laid out of the flow, and would else
-   be placed from the frame, outside what scrolls.) */
-.task-log.thread { position: relative; flex: 1 1 auto; gap: 14px; margin-right: 0; padding: 14px 8px 14px 16px; }
-/* What scrolls up goes softly under the frame's top: a shade there, only once the conversation is scrolled. */
-.task-log.thread::before { content: ''; position: sticky; top: -14px; z-index: 2; flex: none; height: 18px; margin: -14px -8px -18px -16px; background: linear-gradient(var(--bg) 30%, transparent); opacity: 0; pointer-events: none; animation: thread-shade linear both; animation-timeline: scroll(nearest block); animation-range: 0 28px; }
-@keyframes thread-shade { to { opacity: 1; } }
+/* The conversation of a task (the Chat view): a chat, flat on the pane and as wide as it, between the task's lines and the
+   reply box, which is at the foot. It scrolls with its bar at the window's edge. */
+.thread-place { position: relative; display: flex; flex-direction: column; flex: 1 1 0; min-height: 4.5rem; margin-right: -15px; }
+/* (It is the place its parts are laid out from: what is kept for a screen reader is laid out of the flow, and would else be
+   placed from outside what scrolls.) */
+.task-log.thread { position: relative; flex: 1 1 auto; gap: 20px; margin-right: 0; padding: 2px 7px 14px 0; }
+/* A turn: what was said, then what the agent did and said. */
+.turn { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 /* A day, where the conversation goes over one. */
 .thread-day { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; }
 .thread-day::before, .thread-day::after { content: ''; flex: 1; height: 1px; background: var(--line); }
-/* What you said is at the right, with when you said it before it. */
-.you-row { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; min-width: 0; }
-.thread .task-you { align-self: auto; min-width: 0; border-radius: 12px 12px 4px 12px; }
-.said-at { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-/* Under an answer: when it came, and a way to copy it. */
-.said-meta { display: flex; align-items: center; gap: 10px; min-height: 16px; margin-top: -8px; }
-.said-meta button.link { display: inline-flex; align-items: center; gap: 4px; margin: 0; padding: 0; color: var(--muted); font-size: 11px; }
-.said-meta button.link:hover { color: var(--ink); }
-/* At the end, while it works: a mark that beats, what it does now, and how long this turn has run. */
-.task-now { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 24px; font-size: 12.5px; }
-.now-mark { position: relative; flex: none; display: grid; place-items: center; width: 18px; height: 18px; }
-.now-mark::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--togle); }
-.now-mark::after { content: ''; position: absolute; inset: 5px; border: 1px solid var(--togle); border-radius: 50%; animation: now-ping 1.8s ease-out infinite; }
-@keyframes now-ping { from { transform: scale(1); opacity: 0.9; } 80%, to { transform: scale(2.6); opacity: 0; } }
-.now-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: transparent; background: linear-gradient(100deg, var(--muted) 40%, var(--ink) 50%, var(--muted) 60%) 0 0 / 300% 100%; -webkit-background-clip: text; background-clip: text; animation: now-shimmer 2.4s linear infinite; }
-@keyframes now-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-.now-clock { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-/* What is new comes in softly. */
-@keyframes thread-in { from { opacity: 0; transform: translateY(4px); } }
-.thread > .you-row, .thread > .task-agent, .thread > .task-steps, .thread > .steps, .thread > .said-meta, .thread > .task-now, .thread .step { animation: thread-in 0.22s ease-out; }
-/* Back to the latest words, when the conversation is scrolled up: over its foot, in the middle. */
-.thread-jump { position: absolute; left: 50%; bottom: 12px; z-index: 3; display: grid; place-items: center; width: 30px; height: 30px; margin-left: -15px; padding: 0; border-color: var(--muted); border-radius: 50%; background: var(--raised); box-shadow: 0 10px 24px -8px var(--shadow); animation: thread-in 0.16s ease-out; }
-@media (prefers-reduced-motion: reduce) {
-  .now-mark::after, .now-words, .thread-jump, .thread > .you-row, .thread > .task-agent, .thread > .task-steps, .thread > .steps, .thread > .said-meta, .thread > .task-now, .thread .step { animation: none; }
-  .now-words { color: var(--muted); background: none; }
-  .task-steps > summary > svg { transition: none; }
-}
-/* "Show earlier": its words only, in the middle. A link button has a negative side margin that would make it wider than the thread. */
 .task-earlier-turns { align-self: center; margin: 0; font-size: 12px; }
-/* What the agent said is plain words on the place, as the design draws a conversation: only what you said is in a bubble. */
+/* What the person said: a bubble at the right, with when it was said beside it. A very long one shows its first twelve lines,
+   fading out, and opens to all of it. */
+.you-row { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; min-width: 0; }
+.you-bubble { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; max-width: 82%; padding: 8px 12px; border-radius: 14px 14px 4px 14px; background: var(--togle-soft); }
+.task-you { align-self: stretch; min-width: 0; max-height: calc(12 * 1.45em); overflow: hidden; color: var(--ink); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-you.whole { max-height: none; }
+.task-you.clamped { -webkit-mask-image: linear-gradient(to bottom, #000 75%, transparent); mask-image: linear-gradient(to bottom, #000 75%, transparent); }
+.you-bubble .you-more { margin: 0; padding: 0; color: var(--togle); font-size: 11px; }
+.you-bubble .you-more:hover { color: var(--ink); }
+.said-at { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* What the agent said is plain words on the place, as the design draws a conversation. */
 .task-agent { max-width: 100%; padding: 0; overflow-wrap: anywhere; }
 .task-agent > :first-child { margin-top: 0; }
 .task-agent > :last-child { margin-bottom: 0; }
-.task-you { align-self: flex-end; max-width: 82%; padding: 8px 10px; border-radius: 10px; background: var(--togle-soft); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
-/* Work folded to one line: the small arrow the design draws before it (it points down while the work is open), what the
-   work was, and how long it took when that is known. */
-.task-steps > summary { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 0; list-style: none; color: var(--muted); font-size: 12px; cursor: pointer; }
-.task-steps > summary::-webkit-details-marker { display: none; }
-.task-steps > summary:hover { color: var(--ink); }
-.task-steps > summary > svg { flex: none; transform: rotate(-90deg); transition: transform 0.15s ease; }
-.task-steps[open] > summary > svg { transform: none; }
-/* What the work was, as small chips: the files, the commands, how many of them failed or were refused. Then how long it took. */
-.fold-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
-.fold-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; background: var(--raised); color: var(--ink); font-size: 11.5px; font-weight: 500; line-height: 1.4; white-space: nowrap; }
-.fold-chip svg { color: var(--muted); }
-.fold-chip.bad { background: var(--danger-soft); color: var(--danger); }
-.fold-label { flex: none; }
-.fold-took { flex: none; font-variant-numeric: tabular-nums; }
-/* Open, the work is on a rail: each thing the agent did is a line with a round mark, and what it said along the way is beside the rail. */
-.fold-body { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 4px 0 2px; }
-.fold-body::before, .steps::before { content: ''; position: absolute; top: 14px; bottom: 14px; left: 8.5px; width: 1px; background: var(--line); }
-.fold-body > .steps::before { display: none; }
-.fold-body > .task-agent { padding-left: 27px; }
-.steps { position: relative; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.step { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 24px; color: var(--muted); font-size: 12px; }
-.step-node { position: relative; z-index: 1; flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--raised); color: var(--muted); }
-/* A note has a small dot on the rail. */
-.step-node.dot { background: var(--bg); }
-.step-node.dot::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); opacity: 0.6; }
-/* A command's mark says how it ended: green for done, red for failed or refused, indigo and turning while it runs. */
-.task-cmd[data-status='finished'] .step-node { background: var(--ok-soft); color: var(--ok); }
-.task-cmd[data-status='failed'] .step-node, .task-cmd[data-status='declined'] .step-node { background: var(--danger-soft); color: var(--danger); }
-.task-cmd[data-status='running'] .step-node { background: var(--togle-soft); color: var(--togle); }
-.task-cmd[data-status='failed'] .hint, .task-cmd[data-status='declined'] .hint { color: var(--danger); }
-.task-cmd[data-status='running'] .hint { color: var(--togle); }
-.step-spin { width: 9px; height: 9px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: step-spin 0.8s linear infinite; }
+/* Under an answer: when it came; Copy shows when the pointer is on the turn. */
+.said-meta { display: flex; align-items: center; gap: 10px; min-height: 18px; margin-top: -4px; color: var(--muted); font-size: 11px; }
+.meta-took { font-variant-numeric: tabular-nums; }
+button.copy-text { display: inline-flex; align-items: center; gap: 4px; margin: 0; padding: 0; color: var(--muted); font-size: 11px; text-decoration: none; }
+button.copy-text:hover { color: var(--ink); }
+.said-meta .copy-text { opacity: 0; transition: opacity 0.12s ease-out; }
+.turn:hover .said-meta .copy-text, .said-meta .copy-text:focus-visible { opacity: 1; }
+
+/* ---- What the agent did: quieter than what it says ---- */
+/* A row for each thing: its mark, what it did to what, and how long it took. What it touched is in the brighter ink, to find. */
+.rows { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.step-row { min-width: 0; color: var(--muted); font-size: 12px; }
+.row-line { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 22px; margin: 0; padding: 1px 2px 1px 0; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; font-weight: 400; line-height: 1.45; text-align: left; white-space: nowrap; }
+button.row-line { cursor: pointer; }
+button.row-line:hover:not(:disabled) { border-color: transparent; color: var(--ink); }
+.row-icon { flex: none; display: grid; place-items: center; width: 16px; height: 16px; color: var(--muted); }
+.row-words { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.row-what { color: var(--ink); }
+.row-what code { padding: 0; background: none; color: var(--ink); font: 11.5px var(--font-mono); }
+.row-what q { quotes: '\201C' '\201D'; }
+.row-dim, .row-what .row-dim { color: var(--muted); }
+.file-name { color: var(--ink); }
+.row-caret { flex: none; display: grid; place-items: center; color: var(--muted); opacity: 0; transform: rotate(-90deg); transition: opacity 0.15s, transform 0.15s; }
+.row-line:hover .row-caret, .row-line:focus-visible .row-caret, .step-row.open > .row-line .row-caret { opacity: 0.85; }
+.step-row.open > .row-line .row-caret { transform: none; }
+.row-note { flex: none; margin-left: auto; color: var(--danger); font-size: 11.5px; }
+.row-time { flex: none; margin-left: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.row-note + .row-time { margin-left: 0; }
+/* A step that runs turns, and its verb shimmers; one that failed is red. Success has no mark of its own. */
+.row-spin { display: block; width: 10px; height: 10px; border: 1.5px solid var(--togle); border-right-color: transparent; border-radius: 50%; animation: step-spin 0.8s linear infinite; }
 @keyframes step-spin { to { transform: rotate(360deg); } }
-/* Where less motion is asked for, the mark of a command that runs stands still: its color and its word say that it runs. */
-@media (prefers-reduced-motion: reduce) { .step-spin { animation: none; } }
-.step code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font: 12px/1.5 var(--font-mono); }
-.step .hint { flex: none; }
-/* A file it changed: its name, then the folder it is in. */
-.file-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
-.file-folder { flex: 0 10 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-row[data-status='failed'] .row-icon, .step-row[data-status='failed'] .row-verb { color: var(--danger); }
+.step-row[data-status='declined'] .row-note { color: var(--muted); }
+/* A note between steps: a small dot, and the words, on as many lines as they take. */
+.row-dot { display: block; width: 4px; height: 4px; border-radius: 50%; background: var(--muted); opacity: 0.6; }
+.task-note .row-line { align-items: flex-start; }
+.task-note .row-icon { height: 19px; }
+.task-note .row-words { white-space: normal; overflow-wrap: anywhere; }
 .task-note { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-/* A note can be a sentence of several lines: its mark stays at the first. */
-.task-note.step { align-items: flex-start; }
-.task-note.step .step-node { margin-top: 3px; }
-.step-words { min-width: 0; padding: 3.5px 0; overflow-wrap: anywhere; }
+/* A command opened: all of it after a $, how it ended, and what it printed in a small box of its own, with Copy. */
+.step-box { margin: 3px 0 6px 24px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.box-head { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; }
+.box-prompt { flex: none; color: var(--togle); font: 600 12px/1.5 var(--font-mono); }
+.box-command { flex: 1 1 auto; min-width: 0; padding: 0; background: none; color: var(--ink); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.box-chip { flex: none; padding: 0 7px; border-radius: 999px; background: var(--raised); color: var(--muted); font-size: 11px; line-height: 18px; }
+.box-chip.bad { background: var(--danger-soft); color: var(--danger); }
+.box-chip.live { background: var(--togle-soft); color: var(--togle); }
+.box-out { position: relative; border-top: 1px solid var(--line); }
+.box-out pre { max-height: 12rem; margin: 0; padding: 7px 10px 8px; overflow: auto; overscroll-behavior-y: auto; color: var(--ink); font: 11.5px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.box-out pre:focus-visible { outline: 2px solid var(--togle); outline-offset: -2px; }
+.box-out .hint { margin: 0; padding: 6px 70px 0 10px; font-size: 11.5px; }
+.box-out .hint:only-child { padding-bottom: 7px; }
+.box-out .copy-text { position: absolute; top: 6px; right: 10px; opacity: 0.6; }
+.box-out:hover .copy-text, .box-out .copy-text:focus-visible { opacity: 1; }
+/* A thought opened: its words, small and quiet, in a box of its own that scrolls. */
+.thought-box { max-height: 10rem; margin: 2px 0 6px 24px; padding: 1px 10px; overflow: auto; overscroll-behavior-y: auto; border-left: 2px solid var(--line); }
+.thought-box:focus-visible { outline: 2px solid var(--togle); outline-offset: 2px; }
+.thought-words { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.thought-box .hint { margin: 0; }
+/* A stretch of work as one quiet line: the small arrow the design draws before it (it points down while open), and the sentence
+   of what it was. While it is the work going on, the sentence shimmers and its newest step ticks under it. */
+.task-steps { display: flex; flex-direction: column; min-width: 0; }
+button.fold-line { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; margin: 0; padding: 2px 2px 2px 2px; border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.45; text-align: left; white-space: normal; cursor: pointer; }
+button.fold-line:hover:not(:disabled) { border-color: transparent; color: var(--ink); }
+.fold-line > svg { flex: none; transform: rotate(-90deg); transition: transform 0.15s ease; }
+.task-steps.open > .fold-line > svg { transform: none; }
+/* "Worked for 4m 8s", then in brief what it changed and ran. */
+.fold-label { flex: none; color: var(--ink); opacity: 0.85; }
+.fold-label + .fold-words::before { content: '\00B7'; margin-right: 6px; color: var(--muted); }
+.fold-words { min-width: 0; }
+.fold-words .bad { color: var(--danger); }
+.fold-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 4px 0 4px 7px; padding-left: 12px; border-left: 1px solid var(--line); }
+.fold-ticker { padding-left: 20px; animation: ticker-in 0.24s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes ticker-in { from { opacity: 0; transform: translateY(6px); } }
+/* Words that shimmer: what is going on now. */
+.fold-words.live, .step-row[data-status='running'] .row-verb, .now-words { color: transparent; background: linear-gradient(100deg, var(--muted) 40%, var(--ink) 50%, var(--muted) 60%) 0 0 / 300% 100%; -webkit-background-clip: text; background-clip: text; animation: now-shimmer 2.4s linear infinite; }
+.fold-words.live .bad { -webkit-text-fill-color: var(--danger); }
+@keyframes now-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+/* ---- At the end, beside, and under ---- */
+/* At the end, while it works and no step of it runs: a mark that beats, that it works, and how long this turn has run. */
+.task-now { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 22px; font-size: 12px; }
+.now-mark { position: relative; flex: none; display: grid; place-items: center; width: 16px; height: 16px; }
+.now-mark::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--togle); }
+.now-mark::after { content: ''; position: absolute; inset: 4.5px; border: 1px solid var(--togle); border-radius: 50%; animation: now-ping 1.8s ease-out infinite; }
+@keyframes now-ping { from { transform: scale(1); opacity: 0.9; } 80%, to { transform: scale(2.6); opacity: 0; } }
+.now-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.now-clock { flex: none; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+/* Back to the latest words, when the conversation is scrolled up: a small pill over its foot, in the middle. */
+button.thread-jump { position: absolute; left: 50%; bottom: 12px; z-index: 4; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 10px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 999px; background: var(--raised); color: var(--ink); font-size: 12px; font-weight: 500; box-shadow: 0 10px 24px -10px var(--shadow); animation: jump-in 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+button.thread-jump:hover:not(:disabled) { border-color: var(--muted); }
+@keyframes jump-in { from { opacity: 0; transform: translateX(-50%) scale(1.08); } }
+/* The agent's own checklist, on top of the reply box, as one with it. */
+.task-plan { display: flex; flex-direction: column; margin: 0 8px -12px; border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--bg); overflow: hidden; }
+.task-plan:not(:has(+ .task-reply-place)) { margin: 0; border-bottom: 1px solid var(--line); border-radius: 10px; }
+button.plan-head { display: flex; align-items: center; gap: 6px; width: 100%; margin: 0; padding: 6px 10px; border: 0; border-radius: 0; background: none; color: var(--ink); font-size: 12px; font-weight: 600; text-align: left; }
+button.plan-head:hover:not(:disabled) { border-color: transparent; }
+.plan-head > svg { flex: none; color: var(--muted); transform: rotate(-90deg); transition: transform 0.15s ease; }
+.plan-head[aria-expanded='true'] > svg { transform: none; }
+.plan-count { color: var(--muted); font-weight: 400; }
+.plan-items { display: flex; flex-direction: column; gap: 2px; max-height: 28vh; margin: 0; padding: 0 10px 8px 28px; overflow-y: auto; list-style: none; }
+.plan-items li { display: flex; align-items: flex-start; gap: 8px; min-width: 0; color: var(--ink); font-size: 12px; line-height: 1.45; }
+.plan-mark { flex: none; display: grid; place-items: center; width: 12px; height: 17px; color: var(--muted); }
+.plan-todo { display: block; width: 9px; height: 9px; border: 1px dashed var(--muted); border-radius: 50%; }
+.plan-text { min-width: 0; overflow-wrap: anywhere; }
+.plan-items li[data-state='done'] { color: var(--muted); }
+.plan-items li[data-state='done'] .plan-mark { color: var(--ok); }
+/* In a low window the checklist shows a little less, to leave the conversation its room. */
+@media (max-height: 560px) {
+  .plan-items { max-height: 18vh; }
+}
+/* What is new comes in with a little rise, once; what was there when the conversation opened stays still. */
+@keyframes thread-in { from { transform: translateY(0.375rem); } }
+.thread .fresh { animation: thread-in 0.18s cubic-bezier(0.16, 1, 0.3, 1); }
+/* Where less motion is asked for, nothing turns, beats, shimmers or rises. (After the rules it turns off, so that it wins.) */
+@media (prefers-reduced-motion: reduce) {
+  .thread .fresh, .fold-ticker, .thread-jump, .now-mark::after, .row-spin, .fold-words.live, .step-row[data-status='running'] .row-verb, .now-words { animation: none; }
+  .fold-words.live, .step-row[data-status='running'] .row-verb, .now-words { color: var(--muted); background: none; }
+  .fold-line > svg, .row-caret, .plan-head > svg, .said-meta .copy-text { transition: none; }
+}
 /* For a screen reader only. */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); border: 0; white-space: nowrap; }
 /* What it asks waits for you: amber. A command that looks dangerous is marked red. */
@@ -428,6 +480,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-reply:focus-within { border-color: var(--togle); }
 .task-reply input, .task-reply textarea { flex: 1; min-width: 0; padding: 4px 10px; border: 0; background: transparent; }
 .task-reply textarea { field-sizing: content; min-height: 26px; max-height: 12.5rem; line-height: 1.4; resize: none; }
+.task-reply button.reply-send { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; }
 /* The agent's own commands, listed over the reply box while "/" is typed; its models after "/model". */
 .task-reply-place { position: relative; }
 .slash-list { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 20; display: flex; flex-direction: column; gap: 1px; max-height: 208px; overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 14px 28px -18px var(--shadow); }
@@ -889,8 +942,6 @@ body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: cross
 .thread .task-agent .md code { padding: 1px 5px; border-radius: 5px; background: var(--raised); font: 12px/1.4 var(--font-mono); }
 .thread .task-agent .md pre code { padding: 0; border-radius: 0; background: none; }
 .thread .task-agent .md .code-block, .thread .task-agent .md-table { border-radius: 10px; }
-/* On the frame's dark ground, code has the lighter one. */
-.thread .task-agent .md pre { background: var(--surface); }
 /* A table keeps its words whole: where it is wider than the place, it scrolls sideways in its own box. */
 .md th, .md td { overflow-wrap: break-word; }
 .settings .sets .card > .hint { margin: 0; padding: 2px 0 6px; }

@@ -203,7 +203,7 @@ export interface TogleApi {
   handBackRunnerTask(key: string): Promise<{ command: string; folder: string }>
   /** What a task's reply box lists when "/" is typed: its agent's own commands and models. */
   runnerOffers(key: string): Promise<import('./runner').TaskOffers>
-  /** A task's conversation as its agent keeps it (its last turns, or all with `all`), for the Web view; null when the agent keeps none to read. */
+  /** A task's conversation as its agent keeps it (its last turns, or all with `all`), for the Chat view; null when the agent keeps none to read. */
   runnerHistory(key: string, all?: boolean): Promise<import('./runner').TaskHistory | null>
   /** What a step of that conversation holds, asked for when it is opened: what a command printed, or the words of a thought. Null when nothing is kept. */
   runnerStep(key: string, more: string): Promise<import('./runner').StepDetail | null>

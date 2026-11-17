@@ -332,12 +332,12 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
         </Fragment>
       ))}
       {/* Where tasks open: a switch of two, the same one a task has on its own line, so that the two read as one thing.
-          Terminal is the agent's own screen, Web the conversation with a card for what it asks. */}
+          Terminal is the agent's own screen, Chat the conversation with a card for what it asks. */}
       <Row label={false} name="Tasks open in">
-        <span className="segmented view-switch" role="radiogroup" aria-label="Tasks open in" title="Terminal is the agent’s own screen. Web is the conversation, a card for what the agent asks, and a reply box. A switch on a task changes it for that task.">
+        <span className="segmented view-switch" role="radiogroup" aria-label="Tasks open in" title="Terminal is the agent’s own screen. Chat is the conversation, a card for what the agent asks, and a reply box. A switch on a task changes it for that task.">
           {(['cards', 'session'] as const).map((name) => {
             const on = (settings.tasks.view === 'cards' ? 'cards' : 'session') === name
-            return <button key={name} type="button" role="radio" aria-checked={on} className={on ? 'on' : ''} onClick={() => { if (!on) void save({ tasks: { view: name } }) }}>{name === 'cards' ? 'Web' : 'Terminal'}</button>
+            return <button key={name} type="button" role="radio" aria-checked={on} className={on ? 'on' : ''} onClick={() => { if (!on) void save({ tasks: { view: name } }) }}>{name === 'cards' ? 'Chat' : 'Terminal'}</button>
           })}
         </span>
       </Row>

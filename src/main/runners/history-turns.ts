@@ -1,4 +1,4 @@
-// The part of an agent's conversation the Web view shows: its last turns, or all of them up to a limit. A turn starts with what the
+// The part of an agent's conversation the Chat view shows: its last turns, or all of them up to a limit. A turn starts with what the
 // person asked. Used for the agents whose conversation is read in full (Claude Code's file, Hermes's export).
 import type { LogEntry, TaskHistory } from '@shared/runner'
 

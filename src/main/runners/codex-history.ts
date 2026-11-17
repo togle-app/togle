@@ -1,4 +1,4 @@
-// What Codex keeps of a thread's conversation, for the Web view: its turns as `thread/turns/list` tells them, made into the same
+// What Codex keeps of a thread's conversation, for the Chat view: its turns as `thread/turns/list` tells them, made into the same
 // entries the window shows for any task. The newest turns come with every step (commands with what they printed and how long they
 // took, files changed, its thinking, its searches of the web, the tools of its connectors); older ones with only what was asked and
 // the answer, which is all the server gives of them in one cheap call.
