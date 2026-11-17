@@ -17,6 +17,9 @@ const DETAIL_MOST = 400_000
 const READS_MOST = 60
 const THOUGHT_LEAST = 1_000
 
+/** A file's whole text as a change that added all of it: each line marked "+". */
+const addedLines = (whole: string): string => whole.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').map((line) => `+${line}`).join('\n')
+
 /** A number for an item that is the same each time it is read: the window keeps its place by it. */
 function stable(value: string): number {
   let hash = 2166136261
@@ -59,9 +62,10 @@ function tookOf(item: Json): number | undefined {
 export function codexEntries(turns: unknown[], details?: Map<string, string>): LogEntry[] {
   const entries: LogEntry[] = []
   const last = (): LogEntry | undefined => entries[entries.length - 1]
-  const keep = (key: string, words: string): string | undefined => {
+  // Of what was printed its end is kept, of how a file changed its start.
+  const keep = (key: string, words: string, start = false): string | undefined => {
     if (!details || !key || !words.trim()) return undefined
-    details.set(key, words.slice(-DETAIL_MOST))
+    details.set(key, start ? words.slice(0, DETAIL_MOST) : words.slice(-DETAIL_MOST))
     return key
   }
   for (const turn of turns.map(rec)) {
@@ -92,8 +96,20 @@ export function codexEntries(turns: unknown[], details?: Map<string, string>): L
           break
         }
         case 'fileChange': {
-          const paths = list(item.changes).map((change) => text(rec(change).path)).filter(Boolean)
-          if (paths.length && text(item.status) === 'completed') entries.push({ id, at, kind: 'files', text: `Changed ${paths.length} file${paths.length === 1 ? '' : 's'}: ${paths.join(', ').slice(0, 160)}`, paths: paths.slice(0, 200) })
+          // Each file with how it changed, kept by its place among the files that have a path (the list the window shows).
+          const changes = list(item.changes).map(rec).filter((change) => text(change.path))
+          if (!changes.length || text(item.status) !== 'completed') break
+          const paths = changes.map((change) => text(change.path)).slice(0, 200)
+          let opens = false
+          paths.forEach((_, index) => {
+            const change = changes[index]
+            const raw = text(change.diff)
+            const how = text(rec(change.kind).type)
+            // A file made or removed is told as its whole text, without the marks of a change: each line is added, or taken out.
+            const marked = /^(?:@@|---|diff )/.test(raw) || !raw ? raw : how === 'add' ? addedLines(raw) : how === 'delete' ? raw.replace(/\n$/, '').split('\n').map((line) => `-${line}`).join('\n') : raw
+            if (keep(`${key}#${index}`, marked, true)) opens = true
+          })
+          entries.push({ id, at, kind: 'files', text: `Changed ${paths.length} file${paths.length === 1 ? '' : 's'}: ${paths.join(', ').slice(0, 160)}`, paths, ...(opens ? { more: key } : {}) })
           break
         }
         case 'reasoning': {

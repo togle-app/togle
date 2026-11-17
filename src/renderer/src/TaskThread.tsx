@@ -130,10 +130,9 @@ function keepDetail(id: string, detail: StepDetail | null): void {
   while (details.size > DETAILS_KEPT) details.delete(details.keys().next().value as string)
 }
 
-/** What a step holds (what a command printed, the words of a thought), asked for once the step is opened. */
-function useDetail(taskKey: string, entry: LogEntry, open: boolean): { detail: StepDetail | null; loading: boolean } {
-  const more = entry.more
-  const id = more ? `${taskKey}\u0000${more}\u0000${entry.status ?? ''}` : ''
+/** What a step holds (what a command printed, a thought's words, how a file changed), asked for once the step is opened. */
+function useDetail(taskKey: string, more: string | undefined, version: string, open: boolean): { detail: StepDetail | null; loading: boolean } {
+  const id = more ? `${taskKey}\u0000${more}\u0000${version}` : ''
   const [, setRead] = useState(0)
   const has = id !== '' && details.has(id)
   useEffect(() => {
@@ -270,26 +269,91 @@ function NoteRow({ text }: { text: string }): ReactNode {
   )
 }
 
+/** What a line of a diff is, by how it starts. */
+const diffLine = (line: string): string =>
+  line.startsWith('@@') ? 'd-at' : line.startsWith('+++') || line.startsWith('---') ? 'd-head' : line.startsWith('+') ? 'd-add' : line.startsWith('-') ? 'd-del' : line.startsWith('\\') ? 'd-note' : 'd-keep'
+
+/** How a file changed: its lines, what was added green and what was taken out red, in a small box of its own, with Copy. */
+function DiffBox({ taskKey, more, file }: { taskKey: string; more: string; file: string }): ReactNode {
+  const { detail, loading } = useDetail(taskKey, more, '', true)
+  return (
+    <div className="step-box diff-box">
+      <div className="box-head">
+        <span className="box-file" title={file}>
+          {file}
+        </span>
+      </div>
+      <div className="box-out">
+        {loading ? (
+          <p className="hint">Reading how it changed…</p>
+        ) : detail ? (
+          <>
+            <pre className="diff" tabIndex={0} aria-label={`How ${nameOf(file)} changed`}>
+              {detail.text.split('\n').map((line, index) => (
+                <span key={index} className={diffLine(line)}>
+                  {line || ' '}
+                </span>
+              ))}
+            </pre>
+            {detail.cut && <p className="hint">Only the start of it is shown.</p>}
+            <CopyButton text={detail.text} label="Copy how it changed" />
+          </>
+        ) : (
+          <p className="hint">How it changed is not kept any more.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** One file of a change, a row that opens to how it changed. A change that failed changed nothing, and opens to nothing. */
+function FileRow({ entry, file, index, taskKey }: { entry: LogEntry; file: string; index: number; taskKey: string }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const failed = entry.status === 'failed'
+  const opens = !!entry.more && !failed
+  const line = (
+    <>
+      <span className="row-icon" aria-hidden="true">
+        <Icon name={failed ? 'alert' : 'pencil'} size={13} />
+      </span>
+      <span className="row-words">
+        <span className="row-verb">{failed ? 'Tried to change' : 'Changed'}</span>{' '}
+        <span className="row-what">
+          <FileName file={file} />
+        </span>
+      </span>
+      {opens && (
+        <span className="row-caret" aria-hidden="true">
+          <Icon name="chevron" size={11} />
+        </span>
+      )}
+      {failed && <span className="row-note">failed</span>}
+    </>
+  )
+  return (
+    <div className={`step-row task-file${open ? ' open' : ''}`} data-kind="files" data-status={failed ? 'failed' : undefined}>
+      {opens ? (
+        <button type="button" className="row-line" aria-expanded={open} title={file} onClick={() => setOpen((was) => !was)}>
+          {line}
+        </button>
+      ) : (
+        <div className="row-line" title={file}>
+          {line}
+        </div>
+      )}
+      {open && entry.more && <DiffBox taskKey={taskKey} more={`${entry.more}#${index}`} file={file} />}
+    </div>
+  )
+}
+
 /** The files one change touched, a row for each. */
-function FileRows({ entry }: { entry: LogEntry }): ReactNode {
+function FileRows({ entry, taskKey }: { entry: LogEntry; taskKey: string }): ReactNode {
   const files = entry.paths ?? []
   if (!files.length) return <NoteRow text={entry.text} />
   return (
     <>
-      {files.slice(0, FILES_SHOWN).map((file) => (
-        <div key={file} className="step-row task-file" data-kind="files">
-          <div className="row-line" title={file}>
-            <span className="row-icon" aria-hidden="true">
-              <Icon name="pencil" size={13} />
-            </span>
-            <span className="row-words">
-              <span className="row-verb">Changed</span>{' '}
-              <span className="row-what">
-                <FileName file={file} />
-              </span>
-            </span>
-          </div>
-        </div>
+      {files.slice(0, FILES_SHOWN).map((file, index) => (
+        <FileRow key={file} entry={entry} file={file} index={index} taskKey={taskKey} />
       ))}
       {files.length > FILES_SHOWN && <NoteRow text={`and ${files.length - FILES_SHOWN} more ${files.length - FILES_SHOWN === 1 ? 'file' : 'files'}`} />}
     </>
@@ -298,7 +362,7 @@ function FileRows({ entry }: { entry: LogEntry }): ReactNode {
 
 /** A command opened: the whole of it, how it ended, and what it printed, with a way to copy that. */
 function CommandBox({ entry, taskKey, running, stopped }: { entry: LogEntry; taskKey: string; running: boolean; stopped: boolean }): ReactNode {
-  const { detail, loading } = useDetail(taskKey, entry, true)
+  const { detail, loading } = useDetail(taskKey, entry.more, entry.status ?? '', true)
   // Code is shown as code; a command after a $.
   const code = entry.step === 'code'
   return (
@@ -336,7 +400,7 @@ function CommandBox({ entry, taskKey, running, stopped }: { entry: LogEntry; tas
 
 /** A thought opened: its words, as the agent kept them. */
 function ThoughtBox({ entry, taskKey }: { entry: LogEntry; taskKey: string }): ReactNode {
-  const { detail, loading } = useDetail(taskKey, entry, true)
+  const { detail, loading } = useDetail(taskKey, entry.more, '', true)
   return (
     <div className="thought-box" tabIndex={0}>
       {loading ? <p className="hint">Reading its thinking…</p> : detail ? <p className="thought-words">{detail.text}</p> : <p className="hint">Its thinking is not kept any more.</p>}
@@ -410,7 +474,7 @@ function StepRow({ entry, taskKey }: { entry: LogEntry; taskKey: string }): Reac
 
 /** Any entry that is not something said, as its row (or rows). */
 function Rows({ entry, taskKey }: { entry: LogEntry; taskKey: string }): ReactNode {
-  if (entry.kind === 'files') return <FileRows entry={entry} />
+  if (entry.kind === 'files') return <FileRows entry={entry} taskKey={taskKey} />
   if (entry.kind === 'command' || entry.kind === 'step' || entry.kind === 'asked') return <StepRow entry={entry} taskKey={taskKey} />
   return <NoteRow text={entry.text} />
 }
@@ -424,7 +488,7 @@ const CLAUSE_ORDER: ClauseKey[] = ['read', 'search', 'web', 'change', 'command',
 /** What an entry counts as in a line of work; nothing for a note, a refused command, or the agent's checklist. */
 function clauseOf(entry: LogEntry): ClauseKey | undefined {
   if (entry.kind === 'command') return entry.status === 'declined' ? undefined : 'command'
-  if (entry.kind === 'files') return 'change'
+  if (entry.kind === 'files') return entry.status === 'failed' ? undefined : 'change'
   if (entry.kind !== 'step' || entry.step === 'plan') return undefined
   if (entry.step === 'think') return 'thought'
   if (entry.step === 'code') return 'command'
@@ -432,7 +496,7 @@ function clauseOf(entry: LogEntry): ClauseKey | undefined {
 }
 
 /** Whether an entry is something the agent did or thought (a row), not something said or a checklist. */
-const isDoing = (entry: LogEntry): boolean => !!clauseOf(entry) || (entry.kind === 'command' && entry.status === 'declined')
+const isDoing = (entry: LogEntry): boolean => !!clauseOf(entry) || (entry.kind === 'command' && entry.status === 'declined') || (entry.kind === 'files' && entry.status === 'failed')
 
 interface Clause {
   text: string
@@ -620,10 +684,12 @@ function Meta({ at, text, fresh }: { at?: number; text: string; fresh?: boolean 
 }
 
 /**
- * What the person said, as a bubble at the right, with when it was said beside it. A very long one shows its first lines, fading
- * out, and opens to all of it.
+ * What the person said, as a card of its own at the head of its turn, set apart from what the agent says. The last one (`pinned`),
+ * what the agent works on now, stays at the top of the conversation while its turn is in view, so that it is always there; the
+ * ones before scroll away with their turns. A long one shows its first lines, fading out, and opens to all of it (and then it
+ * scrolls away like the rest).
  */
-function YouBubble({ entry, at, fresh }: { entry: LogEntry; at?: number; fresh?: boolean }): ReactNode {
+function YouCard({ entry, at, fresh, pinned }: { entry: LogEntry; at?: number; fresh?: boolean; pinned: boolean }): ReactNode {
   const box = useRef<HTMLDivElement>(null)
   const [long, setLong] = useState(false)
   const [whole, setWhole] = useState(false)
@@ -640,18 +706,20 @@ function YouBubble({ entry, at, fresh }: { entry: LogEntry; at?: number; fresh?:
     return () => watch.disconnect()
   }, [entry.text, whole])
   return (
-    <div className={fresh ? 'you-row fresh' : 'you-row'}>
-      {at !== undefined && <When at={at} />}
-      <div className="you-bubble">
-        <div ref={box} className={`task-you${long && !whole ? ' clamped' : ''}${whole ? ' whole' : ''}`}>
-          {entry.text}
-        </div>
-        {(long || whole) && (
-          <button type="button" className="link you-more" aria-expanded={whole} onClick={() => setWhole((was) => !was)}>
-            {whole ? 'Show less' : 'Show all'}
-          </button>
-        )}
+    <div className={`you-row${pinned && !whole ? ' pinned' : ''}${fresh ? ' fresh' : ''}`}>
+      <div className="you-head">
+        <span className="you-label">You</span>
+        {at !== undefined && <When at={at} />}
       </div>
+      <div ref={box} className={`task-you${long && !whole ? ' clamped' : ''}${whole ? ' whole' : ''}`}>
+        {entry.text}
+      </div>
+      {(long || whole) && (
+        <button type="button" className="link you-more" aria-expanded={whole} onClick={() => setWhole((was) => !was)}>
+          {whole ? 'Show less' : 'Show all'}
+        </button>
+      )}
+      {pinned && !whole && <span className="you-fade" aria-hidden="true" />}
     </div>
   )
 }
@@ -688,8 +756,9 @@ export function lastTurnKey(entries: readonly LogEntry[]): number | undefined {
 const isPlan = (entry: LogEntry): boolean => entry.kind === 'step' && entry.step === 'plan'
 
 /**
- * A conversation as a chat: what the person said in a bubble at the right, what the agent said as words on the left, and what it
- * did out of the way, to open when wanted (the Terminal view has all of it as it was). A turn that is over and was answered shows
+ * A conversation as a chat: what the person said in a card of its own (the last one, what the agent works on, pinned at the top
+ * while its turn is in view), what the agent
+ * said as words under it, and what it did out of the way, to open when wanted (the Terminal view has all of it as it was). A turn that is over and was answered shows
  * one quiet line for all the work, "Worked for 4m 8s · Changed 4 files, ran 5 commands", which opens to what it did and what it
  * said along the way; then the answer, with when it came and Copy. The turn going on, and one that ended with no answer, show what
  * the agent says in the open and each stretch of work as its line; the stretch it is at says what it does now, and its step ticks
@@ -771,7 +840,7 @@ export function Thread({ entries, state, settled, taskKey, known = null, stepsRu
     }
     blocks.push(
       <div key={turn.key} className="turn">
-        {turn.you && <YouBubble entry={turn.you} at={asked} fresh={isNew(turn.you.id)} />}
+        {turn.you && <YouCard entry={turn.you} at={asked} fresh={isNew(turn.you.id)} pinned={last} />}
         {inside}
       </div>
     )

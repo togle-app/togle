@@ -61,12 +61,16 @@ function planOf(todos: unknown): PlanItem[] {
 
 const planWords = (plan: PlanItem[]): string => `${plan.filter((item) => item.state === 'done').length} of ${plan.length} done`
 
-/** A tool that waits for its row: its entry, and when it was called. */
+/** A tool that waits for its row: its entry, when it was called, and for a file written, what was written. */
 interface Waiting {
   entry: LogEntry
   at: number
   tool: string
+  written?: string
 }
+
+/** A file's whole text as a change that added all of it: each line marked "+". */
+const addedLines = (whole: string): string => whole.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').map((line) => `+${line}`).join('\n')
 
 /**
  * The conversation in an export: what was asked, what Hermes said, the commands it ran with how each ended and how long it took,
@@ -83,9 +87,10 @@ export function hermesEntries(session: unknown, details?: Map<string, string>): 
   const entries: LogEntry[] = []
   const waiting = new Map<string, Waiting>()
   const last = (): LogEntry | undefined => entries[entries.length - 1]
-  const keep = (key: string, words: string): string | undefined => {
+  // Of what was printed its end is kept, of how a file changed its start.
+  const keep = (key: string, words: string, start = false): string | undefined => {
     if (!details || !key || !words.trim()) return undefined
-    details.set(key, words.slice(-DETAIL_MOST))
+    details.set(key, start ? words.slice(0, DETAIL_MOST) : words.slice(-DETAIL_MOST))
     return key
   }
   rows.forEach((row, position) => {
@@ -114,8 +119,12 @@ export function hermesEntries(session: unknown, details?: Map<string, string>): 
         if (RUNS.has(name) && text(given.command)) wait({ id: own, at, kind: 'command', text: text(given.command).slice(0, COMMAND_MOST), status: 'running' })
         else if (CODE.has(name) && text(given.code).trim()) wait({ id: own, at, kind: 'step', step: 'code', text: text(given.code).trim().slice(0, COMMAND_MOST), status: 'running' })
         else if (EDITS.has(name)) {
+          // Its row says whether it changed the file, and how (a patch's diff; for a file written, what was written).
           const file = text(given.path) || text(given.file_path) || text(given.filename)
-          if (file) entries.push({ id: own, at, kind: 'files', text: `Changed 1 file: ${file}`, paths: [file] })
+          if (!file) return
+          const entry: LogEntry = { id: own, at, kind: 'files', text: `Changed 1 file: ${file}`, paths: [file] }
+          entries.push(entry)
+          if (text(call.id)) waiting.set(text(call.id), { entry, at, tool: name, ...(typeof given.content === 'string' ? { written: given.content } : {}) })
         } else if (READS.has(name)) {
           // Several reads one after another are one step that names them all.
           const file = text(given.path)
@@ -149,6 +158,18 @@ export function hermesEntries(session: unknown, details?: Map<string, string>): 
       waiting.delete(text(row.tool_call_id))
       const { entry } = held
       const said = wordsOf(row.content)
+      if (entry.kind === 'files') {
+        const result = objectOf(said)
+        // A change that failed changed nothing: it is not opened to a change that did not happen.
+        if (result.error || result.success === false || result.stale_write_blocked) {
+          entry.status = 'failed'
+          return
+        }
+        const how = typeof result.diff === 'string' && result.diff.trim() ? result.diff : held.written ? addedLines(held.written) : ''
+        const more = keep(`${text(row.tool_call_id)}#0`, how, true)
+        if (more) entry.more = text(row.tool_call_id)
+        return
+      }
       const result = objectOf(said)
       const failed = (typeof result.exit_code === 'number' && result.exit_code !== 0) || !!result.error
       // How long it took: what the tool says itself, else from the call to its row, when their times are in order.

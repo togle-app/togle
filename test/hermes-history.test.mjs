@@ -115,6 +115,23 @@ test('what else Hermes did: code it ran, files read, searches, the web, its chec
   assert.equal(T.hermesEntries(session(message(1, 'assistant', { content: 'Hi.', reasoning: 'A thought.' }))).length, 1, 'with nowhere to keep its words, a thought is not told')
 })
 
+test('a file Hermes changed opens to how it changed: the diff of a patch, a file written whole; a change that failed opens to nothing', () => {
+  const details = new Map()
+  const entries = T.hermesEntries(session(
+    message(401, 'user', { content: 'Fix the notes.' }),
+    message(402, 'assistant', { content: '', tool_calls: [call('p1', 'patch', { path: 'notes/a.md', old_string: 'x', new_string: 'y' }), call('w1', 'write_file', { path: 'notes/new.md', content: 'line one\nline two\n' }), call('w2', 'write_file', { path: 'notes/locked.md', content: 'z' })] }),
+    message(403, 'tool', { tool_call_id: 'p1', content: JSON.stringify({ success: true, diff: '--- a/notes/a.md\n+++ b/notes/a.md\n@@ -1 +1 @@\n-x\n+y\n', files_modified: ['notes/a.md'] }) }),
+    message(404, 'tool', { tool_call_id: 'w1', content: JSON.stringify({ bytes_written: 18, files_modified: ['notes/new.md'], verified: true }) }),
+    message(405, 'tool', { tool_call_id: 'w2', content: JSON.stringify({ error: 'The file changed since it was read.', stale_write_blocked: true }) }),
+    message(406, 'assistant', { content: 'Done.' })
+  ), details)
+  const changes = entries.filter((entry) => entry.kind === 'files')
+  assert.deepEqual(changes.map((entry) => [entry.paths[0], entry.more ?? null, entry.status ?? null]), [['notes/a.md', 'p1', null], ['notes/new.md', 'w1', null], ['notes/locked.md', null, 'failed']])
+  assert.equal(details.get('p1#0'), '--- a/notes/a.md\n+++ b/notes/a.md\n@@ -1 +1 @@\n-x\n+y\n')
+  assert.equal(details.get('w1#0'), '+line one\n+line two')
+  assert.equal(details.has('w2#0'), false)
+})
+
 const hermes = (rows, backend = {}) => {
   const home = mkdtempSync(path.join(os.tmpdir(), 'togle-hermes-history-'))
   made.push(home)

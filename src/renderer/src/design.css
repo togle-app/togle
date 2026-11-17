@@ -317,22 +317,29 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .thread-place { position: relative; display: flex; flex-direction: column; flex: 1 1 0; min-height: 4.5rem; margin-right: -15px; }
 /* (It is the place its parts are laid out from: what is kept for a screen reader is laid out of the flow, and would else be
    placed from outside what scrolls.) */
-.task-log.thread { position: relative; flex: 1 1 auto; gap: 20px; margin-right: 0; padding: 2px 7px 14px 0; }
+/* (What is brought into view stops under the pinned card, not behind it.) */
+.task-log.thread { position: relative; flex: 1 1 auto; gap: 20px; margin-right: 0; padding: 0 7px 14px 0; scroll-padding-top: 6rem; }
 /* A turn: what was said, then what the agent did and said. */
 .turn { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 /* A day, where the conversation goes over one. */
 .thread-day { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; }
 .thread-day::before, .thread-day::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .task-earlier-turns { align-self: center; margin: 0; font-size: 12px; }
-/* What the person said: a bubble at the right, with when it was said beside it. A very long one shows its first twelve lines,
-   fading out, and opens to all of it. */
-.you-row { display: flex; align-items: flex-end; justify-content: flex-end; gap: 8px; min-width: 0; }
-.you-bubble { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; max-width: 82%; padding: 8px 12px; border-radius: 14px 14px 4px 14px; background: var(--togle-soft); }
-.task-you { align-self: stretch; min-width: 0; max-height: calc(12 * 1.45em); overflow: hidden; color: var(--ink); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* What the person said: a card of its own, set apart from what the agent says (its color, a bar at its left, a shadow under it).
+   The last one, what the agent works on now, is pinned at the top while its turn is in view. A long one shows its first three
+   lines, fading out, and opens to all of it. */
+.you-row { position: relative; z-index: 3; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 7px 12px 9px 12px; border: 1px solid color-mix(in srgb, var(--togle) 24%, var(--line)); border-left: 3px solid var(--togle); border-radius: 10px; background: var(--togle-soft); box-shadow: 0 10px 18px -12px #000; }
+.you-row.pinned { position: sticky; top: 0; container-type: scroll-state; }
+/* While the pinned card is stuck at the top, what scrolls under it fades out just below the card instead of showing cut in half. */
+.you-fade { position: absolute; top: calc(100% + 1px); right: -1px; left: -3px; height: 14px; background: linear-gradient(var(--surface), transparent); opacity: 0; pointer-events: none; }
+@container scroll-state(stuck: top) { .you-fade { opacity: 1; } }
+.you-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.you-label { color: var(--togle); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
+.task-you { min-width: 0; max-height: calc(3 * 1.45em); overflow: hidden; color: var(--ink); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-you.whole { max-height: none; }
-.task-you.clamped { -webkit-mask-image: linear-gradient(to bottom, #000 75%, transparent); mask-image: linear-gradient(to bottom, #000 75%, transparent); }
-.you-bubble .you-more { margin: 0; padding: 0; color: var(--togle); font-size: 11px; }
-.you-bubble .you-more:hover { color: var(--ink); }
+.task-you.clamped { -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.you-row .you-more { align-self: flex-start; margin: 0; padding: 0; color: var(--togle); font-size: 11px; }
+.you-row .you-more:hover { color: var(--ink); }
 .said-at { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 /* What the agent said is plain words on the place, as the design draws a conversation. */
 .task-agent { max-width: 100%; padding: 0; overflow-wrap: anywhere; }
@@ -390,10 +397,21 @@ button.row-line:hover:not(:disabled) { border-color: transparent; color: var(--i
 .box-out { position: relative; border-top: 1px solid var(--line); }
 .box-out pre { max-height: 12rem; margin: 0; padding: 7px 10px 8px; overflow: auto; overscroll-behavior-y: auto; color: var(--ink); font: 11.5px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .box-out pre:focus-visible { outline: 2px solid var(--togle); outline-offset: -2px; }
-.box-out .hint { margin: 0; padding: 6px 70px 0 10px; font-size: 11.5px; }
+.box-out .hint { margin: 0; padding: 6px 10px 0; font-size: 11.5px; }
 .box-out .hint:only-child { padding-bottom: 7px; }
-.box-out .copy-text { position: absolute; top: 6px; right: 10px; opacity: 0.6; }
+/* Copy is under what it copies, at its right: it never lies over a line. */
+.box-out .copy-text { display: flex; width: max-content; margin: 0 10px 6px auto; opacity: 0.7; }
 .box-out:hover .copy-text, .box-out .copy-text:focus-visible { opacity: 1; }
+/* How a file changed: its whole path, then its lines, what was added green and what was taken out red. */
+.box-file { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--ink); font: 11.5px/1.5 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.diff-box .box-out pre.diff { max-height: 18rem; padding: 4px 0 6px; }
+pre.diff > span { display: block; padding: 0 10px; }
+pre.diff .d-add { background: color-mix(in srgb, var(--ok) 13%, transparent); color: color-mix(in srgb, var(--ok) 55%, var(--ink)); }
+pre.diff .d-del { background: color-mix(in srgb, var(--danger) 13%, transparent); color: color-mix(in srgb, var(--danger) 55%, var(--ink)); }
+pre.diff .d-at { margin-top: 4px; color: var(--togle); opacity: 0.85; }
+pre.diff .d-at:first-child { margin-top: 0; }
+pre.diff .d-head, pre.diff .d-note { color: var(--muted); }
+pre.diff .d-keep { color: var(--muted); }
 /* A thought opened: its words, small and quiet, in a box of its own that scrolls. */
 .thought-box { max-height: 10rem; margin: 2px 0 6px 24px; padding: 1px 10px; overflow: auto; overscroll-behavior-y: auto; border-left: 2px solid var(--line); }
 .thought-box:focus-visible { outline: 2px solid var(--togle); outline-offset: 2px; }
@@ -447,8 +465,10 @@ button.plan-head:hover:not(:disabled) { border-color: transparent; }
 .plan-text { min-width: 0; overflow-wrap: anywhere; }
 .plan-items li[data-state='done'] { color: var(--muted); }
 .plan-items li[data-state='done'] .plan-mark { color: var(--ok); }
-/* In a low window the checklist shows a little less, to leave the conversation its room. */
+/* In a low window what was said shows two lines (Show all still opens all of it), and the checklist a little less, to leave the
+   conversation its room. */
 @media (max-height: 560px) {
+  .task-you:not(.whole) { max-height: calc(2 * 1.45em); }
   .plan-items { max-height: 18vh; }
 }
 /* What is new comes in with a little rise, once; what was there when the conversation opened stays still. */

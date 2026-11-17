@@ -146,6 +146,24 @@ test('what else Codex did: its thinking, the web, a connector\'s tools, pictures
   assert.deepEqual(T.codexEntries(turns, new Map()).map((e) => e.id), entries.map((e) => e.id), 'the same ids each time, thoughts in a row keeping the first')
 })
 
+test('each file Codex changed is kept with how it changed, by its place among the files with a path; a file it made is all added', () => {
+  const details = new Map()
+  const entries = T.codexEntries([{ id: 't1', items: [
+    { id: 'u', type: 'userMessage', content: [{ type: 'text', text: 'Tidy.' }] },
+    { id: 'fc', type: 'fileChange', status: 'completed', changes: [
+      { path: 'C:\\work\\a.ts', kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-old\n+new\n' },
+      { path: '', kind: { type: 'update' }, diff: '@@ -1 +1 @@\n-x\n+y\n' },
+      { path: 'C:\\work\\b.ts', kind: { type: 'add' }, diff: 'first\nsecond\n' },
+      { path: 'C:\\work\\c.ts', kind: { type: 'delete' }, diff: 'gone\n' }
+    ] },
+    { id: 'a', type: 'agentMessage', text: 'Tidied.' }
+  ] }], details)
+  const change = entries.find((entry) => entry.kind === 'files')
+  assert.deepEqual(change.paths, ['C:\\work\\a.ts', 'C:\\work\\b.ts', 'C:\\work\\c.ts'], 'a change with no path is not a file of it')
+  assert.equal(change.more, 'fc')
+  assert.deepEqual([...details], [['fc#0', '@@ -1 +1 @@\n-old\n+new\n'], ['fc#1', '+first\n+second'], ['fc#2', '-gone']], 'each by its place among the files shown')
+})
+
 test('a thread Togle runs gives back its conversation: the newest turns with their steps, older ones asked for', { timeout: 60_000 }, async () => {
   const backend = codex()
   try {

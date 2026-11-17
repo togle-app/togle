@@ -27,7 +27,7 @@ import type { LogEntry, StepDetail, TaskHistory, TaskInfo } from '@shared/runner
 import { exists, lines } from './acp'
 import { hermesEntries } from './hermes-history'
 import { lastTurns } from './history-turns'
-import { detailOf } from './step-detail'
+import { detailOf, diffOf, isFileKey } from './step-detail'
 import { keepJson } from './keep'
 import { TaskBase } from './task-base'
 import { cleanWords, loadPty, openTerminal, refuseCommand, TerminalTask, type TerminalChunk } from './terminal'
@@ -618,7 +618,8 @@ export class HermesBackend implements Backend {
 
   /** What a step of that conversation holds (what a command printed, a thought's words), as the session's last export gave it. */
   async step(id: string, more: string): Promise<StepDetail | null> {
-    return detailOf(this.conversations.get(this.sessionOf(id))?.details.get(more))
+    const raw = this.conversations.get(this.sessionOf(id))?.details.get(more)
+    return isFileKey(more) ? diffOf(raw) : detailOf(raw)
   }
 
   /** A session by the id Hermes knows it by: one Togle started has the name it was started with as its id here. */

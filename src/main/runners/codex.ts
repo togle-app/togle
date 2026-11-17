@@ -21,7 +21,7 @@ import path from 'node:path'
 import type { AgentQuestion, StepDetail, TaskHistory, TaskInfo, TaskState } from '@shared/runner'
 import { daemonPid, daemonState, startDaemon } from './codex-daemon'
 import { codexEntries, turnsOf } from './codex-history'
-import { detailOf } from './step-detail'
+import { detailOf, diffOf, isFileKey } from './step-detail'
 import { WsRpcPeer } from './codex-link'
 import { type Id, JsonRpcPeer, NO_ANSWER, type PeerHandlers, RpcError, type RpcPeer, list, rec, text } from './jsonrpc'
 import { keepJson } from './keep'
@@ -810,7 +810,8 @@ export class CodexBackend implements Backend {
 
   /** What a step of that conversation holds (what a command printed, a thought's words), as the thread's last reading gave it. */
   async step(id: string, more: string): Promise<StepDetail | null> {
-    return detailOf(this.details.get(id)?.get(more))
+    const raw = this.details.get(id)?.get(more)
+    return isFileKey(more) ? diffOf(raw) : detailOf(raw)
   }
 
   // ---- Starting and opening ----

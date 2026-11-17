@@ -127,8 +127,10 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await texts(ui, '.task-log .task-you, .turn > .task-agent'), ['Add a status column to the orders table.', 'I will add the column and a migration.'])
   assert.equal(await ui.evaluate("document.querySelector('.task-steps > .fold-line .fold-words').textContent"), 'Changed 2 files, ran 1 command')
   assert.equal(await ui.evaluate("document.querySelector('.task-steps > .fold-line').getAttribute('aria-expanded')"), 'false')
-  // A chat: what was said is a bubble at the right of the conversation, narrower than it.
-  assert.ok(await ui.evaluate("(()=>{const log=document.querySelector('.task-log').getBoundingClientRect(),bubble=document.querySelector('.you-bubble').getBoundingClientRect();return log.right-bubble.right<=20&&bubble.width<log.width*0.85})()"), 'what was said is a bubble at the right')
+  // What was said is a card of its own, as wide as the conversation. The last, what the agent works on, is pinned at the top.
+  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.you-row')).position"), 'sticky')
+  assert.ok(await ui.evaluate("(()=>{const log=document.querySelector('.task-log'),card=document.querySelector('.you-row').getBoundingClientRect();return Math.abs(log.clientWidth-parseFloat(getComputedStyle(log).paddingRight)-card.width)<=1})()"), 'the card is as wide as the conversation')
+  assert.deepEqual(await texts(ui, '.you-row .you-label'), ['You'])
   assert.equal(await ui.evaluate("document.querySelector('.task-log').getAttribute('aria-label')"), 'The conversation')
   assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Waiting for you')
   assert.ok((await ui.evaluate("document.querySelector('.task-status .hint').textContent")).startsWith('2 files changed'))
@@ -308,6 +310,17 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await texts(ui, '.fold-body > .task-agent, .fold-body .step-row'), ['I will change redirect.ts.', 'Ran npm testfailed', 'Changed redirect.ts src', 'Ran npm test'], 'one stretch of work opens straight to its steps')
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.task-steps .task-cmd')].map(row=>row.dataset.status)"), ['failed', 'finished'])
   assert.ok(await ui.evaluate("document.querySelector('.fold-body .task-cmd').getBoundingClientRect().height>0"), 'open, its steps are in view')
+  // A file it changed opens to how it changed, asked of its agent only then: what was added green, what was taken out red.
+  const before = (await ui.calls('runnerStep')).length
+  await ui.evaluate("document.querySelector('.fold-body .task-file > .row-line').click()")
+  await ui.wait("!!document.querySelector('.diff-box pre.diff')")
+  assert.deepEqual((await ui.calls('runnerStep')).slice(before).map(call => call.args), [['claude:s3', 'f26#0']])
+  assert.equal(await ui.evaluate("document.querySelector('.diff-box .box-file').textContent"), 'src/redirect.ts')
+  assert.deepEqual(await texts(ui, '.diff-box .d-add'), ['+ const next = query.next'])
+  assert.deepEqual(await texts(ui, '.diff-box .d-del'), ['- const next = undefined'])
+  assert.deepEqual(await texts(ui, '.diff-box .d-at'), ['@@ -10,4 +10,4 @@'])
+  await ui.evaluate("document.querySelector('.fold-body .task-file > .row-line').click()")
+  await ui.wait("!document.querySelector('.diff-box')")
   // A command opens to all of it: the whole command after a $, and how it ended.
   await ui.evaluate("document.querySelector('.fold-body .task-cmd > .row-line').click()")
   await ui.wait("!!document.querySelector('.step-box')")
@@ -331,6 +344,10 @@ async function checkTasks(T, agent) {
   await ui.click('.task-earlier-turns', 'Show earlier')
   await ui.wait("document.querySelectorAll('.task-log .task-you').length===2")
   assert.deepEqual(await texts(ui, '.task-log .task-you'), ['Where does the login redirect go wrong?', 'Fix it, and keep the tests green.'], 'the older turns come first')
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.you-row')].map(card=>getComputedStyle(card).position)"), ['relative', 'sticky'], 'only the last thing said, what the agent works on, is pinned')
+  // The fade under the pinned card shows only while the card is stuck at the top; here its turn is in full view and it is not.
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.you-row')].map(card=>card.querySelectorAll('.you-fade').length)"), [0, 1])
+  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.you-fade')).opacity"), '0')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-earlier-turns')"), false)
   assert.ok((await ui.evaluate("document.querySelector('.task-status .hint').textContent")).startsWith('1 file changed'), 'with all the turns shown, the count is of the whole')
   assert.deepEqual((await ui.calls('runnerHistory')).map(call => call.args).filter(args => args[0] === 'claude:s3').at(-1), ['claude:s3', true])
@@ -370,10 +387,10 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("!!document.querySelector('.task-log [data-kind=plan]')"), false, 'the checklist is not a step in the thread')
   assert.ok(await ui.evaluate("(()=>{const plan=document.querySelector('.task-plan').getBoundingClientRect(),reply=document.querySelector('.task-reply').getBoundingClientRect();return Math.abs(plan.bottom-reply.top)<=1})()"), 'the checklist sits on the reply box')
   // A command opens to what it printed so far, asked of its agent only then.
-  assert.equal((await ui.calls('runnerStep')).length, 0, 'nothing is asked before a step is opened')
+  assert.equal((await ui.calls('runnerStep')).filter(call => call.args[0] === 'claude:w2').length, 0, 'nothing is asked before a step is opened')
   await ui.evaluate("document.querySelector('.task-cmd[data-status=running] > .row-line').click()")
   await ui.wait("document.querySelector('.box-out pre')?.textContent==='step six is half way'")
-  assert.deepEqual((await ui.calls('runnerStep')).map(call => call.args), [['claude:w2', 'out6']])
+  assert.deepEqual((await ui.calls('runnerStep')).filter(call => call.args[0] === 'claude:w2').map(call => call.args), [['claude:w2', 'out6']])
   assert.equal(await ui.evaluate("document.querySelector('.step-box .box-chip.live')?.textContent"), 'running')
   await ui.evaluate("document.querySelector('.task-steps > .fold-line').click()")
   await ui.wait("document.querySelectorAll('.fold-body > .task-agent').length===2")

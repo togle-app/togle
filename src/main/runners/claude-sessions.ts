@@ -520,8 +520,9 @@ function called(state: Conversation, block: Json, at: number): void {
   if (RUNS.has(name)) {
     if (str(input.command)) wait(push(state, 'command', str(input.command).slice(0, COMMAND_MOST), at, { status: 'running' }))
   } else if (EDITS.has(name)) {
+    // Its result says whether it changed the file, and holds how.
     const file = str(input.file_path) || str(input.notebook_path)
-    if (file) push(state, 'files', `Changed 1 file: ${file}`, at, { paths: [file] })
+    if (file) wait(push(state, 'files', `Changed 1 file: ${file}`, at, { paths: [file] }))
   } else if (name === 'Read') {
     if (str(input.file_path)) read(state, str(input.file_path), at)
   } else if (SEARCHES.has(name)) {
@@ -564,6 +565,20 @@ function ended(state: Conversation, call: string, waiting: Waiting, r: Json, blo
   }
   const entry = waiting.entry
   if (!entry) return
+  if (entry.kind === 'files') {
+    // A change that failed (or was refused) changed nothing: it is not opened to a change that did not happen.
+    if (failed) {
+      entry.status = 'failed'
+      return
+    }
+    const patch = Array.isArray(result.structuredPatch) ? result.structuredPatch.filter(isObject) : []
+    const created = !patch.length && str(result.type) === 'create' && str(result.content) !== ''
+    if (place && (patch.length || created)) {
+      entry.more = `file:${call}`
+      state.places.set(entry.more, place)
+    }
+    return
+  }
   if (entry.kind === 'command') {
     entry.status = failed ? (REFUSED.test(textOf(block.content).trim()) ? 'declined' : 'failed') : 'finished'
     if (took !== undefined) entry.took = took
@@ -712,6 +727,46 @@ export function claudeConversation(id: string, all = false): Promise<TaskHistory
   return run
 }
 
+/** The line of a session's file where its conversation found what a key names, read again; null when it is not held any more. */
+async function lineAt(id: string, key: string): Promise<Json | null> {
+  const held = conversations.get(id)
+  const place = held?.state.places.get(key)
+  if (!held || !place || place.length > DETAIL_LINE_MOST) return null
+  const handle = await fs.open(held.file, 'r').catch(() => null)
+  if (!handle) return null
+  try {
+    const buffer = Buffer.alloc(place.length)
+    const { bytesRead } = await handle.read(buffer, 0, place.length, place.offset)
+    return parse(buffer.toString('utf8', 0, bytesRead).trim())
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * How a file changed in a session, read again from the result of the change where the conversation found it: its patch, a line
+ * for each (" " kept, "+" added, "-" taken out, "@@" where), or all of a file it made, each line added. `more` is the key the
+ * change came with ("file:<call>", and "#0" for its one file). Null when it is not held, or the line there is not that result.
+ */
+export async function claudeChange(id: string, more: string): Promise<string | null> {
+  const key = /^(file:[^#]+)(?:#0)?$/.exec(more)?.[1]
+  if (!key) return null
+  const r = await lineAt(id, key)
+  if (!r || r.type !== 'user' || !isObject(r.message) || !Array.isArray(r.message.content)) return null
+  const results = r.message.content.filter(isObject).filter((block) => block.type === 'tool_result')
+  const call = key.slice('file:'.length)
+  // The line's own account of the result is of its one result: that one.
+  if (results.length !== 1 || str(results[0].tool_use_id) !== call || results[0].is_error === true) return null
+  const result = isObject(r.toolUseResult) ? r.toolUseResult : {}
+  const patch = Array.isArray(result.structuredPatch) ? result.structuredPatch.filter(isObject) : []
+  if (patch.length) {
+    const number = (value: unknown): number => (typeof value === 'number' ? value : 0)
+    return patch.map((hunk) => [`@@ -${number(hunk.oldStart)},${number(hunk.oldLines)} +${number(hunk.newStart)},${number(hunk.newLines)} @@`, ...(Array.isArray(hunk.lines) ? hunk.lines.map(str) : [])].join('\n')).join('\n')
+  }
+  if (str(result.type) === 'create' && str(result.content)) return str(result.content).replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').map((line) => `+${line}`).join('\n')
+  return null
+}
+
 /**
  * What a step of a session holds, read again from the session's file where the conversation found it: what a command printed,
  * or the words of a thought. `more` is the key the step came with, and only a key this conversation gave is looked up: nothing
@@ -719,20 +774,7 @@ export function claudeConversation(id: string, all = false): Promise<TaskHistory
  * or the line there is not the one the key names (the file was written again).
  */
 export async function claudeStep(id: string, more: string): Promise<string | null> {
-  const held = conversations.get(id)
-  const place = held?.state.places.get(more)
-  if (!held || !place || place.length > DETAIL_LINE_MOST) return null
-  const handle = await fs.open(held.file, 'r').catch(() => null)
-  if (!handle) return null
-  let line: string
-  try {
-    const buffer = Buffer.alloc(place.length)
-    const { bytesRead } = await handle.read(buffer, 0, place.length, place.offset)
-    line = buffer.toString('utf8', 0, bytesRead).trim()
-  } finally {
-    await handle.close()
-  }
-  const r = parse(line)
+  const r = await lineAt(id, more)
   if (!r || !isObject(r.message) || !Array.isArray(r.message.content)) return null
   const blocks = r.message.content.filter(isObject)
   const thinking = /^think:(.+):(\d+)$/.exec(more)

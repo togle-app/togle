@@ -163,19 +163,22 @@ export interface LogEntry {
   /** How long it took, in milliseconds, where the agent's record says so or its times tell. */
   took?: number
   /**
-   * There is more to it that is asked for when it is opened (what a command printed, the words of its thinking): the key to
-   * ask by. Left out when there is nothing to open.
+   * There is more to it that is asked for when it is opened (what a command printed, the words of its thinking, how a file
+   * changed): the key to ask by. Of a change of files, each file's is this key, "#", and the file's place in `paths`. Left out
+   * when there is nothing to open.
    */
   more?: string
   /** The checklist as it stood after a `plan` step. */
   plan?: PlanItem[]
 }
 
-/** What opening a step shows: what a command printed, or the words of the agent's thinking. */
+/** What opening a step shows: what a command printed, the words of the agent's thinking, or how a file changed. */
 export interface StepDetail {
   text: string
-  /** Its start was left out: only its end is kept. */
+  /** Not all of it is kept: of what was printed only its end, of a change only its start. */
   cut: boolean
+  /** It is how a file changed, a line for each: " " kept, "+" added, "-" taken out, "@@" where in the file. */
+  diff?: boolean
 }
 
 /** A request as the window shows it: with Togle's mark on a command that looks dangerous. */
@@ -226,9 +229,9 @@ export function needsYou(task: Pick<TaskView, 'state' | 'mine' | 'terminal'>): b
   return task.state === 'waiting' || (task.mine && !task.terminal && (task.state === 'stopped' || task.state === 'failed'))
 }
 
-/** How many files a task changed, by what its log says (each file once). */
+/** How many files a task changed, by what its log says (each file once). A change that failed changed nothing. */
 export function changedFiles(log: readonly LogEntry[]): number {
-  return new Set(log.filter((entry) => entry.kind === 'files').flatMap((entry) => entry.paths ?? [])).size
+  return new Set(log.filter((entry) => entry.kind === 'files' && entry.status !== 'failed').flatMap((entry) => entry.paths ?? [])).size
 }
 
 /**

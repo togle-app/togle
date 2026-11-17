@@ -13,7 +13,7 @@ const dir = workDir('claude-conversation')
 const claudeHome = path.join(dir, '.claude')
 process.env.CLAUDE_CONFIG_DIR = claudeHome
 
-const { claudeConversation, claudeStep, detailOf } = await import('./.build/togle.mjs')
+const { claudeChange, claudeConversation, claudeStep, detailOf, diffOf } = await import('./.build/togle.mjs')
 
 const file = (n) => path.join(claudeHome, 'projects', 'C--work-shop', `bbbb${n}111-2222-4333-8444-555566667777.jsonl`)
 const id = (n) => `bbbb${n}111-2222-4333-8444-555566667777`
@@ -226,4 +226,36 @@ test('what is shown of a step is made fit to show: no colors or control keys, no
   const long = detailOf(Array.from({ length: 5000 }, (_, n) => 'line ' + n).join('\n'))
   assert.equal(long.cut, true)
   assert.ok(long.text.length <= 24000 && long.text.endsWith('line 4999') && long.text.startsWith('line '), 'its end, from the start of a line')
+})
+
+test('a file it changed opens to how it changed: its patch, a new file whole, and nothing for a change that failed', async () => {
+  write(13,
+    line(asked(13, 'Fix the redirect and add a test.')) +
+    line(said(13, [call('e1', 'Edit', { file_path: 'C:\\work\\shop\\redirect.ts', old_string: 'undefined', new_string: 'query.next' })], { timestamp: at(1) })) +
+    line(answer(13, 'e1', 'The file has been updated.', 2, { toolUseResult: { filePath: 'C:\\work\\shop\\redirect.ts', oldString: 'undefined', newString: 'query.next', originalFile: 'x', replaceAll: false, userModified: false, structuredPatch: [{ oldStart: 10, oldLines: 3, newStart: 10, newLines: 3, lines: [' export function redirect(query) {', '-  const next = undefined', '+  const next = query.next', ' }'] }] } })) +
+    line(said(13, [call('w1', 'Write', { file_path: 'C:\\work\\shop\\redirect.test.ts', content: 'import x\ntest()\n' })], { timestamp: at(3) })) +
+    line(answer(13, 'w1', 'File created.', 4, { toolUseResult: { type: 'create', filePath: 'C:\\work\\shop\\redirect.test.ts', content: 'import x\ntest()\n', structuredPatch: [], originalFile: null } })) +
+    line(said(13, [call('e2', 'Edit', { file_path: 'C:\\work\\shop\\gone.ts', old_string: 'a', new_string: 'b' })], { timestamp: at(5) })) +
+    line({ ...answer(13, 'e2', 'String to replace not found in file.', 6), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'e2', content: 'String to replace not found in file.', is_error: true }] } }) +
+    line(said(13, [{ type: 'text', text: 'Fixed, with a test.' }], { timestamp: at(7) }))
+  )
+  const history = await claudeConversation(id(13))
+  const changes = history.entries.filter((entry) => entry.kind === 'files')
+  assert.deepEqual(changes.map((entry) => [entry.paths[0].split('\\').pop(), entry.more ?? null, entry.status ?? null]), [['redirect.ts', 'file:e1', null], ['redirect.test.ts', 'file:w1', null], ['gone.ts', null, 'failed']])
+  assert.equal(JSON.stringify(history).includes('query.next'), false, 'how a file changed is not in the conversation')
+  assert.equal(await claudeChange(id(13), 'file:e1#0'), '@@ -10,3 +10,3 @@\n export function redirect(query) {\n-  const next = undefined\n+  const next = query.next\n }')
+  assert.equal(await claudeChange(id(13), 'file:w1#0'), '+import x\n+test()', 'a file it made is all of it, added')
+  assert.equal(await claudeChange(id(13), 'file:e2#0'), null, 'a change that failed opens to nothing')
+  assert.equal(await claudeChange(id(13), 'e1'), null, 'only a key of a change')
+  assert.equal(await claudeChange(id(13), 'file:../../etc#0'), null)
+  assert.deepEqual(diffOf(await claudeChange(id(13), 'file:e1#0')), { text: '@@ -10,3 +10,3 @@\n export function redirect(query) {\n-  const next = undefined\n+  const next = query.next\n }', cut: false, diff: true }, 'its lines are kept as they are, a space at the start of a kept line too')
+})
+
+test('how a file changed is made fit to show: its lines as they are, no keys or passwords, and its start when it is long', () => {
+  assert.deepEqual(diffOf(' kept\n\n-API_KEY=sk-ant-abcdefghijklmnopqrstuvwxyz0123456789\n+API_KEY=read-from-env\n\u001b[31m+red\u001b[0m\n'), { text: ' kept\n\n-API_KEY=[secret removed]\n+API_KEY=read-from-env\n+red', cut: false, diff: true })
+  assert.equal(diffOf(''), null)
+  assert.equal(diffOf(' \n \n'), null)
+  const long = diffOf(Array.from({ length: 4000 }, (_, n) => '+line ' + n).join('\n'))
+  assert.equal(long.cut, true)
+  assert.ok(long.text.startsWith('+line 0\n') && long.text.length <= 24000 && /\+line \d+$/.test(long.text), 'its start, cut at the end of a line')
 })
