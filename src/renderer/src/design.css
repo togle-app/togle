@@ -370,7 +370,7 @@ button.row-line:hover:not(:disabled) { border-color: transparent; color: var(--i
 .row-spin { display: block; width: 10px; height: 10px; border: 1.5px solid var(--togle); border-right-color: transparent; border-radius: 50%; animation: step-spin 0.8s linear infinite; }
 @keyframes step-spin { to { transform: rotate(360deg); } }
 .step-row[data-status='failed'] .row-icon, .step-row[data-status='failed'] .row-verb { color: var(--danger); }
-.step-row[data-status='declined'] .row-note { color: var(--muted); }
+.step-row[data-status='declined'] .row-note, .row-note.quiet { color: var(--muted); }
 /* A note between steps: a small dot, and the words, on as many lines as they take. */
 .row-dot { display: block; width: 4px; height: 4px; border-radius: 50%; background: var(--muted); opacity: 0.6; }
 .task-note .row-line { align-items: flex-start; }
@@ -382,6 +382,8 @@ button.row-line:hover:not(:disabled) { border-color: transparent; color: var(--i
 .box-head { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; }
 .box-prompt { flex: none; color: var(--togle); font: 600 12px/1.5 var(--font-mono); }
 .box-command { flex: 1 1 auto; min-width: 0; padding: 0; background: none; color: var(--ink); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Code it ran: its lines, as many as there are, up to a few screens' worth with their own scroll. */
+.box-head.code .box-command { max-height: 14rem; overflow: auto; }
 .box-chip { flex: none; padding: 0 7px; border-radius: 999px; background: var(--raised); color: var(--muted); font-size: 11px; line-height: 18px; }
 .box-chip.bad { background: var(--danger-soft); color: var(--danger); }
 .box-chip.live { background: var(--togle-soft); color: var(--togle); }

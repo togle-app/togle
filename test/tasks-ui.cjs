@@ -185,6 +185,10 @@ async function checkTasks(T, agent) {
   assert.deepEqual((await ui.calls('stopRunnerTask')).map(call => call.args), [['claude:s2']])
   assert.deepEqual(await texts(ui, '.task-actions button'), [], 'a stopped Claude Code task has no second press')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-now')"), false, 'nothing is said to be going on once it stopped')
+  // The command it ran has no result in its record, and Claude Code stops what it runs with it: it is drawn as stopped, still.
+  assert.equal(await ui.evaluate("!!document.querySelector('.row-spin')"), false, 'nothing turns once it stopped')
+  assert.deepEqual(await texts(ui, '.task-cmd .row-note'), ['stopped'])
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-cmd .row-time')"), false, 'and no clock counts on')
 
   // A reply goes to the task.
   // The box grows with the lines typed, and stays at the foot of the pane.

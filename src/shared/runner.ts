@@ -134,9 +134,9 @@ export interface RunnerStatus {
 /**
  * What a `step` was, when it was neither a command nor a change of files: `read` files (in `paths`), `search` in the files,
  * `web` a page or a search of the web, `helper` another agent it gave work to, `plan` its own checklist, `think` its thinking,
- * `tool` any other tool, by its name.
+ * `code` code it ran (its text, which can be many lines), `tool` any other tool, by its name.
  */
-export type StepKind = 'read' | 'search' | 'web' | 'helper' | 'plan' | 'think' | 'tool'
+export type StepKind = 'read' | 'search' | 'web' | 'helper' | 'plan' | 'think' | 'code' | 'tool'
 
 /** One thing on an agent's own checklist, as it stood. */
 export interface PlanItem {
@@ -269,7 +269,7 @@ export function stepCounts(log: readonly LogEntry[]): { steps: number; files: nu
   return {
     steps: log.filter(isWork).length,
     files: changedFiles(log),
-    ran: commands.length - refused,
+    ran: commands.length - refused + of('code').length,
     refused,
     failed: commands.filter((entry) => entry.status === 'failed').length,
     read: new Set(of('read').flatMap((entry) => entry.paths ?? [entry.text])).size,

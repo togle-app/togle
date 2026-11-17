@@ -13,7 +13,7 @@ const DETAIL_MOST = 400_000
 const DETAILS_MOST = 6 * 1048576
 // The most files one run of reads names.
 const READS_MOST = 60
-// Hermes's tools by name: those that run a command (or code, which is told as a command), those that change a file, and the
+// Hermes's tools by name: those that run a command, the one that runs code, those that change a file, and the
 // ones told as a step of their own kind. Any other tool is told by its name.
 const RUNS = new Set(['terminal', 'shell', 'bash', 'execute_command', 'run_command'])
 const CODE = new Set(['execute_code'])
@@ -112,7 +112,7 @@ export function hermesEntries(session: unknown, details?: Map<string, string>): 
           if (text(call.id)) waiting.set(text(call.id), { entry, at, tool: name })
         }
         if (RUNS.has(name) && text(given.command)) wait({ id: own, at, kind: 'command', text: text(given.command).slice(0, COMMAND_MOST), status: 'running' })
-        else if (CODE.has(name) && text(given.code).trim()) wait({ id: own, at, kind: 'command', text: text(given.code).trim().slice(0, COMMAND_MOST), status: 'running' })
+        else if (CODE.has(name) && text(given.code).trim()) wait({ id: own, at, kind: 'step', step: 'code', text: text(given.code).trim().slice(0, COMMAND_MOST), status: 'running' })
         else if (EDITS.has(name)) {
           const file = text(given.path) || text(given.file_path) || text(given.filename)
           if (file) entries.push({ id: own, at, kind: 'files', text: `Changed 1 file: ${file}`, paths: [file] })
@@ -154,7 +154,7 @@ export function hermesEntries(session: unknown, details?: Map<string, string>): 
       // How long it took: what the tool says itself, else from the call to its row, when their times are in order.
       const told = typeof result.duration_seconds === 'number' && result.duration_seconds >= 0 ? result.duration_seconds * 1000 : held.at > 0 && at >= held.at ? at - held.at : undefined
       if (told !== undefined) entry.took = Math.round(told)
-      if (entry.kind === 'command') {
+      if (entry.kind === 'command' || entry.step === 'code') {
         entry.status = failed ? 'failed' : 'finished'
         // What it printed: the tool's own account of it, or the row as it is when it is not such an account.
         const more = keep(text(row.tool_call_id), typeof result.output === 'string' ? [result.output, typeof result.error === 'string' ? result.error : ''].filter((part) => part.trim()).join('\n') : said)

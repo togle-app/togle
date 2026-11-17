@@ -87,7 +87,7 @@ test('what else Hermes did: code it ran, files read, searches, the web, its chec
   assert.deepEqual(entries.map((e) => [e.kind, e.step ?? null, e.text, e.status ?? null, e.took ?? null]), [
     ['you', null, 'Tidy the notes folder.', null, null],
     ['step', 'think', '', null, null],
-    ['command', null, 'import os\nprint(os.listdir("notes"))', 'finished', 1250],
+    ['step', 'code', 'import os\nprint(os.listdir("notes"))', 'finished', 1250],
     ['step', 'read', 'notes/a.md', null, null],
     ['agent', null, 'Two notes. I will make a list.', null, null],
     ['step', 'plan', '0 of 2 done', null, null],

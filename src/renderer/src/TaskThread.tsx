@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { LogEntry, PlanItem, StepDetail, TaskHistory, TaskState, TaskView } from '@shared/runner'
 import { Icon, type IconName } from './Icon'
 import { Markdown } from './Markdown'
@@ -176,6 +176,10 @@ function CopyButton({ text, label }: { text: string; label: string }): ReactNode
 
 // ---- One step, as a row ----
 
+// Whether a step of this task can be running now: while the task works or waits, or a command it started outlives a Stop. A step
+// whose result never came (the task was stopped under it) is drawn as stopped then, not turning.
+const StepsRun = createContext(true)
+
 // The most files of one change listed, each on its line: the rest are counted.
 const FILES_SHOWN = 6
 
@@ -218,6 +222,8 @@ interface Look {
 function lookOf(entry: LogEntry, running: boolean): Look {
   const text = entry.text
   if (entry.kind === 'command') return { icon: 'terminal', verb: running ? 'Running' : 'Ran', what: <code>{shortCommand(text)}</code>, whole: text }
+  // Code it ran (Hermes runs Python): its first line, the whole of it on the pointer and when opened.
+  if (entry.step === 'code') return { icon: 'terminal', verb: running ? 'Running code' : 'Ran code', what: <code>{text.split('\n').find((line) => line.trim())?.trim() ?? ''}</code>, whole: text }
   if (entry.kind === 'asked') return { icon: 'ask', verb: 'It asked about', what: text, whole: text }
   switch (entry.step) {
     case 'read': {
@@ -291,18 +297,23 @@ function FileRows({ entry }: { entry: LogEntry }): ReactNode {
 }
 
 /** A command opened: the whole of it, how it ended, and what it printed, with a way to copy that. */
-function CommandBox({ entry, taskKey }: { entry: LogEntry; taskKey: string }): ReactNode {
+function CommandBox({ entry, taskKey, running, stopped }: { entry: LogEntry; taskKey: string; running: boolean; stopped: boolean }): ReactNode {
   const { detail, loading } = useDetail(taskKey, entry, true)
+  // Code is shown as code; a command after a $.
+  const code = entry.step === 'code'
   return (
     <div className="step-box">
-      <div className="box-head">
-        <span className="box-prompt" aria-hidden="true">
-          $
-        </span>
+      <div className={code ? 'box-head code' : 'box-head'}>
+        {!code && (
+          <span className="box-prompt" aria-hidden="true">
+            $
+          </span>
+        )}
         <code className="box-command">{entry.text}</code>
         {entry.status === 'failed' && <span className="box-chip bad">failed</span>}
         {entry.status === 'declined' && <span className="box-chip">refused</span>}
-        {entry.status === 'running' && <span className="box-chip live">running</span>}
+        {running && <span className="box-chip live">running</span>}
+        {stopped && <span className="box-chip">stopped</span>}
       </div>
       {entry.more && (
         <div className="box-out">
@@ -339,9 +350,12 @@ function ThoughtBox({ entry, taskKey }: { entry: LogEntry; taskKey: string }): R
  * thought whose words were kept opens to them.
  */
 function StepRow({ entry, taskKey }: { entry: LogEntry; taskKey: string }): ReactNode {
-  const running = entry.status === 'running'
+  const mayRun = useContext(StepsRun)
+  const running = entry.status === 'running' && mayRun
+  // Its result never came, and nothing of the task runs any more: it was stopped under it.
+  const stopped = entry.status === 'running' && !mayRun
   const look = lookOf(entry, running)
-  const opens = entry.kind === 'command' || (entry.kind === 'step' && entry.step === 'think' && !!entry.more)
+  const opens = entry.kind === 'command' || entry.step === 'code' || (entry.kind === 'step' && entry.step === 'think' && !!entry.more)
   const [open, setOpen] = useState(false)
   const ticking = running && realTime(entry.at)
   const now = useNow(ticking)
@@ -368,12 +382,18 @@ function StepRow({ entry, taskKey }: { entry: LogEntry; taskKey: string }): Reac
       )}
       {entry.status === 'declined' && <span className="row-note">refused</span>}
       {entry.status === 'failed' && <span className="row-note">failed</span>}
-      {time && <span className="row-time">{time}</span>}
+      {stopped && <span className="row-note quiet">stopped</span>}
+      {/* A clock that runs is for the eye only: read out, it would speak every second. */}
+      {time && (
+        <span className="row-time" aria-hidden={ticking || undefined}>
+          {time}
+        </span>
+      )}
     </>
   )
   const kind = entry.kind === 'step' ? entry.step : entry.kind
   return (
-    <div className={`step-row${entry.kind === 'command' ? ' task-cmd' : ''}${open ? ' open' : ''}`} data-kind={kind} data-status={entry.status}>
+    <div className={`step-row${entry.kind === 'command' ? ' task-cmd' : ''}${open ? ' open' : ''}`} data-kind={kind} data-status={stopped ? 'stopped' : entry.status}>
       {opens ? (
         <button type="button" className="row-line" aria-expanded={open} title={look.whole || undefined} onClick={() => setOpen((was) => !was)}>
           {line}
@@ -383,7 +403,7 @@ function StepRow({ entry, taskKey }: { entry: LogEntry; taskKey: string }): Reac
           {line}
         </div>
       )}
-      {open && (entry.kind === 'command' ? <CommandBox entry={entry} taskKey={taskKey} /> : <ThoughtBox entry={entry} taskKey={taskKey} />)}
+      {open && (entry.kind === 'command' || entry.step === 'code' ? <CommandBox entry={entry} taskKey={taskKey} running={running} stopped={stopped} /> : <ThoughtBox entry={entry} taskKey={taskKey} />)}
     </div>
   )
 }
@@ -407,6 +427,7 @@ function clauseOf(entry: LogEntry): ClauseKey | undefined {
   if (entry.kind === 'files') return 'change'
   if (entry.kind !== 'step' || entry.step === 'plan') return undefined
   if (entry.step === 'think') return 'thought'
+  if (entry.step === 'code') return 'command'
   return entry.step === 'read' || entry.step === 'search' || entry.step === 'web' || entry.step === 'helper' ? entry.step : 'tool'
 }
 
@@ -679,7 +700,7 @@ const isPlan = (entry: LogEntry): boolean => entry.kind === 'step' && entry.step
  * again. `known` is the entries drawn before: one that is not among them comes in with a little motion, once. (Null at first:
  * what was there when the task opened does not move.)
  */
-export function Thread({ entries, state, settled, taskKey, known = null }: { entries: LogEntry[]; state: TaskState; settled?: number; taskKey: string; known?: ReadonlySet<number> | null }) {
+export function Thread({ entries, state, settled, taskKey, known = null, stepsRun = state === 'working' || state === 'waiting' }: { entries: LogEntry[]; state: TaskState; settled?: number; taskKey: string; known?: ReadonlySet<number> | null; stepsRun?: boolean }) {
   const now = Date.now()
   const turns = turnsOf(entries.filter((entry) => !isPlan(entry)))
   const isNew = (id: number): boolean => !!known && !known.has(id)
@@ -755,7 +776,7 @@ export function Thread({ entries, state, settled, taskKey, known = null }: { ent
       </div>
     )
   })
-  return <>{blocks}</>
+  return <StepsRun.Provider value={stepsRun}>{blocks}</StepsRun.Provider>
 }
 
 // ---- Beside the thread ----
