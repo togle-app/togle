@@ -155,7 +155,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 .popover.menu .menu-chip { margin-left: auto; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; font-weight: 600; color: var(--muted); }
 .monitor-picker { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 22px 36px -26px var(--shadow); }
 .monitor-picker h2 { font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; }
-.monitor-picker-backdrop { inset: 36px 0 0; background: rgba(8, 10, 14, 0.82); }
+.monitor-picker-backdrop { inset: 36px 0 0; padding: min(14vh, 120px) 16px 16px; background: rgba(8, 10, 14, 0.82); }
 
 /* A line Togle says in the window: neutral, and amber when it waits for an answer. */
 .notice { align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); font-size: 12.5px; }
@@ -461,6 +461,11 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .live-head > .spacer { display: none; }
 .live-head button { padding: 3px 9px; font-size: 12px; }
 .live-actions { display: inline-flex; gap: 8px; margin-left: auto; }
+/* In a narrow window Mark and Stop have a line of their own, at its end. Beside the call's name they fit or not by the
+   width of the name's digits ("11:00" fits, "10:56" does not), so a call looked different from one minute to the next. */
+@media (max-width: 440px) {
+  .live-actions { flex: 1 0 100%; justify-content: flex-end; margin-left: 0; }
+}
 .live-clock { background: var(--togle-soft); color: var(--togle); font-variant-numeric: tabular-nums; }
 .live-sources { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .live-meter { display: inline-flex; align-items: center; gap: 0; }
