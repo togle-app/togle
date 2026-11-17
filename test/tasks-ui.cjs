@@ -76,6 +76,23 @@ async function open(T, agent, width, surface, extra = {}) {
 }
 
 const texts = (ui, selector) => ui.evaluate("[...document.querySelectorAll(" + JSON.stringify(selector) + ")].map(e=>e.textContent.trim().replace(/\\s+/g,' '))")
+// A choice of Settings (a microphone, a language, where tasks open): its button opens Togle's own list, and a choice in
+// the list is pressed by its words. The button is brought into view first: a list does not open from a button out of sight.
+const choiceButton = label => "document.querySelector(" + JSON.stringify('[data-choice=' + JSON.stringify(label) + ']') + ")"
+const shownChoice = label => "document.querySelector(" + JSON.stringify('[data-choice=' + JSON.stringify(label) + '] .choice-value') + ").textContent"
+const openChoice = async (ui, label) => {
+  await ui.evaluate("(()=>{const b=" + choiceButton(label) + ";b.scrollIntoView({block:'center'});b.click()})()")
+  await ui.wait("!!document.querySelector('.menu-overlay')")
+}
+const closeChoice = async ui => {
+  await ui.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))")
+  await ui.wait("!document.querySelector('.menu-overlay')")
+}
+const pickChoice = async (ui, label, words) => {
+  await openChoice(ui, label)
+  await ui.click('.menu-overlay [role^=menuitem]', words)
+  await ui.wait("!document.querySelector('.menu-overlay')")
+}
 
 
 async function checkTasks(T, agent) {
@@ -762,18 +779,19 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual(await texts(ui, '#settings-agents .agent-label'), ['Claude Code', 'Codex', 'Hermes'])
   assert.deepEqual(await texts(ui, '#settings-agents .agent-name .av'), ['C', 'X', 'H'], 'each agent with its letter, as the design marks them')
   assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add an agent'])
-  // Which view a task opens in, as the design's Settings has it: a value like the others, Terminal until it is changed.
-  const view = '#settings-agents select[aria-label="Tasks open in"]'
-  const shownView = "document.querySelector(" + JSON.stringify(view) + ").selectedOptions[0].textContent"
-  const pickView = value => ui.evaluate("(()=>{const el=document.querySelector(" + JSON.stringify(view) + ");Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(el," + JSON.stringify(value) + ");el.dispatchEvent(new Event('change',{bubbles:true}))})()")
-  assert.deepEqual(await texts(ui, view + ' option'), ['Terminal', 'Web'])
-  assert.equal(await ui.evaluate(shownView), 'Terminal')
-  assert.equal(await ui.evaluate("!!document.querySelector('#settings-agents .segmented, #settings-agents [role=radio]')"), false, 'not a pair of buttons: the design draws the value in words')
-  await pickView('cards')
-  await ui.wait(shownView + "==='Web'")
+  // Which view a task opens in: a choice like the others in Settings, Terminal until it is changed.
+  assert.equal(await ui.evaluate("!!document.querySelector('#settings-agents [data-choice=\"Tasks open in\"]')"), true)
+  await openChoice(ui, 'Tasks open in')
+  assert.deepEqual(await texts(ui, '.menu-overlay [role=menuitemradio]'), ['Terminal', 'Web'])
+  assert.deepEqual(await texts(ui, '.menu-overlay [aria-checked=true]'), ['Terminal'], 'the one in use is ticked')
+  await closeChoice(ui)
+  assert.equal(await ui.evaluate(shownChoice('Tasks open in')), 'Terminal')
+  assert.equal(await ui.evaluate("!!document.querySelector('#settings-agents .segmented, #settings-agents [role=radio], #settings-agents select')"), false, 'one kind of choice in Settings: a button that opens Togle\'s own list')
+  await pickChoice(ui, 'Tasks open in', 'Web')
+  await ui.wait(shownChoice('Tasks open in') + "==='Web'")
   assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).at(-1), { tasks: { view: 'cards' } })
-  await pickView('session')
-  await ui.wait(shownView + "==='Terminal'")
+  await pickChoice(ui, 'Tasks open in', 'Terminal')
+  await ui.wait(shownChoice('Tasks open in') + "==='Terminal'")
   assert.equal(await ui.evaluate("!!document.querySelector('.settings .card-note, .settings .setting > .note')"), false, 'no notes under the rows: everything fits on one screen')
   assert.deepEqual(await texts(ui, '#settings-agents .setting-value'), ['Found', 'Found', 'Not found'])
   // Remove takes an agent Togle finds off its lists, after asking: it stays installed, its tasks go on in it, and it can be added back.
@@ -820,7 +838,8 @@ async function checkAgentSettings(T, agent) {
   const groups = ['settings-keys', 'settings-voice', 'settings-meetings', 'settings-agents', 'settings-accounts']
   // Every row of Settings, each group's name and the line under the plan: where it is from the top of the groups, and how large.
   const rows = "(()=>{const top=document.querySelector('.sets').getBoundingClientRect().top;return [...document.querySelectorAll('.sets .setting, .sets .section-head, .sets .ai-plan-other')].filter(e=>!e.closest('.setting-detail')).map(e=>{const r=e.getBoundingClientRect();return [e.textContent.trim().slice(0,20),Math.round(r.left),Math.round(r.top-top),Math.round(r.width),Math.round(r.height)].join(' ')})})()"
-  const placed = (form, side) => "(()=>{const f=document.querySelector(" + JSON.stringify(form) + "),r=f.getBoundingClientRect(),all=document.querySelector('.sets').getBoundingClientRect(),own=f.closest('section').getBoundingClientRect();return getComputedStyle(f).position==='absolute'&&r.width<=577&&r.width>=Math.min(576,all.width)-1&&r.left>=all.left-1&&r.right<=all.right+1&&(" + JSON.stringify(side) + "==='end'?Math.abs(r.right-all.right)<=1:Math.abs(r.left-own.left)<=1)})()"
+  // A form to type in is a dialog: the card the design draws, no wider than drawn, in the middle of the window, whole in it, over a layer that dims the whole window under the title bar.
+  const dialog = form => "(()=>{const f=document.querySelector(" + JSON.stringify(form) + "),r=f.getBoundingClientRect(),back=f.closest('.form-backdrop'),b=back.getBoundingClientRect();return getComputedStyle(back).position==='fixed'&&Math.abs(b.left)<=1&&Math.abs(b.right-innerWidth)<=1&&Math.abs(b.top-36)<=1&&Math.abs(b.bottom-innerHeight)<=1&&r.width<=577&&Math.abs((r.left+r.right)/2-innerWidth/2)<=1&&r.top>=36&&r.bottom<=innerHeight})()"
   const places = "(()=>Object.fromEntries(" + JSON.stringify(groups) + ".map(id=>{const r=document.getElementById(id).getBoundingClientRect();return [id,{left:Math.round(r.left),top:Math.round(r.top),width:Math.round(r.width)}]})))()"
   for (const width of [1024, 1600]) {
     ui.window.setContentSize(width, 900)
@@ -839,14 +858,13 @@ async function checkAgentSettings(T, agent) {
     assert.ok(await ui.evaluate("(()=>{const cards=[...document.querySelectorAll('.sets section')];const boxes=cards.map(c=>c.getBoundingClientRect());return cards.every(c=>getComputedStyle(c).borderTopWidth==='1px'&&parseFloat(getComputedStyle(c).borderTopLeftRadius)>=10)&&boxes.every((a,i)=>boxes.every((b,j)=>i===j||a.right+8<=b.left||b.right+8<=a.left||a.bottom+8<=b.top||b.bottom+8<=a.top))})()"), 'each group is a card apart from the others at ' + width)
     // As wide as the place: from its left edge to its right one, on a wide window too.
     assert.ok(await ui.evaluate("(()=>{const all=document.querySelector('.sets').getBoundingClientRect(),place=document.querySelector('.shell-content');const pad=getComputedStyle(place);return Math.abs(all.left-(place.getBoundingClientRect().left+parseFloat(pad.paddingLeft)))<=1&&Math.abs(all.width-(place.clientWidth-parseFloat(pad.paddingLeft)-parseFloat(pad.paddingRight)))<=1})()"), 'the groups are as wide as the place at ' + width)
-    // A form to type in (an agent to add, a key) is one card as wide as the design draws it (36rem), under the
-    // button that opened it and over the page: every row of the page keeps its exact place, and the button stays. It once
-    // took the place of its button, moved its group and pushed the others.
+    // A form to type in (an agent to add, a key) is a dialog over the window: every row of the page keeps its exact place,
+    // and the button that opened it stays. It once took the place of its button, moved its group and pushed the others.
     const before = await ui.evaluate(rows)
     await ui.evaluate("(()=>{const b=[...document.querySelectorAll('#settings-agents button')].find(b=>b.textContent.trim()==='Add an agent');b.focus();b.click()})()")
     await ui.wait("!!document.querySelector('form.add-agent')")
     assert.deepEqual(await ui.evaluate(rows), before, 'every row stays where it was when the form that adds an agent opens at ' + width)
-    assert.equal(await ui.evaluate(placed('form.add-agent', 'end')), true, 'the form is as wide as the design draws it, inside the place, ending at its right edge, at ' + width)
+    assert.equal(await ui.evaluate(dialog('form.add-agent')), true, 'the form that adds an agent is a dialog in the middle of the window at ' + width)
     assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Agent name', 'the keys go to its first field')
     // The keys stay in the form: Tab from its last button goes to its first field, not to a row under the form.
     await ui.evaluate("(()=>{const last=[...document.querySelectorAll('form.add-agent button')].filter(b=>!b.disabled).at(-1);last.focus();last.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}))})()")
@@ -854,12 +872,12 @@ async function checkAgentSettings(T, agent) {
     await ui.evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true}))")
     assert.equal(await ui.evaluate("document.activeElement?.textContent"), 'Cancel', 'and Shift+Tab from the first field goes to the last button at ' + width)
     await ui.evaluate("document.querySelector('form.add-agent input').focus()")
-    assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('form.add-agent')).boxShadow.includes('100vmax')||/\\d{4,}px/.test(getComputedStyle(document.querySelector('form.add-agent')).boxShadow)"), true, 'the page under the form is dimmed')
+    assert.equal(await ui.evaluate("(()=>{const back=document.querySelector('form.add-agent').closest('.form-backdrop');return back.getAttribute('role')==='dialog'&&back.getAttribute('aria-modal')==='true'&&/rgba\\(8, 10, 14, 0\\.8/.test(getComputedStyle(back).backgroundColor)&&getComputedStyle(document.querySelector('.shell-content')).overflowY==='hidden'})()"), true, 'the window under the dialog is dimmed and does not scroll')
     // One form at a time: the key form closes the one that adds an agent, and nothing under it moves either.
     await ui.click('.ai-plan-other button', 'Use a key')
     await ui.wait("!!document.querySelector('form.ai-key-form')&&!document.querySelector('form.add-agent')")
     assert.deepEqual(await ui.evaluate(rows), before, 'every row stays where it was when the key form opens at ' + width)
-    assert.equal(await ui.evaluate(placed('form.ai-key-form', 'start')), true, 'the key form is as wide as the design draws it, from its group\'s left edge, at ' + width)
+    assert.equal(await ui.evaluate(dialog('form.ai-key-form')), true, 'the key form is a dialog in the middle of the window at ' + width)
     assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Key', 'the keys go to the key, not to the service already chosen')
     // Escape closes it wherever the keys are, and a click elsewhere does not: what was typed stays.
     await ui.evaluate("document.querySelector('#settings-keys').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))")
@@ -886,10 +904,10 @@ async function checkAgentSettings(T, agent) {
   ui.window.setContentSize(420, 900)
   await ui.wait('innerWidth===420')
   const narrow = await ui.evaluate(places)
-  // A form over the page is as wide as the place there, and no wider: the page does not scroll sideways under it.
+  // The dialog fits a narrow window, with room at its sides: nothing scrolls sideways.
   await ui.click('.ai-plan-other button', 'Use a key')
   await ui.wait("!!document.querySelector('form.ai-key-form')")
-  assert.ok(await ui.evaluate("(()=>{const place=document.querySelector('.shell-content'),f=document.querySelector('form.ai-key-form').getBoundingClientRect(),all=document.querySelector('.sets').getBoundingClientRect();return place.scrollWidth<=place.clientWidth&&Math.abs(f.left-all.left)<=1&&Math.abs(f.right-all.right)<=1})()"), 'the key form fits the place in a narrow window')
+  assert.ok(await ui.evaluate("(()=>{const place=document.querySelector('.shell-content'),f=document.querySelector('form.ai-key-form').getBoundingClientRect();return place.scrollWidth<=place.clientWidth&&f.left>=15&&f.right<=innerWidth-15&&f.top>=36})()"), 'the key form fits a narrow window')
   await ui.click('form.ai-key-form button', 'Cancel')
   await ui.wait("!document.querySelector('form.ai-key-form')")
   const stacked = ['settings-keys', 'settings-meetings', 'settings-accounts', 'settings-voice', 'settings-agents']
@@ -936,13 +954,13 @@ async function checkReach(T, agent) {
   await ui.wait("!!document.querySelector('#settings-devices .reach-device')")
   assert.deepEqual(await texts(ui, '#settings-devices .reach-device'), ['Windows PC', 'MacBook', 'build-server'])
   assert.match(await ui.evaluate("document.querySelector('#settings-devices').innerText"), /MacBook: Stopped Write the release notes/, 'what other devices did here is listed')
-  // The form for a device's code opens under its row and over the page: the row stays, and so does every other.
+  // The form for a device's code is a dialog over the window: its row stays, and so does every other.
   const deviceRows = "(()=>{const top=document.querySelector('.sets').getBoundingClientRect().top;return [...document.querySelectorAll('.sets .setting, .sets .section-head')].filter(e=>!e.closest('.setting-detail')).map(e=>{const r=e.getBoundingClientRect();return [e.textContent.trim().slice(0,20),Math.round(r.left),Math.round(r.top-top),Math.round(r.width),Math.round(r.height)].join(' ')})})()"
   const beforeDevice = await ui.evaluate(deviceRows)
   await ui.click('#settings-devices button', 'Add a device')
   await ui.wait("!!document.querySelector('#settings-devices form.setting-detail.over')")
   assert.deepEqual(await ui.evaluate(deviceRows), beforeDevice, 'every row stays where it was when the form for a device opens')
-  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('#settings-devices form.setting-detail.over')).position"), 'absolute')
+  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('#settings-devices .form-backdrop')).position"), 'fixed', 'it is a dialog over the window')
   await ui.fill('#settings-devices input[aria-label="Code"]', '7f3k-92qd')
   await ui.click('#settings-devices button', 'Next')
   await ui.wait("document.querySelector('#settings-devices').innerText.includes('gpu-box joins as a server')")

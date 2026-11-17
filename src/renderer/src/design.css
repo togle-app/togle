@@ -531,7 +531,7 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings-one .settings-content { max-width: none; margin: 0; }
 /* What went wrong saving stands over the groups, with a group's room under it. */
 .settings-one .settings-content > .error { margin: 0 0 0.9rem; }
-.sets { position: relative; display: flex; align-items: flex-start; gap: 0.9rem; }
+.sets { display: flex; align-items: flex-start; gap: 0.9rem; }
 .sets-col { display: flex; flex: 1 1 0; flex-direction: column; gap: 0.9rem; min-width: 0; }
 /* Each column is in two parts, which only three columns tell apart. */
 .sets-part { display: contents; }
@@ -575,30 +575,16 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings .sets .setting > .note, .settings .sets .setting > .error, .settings .free-text { overflow-wrap: anywhere; }
 .settings .sets .setting > .control { flex-wrap: wrap; row-gap: 4px; min-width: 0; }
 .settings .sets .setting .menu-anchor { min-width: 0; }
-/* A value reads as words, muted on the right; clicked, it opens its choices. */
-.settings .sets .setting > .control > select,
-.settings .sets .setting select {
-  width: auto;
-  min-width: 0;
-  max-width: 11rem;
-  /* As wide as the value it shows, not as its longest choice: "Ask" then leaves its row's name all the room. */
-  field-sizing: content;
-  text-overflow: ellipsis;
-  padding: 0 0 0 4px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  text-align: right;
-  text-align-last: right;
-  appearance: none;
-  cursor: pointer;
-}
-.settings .sets .setting select:hover, .settings .sets .setting select:focus { color: var(--ink); }
-.settings .sets .setting select option { background: var(--surface); color: var(--ink); }
-.value-button { max-width: 100%; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 400; text-align: right; white-space: normal; overflow-wrap: anywhere; }
-.value-button:hover:not(:disabled) { background: transparent; color: var(--ink); }
+/* A choice (a microphone, a language, where tasks open) and a row that opens a list: what is chosen, on a button with a
+   small arrow, as the task box's two chips are. What can be pressed then looks it, and what only says how something
+   stands (Found, Not found) stays plain words. It opens Togle's own list, with the choice in use ticked. A long value (a
+   microphone's name) is shortened on the button, and its row's name stays whole. */
+.choice { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; padding: 2px 6px 2px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 600; }
+.choice .choice-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.choice svg { flex: none; color: var(--muted); }
+.choice[aria-expanded='true'] svg { transform: rotate(180deg); }
+.choice:hover:not(:disabled), .choice[aria-expanded='true'] { border-color: var(--muted); }
+.settings .sets .setting .menu-anchor { max-width: 100%; }
 .settings .setting-value, .settings .setting-value.found { color: var(--muted); font-size: 12px; white-space: nowrap; }
 /* An agent's row, Togle Studio's and the AI plan's: a name and a value that can both be long (a name the person gave, a
    status in a sentence, a service's address). They are side by side where both fit; where they do not, the value goes
@@ -634,33 +620,28 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings .setting-detail > .setting { padding: 5px 0; border-bottom: 0; }
 .settings .setting-detail .row { display: flex; flex-wrap: wrap; gap: 6px; }
 .settings .setting-detail .hint { margin: 0; }
-/* Brought into view in a low window, it keeps a little room from the window's edge: its last line is not on the edge. A
-   card laid over the page can end lower than the page does, where there is nothing to scroll to: a part of no size that
-   reaches 12px under it gives the page that much more to scroll. */
+/* A list or a question brought into view in a low window keeps a little room from the window's edge. */
 .settings .setting-detail { scroll-margin-block: 12px; }
-.settings .setting-detail.over::after { content: ''; position: absolute; top: 100%; left: 0; width: 1px; height: 12px; pointer-events: none; }
-/* A form to type in (an agent to add, a key, a sign-in, a device's code) is one card as wide as the design draws it
-   (36rem, or the place where that is narrower), so that a command or an address has room. It opens under its button and
-   over the page: nothing on the page moves. It starts where it would be in the flow, moved out by the room and the line
-   of its group's card, so that its left edge is the card's own (as wide as the place, it then fits the place exactly); in
-   the last column it ends at the place's right edge instead, so that it stays inside the place. */
-/* While it is open the page under it is dimmed, as far as the place reaches: the form is the one thing to act on, and a row
-   it half covers reads as behind it, not as cut off. (The dimming is the card's own wide shadow, so it follows the card.) */
-.settings .setting-detail.over { position: absolute; z-index: 30; box-sizing: border-box; width: min(36rem, 100%); margin: 6px 0 0 calc(-0.9rem - 1px); background: var(--surface); box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--stage) 60%, transparent), 0 14px 28px -12px var(--shadow); }
-.sets-col:last-child .setting-detail.over { right: 0; }
-@media (min-width: 1150px) {
-  .sets-col:last-child > .sets-part:first-child .setting-detail.over { right: auto; }
-}
+/* A form to type in (an agent to add, a key, a sign-in, a device's code) is a dialog: the card the design draws, as wide
+   as drawn (36rem, or the window where that is narrower), in the middle of the window and hung near its top, so that it
+   does not shift when it grows a field. The window under it is dimmed, as under Togle's other dialog, and does not
+   scroll. In a low window the dialog scrolls in the dimmed layer, so that its buttons can always be reached. */
+.form-backdrop { position: fixed; inset: 36px 0 0; z-index: 80; display: flex; align-items: flex-start; justify-content: center; box-sizing: border-box; padding: min(14vh, 120px) 16px 16px; overflow: auto; background: rgba(8, 10, 14, 0.82); font-weight: 400; cursor: default; }
+.settings .setting-detail.over { flex: none; box-sizing: border-box; width: 100%; max-width: 36rem; margin: 0; padding: 14px; background: var(--surface); box-shadow: 0 22px 36px -26px var(--shadow); }
+body.has-dialog .shell-content { overflow: hidden; }
+/* The row before a dialog that is the last thing in its group keeps no line under it, as when the dialog is not open. */
+.settings .sets .card > .setting:has(+ .form-backdrop:last-child) { border-bottom: 0; }
 /* A field, as the design draws one: its name and what is typed in it in one dark box, the name on the left, the words on
    the right. A field of several lines has its name over them. */
 .field, .settings label.field { display: flex; flex-direction: row; align-items: center; gap: 10px; min-width: 0; margin: 0; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 13px; cursor: text; }
 .field:focus-within { border-color: var(--togle); }
 .field .field-name { flex: none; color: var(--muted); }
-.field input, .field select, .field textarea { flex: 1 1 0; width: auto; min-width: 0; padding: 7px 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); font-size: 13px; text-align: right; }
-.field input:focus, .field select:focus, .field textarea:focus { outline: none; }
-/* A choice in a field has a small arrow after it, which says it opens. */
-.field select { padding-right: 16px; text-align-last: right; appearance: none; cursor: pointer; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23a0a7bc' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") right center / 10px 6px no-repeat; }
-.field select option { background: var(--surface); color: var(--ink); }
+.field input, .field textarea { flex: 1 1 0; width: auto; min-width: 0; padding: 7px 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); font-size: 13px; text-align: right; }
+.field input:focus, .field textarea:focus { outline: none; }
+/* A field that holds a choice: the choice is at the field's end, plain in the field's own box. */
+.field.has-choice { cursor: default; }
+.field.has-choice .menu-anchor { flex: 1 1 0; justify-content: flex-end; min-width: 0; }
+.field.has-choice .choice { padding: 7px 0; border: 0; border-radius: 4px; background: none; font-size: 13px; font-weight: 400; }
 .field.tall, .settings label.field.tall { flex-direction: column; align-items: stretch; gap: 2px; padding: 7px 10px; }
 /* Its lines keep their height: as a part that only takes the room left, a box of several lines had none. */
 .field.tall textarea { flex: none; width: 100%; min-height: 4.6rem; padding: 0; text-align: left; line-height: 1.4; resize: vertical; }

@@ -15,6 +15,7 @@ import { Shortcut } from './Shortcut'
 import { Field, FormOver, openedInView, Row, Section, Toggle, useOneOpen } from './Rows'
 import { useAccounts } from './Accounts'
 import { Menu } from './Menu'
+import { Choice, Opens } from './Choice'
 import { VocabularyEditor } from './DictationVocabulary'
 import { Devices, SignIn, useReach } from './Devices'
 import { useRememberedVoices } from './VoiceMemory'
@@ -161,17 +162,16 @@ function Voice({ settings, stt, save }: { settings: Settings; stt: SttStatus; sa
   return (
     <Section id="settings-voice" title="Voice">
       {/* Calls stay on the system's microphone: Togle Studio cleans the sound by being that microphone. */}
-      <Row name="Microphone" note={problem || undefined}>
-        <select aria-label="Microphone" value={chosen} onChange={(event) => void save({ dictation: { microphoneId: event.target.value } })}>
-          <option value="">System default</option>
-          {chosen && !microphones.some((device) => device.deviceId === chosen) && <option value={chosen}>Saved microphone (not listed)</option>}
-          {microphones.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}
-        </select>
+      <Row label={false} name="Microphone" note={problem || undefined}>
+        <Choice label="Microphone" value={chosen} onChange={(microphoneId) => void save({ dictation: { microphoneId } })} options={[
+          { value: '', label: 'System default' },
+          ...(chosen && !microphones.some((device) => device.deviceId === chosen) ? [{ value: chosen, label: 'Saved microphone (not listed)' }] : []),
+          ...microphones.map((device, index) => ({ value: device.deviceId, label: device.label || `Microphone ${index + 1}` }))
+        ]} />
       </Row>
-      <Row name="Language">
-        <select aria-label="Language" value={settings.transcription.language} onChange={(event) => void save({ transcription: { language: event.target.value } })}>
-          {SPEECH_LANGUAGES.map(([code, name]) => <option key={code} value={code}>{code === 'auto' ? 'Detected' : name}</option>)}
-        </select>
+      <Row label={false} name="Language">
+        <Choice label="Language" value={settings.transcription.language} onChange={(language) => void save({ transcription: { language } })}
+          options={SPEECH_LANGUAGES.map(([code, name]) => ({ value: code, label: code === 'auto' ? 'Detected' : name }))} />
       </Row>
       <NamesAndTerms accountId={voiceAccountId(settings, accounts.accounts)} />
       <Toggle name="Clean up what I say" checked={settings.dictation.polish} onChange={(polish) => void save({ dictation: { polish } })} />
@@ -221,7 +221,7 @@ function NamesAndTerms({ accountId }: { accountId: string }) {
   return (
     <>
       <Row label={false} name="Names and terms">
-        <button className="value-button" aria-expanded={open} title="Names and terms spelled your way, and phrases that type a longer text" onClick={() => setOpen(!open)}>{count === undefined ? '…' : count ? `${count} ${count === 1 ? 'entry' : 'entries'}` : 'None'}</button>
+        <button className="choice" aria-expanded={open} title="Names and terms spelled your way, and phrases that type a longer text" onClick={() => setOpen(!open)}><Opens>{count === undefined ? '…' : count ? `${count} ${count === 1 ? 'entry' : 'entries'}` : 'None'}</Opens></button>
       </Row>
       {open && <div ref={openedInView} className="setting-detail"><VocabularyEditor accountId={accountId} /><div className="row"><button className="ghost small" onClick={() => setOpen(false)}>Done</button></div></div>}
     </>
@@ -244,12 +244,10 @@ function Meetings({ settings, save }: { settings: Settings; save: (patch: Settin
         ? groups.map(({ mode, apps: inGroup }) => {
           const names = inGroup.map((app) => app.name).join(', ')
           return (
-            <Row key={mode} name={names}>
-              <select aria-label={`When a call starts in ${names}`} value={mode} onChange={(event) => void save({ meetings: { ...settings.meetings, notice: true, apps: { ...apps, ...Object.fromEntries(inGroup.map((app) => [app.id, event.target.value as CallAppMode])) } } })}>
-                <option value="ask">Ask</option>
-                <option value="always">Always write down</option>
-                {mode === 'never' && <option value="never">Never</option>}
-              </select>
+            <Row key={mode} label={false} name={names}>
+              <Choice<CallAppMode> label={`When a call starts in ${names}`} value={mode}
+                onChange={(next) => void save({ meetings: { ...settings.meetings, notice: true, apps: { ...apps, ...Object.fromEntries(inGroup.map((app) => [app.id, next])) } } })}
+                options={[{ value: 'ask', label: 'Ask' }, { value: 'always', label: 'Always write down' }, ...(mode === 'never' ? [{ value: 'never' as const, label: 'Never' }] : [])]} />
             </Row>
           )
         })
@@ -268,7 +266,7 @@ function RememberedVoices({ settings, save }: { settings: Settings; save: (patch
   return (
     <>
       <Row label={false} name="Remembered voices">
-        <button className="value-button" aria-expanded={open} onClick={() => setOpen(!open)}>{people.length ? `${people.length} ${people.length === 1 ? 'person' : 'people'}` : 'None'}</button>
+        <button className="choice" aria-expanded={open} onClick={() => setOpen(!open)}><Opens>{people.length ? `${people.length} ${people.length === 1 ? 'person' : 'people'}` : 'None'}</Opens></button>
       </Row>
       {open && (
         <div ref={openedInView} className="setting-detail remembered-people">
@@ -333,12 +331,11 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
           )}
         </Fragment>
       ))}
-      {/* A value that opens its choices, like the others on this screen: Terminal is the agent's own screen, Web the conversation with a card for what it asks. */}
-      <Row name="Tasks open in">
-        <select aria-label="Tasks open in" title="Terminal is the agent’s own screen. Web is the conversation, a card for what the agent asks, and a reply box. A switch on a task changes it for that task." value={settings.tasks.view} onChange={(event) => void save({ tasks: { view: event.target.value === 'cards' ? 'cards' : 'session' } })}>
-          <option value="session">Terminal</option>
-          <option value="cards">Web</option>
-        </select>
+      {/* A choice like the others on this screen: Terminal is the agent's own screen, Web the conversation with a card for what it asks. */}
+      <Row label={false} name="Tasks open in">
+        <Choice<'session' | 'cards'> label="Tasks open in" title="Terminal is the agent’s own screen. Web is the conversation, a card for what the agent asks, and a reply box. A switch on a task changes it for that task."
+          value={settings.tasks.view === 'cards' ? 'cards' : 'session'} onChange={(view) => void save({ tasks: { view } })}
+          options={[{ value: 'session', label: 'Terminal' }, { value: 'cards', label: 'Web' }]} />
       </Row>
       {/* The button stays where it is while its form is open under it, over the page. */}
       <div className="setting add-row"><button className="small" aria-expanded={adding} title="Any other agent: one that speaks ACP, or any that runs in a terminal" onClick={() => { setError(''); setAdding(!adding) }}>Add an agent</button></div>
@@ -450,7 +447,7 @@ function AIPlan({ settings, save }: { settings: Settings; save: (patch: Settings
         {ai.kind === 'plan' ? (
           <>
             <span className="control">
-              <Menu className="value-button" label="ChatGPT · signed in" ariaLabel="Manage the AI plan" align="right" items={[
+              <Menu className="choice" label={<Opens>ChatGPT · signed in</Opens>} ariaLabel="Manage the AI plan" align="right" items={[
                 { label: 'Manage usage', onSelect: () => api.openExternal(MANAGE_USAGE_URL) },
                 { label: 'Sign out', disabled: busy, onSelect: () => void run(() => api.signOutAccount(ai.account.id)) }
               ]} />
@@ -459,7 +456,7 @@ function AIPlan({ settings, save }: { settings: Settings; save: (patch: Settings
         ) : ai.kind === 'key' ? (
           <>
             <span className="control">
-              <Menu className="value-button" label={`${ai.connection.label} · key`} ariaLabel="Manage the AI key" align="right" items={[
+              <Menu className="choice" label={<Opens>{`${ai.connection.label} · key`}</Opens>} ariaLabel="Manage the AI key" align="right" items={[
                 { label: 'Use a different key', disabled: busy, onSelect: () => setKeyForm(true) },
                 ...(chatgpt ? [{ label: 'Sign in with ChatGPT instead', disabled: busy, onSelect: () => void run(async () => { await api.signInAccount(chatgpt.id); await usePlan() }) }] : []),
                 { label: 'Remove the key', disabled: busy, onSelect: () => void run(async () => { await usePlan(); await api.removeApiConnection(ai.connection.id) }) }
@@ -498,11 +495,11 @@ function KeyModel({ settings, connection, save }: { settings: Settings; connecti
     return () => { live = false }
   }, [connection.id, connection.revision])
   return (
-    <Row name="Model">
-      <select aria-label="Model" value={current} onChange={(event) => void save({ ai: keyProfile(connection.id, event.target.value), provider: 'compat', subscriptionAccountId: '' })}>
-        {current && !models.some((model) => model.id === current) && <option value={current}>{current}</option>}
-        {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-      </select>
+    <Row label={false} name="Model">
+      <Choice label="Model" value={current} onChange={(model) => void save({ ai: keyProfile(connection.id, model), provider: 'compat', subscriptionAccountId: '' })} options={[
+        ...(current && !models.some((model) => model.id === current) ? [{ value: current, label: current }] : []),
+        ...models.map((model) => ({ value: model.id, label: model.label }))
+      ]} />
     </Row>
   )
 }
@@ -534,10 +531,8 @@ function KeyForm({ save, replacing, onClose }: { save: (patch: SettingsPatch) =>
   return (
     <FormOver className="ai-key-form" label="Use a key" busy={busy} onClose={onClose} onSubmit={() => void submit()}>
       <span className="tasks-label">Use a key</span>
-      <Field name="Service">
-        <select aria-label="Service" value={service} disabled={busy} onChange={(event) => setService(event.target.value as typeof service)}>
-          {KEY_SERVICES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
+      <Field choice name="Service">
+        <Choice label="Service" value={service} disabled={busy} onChange={setService} options={KEY_SERVICES.map((item) => ({ value: item.id, label: item.name }))} />
       </Field>
       {service === 'other' && (
         <Field name="Address" note="An OpenAI-compatible service, such as OpenRouter, Groq, or a model on this computer with Ollama.">
@@ -587,7 +582,7 @@ function StudioRow() {
       <>
         <Row label={false} name="Togle Studio" className="studio-row">
           {reach.account
-            ? <Menu className="value-button" label={reach.account.email} ariaLabel="Togle Studio account" align="right" items={[{ label: 'Sign out', onSelect: () => void run('out', () => api.reachSignOut()) }]} />
+            ? <Menu className="choice" label={<Opens>{reach.account.email}</Opens>} ariaLabel="Togle Studio account" align="right" items={[{ label: 'Sign out', onSelect: () => void run('out', () => api.reachSignOut()) }]} />
             : <button className="small" aria-expanded={signingIn} onClick={() => setSigningIn(!signingIn)}>Sign in</button>}
         </Row>
         {signingIn && !reach.account && <SignIn busy={busy} run={run} onCancel={() => setSigningIn(false)} />}

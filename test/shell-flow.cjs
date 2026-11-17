@@ -94,6 +94,29 @@ async function open(T, agent, scenario, width = 1024, height = 850, surface) {
 
 const LIVE = "document.querySelector('section[aria-label=\"Call being written down\"]')"
 const texts = (ui, selector) => ui.evaluate('[...document.querySelectorAll(' + JSON.stringify(selector) + ")].map(e=>e.textContent.trim().replace(/\\s+/g,' '))")
+// A choice of Settings (a microphone, a language, where tasks open): its button opens Togle's own list, and a choice in
+// the list is pressed by its words. The button is brought into view first: a list does not open from a button out of sight.
+const choiceButton = label => "document.querySelector(" + JSON.stringify('[data-choice=' + JSON.stringify(label) + ']') + ")"
+const shownChoice = label => "document.querySelector(" + JSON.stringify('[data-choice=' + JSON.stringify(label) + '] .choice-value') + ").textContent"
+const openChoice = async (ui, label) => {
+  await ui.evaluate("(()=>{const b=" + choiceButton(label) + ";b.scrollIntoView({block:'center'});b.click()})()")
+  await ui.wait("!!document.querySelector('.menu-overlay')")
+}
+const closeChoice = async ui => {
+  await ui.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))")
+  await ui.wait("!document.querySelector('.menu-overlay')")
+}
+const pickChoice = async (ui, label, words) => {
+  await openChoice(ui, label)
+  await ui.click('.menu-overlay [role^=menuitem]', words)
+  await ui.wait("!document.querySelector('.menu-overlay')")
+}
+// A real press and release in the middle of what the expression finds: click() sends no pointer down, and Togle's lists close on one.
+const pressReal = async (ui, found) => {
+  const at = await ui.evaluate("(()=>{const el=(" + found + ");el.scrollIntoView({block:'nearest'});const r=el.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()")
+  for (const type of ['mouseMove', 'mouseDown', 'mouseUp']) ui.window.webContents.sendInputEvent({ type, x: at.x, y: at.y, button: 'left', clickCount: 1 })
+  await ui.paint()
+}
 const place = ui => ui.evaluate("document.querySelector('.workspace-nav button[aria-current=page]')?.getAttribute('aria-label')")
 
 /** The window's places, home, and a call written down from start to its page afterwards. */
@@ -726,16 +749,38 @@ async function checkSettings(T, agent) {
   assert.deepEqual(await texts(ui, '#settings-keys button.keys'), ['F9', 'F8', 'F10'])
   const names = await texts(ui, '#settings-voice .setting > .name')
   assert.deepEqual(names.slice(0, 4), ['Microphone', 'Language', 'Names and terms', 'Clean up what I say'])
-  assert.equal(await ui.evaluate("document.querySelector('#settings-voice [aria-label=\"Microphone\"]').value"), '', 'the system default')
-  assert.equal(await ui.evaluate("document.querySelector('#settings-voice [aria-label=\"Language\"] option[value=auto]').textContent"), 'Detected')
+  assert.equal(await ui.evaluate(shownChoice('Microphone')), 'System default', 'the system default')
+  // A choice is a button with a small arrow, not a field of the system's: it opens Togle's own list, on the choice in use.
+  assert.equal(await ui.evaluate("document.querySelectorAll('.settings select').length"), 0, 'no list of the system\'s in Settings')
+  assert.equal(await ui.evaluate(shownChoice('Language')), 'English')
+  await openChoice(ui, 'Language')
+  assert.equal((await texts(ui, '.menu-overlay [role=menuitemradio]'))[0], 'Detected')
+  assert.equal(await ui.evaluate("document.activeElement?.textContent.trim()"), 'English', 'the list opens on the language in use')
+  assert.deepEqual(await texts(ui, '.menu-overlay [aria-checked=true]'), ['English'], 'and it alone is ticked')
+  // A letter goes to the next language that starts with it.
+  await ui.evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'g',bubbles:true,cancelable:true}))")
+  assert.equal(await ui.evaluate("document.activeElement?.textContent.trim()"), 'German')
+  await closeChoice(ui)
+  // With real presses: the button pressed again closes its list for good (not closed by the press and opened by the click),
+  // and a press on the row's name opens nothing, because the row is not the button's label.
+  await pressReal(ui, choiceButton('Language'))
+  await ui.wait("!!document.querySelector('.menu-overlay')")
+  await pressReal(ui, choiceButton('Language'))
+  await ui.wait("!document.querySelector('.menu-overlay')")
+  await new Promise(resolve => setTimeout(resolve, 300))
+  assert.equal(await ui.evaluate("!!document.querySelector('.menu-overlay')"), false, 'the button pressed again closes the list, and it stays closed')
+  await pressReal(ui, "[...document.querySelectorAll('#settings-voice .setting .name')].find(n=>n.textContent==='Language')")
+  await new Promise(resolve => setTimeout(resolve, 300))
+  assert.equal(await ui.evaluate("!!document.querySelector('.menu-overlay')"), false, 'a press on the name of the row opens nothing')
+  assert.equal(await ui.evaluate(shownChoice('Language')), 'English', 'and nothing was chosen by any of this')
   assert.equal(await ui.evaluate("!!document.querySelector('.settings .card-note, .settings .setting > .note')"), false, 'no notes under the rows: everything fits on one screen')
   if (process.platform === 'win32') assert.deepEqual(await texts(ui, '#settings-meetings .setting > .name'), ['Zoom, Meet, Teams', 'Remembered voices'], 'the call apps the design names, together while Togle does the same in each')
-  assert.equal(await ui.evaluate("document.querySelector('#settings-meetings .setting:last-of-type .value-button')?.textContent"), 'None')
+  assert.equal(await ui.evaluate("document.querySelector('#settings-meetings .setting:last-of-type .choice')?.textContent"), 'None')
   assert.ok(await ui.evaluate("(()=>{const s=document.querySelector('.sets');return s.scrollHeight<=innerHeight})()"), 'the groups fit on one screen')
   await ui.capture('settings')
 
   // Names and terms open where they are, and close again.
-  const valueOf = (group, name) => "[...document.querySelectorAll('" + group + " .setting')].find(r=>r.querySelector('.name')?.textContent===" + JSON.stringify(name) + ").querySelector('.value-button')"
+  const valueOf = (group, name) => "[...document.querySelectorAll('" + group + " .setting')].find(r=>r.querySelector('.name')?.textContent===" + JSON.stringify(name) + ").querySelector('.choice')"
   await ui.evaluate(valueOf('#settings-voice', 'Names and terms') + '.click()')
   await ui.wait("!!document.querySelector('#settings-voice .vocabulary-editor')")
   await ui.click('#settings-voice button', 'Done')
@@ -746,7 +791,7 @@ async function checkSettings(T, agent) {
   await ui.evaluate("document.querySelector('.remembered-people [role=switch]').click()")
   await ui.wait('window.togleUITest.settings().assist.rememberVoices===true')
   if (process.platform === 'win32') {
-    await ui.evaluate("(()=>{const select=document.querySelector('[aria-label=\"When a call starts in Zoom, Meet, Teams\"]');select.value='always';select.dispatchEvent(new Event('change',{bubbles:true}))})()")
+    await pickChoice(ui, 'When a call starts in Zoom, Meet, Teams', 'Always write down')
     await ui.wait("window.togleUITest.settings().meetings.apps.zoom==='always'")
   }
 
@@ -755,8 +800,11 @@ async function checkSettings(T, agent) {
   assert.ok((await ui.evaluate("document.querySelector('.ai-plan-other').textContent")).includes('No ChatGPT plan? Use a key from Claude, Gemini, Grok, Kimi or any other.'))
   await ui.click('.ai-plan-other button', 'Use a key')
   await ui.wait("!!document.querySelector('form.ai-key-form')")
-  assert.deepEqual(await texts(ui, '.ai-key-form [aria-label=Service] option'), ['Claude', 'Gemini', 'Grok', 'Kimi', 'Another service'])
-  assert.equal(await ui.evaluate("document.querySelector('.ai-key-form [aria-label=Service]').value"), 'claude', 'Claude first: there is no Claude sign-in, so a key from Anthropic is how Claude is used')
+  await openChoice(ui, 'Service')
+  assert.deepEqual(await texts(ui, '.menu-overlay [role=menuitemradio]'), ['Claude', 'Gemini', 'Grok', 'Kimi', 'Another service'])
+  await closeChoice(ui)
+  assert.equal(await ui.evaluate("!!document.querySelector('form.ai-key-form')"), true, 'Escape closed the list of services, not the dialog under it')
+  assert.equal(await ui.evaluate(shownChoice('Service')), 'Claude', 'Claude first: there is no Claude sign-in, so a key from Anthropic is how Claude is used')
   await ui.fill('.ai-key-form input[aria-label=Key]', 'fictional-claude-key')
   await ui.click('.ai-key-form button', 'Use this key')
   await ui.wait("document.querySelector('.ai-plan .control button')?.textContent==='Claude · key'")
@@ -772,7 +820,7 @@ async function checkSettings(T, agent) {
   await ui.click('.ai-plan .control button', 'Manage the AI key')
   await ui.click('.menu-item, [role=menuitem]', 'Use a different key')
   await ui.wait("!!document.querySelector('form.ai-key-form')")
-  await ui.evaluate("(()=>{const select=document.querySelector('.ai-key-form [aria-label=Service]');select.value='gemini';select.dispatchEvent(new Event('change',{bubbles:true}))})()")
+  await pickChoice(ui, 'Service', 'Gemini')
   await ui.fill('.ai-key-form input[aria-label=Key]', 'fictional-gemini-key')
   await ui.click('.ai-key-form button', 'Use this key')
   await ui.wait("document.querySelector('.ai-plan .control button')?.textContent==='Gemini · key'")

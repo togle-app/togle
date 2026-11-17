@@ -27,10 +27,18 @@ interface Props {
   direction?: 'down' | 'up'
   /** As it opens: a chance to load what it lists. */
   onOpen?: () => void
+  /**
+   * The items are the choices of one setting, one of them in use: the list opens on that one, a letter goes to the next
+   * choice that starts with it (the languages are many), and a screen reader hears one-of-several.
+   */
+  choice?: boolean
+  /** What a test or a script finds its button by. */
+  name?: string
+  disabled?: boolean
 }
 
 /** A button that opens a short list of choices; a pick, a click elsewhere, Escape or switching apps closes it. */
-export function Menu({ label, className = '', title, ariaLabel, items, align = 'left', direction = 'down', onOpen }: Props) {
+export function Menu({ label, className = '', title, ariaLabel, items, align = 'left', direction = 'down', onOpen, choice = false, name, disabled }: Props) {
   const [open, setOpen] = useState(false)
   const menuId = useId()
   const trigger = useRef<HTMLButtonElement>(null)
@@ -43,9 +51,13 @@ export function Menu({ label, className = '', title, ariaLabel, items, align = '
   useEffect(() => {
     if (!open || !positioned) return
     const buttons = choices()
-    const button = focusEdge.current === 'last' ? buttons.at(-1) : buttons[0]
+    // A list of choices opens on the one in use: in a long list it is then in view, and the arrows start from it.
+    const inUse = choice ? buttons.find((button) => button.getAttribute('aria-checked') === 'true') : undefined
+    const button = inUse ?? (focusEdge.current === 'last' ? buttons.at(-1) : buttons[0])
     button?.focus()
   }, [open, positioned])
+  // Letters typed in a list of choices, to go to the one that starts with them.
+  const typed = useRef({ text: '', at: 0 })
   // A viewport overlay escapes scrolling panels and inherited header/form styles.
   useLayoutEffect(() => {
     if (!open) { setPosition(null); return }
@@ -122,6 +134,8 @@ export function Menu({ label, className = '', title, ariaLabel, items, align = '
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
+        data-choice={name}
+        disabled={disabled}
         onKeyDown={(e) => {
           if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
           e.preventDefault()
@@ -155,6 +169,17 @@ export function Menu({ label, className = '', title, ariaLabel, items, align = '
               trigger.current?.focus()
               return
             }
+            if (choice && e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+              // A letter goes to the next choice that starts with it; letters typed close together are read as one start.
+              const now = Date.now()
+              const text = (now - typed.current.at < 700 ? typed.current.text : '') + e.key.toLowerCase()
+              typed.current = { text, at: now }
+              const all = choices()
+              const from = all.indexOf(document.activeElement as HTMLButtonElement) + (text.length === 1 ? 1 : 0)
+              const found = [...all.slice(from), ...all.slice(0, from)].find((button) => (button.textContent ?? '').trim().toLowerCase().startsWith(text))
+              if (found) { e.preventDefault(); found.focus() }
+              return
+            }
             if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return
             e.preventDefault()
             e.stopPropagation()
@@ -177,7 +202,7 @@ export function Menu({ label, className = '', title, ariaLabel, items, align = '
               <button
                 key={i}
                 type="button"
-                role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+                role={item.checked === undefined ? 'menuitem' : choice ? 'menuitemradio' : 'menuitemcheckbox'}
                 aria-checked={item.checked}
                 className={item.danger ? 'danger' : undefined}
                 disabled={item.disabled}

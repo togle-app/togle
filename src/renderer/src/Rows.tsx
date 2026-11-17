@@ -48,15 +48,17 @@ export function Row({ name, note, children, stacked, label = true, className = '
 
 /**
  * A field as the design draws one: what it is and what is typed in it share one box, its name on the left and the words on
- * the right. `tall`: its name over a box of several lines. `note`: a line under it.
+ * the right. `tall`: its name over a box of several lines. `note`: a line under it. `choice`: it holds a button that opens
+ * choices, not a place to type, so it is not that button's label (a press on its name would press the button).
  */
-export function Field({ name, note, tall, children }: { name: string; note?: ReactNode; tall?: boolean; children: ReactNode }) {
+export function Field({ name, note, tall, choice, children }: { name: string; note?: ReactNode; tall?: boolean; choice?: boolean; children: ReactNode }) {
+  const Tag = choice ? 'div' : 'label'
   return (
     <>
-      <label className={`field ${tall ? 'tall' : ''}`}>
+      <Tag className={`field ${tall ? 'tall' : ''} ${choice ? 'has-choice' : ''}`} role={choice ? 'group' : undefined} aria-label={choice ? name : undefined}>
         <span className="field-name">{name}</span>
         {children}
-      </label>
+      </Tag>
       {note && <span className="hint field-note">{note}</span>}
     </>
   )
@@ -76,12 +78,16 @@ export function useOneOpen(): [boolean, (open: boolean) => void] {
   return [open, setOpen]
 }
 
+// The dialogs open now: the page under them does not scroll while there is one.
+let dialogs = 0
+
 /**
- * A form to type in (an agent to add, a key, a sign-in, a device's code): one card as wide as Settings, as the design draws
- * it, so that a command or an address has room. It opens under the button that opened it and over the page: nothing on the
- * page moves, and that button stays where it is. The page under it is dimmed while it is open. The keys go to its first field
- * and stay in the form (Tab from its last button goes to its first field, not to a row under it); Escape closes it wherever
- * the keys are, and they go back to the button that opened it. A click elsewhere does not close it: what was typed stays.
+ * A form to type in (an agent to add, a key, a sign-in, a device's code), as a dialog: the card the design draws, in the
+ * middle of the window and hung near its top (it does not shift when it grows a field), over the dimmed window. Nothing
+ * on the page moves, and the button that opened it stays where it is. The keys go to its first field and stay in the form
+ * (Tab from its last button goes to its first field); Escape closes it wherever the keys are, and they go back to the
+ * button that opened it. A click beside it does not close it: what was typed stays. It is in the page where its group is
+ * and only laid over the window, so that the rules and the names of its group still find it.
  */
 export function FormOver({ label, className = '', busy = false, onClose, onSubmit, children }: { label: string; className?: string; busy?: boolean; onClose: () => void; onSubmit: () => void; children: ReactNode }) {
   const form = useRef<HTMLFormElement>(null)
@@ -92,14 +98,9 @@ export function FormOver({ label, className = '', busy = false, onClose, onSubmi
   useEffect(() => {
     const box = form.current
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    // In a low window the page moves just far enough to show it whole, buttons and all: as it opens, and again when it
-    // grows (a field that a choice adds, a line that says what went wrong).
-    const show = (): void => box?.scrollIntoView({ block: 'nearest' })
-    show()
-    const grown = new ResizeObserver(show)
-    if (box) grown.observe(box)
+    if (++dialogs === 1) document.body.classList.add('has-dialog')
     // The keys go to the first field to type in (a choice already made, such as the service of a key, is not the first stop).
-    const first = box?.querySelector<HTMLElement>('input:not(:disabled), textarea:not(:disabled)') ?? box?.querySelector<HTMLElement>('select:not(:disabled), button:not(:disabled)')
+    const first = box?.querySelector<HTMLElement>('input:not(:disabled), textarea:not(:disabled)') ?? box?.querySelector<HTMLElement>('button:not(:disabled)')
     first?.focus({ preventScroll: true })
     const key = (event: KeyboardEvent): void => {
       if (event.key === 'Tab' && box && !event.defaultPrevented) {
@@ -110,19 +111,23 @@ export function FormOver({ label, className = '', busy = false, onClose, onSubmi
         if (to >= 0 && stops[to]) { event.preventDefault(); stops[to].focus() }
         return
       }
-      // Not the Escape that closes a list of choices.
-      if (event.key !== 'Escape' || event.defaultPrevented || working.current || event.target instanceof HTMLSelectElement) return
+      // Not the Escape that closes a list of choices: that list takes it first, and it never comes here.
+      if (event.key !== 'Escape' || event.defaultPrevented || working.current) return
       event.preventDefault()
       close.current()
     }
     document.addEventListener('keydown', key)
     return () => {
-      grown.disconnect()
+      if (--dialogs === 0) document.body.classList.remove('has-dialog')
       document.removeEventListener('keydown', key)
       if (opener?.isConnected && (!document.activeElement || document.activeElement === document.body)) opener.focus({ preventScroll: true })
     }
   }, [])
-  return <form ref={form} className={`setting-detail over ${className}`} aria-label={label} onSubmit={(event) => { event.preventDefault(); onSubmit() }}>{children}</form>
+  return (
+    <div className="form-backdrop" role="dialog" aria-modal="true" aria-label={label}>
+      <form ref={form} className={`setting-detail over ${className}`} aria-label={label} onSubmit={(event) => { event.preventDefault(); onSubmit() }}>{children}</form>
+    </div>
+  )
 }
 
 /**
