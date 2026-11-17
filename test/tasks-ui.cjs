@@ -839,6 +839,13 @@ async function checkAgentSettings(T, agent) {
     assert.deepEqual(await ui.evaluate(rows), before, 'every row stays where it was when the form that adds an agent opens at ' + width)
     assert.equal(await ui.evaluate(spans('form.add-agent')), true, 'the form is as wide as the two columns, under its button, at ' + width)
     assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Agent name', 'the keys go to its first field')
+    // The keys stay in the form: Tab from its last button goes to its first field, not to a row under the form.
+    await ui.evaluate("(()=>{const last=[...document.querySelectorAll('form.add-agent button')].filter(b=>!b.disabled).at(-1);last.focus();last.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}))})()")
+    assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Agent name', 'Tab past the last button comes back to the first field at ' + width)
+    await ui.evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true}))")
+    assert.equal(await ui.evaluate("document.activeElement?.textContent"), 'Cancel', 'and Shift+Tab from the first field goes to the last button at ' + width)
+    await ui.evaluate("document.querySelector('form.add-agent input').focus()")
+    assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('form.add-agent')).boxShadow.includes('100vmax')||/\\d{4,}px/.test(getComputedStyle(document.querySelector('form.add-agent')).boxShadow)"), true, 'the page under the form is dimmed')
     // One form at a time: the key form closes the one that adds an agent, and nothing under it moves either.
     await ui.click('.ai-plan-other button', 'Use a key')
     await ui.wait("!!document.querySelector('form.ai-key-form')&&!document.querySelector('form.add-agent')")

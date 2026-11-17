@@ -79,8 +79,9 @@ export function useOneOpen(): [boolean, (open: boolean) => void] {
 /**
  * A form to type in (an agent to add, a key, a sign-in, a device's code): one card as wide as Settings, as the design draws
  * it, so that a command or an address has room. It opens under the button that opened it and over the page: nothing on the
- * page moves, and that button stays where it is. The keys go to its first field; Escape closes it wherever the keys are, and
- * they go back to the button that opened it. A click elsewhere does not close it: what was typed stays.
+ * page moves, and that button stays where it is. The page under it is dimmed while it is open. The keys go to its first field
+ * and stay in the form (Tab from its last button goes to its first field, not to a row under it); Escape closes it wherever
+ * the keys are, and they go back to the button that opened it. A click elsewhere does not close it: what was typed stays.
  */
 export function FormOver({ label, className = '', busy = false, onClose, onSubmit, children }: { label: string; className?: string; busy?: boolean; onClose: () => void; onSubmit: () => void; children: ReactNode }) {
   const form = useRef<HTMLFormElement>(null)
@@ -101,6 +102,14 @@ export function FormOver({ label, className = '', busy = false, onClose, onSubmi
     const first = box?.querySelector<HTMLElement>('input:not(:disabled), textarea:not(:disabled)') ?? box?.querySelector<HTMLElement>('select:not(:disabled), button:not(:disabled)')
     first?.focus({ preventScroll: true })
     const key = (event: KeyboardEvent): void => {
+      if (event.key === 'Tab' && box && !event.defaultPrevented) {
+        // The keys stay in the form: past its last stop they go to its first, and from outside it they come in.
+        const stops = [...box.querySelectorAll<HTMLElement>('input, select, textarea, button')].filter((stop) => !stop.hasAttribute('disabled') && stop.tabIndex >= 0 && stop.getClientRects().length)
+        const at = stops.indexOf(document.activeElement as HTMLElement)
+        const to = event.shiftKey ? (at <= 0 ? stops.length - 1 : -1) : at < 0 || at === stops.length - 1 ? 0 : -1
+        if (to >= 0 && stops[to]) { event.preventDefault(); stops[to].focus() }
+        return
+      }
       // Not the Escape that closes a list of choices.
       if (event.key !== 'Escape' || event.defaultPrevented || working.current || event.target instanceof HTMLSelectElement) return
       event.preventDefault()

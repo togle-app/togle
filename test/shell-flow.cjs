@@ -406,6 +406,24 @@ async function checkMeetings(T, agent) {
   assert.ok((await ui.evaluate("document.querySelector('.give-panel .error').textContent")).includes('Rebuild the pricing page (Claude Code): It is open in another window.'), 'it says which task could not take it, and why')
   await ui.click('.give-panel button', 'Cancel')
   await ui.wait("!document.querySelector('.give-panel')")
+  // With real presses (click() sends no pointer down, and the list closes on one): a press elsewhere closes the list and keeps
+  // what was typed, and a press on the button that opened it closes it for good, not closed by the press and opened by the click.
+  const press = async (found) => {
+    const at = await ui.evaluate("(()=>{const r=(" + found + ").getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()")
+    for (const type of ['mouseMove', 'mouseDown', 'mouseUp']) ui.window.webContents.sendInputEvent({ type, x: at.x, y: at.y, button: 'left', clickCount: 1 })
+  }
+  const giveButton = "[...document.querySelectorAll('.meeting-detail .call-record-actions button')].find(b=>b.textContent.trim()==='Give to an agent')"
+  await press(giveButton)
+  await ui.wait("!!document.querySelector('.give-panel')")
+  await ui.fill('.give-words', 'Kept while the list is closed')
+  await press("document.querySelector('.titlebar .brand')")
+  await ui.wait("!document.querySelector('.give-panel')")
+  await press(giveButton)
+  await ui.wait("document.querySelector('.give-words')?.value==='Kept while the list is closed'")
+  await press(giveButton)
+  await ui.wait("!document.querySelector('.give-panel')")
+  await new Promise(resolve => setTimeout(resolve, 300))
+  assert.equal(await ui.evaluate("!!document.querySelector('.give-panel')"), false, 'its own button closes the list, and it stays closed')
   await ui.click('.workspace-nav button', 'Meetings')
   // A right click on a call in the list: rename it, or delete it after asking.
   await ui.evaluate("[...document.querySelectorAll('.meeting-row')].find(row=>row.textContent.includes('Acme renewal')).dispatchEvent(new MouseEvent('contextmenu',{clientX:300,clientY:160,bubbles:true,cancelable:true}))")
@@ -417,6 +435,13 @@ async function checkMeetings(T, agent) {
   assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.meetings .notice.ask')).position"), 'fixed')
   assert.equal(await ui.evaluate("document.activeElement?.textContent"), 'Keep call')
   await ui.click('.meetings .notice.ask button', 'Keep call')
+  // A real press elsewhere keeps the call too.
+  await ui.evaluate("[...document.querySelectorAll('.meeting-row')].find(row=>row.textContent.includes('Acme renewal')).dispatchEvent(new MouseEvent('contextmenu',{clientX:300,clientY:160,bubbles:true,cancelable:true}))")
+  await ui.wait("!!document.querySelector('.call-menu')")
+  await ui.click('.call-menu button', 'Delete call')
+  await ui.wait("!!document.querySelector('.meetings .notice.ask')")
+  await press("document.querySelector('.titlebar .brand')")
+  await ui.wait("!document.querySelector('.meetings .notice.ask')")
   assert.deepEqual(await ui.calls('deleteCallSession'), [], 'nothing is deleted unless asked twice')
   await ui.click('.meeting-row', 'Open call: Design check')
   await ui.wait("!!document.querySelector('.confirm-names')")

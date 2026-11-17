@@ -628,9 +628,9 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 /* A form to type in (an agent to add, a key, a sign-in, a device's code) is one card as wide as Settings, as the design
    draws it, so that a command or an address has room. It opens under its button and over the page: nothing on the page
    moves. (Its place down the page is where it would be in the flow; its width is all of the two columns.) */
-/* A card over the page has a narrow rim of the page's own color around it: what it covers is cut off clean, with no letter
-   showing at its round corners. */
-.settings .setting-detail.over { position: absolute; left: 0; right: 0; z-index: 30; margin: 6px 0 0; background: var(--surface); box-shadow: 0 0 0 4px var(--surface), 0 14px 28px -12px var(--shadow); }
+/* While it is open the page under it is dimmed, as far as the place reaches: the form is the one thing to act on, and a row
+   it half covers reads as behind it, not as cut off. (The dimming is the card's own wide shadow, so it follows the card.) */
+.settings .setting-detail.over { position: absolute; left: 0; right: 0; z-index: 30; margin: 6px 0 0; background: var(--surface); box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--stage) 60%, transparent), 0 14px 28px -12px var(--shadow); }
 /* A field, as the design draws one: its name and what is typed in it in one dark box, the name on the left, the words on
    the right. A field of several lines has its name over them. */
 .field, .settings label.field { display: flex; flex-direction: row; align-items: center; gap: 10px; min-width: 0; margin: 0; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 13px; cursor: text; }
