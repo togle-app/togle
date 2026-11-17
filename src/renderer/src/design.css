@@ -190,9 +190,10 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .shell-nav .dot.live { margin-left: 0; flex-shrink: 0; }
 /* A word too long for its line (a path, an address, a name without spaces) breaks rather than pushing the place sideways. */
 .shell-content { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; padding: 14px 16px; overflow: auto; background: var(--surface); overflow-wrap: break-word; }
-/* On a wide window a place keeps the width it reads well at (--read), from the left, as the design draws it: To-do, a call
-   and its page, the first minute, a task's conversation, Settings. The list of calls uses all the width there is. */
-.live-call, .meetings.meeting-detail { max-width: var(--read); }
+/* On a wide window a place keeps the width it reads well at (--read), from the left, as the design draws it: To-do, the
+   calls and a call's page, a live call, the first minute, a task's conversation, Settings. Only the agent's own screen
+   takes all the width there is. */
+.live-call, .meetings { max-width: var(--read); }
 /* Agents is two panes side by side, each with its own room, the line between them the window's full height. */
 .shell-content:has(> .tasks) { padding: 0; }
 @media (max-width: 560px) {
