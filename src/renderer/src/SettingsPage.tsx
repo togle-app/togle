@@ -55,19 +55,29 @@ export function SettingsPage({ settings, stt, at, onChange }: Props) {
       <div className="settings-content">
         {saveError && <p className="error" role="alert">{saveError}</p>}
         <Update />
-        {/* Two columns, each its own: a list or a question that opens in a group pushes down only what is under it in its
-            column, and nothing jumps to the other side. (A form to type in is laid over both: see FormOver.) In a narrow window
-            the second column goes under the first, so the groups are read, and reached with Tab, in the order they are here. */}
+        {/* Columns, each its own: a list or a question that opens in a group pushes down only what is under it in its column,
+            and nothing jumps to the other side. (A form to type in is laid over the page: see FormOver.) Two columns as the
+            design draws them; on a wide window the stylesheet makes three of their four parts (the two middle parts share a
+            column), and in a narrow one the second column goes under the first. In every shape the groups are read, and
+            reached with Tab, in the order they are here. */}
         <div className="sets">
           <div className="sets-col">
-            <Keys />
-            <Meetings settings={settings} save={save} />
-            <Accounts settings={settings} save={save} />
+            <div className="sets-part">
+              <Keys />
+              <Meetings settings={settings} save={save} />
+            </div>
+            <div className="sets-part">
+              <Accounts settings={settings} save={save} />
+            </div>
           </div>
           <div className="sets-col">
-            <Voice settings={settings} stt={stt} save={save} />
-            <Agents settings={settings} save={save} />
-            <Devices />
+            <div className="sets-part">
+              <Voice settings={settings} stt={stt} save={save} />
+            </div>
+            <div className="sets-part">
+              <Agents settings={settings} save={save} />
+              <Devices />
+            </div>
           </div>
         </div>
       </div>

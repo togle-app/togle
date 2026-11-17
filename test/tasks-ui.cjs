@@ -814,30 +814,37 @@ async function checkAgentSettings(T, agent) {
     assert.equal(await ui.evaluate(oneLine), true, 'Microphone is on one line at ' + width)
   }
   await ui.capture('settings-long-agent')
-  // Two columns of groups at most, as the design draws them, however wide the window: Keys, Meetings and Accounts in one, Voice
-  // and Agents in the other. A wide window once made three, four or five columns of them, or one thin strip.
+  // The groups are as wide as the place, in columns of their own: two as the design draws them (Keys, Meetings and Accounts
+  // beside Voice and Agents), and three on a wide window (Keys, Meetings beside Accounts, Voice beside Agents). A wide window
+  // once made five thin columns of them, then one small block in a corner, then one in the middle.
   const groups = ['settings-keys', 'settings-voice', 'settings-meetings', 'settings-agents', 'settings-accounts']
   // Every row of Settings, each group's name and the line under the plan: where it is from the top of the groups, and how large.
   const rows = "(()=>{const top=document.querySelector('.sets').getBoundingClientRect().top;return [...document.querySelectorAll('.sets .setting, .sets .section-head, .sets .ai-plan-other')].filter(e=>!e.closest('.setting-detail')).map(e=>{const r=e.getBoundingClientRect();return [e.textContent.trim().slice(0,20),Math.round(r.left),Math.round(r.top-top),Math.round(r.width),Math.round(r.height)].join(' ')})})()"
-  const spans = form => "(()=>{const f=document.querySelector(" + JSON.stringify(form) + "),r=f.getBoundingClientRect(),all=document.querySelector('.sets').getBoundingClientRect();return getComputedStyle(f).position==='absolute'&&Math.abs(r.left-all.left)<=1&&Math.abs(r.right-all.right)<=1})()"
+  const placed = (form, side) => "(()=>{const f=document.querySelector(" + JSON.stringify(form) + "),r=f.getBoundingClientRect(),all=document.querySelector('.sets').getBoundingClientRect(),own=f.closest('section').getBoundingClientRect();return getComputedStyle(f).position==='absolute'&&r.width<=577&&r.width>=Math.min(576,all.width)-1&&r.left>=all.left-1&&r.right<=all.right+1&&(" + JSON.stringify(side) + "==='end'?Math.abs(r.right-all.right)<=1:Math.abs(r.left-own.left)<=1)})()"
   const places = "(()=>Object.fromEntries(" + JSON.stringify(groups) + ".map(id=>{const r=document.getElementById(id).getBoundingClientRect();return [id,{left:Math.round(r.left),top:Math.round(r.top),width:Math.round(r.width)}]})))()"
   for (const width of [1024, 1600]) {
     ui.window.setContentSize(width, 900)
     await ui.wait('innerWidth===' + width)
     const at = await ui.evaluate(places)
-    assert.equal(at['settings-keys'].top, at['settings-voice'].top, 'Keys beside Voice at ' + width)
-    assert.ok(at['settings-voice'].left >= at['settings-keys'].left + at['settings-keys'].width, 'in two columns at ' + width)
-    assert.ok(at['settings-meetings'].left === at['settings-keys'].left && at['settings-accounts'].left === at['settings-keys'].left && at['settings-agents'].left === at['settings-voice'].left, 'Meetings and Accounts under Keys, Agents under Voice, at ' + width)
-    assert.ok(at['settings-meetings'].top > at['settings-keys'].top && at['settings-accounts'].top > at['settings-meetings'].top && at['settings-agents'].top > at['settings-voice'].top, 'in the order drawn at ' + width)
-    assert.ok(await ui.evaluate("document.querySelector('.sets').getBoundingClientRect().width<=580"), 'and stay as wide as drawn at ' + width)
-    // A form to type in (an agent to add, a key) is one card as wide as the two columns, as the design draws it, under the
+    const [keys, voice, meetings, agents, accounts] = groups.map(id => at[id])
+    if (width < 1150) {
+      assert.ok(voice.top === keys.top && voice.left >= keys.left + keys.width, 'Keys beside Voice, in two columns, at ' + width)
+      assert.ok(meetings.left === keys.left && accounts.left === keys.left && agents.left === voice.left, 'Meetings and Accounts under Keys, Agents under Voice, at ' + width)
+      assert.ok(meetings.top > keys.top && accounts.top > meetings.top && agents.top > voice.top, 'in the order drawn at ' + width)
+    } else {
+      assert.ok(accounts.top === keys.top && agents.top === keys.top && accounts.left >= keys.left + keys.width && agents.left >= accounts.left + accounts.width, 'Keys, Accounts and Agents side by side, in three columns, at ' + width)
+      assert.ok(meetings.left === keys.left && meetings.top > keys.top && voice.left === accounts.left && voice.top > accounts.top, 'Meetings under Keys and Voice under Accounts at ' + width)
+    }
+    // As wide as the place: from its left edge to its right one, on a wide window too.
+    assert.ok(await ui.evaluate("(()=>{const all=document.querySelector('.sets').getBoundingClientRect(),place=document.querySelector('.shell-content');const pad=getComputedStyle(place);return Math.abs(all.left-(place.getBoundingClientRect().left+parseFloat(pad.paddingLeft)))<=1&&Math.abs(all.width-(place.clientWidth-parseFloat(pad.paddingLeft)-parseFloat(pad.paddingRight)))<=1})()"), 'the groups are as wide as the place at ' + width)
+    // A form to type in (an agent to add, a key) is one card as wide as the design draws it (36rem), under the
     // button that opened it and over the page: every row of the page keeps its exact place, and the button stays. It once
     // took the place of its button, moved its group and pushed the others.
     const before = await ui.evaluate(rows)
     await ui.evaluate("(()=>{const b=[...document.querySelectorAll('#settings-agents button')].find(b=>b.textContent.trim()==='Add an agent');b.focus();b.click()})()")
     await ui.wait("!!document.querySelector('form.add-agent')")
     assert.deepEqual(await ui.evaluate(rows), before, 'every row stays where it was when the form that adds an agent opens at ' + width)
-    assert.equal(await ui.evaluate(spans('form.add-agent')), true, 'the form is as wide as the two columns, under its button, at ' + width)
+    assert.equal(await ui.evaluate(placed('form.add-agent', 'end')), true, 'the form is as wide as the design draws it, inside the place, ending at its right edge, at ' + width)
     assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Agent name', 'the keys go to its first field')
     // The keys stay in the form: Tab from its last button goes to its first field, not to a row under the form.
     await ui.evaluate("(()=>{const last=[...document.querySelectorAll('form.add-agent button')].filter(b=>!b.disabled).at(-1);last.focus();last.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}))})()")
@@ -850,7 +857,7 @@ async function checkAgentSettings(T, agent) {
     await ui.click('.ai-plan-other button', 'Use a key')
     await ui.wait("!!document.querySelector('form.ai-key-form')&&!document.querySelector('form.add-agent')")
     assert.deepEqual(await ui.evaluate(rows), before, 'every row stays where it was when the key form opens at ' + width)
-    assert.equal(await ui.evaluate(spans('form.ai-key-form')), true, 'the key form is as wide as the two columns at ' + width)
+    assert.equal(await ui.evaluate(placed('form.ai-key-form', 'start')), true, 'the key form is as wide as the design draws it, from its group\'s left edge, at ' + width)
     assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Key', 'the keys go to the key, not to the service already chosen')
     // Escape closes it wherever the keys are, and a click elsewhere does not: what was typed stays.
     await ui.evaluate("document.querySelector('#settings-keys').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))")
@@ -882,6 +889,17 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Meetings', 'Accounts', 'Voice', 'Agents'], 'and it is the order they are in the page')
   // Removing an agent is quiet words on its row, not a button: the row reads as a name and how it stands.
   assert.equal(await ui.evaluate("[...document.querySelectorAll('#settings-agents button[aria-label^=\"Remove \"]')].every(b=>getComputedStyle(b).borderTopWidth==='0px'&&getComputedStyle(b).fontWeight==='400')"), true)
+  // No place has a widest it can be: on a wide window To-do and a task are as wide as the room they have, from its left edge.
+  ui.window.setContentSize(1600, 900)
+  await ui.wait('innerWidth===1600')
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.wait("!!document.querySelector('.todo')")
+  assert.ok(await ui.evaluate("(()=>{const place=document.querySelector('.shell-content'),pad=getComputedStyle(place);return Math.abs(document.querySelector('.todo').getBoundingClientRect().width-(place.clientWidth-parseFloat(pad.paddingLeft)-parseFloat(pad.paddingRight)))<=1})()"), 'To-do is as wide as its place on a wide window')
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("!!document.querySelector('.task-row')")
+  await ui.evaluate("document.querySelector('.task-row').click()")
+  await ui.wait("!!document.querySelector('.task-panel > .task-header')")
+  assert.ok(await ui.evaluate("(()=>{const pane=document.querySelector('.task-panel').getBoundingClientRect();return [...document.querySelectorAll('.task-panel > .task-header, .task-panel > .task-status, .task-panel > .task-reply-place, .task-panel > .task-request, .task-panel > .task-banner')].every(part=>Math.abs(part.getBoundingClientRect().width-pane.width)<=1)})()"), 'a task is as wide as its pane on a wide window')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }

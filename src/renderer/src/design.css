@@ -27,8 +27,6 @@
   /* Korean, Japanese and Chinese have their system fonts after the Latin ones, which lack them. */
   --font-body: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Malgun Gothic', 'Yu Gothic UI', 'Microsoft YaHei UI', 'Apple SD Gothic Neo', 'Hiragino Sans', 'PingFang SC', 'Noto Sans CJK KR', 'Noto Sans KR', sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
-  /* The most a place of words is wide, on a window wider than the design draws. */
-  --read: 880px;
   /* The names the older parts of the window use, on the design's colors. */
   --panel: var(--surface);
   --panel-2: var(--raised);
@@ -193,14 +191,11 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 /* The room for the scroll bar is always kept, so that nothing changes width or moves sideways when a place grows longer
    than the window (a form opens, a list gets a row). The bar's 8px are taken from the padding on its side. */
 .shell-content { scrollbar-gutter: stable; padding-right: 8px; }
-/* On a wide window a place keeps the width it reads well at (--read), in the middle of the room it has: To-do, the calls
-   and a call's page, a live call, the first minute, a task's conversation, Settings. Only the agent's own screen takes
-   all the width there is. */
-.todo, .first-minute, .live-call, .meetings { box-sizing: border-box; width: 100%; max-width: var(--read); margin-inline: auto; }
-/* What Togle says over a place (quit?, a call's warning) is as wide as the place under it. Over the two panes of Agents it
-   has the panes' own room around it. */
-.shell-content > .notice { box-sizing: border-box; width: 100%; max-width: var(--read); margin-inline: auto; }
-.shell-content:has(> .tasks) > .notice { width: auto; max-width: none; margin: 14px 15px 0; }
+/* A place is as wide as the window gives it, from its own left edge, on a wide window too: To-do, the calls and a call's
+   page, a live call, the first minute, a task, Settings. None has a widest it can be. */
+/* What Togle says over a place (quit?, a call's warning) is as wide as the place. Over the two panes of Agents it has the
+   panes' own room around it. */
+.shell-content:has(> .tasks) > .notice { margin: 14px 15px 0; }
 /* Agents is two panes side by side, each with its own room, the line between them the window's full height. */
 .shell-content:has(> .tasks) { padding: 0; scrollbar-gutter: auto; }
 @media (max-width: 560px) {
@@ -313,12 +308,9 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .state-chip[data-state='idle'] { background: var(--ok-soft); color: var(--ok); }
 .state-chip[data-state='failed'] { background: var(--danger-soft); color: var(--danger); }
 /* Where it stands, then its steps folded under one quiet line, what it asks, and the reply box. */
-/* The conversation scrolls across the whole pane, its bar at the window's edge with the room for it always kept (the pane's
-   15px at that side: 8 for the bar, 7 beside it), and its words in a column in the middle, as wide as they read well. */
-.task-log { display: flex; flex-direction: column; flex: 0 1 auto; gap: 12px; min-height: 0; margin-right: -15px; padding: 0 calc(7px + max(0px, (100% - var(--read)) / 2)) 0 max(0px, calc((100% - var(--read)) / 2)); overflow-y: auto; scrollbar-gutter: stable; }
-/* The task's name, how it stands, what is asked, a note and the reply box are in that same column: a conversation has one
-   left edge. With the agent's own screen open, which takes all the width there is, they are as wide as the screen. */
-.task-panel:not(:has(> .task-terminal)) > :is(.task-header, .task-status, .task-request, .task-banner, .hint), .task-reply-place { box-sizing: border-box; width: 100%; max-width: var(--read); margin-inline: auto; }
+/* The conversation is as wide as the pane, like the task's name, what is asked and the reply box. It scrolls with its bar
+   at the window's edge, the room for the bar always kept (the pane's 15px at that side: 8 for the bar, 7 beside it). */
+.task-log { display: flex; flex-direction: column; flex: 0 1 auto; gap: 12px; min-height: 0; margin-right: -15px; padding: 0 7px 0 0; overflow-y: auto; scrollbar-gutter: stable; }
 .task-latest { max-width: 100%; }
 /* "Show earlier": its words only, in the middle. A link button has a negative side margin that would make it wider than the thread. */
 .task-earlier-turns { align-self: center; margin: 0; font-size: 12px; }
@@ -528,17 +520,33 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .confirm-name input { flex: 1 1 140px; min-width: 0; padding: 4px 8px; font-size: 12px; }
 .confirm-names > .confirm-end { margin: 2px 0 0; }
 
-/* ---- Settings: five groups side by side, each a few rows of a name and its value ---- */
+/* ---- Settings: groups side by side, each a few rows of a name and its value ---- */
 
 /* The place scrolls, not Settings inside it: the bar is then at the window's edge, clear of the values. */
 .settings.settings-one { padding: 0; overflow: visible; }
-/* Two columns at most, as the design draws Settings (Keys beside Voice, then Meetings and Agents, then Accounts), each as
-   wide as drawn, so that a value stays near its name. A wider window does not add columns or stretch them. Each column is
-   its own: what opens in a group pushes down only what is under it, and nothing crosses to the other side or changes width. */
-.settings-one .settings-content { max-width: 36rem; margin: 0 auto; }
-.sets { position: relative; display: flex; align-items: flex-start; gap: 14px 22px; }
-.sets-col { display: flex; flex: 1 1 0; flex-direction: column; gap: 14px; min-width: 0; }
-.sets section { display: flex; flex-direction: column; gap: 4px; margin: 0; min-width: 0; }
+/* The groups are as wide as the place, in columns of their own: two as the design draws them (Keys, Meetings, Accounts
+   beside Voice, Agents, Devices); three on a wide window, where two would put a value too far from its name (Keys, Meetings
+   beside Accounts, Voice beside Agents, Devices); one in a narrow window. What opens in a group pushes down only what is
+   under it in its column. In every shape the groups are read, and reached with Tab, in the order they are in the page. */
+.settings-one .settings-content { max-width: none; margin: 0; }
+.sets { position: relative; display: flex; align-items: flex-start; gap: 0.9rem clamp(1.4rem, 2.4vw, 2.6rem); }
+.sets-col { display: flex; flex: 1 1 0; flex-direction: column; gap: 0.9rem; min-width: 0; }
+/* Each column is in two parts, which only three columns tell apart. */
+.sets-part { display: contents; }
+.sets section { display: flex; flex-direction: column; gap: 0.3rem; margin: 0; min-width: 0; }
+/* Three columns, from the width where each of two would pass about 30rem. The first part of the first column and the last
+   part of the second have a column each; the two parts between them share the middle one. The parts with a column of their
+   own reach over a last row that takes what is left: growing, they do not make the middle column's rows taller, so a list
+   that opens under Meetings does not move Voice. */
+@media (min-width: 1150px) {
+  .sets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: auto auto 1fr; }
+  .sets-col { display: contents; }
+  .sets-part { display: flex; flex-direction: column; gap: 0.9rem; min-width: 0; }
+  .sets-col:first-child > .sets-part:first-child { grid-column: 1; grid-row: 1 / span 3; }
+  .sets-col:first-child > .sets-part:last-child { grid-column: 2; grid-row: 1; }
+  .sets-col:last-child > .sets-part:first-child { grid-column: 2; grid-row: 2; }
+  .sets-col:last-child > .sets-part:last-child { grid-column: 3; grid-row: 1 / span 3; }
+}
 /* Too narrow for two (under 27rem of room for them): the second column goes under the first, so the groups are read, and
    reached with Tab, in the same order as in a wide window (Keys, Meetings, Accounts, then Voice, Agents, Devices). By the
    window's width, not the room's own: a room that is measured cannot let a form laid over it add to what scrolls. */
@@ -550,7 +558,9 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings .sets .section-head h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
 .settings .sets .card { border: 0; border-radius: 0; background: none; }
 .settings .sets .card > * + * { border-top: 0; }
-.settings .sets .setting { min-height: 0; padding: 5px 0; border-bottom: 1px solid var(--line); column-gap: 10px; font-size: 13px; color: var(--ink); }
+/* A row as the design draws it: 0.3rem over and under its words, a line under it, and 0.3rem before the next row. */
+.settings .sets .setting { min-height: 0; padding: 0.3rem 0; border-bottom: 1px solid var(--line); column-gap: 10px; font-size: 13px; color: var(--ink); }
+.settings .sets .card > * + .setting { margin-top: 0.3rem; }
 .settings .sets .card > .setting:last-child, .settings .sets .card > :last-child > .setting:last-child { border-bottom: 0; }
 .settings .sets .setting > .note { font-size: 12px; color: var(--muted); }
 /* A row's name stays whole (it breaks between its words, never inside one), and its value takes the room that is left: a
@@ -625,12 +635,17 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
    reaches 12px under it gives the page that much more to scroll. */
 .settings .setting-detail { scroll-margin-block: 12px; }
 .settings .setting-detail.over::after { content: ''; position: absolute; top: 100%; left: 0; width: 1px; height: 12px; pointer-events: none; }
-/* A form to type in (an agent to add, a key, a sign-in, a device's code) is one card as wide as Settings, as the design
-   draws it, so that a command or an address has room. It opens under its button and over the page: nothing on the page
-   moves. (Its place down the page is where it would be in the flow; its width is all of the two columns.) */
+/* A form to type in (an agent to add, a key, a sign-in, a device's code) is one card as wide as the design draws it
+   (36rem, or the place where that is narrower), so that a command or an address has room. It opens under its button and
+   over the page: nothing on the page moves. It starts where it would be in the flow, at its group's left edge; in the last
+   column it ends at the place's right edge instead, so that it stays inside the place. */
 /* While it is open the page under it is dimmed, as far as the place reaches: the form is the one thing to act on, and a row
    it half covers reads as behind it, not as cut off. (The dimming is the card's own wide shadow, so it follows the card.) */
-.settings .setting-detail.over { position: absolute; left: 0; right: 0; z-index: 30; margin: 6px 0 0; background: var(--surface); box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--stage) 60%, transparent), 0 14px 28px -12px var(--shadow); }
+.settings .setting-detail.over { position: absolute; z-index: 30; box-sizing: border-box; width: min(36rem, 100%); margin: 6px 0 0; background: var(--surface); box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--stage) 60%, transparent), 0 14px 28px -12px var(--shadow); }
+.sets-col:last-child .setting-detail.over { right: 0; }
+@media (min-width: 1150px) {
+  .sets-col:last-child > .sets-part:first-child .setting-detail.over { right: auto; }
+}
 /* A field, as the design draws one: its name and what is typed in it in one dark box, the name on the left, the words on
    the right. A field of several lines has its name over them. */
 .field, .settings label.field { display: flex; flex-direction: row; align-items: center; gap: 10px; min-width: 0; margin: 0; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 13px; cursor: text; }
