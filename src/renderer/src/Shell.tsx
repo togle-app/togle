@@ -13,6 +13,7 @@ import { onOpenSettings, openSettings, type SettingsPart } from './open-settings
 import { onOpenTaskFrom } from './open-task'
 import { SettingsPage } from './SettingsPage'
 import { withPatch } from './settings-patch'
+import { keepAnswer, TASKS_LISTED } from './kept'
 import { Tasks } from './Tasks'
 import { Todo } from './Todo'
 import { useCall } from './useCall'
@@ -118,9 +119,15 @@ export function Shell() {
     if (wasListening.current && !call.listening && call.callKey) openMeeting(call.callKey)
     wasListening.current = call.listening
   }, [call.listening, call.callKey, openMeeting])
-  // How many tasks wait for the person, on To-do in the sidebar.
+  // How many tasks wait for the person, on To-do in the sidebar. The list read for it is kept too: Agents opens with it.
   useEffect(() => {
-    const count = (): void => { void api.runnerTasks().then((tasks) => setWaiting(Array.isArray(tasks) ? tasks.filter(needsYou).length : 0), () => undefined) }
+    const count = (): void => {
+      void api.runnerTasks().then((tasks) => {
+        const list = Array.isArray(tasks) ? tasks : []
+        keepAnswer(TASKS_LISTED, list)
+        setWaiting(list.filter(needsYou).length)
+      }, () => undefined)
+    }
     count()
     const stop = api.onRunnersChanged(count)
     const timer = setInterval(count, 4000)

@@ -4,6 +4,7 @@ import { canAllowHere, shownPart } from '@shared/runner-command'
 import type { TodoItem, TodoList } from '@shared/todo'
 import type { CallOffer, TodoOffer } from '@shared/call-todo'
 import { meetingTitle } from './MeetingsPage'
+import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED } from './kept'
 
 const api = window.togle
 
@@ -48,42 +49,60 @@ function asking(request: ViewRequest | undefined, task: TaskView): { says: strin
   return { says: 'wants to run', detail: shownPart(request.command ?? request.raw ?? ''), code: true }
 }
 
+// What To-do read last, for when it is opened again (see kept.tsx).
+const KEPT_LIST = 'todo.list'
+const KEPT_OFFERS = 'todo.offers'
+const KEPT_KEYS = 'todo.keys'
+
 /** An item's words as they are compared: a call's to-do ends with a full stop, the same item on the list may not. */
 const plain = (text: string): string => text.trim().replace(/\.$/, '').toLocaleLowerCase()
 
 /** The to-do list: what waits for the person at the top, then their own list, kept in a plain text file. */
 export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => void; onOpenCall: (id: string) => void }) {
-  const [list, setList] = useState<TodoList | null>(null)
+  // Opened again (To-do is home), the list starts from what was read last (see kept.tsx), and is read again behind it.
+  const [list, setList] = useState<TodoList | null>(() => keptAnswer<TodoList>(KEPT_LIST) ?? null)
   // What calls left for today: names to confirm, notes that are ready, and the to-dos in them that are the person's.
-  const [offers, setOffers] = useState<{ calls: CallOffer[]; items: TodoOffer[] }>({ calls: [], items: [] })
-  const [tasks, setTasks] = useState<TaskView[]>([])
-  const [status, setStatus] = useState<RunnerStatus[]>([])
-  const [keys, setKeys] = useState('F9')
+  const [offers, setOffers] = useState<{ calls: CallOffer[]; items: TodoOffer[] }>(() => keptAnswer<{ calls: CallOffer[]; items: TodoOffer[] }>(KEPT_OFFERS) ?? { calls: [], items: [] })
+  const [tasks, setTasks] = useState<TaskView[]>(() => keptAnswer<TaskView[]>(TASKS_LISTED) ?? [])
+  const [status, setStatus] = useState<RunnerStatus[]>(() => keptAnswer<RunnerStatus[]>(AGENTS_FOUND) ?? [])
+  const [keys, setKeys] = useState(() => keptAnswer<string>(KEPT_KEYS) ?? 'F9')
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState<{ line: number; text: string } | null>(null)
   const [error, setError] = useState('')
 
   const refreshList = useCallback(async () => {
     try {
-      setList(await api.todoList())
+      const found = await api.todoList()
+      keepAnswer(KEPT_LIST, found)
+      setList(found)
     } catch (caught) {
       setError(errorText(caught))
     }
   }, [])
+  // The tasks and the agents, each taken when it comes: one does not wait for the other. A read that fails keeps the rows as
+  // they were (the Agents screen says what went wrong).
   const refreshTasks = useCallback(async () => {
-    try {
-      const [found, installed] = await Promise.all([api.runnerTasks(), api.runnerStatus()])
-      setTasks(Array.isArray(found) ? found : [])
-      setStatus(Array.isArray(installed) ? installed : [])
-    } catch {
-      // The Tasks screen says what went wrong with the agents; here the rows stay as they were.
-    }
+    await Promise.all([
+      api.runnerTasks().then((found) => {
+        const next = Array.isArray(found) ? found : []
+        keepAnswer(TASKS_LISTED, next)
+        setTasks(next)
+      }, () => undefined),
+      api.runnerStatus().then((installed) => {
+        const next = Array.isArray(installed) ? installed : []
+        keepAnswer(AGENTS_FOUND, next)
+        setStatus(next)
+      }, () => undefined)
+    ])
   }, [])
 
   const refreshOffers = useCallback(async () => {
     try {
       const found = await api.meetingOffers()
-      if (found && Array.isArray(found.calls) && Array.isArray(found.items)) setOffers(found)
+      if (found && Array.isArray(found.calls) && Array.isArray(found.items)) {
+        keepAnswer(KEPT_OFFERS, found)
+        setOffers(found)
+      }
     } catch {
       // Calls are in Meetings; here the offers stay as they were.
     }
@@ -117,7 +136,10 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
       .listHotkeys()
       .then((found) => {
         const dictate = found.find((key) => key.id === 'dictate')
-        if (dictate?.ok && dictate.keys) setKeys(dictate.keys)
+        if (dictate?.ok && dictate.keys) {
+          keepAnswer(KEPT_KEYS, dictate.keys)
+          setKeys(dictate.keys)
+        }
       })
       .catch(() => undefined)
   }, [])

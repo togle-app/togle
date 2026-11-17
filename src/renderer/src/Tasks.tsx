@@ -5,7 +5,7 @@ import { useReach } from './Devices'
 import { openSettings } from './open-settings'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
-import { AGENTS_FOUND, keepAnswer, keptAnswer, WaitLine } from './kept'
+import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, WaitLine } from './kept'
 import { RequestCard } from './RequestCard'
 import { clock, currentPlan, lastTurnKey, PlanCard, Thread, turnStart, useHistory } from './TaskThread'
 import { TerminalView } from './TerminalView'
@@ -22,7 +22,7 @@ const RECENT_MS = 24 * 3600_000
 // The task looked at last, for when the screen is opened again.
 let remembered: string | undefined
 // What the screen read last, for when it is opened again (see kept.tsx): the list of tasks, the agents, and the view tasks open in.
-const KEPT_TASKS = 'agents.tasks'
+const KEPT_TASKS = TASKS_LISTED
 const KEPT_STATUS = AGENTS_FOUND
 const KEPT_OPENS = 'agents.opens'
 // What Togle saw of each task it runs (its own log), read last: a task opened again shows it at once. A few dozen at most.
@@ -511,20 +511,37 @@ interface PanelProps {
   onAnswer: (requestId: string, decision: 'allow-once' | 'allow-always' | 'refuse') => void
   onReply: (requestId: string, text: string) => void
   onSend: (text: string) => void
-  onStop: () => void
-  onEndCommands: () => void
-  onOpen: () => void
+  onStop: () => Promise<void>
+  onEndCommands: () => Promise<void>
+  onOpen: () => Promise<void>
   /** The view the task is shown in, and a pick of the other. */
   view: View
   onView: (view: View) => void
-  onTakeOver: () => void
+  onTakeOver: () => Promise<void>
   /** Take over was pressed on the task's row: the question that confirms it shows at once. */
   takeOverAsked: boolean
-  onHandBack: () => void
+  onHandBack: () => Promise<void>
   /** The task was just handed back: the line that goes on in the person's own terminal. */
   handedBack?: { command: string; folder: string }
   /** Whether Togle's own log of the task has been read (a task it does not run has none). */
   logRead: boolean
+}
+
+/**
+ * A press that goes through main and changes the task (a screen opened, the task taken over or handed back, its command ended):
+ * the button says what it does while it does it, and the panel takes no second such press, until the task changes or, once main
+ * has answered and nothing changed (it refused, and says why), a moment after.
+ */
+function usePressed(task: TaskView): [string | undefined, (name: string, work: () => Promise<void>) => () => void] {
+  const [pressed, setPressed] = useState<string>()
+  const changed = `${task.state} ${task.terminal ? 'screen' : ''} ${task.mine ? 'mine' : ''} ${task.screenId ?? ''} ${task.commandsRunning ? 'running' : ''}`
+  useEffect(() => setPressed(undefined), [changed])
+  const press = (name: string, work: () => Promise<void>) => () => {
+    if (pressed) return
+    setPressed(name)
+    void work().finally(() => setTimeout(() => setPressed((now) => (now === name ? undefined : now)), 1_500))
+  }
+  return [pressed, press]
 }
 
 function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack, logRead }: PanelProps) {
@@ -535,14 +552,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
   // The agent's own screen is on screen: no card over it and no reply box, because what it asks is answered on it.
   const sessionShown = task.terminal && (!task.screen || view === 'session')
   const [text, setText] = useState('')
-  // Stop pressed: it says so until the task stops (or, if it did not, for a few seconds), and takes no second press.
-  const [stopping, setStopping] = useState(false)
-  useEffect(() => setStopping(false), [task.state])
-  useEffect(() => {
-    if (!stopping) return
-    const timer = setTimeout(() => setStopping(false), 4_000)
-    return () => clearTimeout(timer)
-  }, [stopping])
+  // Stop, and the presses that open or move the task's screen: each says what it does until the task changes.
+  const [pressed, press] = usePressed(task)
   const [confirmTakeOver, setConfirmTakeOver] = useState(takeOverAsked)
   useEffect(() => { if (takeOverAsked) setConfirmTakeOver(true) }, [takeOverAsked])
   const logBox = useRef<HTMLDivElement>(null)
@@ -715,18 +726,18 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
         <div className="task-actions">
           {/* Stop, then what follows from it, then Hand back, as the design page has them in a header. */}
           {task.mine && running && (
-            <button className="small" disabled={stopping} onClick={() => { setStopping(true); onStop() }} title={task.screen ? 'Ends the agent’s turn, as Esc does on its screen (Ctrl+C in Hermes).' : undefined}>
-              {stopping ? 'Stopping…' : 'Stop'}
+            <button className="small" disabled={!!pressed} onClick={press('stop', onStop)} title={task.screen ? 'Ends the agent’s turn, as Esc does on its screen (Ctrl+C in Hermes).' : undefined}>
+              {pressed === 'stop' ? 'Stopping…' : 'Stop'}
             </button>
           )}
           {task.mine && task.commandsRunning && task.state === 'stopped' && (
-            <button className="small" onClick={onEndCommands} title="Stop ended the agent's turn. The command it started is still running.">
-              End the running command
+            <button className="small" disabled={!!pressed} onClick={press('end', onEndCommands)} title="Stop ended the agent's turn. The command it started is still running.">
+              {pressed === 'end' ? 'Ending…' : 'End the running command'}
             </button>
           )}
           {task.mine && task.screen && (
-            <button className="small" onClick={onHandBack} title="Closes its screen here and gives you the line to open it in your own terminal. The task goes on.">
-              Hand back
+            <button className="small" disabled={!!pressed} onClick={press('hand back', onHandBack)} title="Closes its screen here and gives you the line to open it in your own terminal. The task goes on.">
+              {pressed === 'hand back' ? 'Handing back…' : 'Hand back'}
             </button>
           )}
         </div>
@@ -756,8 +767,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
               <>
                 <span>This ends the {agentOf(task)} running in its terminal and moves the same conversation into the background, with its screen here.</span>
                 <span className="row">
-                  <button className="primary small" onClick={onTakeOver}>
-                    End it and take over
+                  <button className="primary small" disabled={!!pressed} onClick={press('take over', onTakeOver)}>
+                    {pressed === 'take over' ? 'Taking over…' : 'End it and take over'}
                   </button>
                   <button className="ghost small" onClick={() => setConfirmTakeOver(false)}>
                     Cancel
@@ -775,8 +786,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
           ) : task.job ? (
             <>
               <span>It runs in the background{task.waitingFor ? `, and waits: ${task.waitingFor}` : ''}. Open its screen here to see it and answer it.</span>
-              <button className="primary small" onClick={onOpen}>
-                Open here
+              <button className="primary small" disabled={!!pressed} onClick={press('open', onOpen)}>
+                {pressed === 'open' ? 'Opening…' : 'Open here'}
               </button>
             </>
           ) : task.pid ? (
@@ -784,8 +795,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
           ) : (
             <>
               <span>{task.runner in KNOWN_AGENTS ? `Togle is not running this task. Continue it here: it opens as ${agentOf(task)}'s own screen, to answer there.` : 'Togle is not running this task. Continue it here to answer it and reply to it.'}</span>
-              <button className="primary small" onClick={onOpen}>
-                Continue here
+              <button className="primary small" disabled={!!pressed} onClick={press('open', onOpen)}>
+                {pressed === 'open' ? 'Opening…' : 'Continue here'}
               </button>
             </>
           )}
@@ -794,7 +805,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
 
       {sessionShown ? (
         // The agent's own screen, with no card over it and no reply box: what it asks is answered on it, and a notice still comes.
-        <TerminalPanel task={task} onEnd={onEndCommands} />
+        <TerminalPanel task={task} ending={pressed === 'end'} onEnd={press('end', onEndCommands)} />
       ) : closedSession ? (
         <>
           {/* Terminal is picked and its screen is closed: what waits is answered here, or on the screen once it is opened. */}
@@ -806,8 +817,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
               {task.screenClosed ?? 'Its screen is closed, and the task goes on.'}
               {task.waitingFor && !task.pending.length ? ` It waits on its screen: ${task.waitingFor}.` : ''}
             </span>
-            <button className="primary small" onClick={onOpen}>
-              Open the screen
+            <button className="primary small" disabled={!!pressed} onClick={press('open', onOpen)}>
+              {pressed === 'open' ? 'Opening…' : 'Open the screen'}
             </button>
           </div>
         </>
@@ -915,7 +926,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
  * A task whose agent has no ACP: it runs in a terminal of Togle's own, which the person reads and types into. Togle cannot
  * see what it asks, so the terminal is where it is answered. Words its command had no place for wait to be typed in.
  */
-function TerminalPanel({ task, onEnd }: { task: TaskView; onEnd: () => void }) {
+function TerminalPanel({ task, ending, onEnd }: { task: TaskView; ending: boolean; onEnd: () => void }) {
   const running = task.state === 'working' || task.state === 'waiting'
   return (
     <div className="task-terminal">
@@ -924,8 +935,8 @@ function TerminalPanel({ task, onEnd }: { task: TaskView; onEnd: () => void }) {
         <div className="task-banner" role="note">
           <span>{running ? `${agentOf(task)} runs in this terminal. It asks here, and you answer here, as in any terminal.` : `${agentOf(task)} has ended. What it printed stays here.`}</span>
           {running && task.mine && (
-            <button className="small" onClick={onEnd} title="Ends the agent and what it started">
-              End it
+            <button className="small" disabled={ending} onClick={onEnd} title="Ends the agent and what it started">
+              {ending ? 'Ending…' : 'End it'}
             </button>
           )}
         </div>

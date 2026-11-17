@@ -284,11 +284,12 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 /* Something on its way (kept.tsx): a thin moving line along the top of its place, shown after a short wait and laid over the
    place, so nothing moves when it comes or goes; for a place with nothing in it yet, a few quiet words in its middle. */
 .tasks-list, .tasks-detail { position: relative; }
-.wait-line { position: absolute; top: 0; right: 0; left: 0; z-index: 6; height: 2px; overflow: hidden; pointer-events: none; background: color-mix(in srgb, var(--togle) 16%, transparent); }
+.wait-line { position: absolute; top: 0; right: 0; left: 0; z-index: 6; height: 2px; overflow: hidden; pointer-events: none; background: color-mix(in srgb, var(--togle) 16%, transparent); animation: wait-in 0.2s ease-out; }
+@keyframes wait-in { from { opacity: 0; } }
 .wait-line::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 34%; border-radius: 2px; background: var(--togle); animation: wait-line 1.2s ease-in-out infinite; }
 @keyframes wait-line { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
-.wait-words { position: absolute; top: 50%; left: 50%; z-index: 6; margin: 0; transform: translate(-50%, -50%); color: var(--muted); font-size: 12px; white-space: nowrap; pointer-events: none; }
-@media (prefers-reduced-motion: reduce) { .wait-line::before { width: 100%; opacity: 0.55; animation: none; } }
+.wait-words { position: absolute; top: 50%; left: 50%; z-index: 6; margin: 0; transform: translate(-50%, -50%); color: var(--muted); font-size: 12px; white-space: nowrap; pointer-events: none; animation: wait-in 0.3s ease-out; }
+@media (prefers-reduced-motion: reduce) { .wait-line, .wait-words { animation: none; } .wait-line::before { width: 100%; opacity: 0.55; animation: none; } }
 .task-panel { display: flex; flex-direction: column; flex: 1; gap: 12px; min-height: 0; }
 /* The task's name, then its buttons. Where the window is too narrow for both (a second button shows after Stop), the
    buttons go under the name, at the line's end, and the name keeps its line. */

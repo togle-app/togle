@@ -1420,7 +1420,7 @@ async function checkNarrow(T, agent) {
 // list; a conversation read before shows at once with no sign, one not read yet with a quiet sign; the Agents screen opened
 // again shows what it had; a switch in Settings moves when pressed, and a change main refuses goes back, with why.
 async function checkSlowMain(T, agent) {
-  const ui = await open(T, agent, 1024, undefined, { slow: { runnerDetail: 900, runnerHistory: 700, runnerTasks: 900, runnerStatus: 900, updateSettings: 400 } })
+  const ui = await open(T, agent, 1024, undefined, { slow: { runnerDetail: 900, runnerHistory: 1500, runnerTasks: 900, runnerStatus: 900, updateSettings: 400 } })
   const pause = (ms) => ui.evaluate('new Promise(r=>setTimeout(r,' + ms + '))')
   const press = (title) => ui.evaluate("[...document.querySelectorAll('.task-row')].find(e=>e.querySelector('strong').textContent===" + JSON.stringify(title) + ").click()")
   const shown = "document.querySelector('.tasks-detail .task-title h2')?.textContent ?? ''"
@@ -1430,12 +1430,16 @@ async function checkSlowMain(T, agent) {
   await press('Fix the login redirect')
   await pause(60)
   assert.ok((await ui.evaluate(shown)).startsWith('Fix the login redirect'), 'a task picked shows at once, from its row')
-  await pause(250)
-  assert.equal(await ui.evaluate("document.querySelector('.thread-place .wait-words')?.textContent"), 'Reading the conversation…', 'with a quiet sign while its conversation is read')
-  assert.equal(await ui.evaluate("!!document.querySelector('.thread-place .wait-line')"), true)
-  assert.equal(await ui.evaluate("!!document.querySelector('.task-log .hint')"), false, 'and not "nothing said" meanwhile')
+  assert.equal(await ui.evaluate("!!document.querySelector('.wait-line')"), false, 'no sign for a short wait')
+  await pause(300)
+  assert.equal(await ui.evaluate("!!document.querySelector('.thread-place .wait-line')"), true, 'a quiet line once the wait is longer')
+  assert.equal(await ui.evaluate("!!document.querySelector('.thread-place .wait-words')"), false, 'and words only for a long one')
+  await ui.wait("document.querySelector('.thread-place .wait-words')?.textContent==='Reading the conversation…'")
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-log .hint')"), false, 'not "nothing said" meanwhile')
   await ui.wait(said + '===1')
-  assert.equal(await ui.evaluate("!!document.querySelector('.wait-line')"), false, 'the sign goes when the words come')
+  assert.equal(await ui.evaluate("!!document.querySelector('.wait-words')"), false, 'the words go when the conversation comes')
+  await pause(450)
+  assert.equal(await ui.evaluate("!!document.querySelector('.wait-line')"), false, 'and the line a moment after')
   await press('Rebuild the pricing page')
   await pause(60)
   assert.ok((await ui.evaluate(shown)).startsWith('Rebuild the pricing page'), 'the task before is not left on screen')

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { Agent, CallSearchHit, CallSession, CallSessionSummary } from '@shared/types'
 import { namesToConfirm } from '@shared/confirm-names'
 import { CallAgentsRow, GivePanel } from './CallAgents'
+import { keepAnswer, keptAnswer } from './kept'
 import { CallNotes } from './CallNotes'
 import { callLength, CallTranscript } from './CallTranscript'
 import { confirmOpen, ConfirmNames } from './ConfirmNames'
@@ -71,7 +72,8 @@ type Point = { x: number; y: number }
  * given to an agent or shared. A right click on a call renames or deletes it.
  */
 export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown, focus, noise, microphone, home }: Props) {
-  const [calls, setCalls] = useState<CallSessionSummary[] | null>(null)
+  // The calls read last show at once when Meetings is opened again (see kept.tsx), and are read again behind them.
+  const [calls, setCalls] = useState<CallSessionSummary[] | null>(() => keptAnswer<CallSessionSummary[]>('meetings.calls') ?? null)
   const [openId, setOpenId] = useState<string>()
   const [openTab, setOpenTab] = useState<'notes' | 'transcript'>('notes')
   // Rename picked from a call's menu in the list: its page opens with the name ready to change.
@@ -89,7 +91,7 @@ export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown,
   useEffect(() => {
     if (open) return
     let current = true
-    const load = (): void => { void api.callSessions().then(list => { if (current) setCalls(list) }).catch(failure => { if (current) setError(errorText(failure)) }) }
+    const load = (): void => { void api.callSessions().then(list => { keepAnswer('meetings.calls', list); if (current) setCalls(list) }).catch(failure => { if (current) setError(errorText(failure)) }) }
     load()
     const stop = api.onCallSessions(() => load())
     return () => { current = false; stop() }
