@@ -171,21 +171,22 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 
 /* ---- The window: a title bar, the rail of places, the place ---- */
 
-.titlebar { height: 36px; padding: 0 6px 0 14px; background: var(--surface); border-bottom: 1px solid var(--line); }
-.titlebar .brand { padding: 0; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; }
+.titlebar { height: 36px; padding: 0 6px 0 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.titlebar .brand { gap: 7px; padding: 0; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; }
+.titlebar .brand-mark { display: block; flex: none; }
 button.icon { color: var(--muted); border-radius: 6px; }
 button.icon:hover, button.icon.active { background: var(--raised); color: var(--ink); }
 
 .shell-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 136px minmax(0, 1fr); }
 .shell-nav { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 8px; background: var(--bg); border-right: 1px solid var(--line); }
 .shell-nav > .spacer { flex: 1; }
-.shell-nav button { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; padding: 6px 9px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 13px; font-weight: 600; text-align: left; }
+/* Each place has its icon beside its name, at every width; in a narrow window the icon is all there is room for. */
+.shell-nav button { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 9px; width: 100%; padding: 6px 9px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 13px; font-weight: 600; text-align: left; }
 .shell-nav button > svg { flex-shrink: 0; }
-.shell-nav button > svg { display: none; }
 .shell-nav button:hover:not(:disabled) { background: var(--raised); color: var(--ink); }
 .shell-nav button[aria-current='page'], .shell-nav button[aria-current='page']:hover:not(:disabled) { background: var(--togle-soft); color: var(--togle); }
-.shell-nav .nav-count { margin-left: 0; min-width: 0; padding: 0 7px; border-radius: 999px; background: var(--wait-soft); color: var(--wait); font-size: 11px; font-weight: 600; line-height: 17px; font-variant-numeric: tabular-nums; }
-.shell-nav .dot.live { margin-left: 0; flex-shrink: 0; }
+.shell-nav .nav-count { margin-left: auto; min-width: 0; padding: 0 7px; border-radius: 999px; background: var(--wait-soft); color: var(--wait); font-size: 11px; font-weight: 600; line-height: 17px; font-variant-numeric: tabular-nums; }
+.shell-nav .dot.live { margin-left: auto; flex-shrink: 0; }
 /* A word too long for its line (a path, an address, a name without spaces) breaks rather than pushing the place sideways. */
 .shell-content { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; padding: 14px 16px; overflow: auto; background: var(--surface); overflow-wrap: break-word; }
 /* The room for the scroll bar is always kept, so that nothing changes width or moves sideways when a place grows longer
@@ -201,7 +202,6 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 @media (max-width: 560px) {
   .shell-layout { grid-template-columns: 52px minmax(0, 1fr); }
   .shell-nav button { justify-content: center; padding: 8px 0; }
-  .shell-nav button > svg { display: block; }
   .shell-nav button > span:not(.nav-count):not(.dot) { display: none; }
   .shell-nav .nav-count { position: absolute; top: 1px; right: 2px; padding: 0 5px; line-height: 16px; font-size: 10px; }
   .shell-nav .dot.live { position: absolute; top: 6px; right: 8px; width: 7px; height: 7px; }

@@ -20,6 +20,13 @@ const SHAPES = {
     </>
   ),
   minimize: <path d="M5 12h14" />,
+  maximize: <rect x="5" y="5" width="14" height="14" rx="1.5" />,
+  restore: (
+    <>
+      <rect x="5" y="9" width="10" height="10" rx="1.5" />
+      <path d="M9 9V6.5A1.5 1.5 0 0 1 10.5 5h7A1.5 1.5 0 0 1 19 6.5v7a1.5 1.5 0 0 1-1.5 1.5H15" />
+    </>
+  ),
   close: <path d="M18 6 6 18M6 6l12 12" />,
   camera: (
     <>

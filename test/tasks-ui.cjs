@@ -1603,6 +1603,89 @@ async function checkGroups(T, agent) {
   ui.window.destroy()
 }
 
+// The window's bar and rail: Togle's mark beside its name, the three buttons of a window (minimize, maximize or restore as the
+// window is, close), and each place's icon beside its name on a wide window, alone in a narrow one.
+async function checkWindowBar(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.wait("!!document.querySelector('.titlebar .window-buttons')")
+  assert.ok(await ui.evaluate("!!document.querySelector('.titlebar .brand .brand-mark')"), 'its mark in the bar')
+  assert.equal(await ui.evaluate("document.querySelector('.titlebar .brand').textContent"), 'Togle')
+  const buttons = () => ui.evaluate("[...document.querySelectorAll('.titlebar .window-buttons button')].map(b=>b.getAttribute('aria-label'))")
+  assert.deepEqual(await buttons(), ['Minimize', 'Maximize', 'Close to tray'], 'minimize, maximize and close')
+  await ui.click('.titlebar .window-buttons button', 'Maximize')
+  await ui.wait("[...document.querySelectorAll('.titlebar .window-buttons button')][1].getAttribute('aria-label')==='Restore'")
+  assert.ok((await ui.calls('maximize')).length === 1, 'the window is asked to maximize')
+  await ui.click('.titlebar .window-buttons button', 'Restore')
+  await ui.wait("[...document.querySelectorAll('.titlebar .window-buttons button')][1].getAttribute('aria-label')==='Maximize'")
+  // Maximized another way (a double click on the bar, the system): the button follows.
+  await ui.evaluate("window.togleUITest.emit('onMaximized', true)")
+  await ui.wait("[...document.querySelectorAll('.titlebar .window-buttons button')][1].getAttribute('aria-label')==='Restore'")
+  await ui.evaluate("window.togleUITest.emit('onMaximized', false)")
+  // Each place with its icon and its name, on a wide window.
+  const rail = () => ui.evaluate("[...document.querySelectorAll('.shell-nav button')].map(b=>{const icon=b.querySelector('svg'),name=b.querySelector('span:not(.nav-count):not(.dot)');return [b.getAttribute('aria-label'),!!icon&&icon.getBoundingClientRect().width>0,!!name&&name.getBoundingClientRect().width>0]})")
+  assert.deepEqual(await rail(), [['To-do', true, true], ['Agents', true, true], ['Meetings', true, true], ['Settings', true, true]], 'an icon beside each name')
+  ui.window.setContentSize(500, 800)
+  await ui.wait('innerWidth===500')
+  assert.deepEqual(await rail(), [['To-do', true, false], ['Agents', true, false], ['Meetings', true, false], ['Settings', true, false]], 'narrow: the icons alone')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
+// A picture pasted into an agent's screen (a screenshot): kept as a file by main, and its path goes in as a paste, which Claude
+// Code and Codex take as a picture to attach. Words go in as a paste on a screen that asked for pastes as such, and as one
+// line on one that did not. On Windows, Ctrl+V pastes as in the system's own terminal, instead of sending the key.
+async function checkPaste(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Agents')
+  const add = (key, title, printed) => ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key, runner: 'term-aider', agent: 'Aider', title, folder: 'C:\\work\\api-server' }) + ',' + JSON.stringify(printed) + ')')
+  await add('term-aider:p1', 'Takes pastes', '\x1b[?2004hprompt> ')
+  await add('term-aider:p2', 'Takes keys only', 'prompt> ')
+  const writes = async (key) => (await ui.calls('terminalWrite')).filter((call) => call.args[0] === key).map((call) => call.args[1]).filter((data) => !/^\x1b\[[?\dIO]/.test(data) || data.startsWith('\x1b[200~'))
+  const paste = (parts) => ui.evaluate("(()=>{const data=new DataTransfer();" + parts + ";document.querySelector('.terminal-view .xterm-helper-textarea').dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));return true})()")
+  const shown = async (title) => {
+    await ui.task(title)
+    await ui.wait("!!document.querySelector('.terminal-view .xterm-helper-textarea')")
+    await ui.evaluate("document.querySelector('.terminal-view .xterm-helper-textarea').focus()")
+    await ui.evaluate('new Promise(r=>setTimeout(r,250))')
+  }
+  await shown('Takes pastes')
+  // A screenshot: no words, a picture.
+  await paste("data.items.add(new File([new Uint8Array([137,80,78,71,13,10,26,10])],'image.png',{type:'image/png'}))")
+  await ui.wait("window.togleUITest.calls().some(c=>c.name==='terminalWrite'&&c.args[1].includes('paste-20261118-120000.png'))")
+  assert.deepEqual((await ui.calls('savePastedPicture')).map((call) => call.args), [[8, 'image/png']], 'main keeps the picture')
+  assert.deepEqual((await writes('term-aider:p1')).at(-1), '\x1b[200~C:\\Users\\someone\\AppData\\Roaming\\Togle\\pasted\\paste-20261118-120000.png\x1b[201~', 'its path goes in, as a paste')
+  // Words of two lines, on a screen that takes pastes: as they are, in one paste.
+  await paste("data.setData('text/plain','line one\\nline two')")
+  await ui.wait("window.togleUITest.calls().filter(c=>c.name==='terminalWrite'&&c.args[1].includes('line two')).length===1")
+  assert.equal((await writes('term-aider:p1')).at(-1), '\x1b[200~line one\rline two\x1b[201~')
+  // A picture main could not keep: the screen says so, and nothing goes in.
+  const wrote = (await writes('term-aider:p1')).length
+  await ui.evaluate("window.togleUITest.failNext('savePastedPicture')")
+  await paste("data.items.add(new File([new Uint8Array([137,80,78,71])],'image.png',{type:'image/png'}))")
+  await ui.wait("!!document.querySelector('.terminal-note')")
+  assert.equal(await ui.evaluate("document.querySelector('.terminal-note span').textContent"), 'The picture was not pasted. It did not answer.')
+  assert.equal((await writes('term-aider:p1')).length, wrote, 'nothing went in')
+  // On a screen that did not ask for pastes as such, two lines go in as one: a line break would press Enter there.
+  await shown('Takes keys only')
+  await paste("data.setData('text/plain','/exit\\nmore')")
+  await ui.wait("window.togleUITest.calls().some(c=>c.name==='terminalWrite'&&c.args[0]==='term-aider:p2'&&c.args[1].includes('more'))")
+  assert.equal((await writes('term-aider:p2')).at(-1), '/exit more', 'one line, no Enter in it')
+  // Ctrl+V: on Windows the page's own paste (caught here before it reads anything), not the key; elsewhere the key, for the
+  // agents that read the clipboard themselves on it.
+  await ui.evaluate("window.__pastes=0;window.__catch=e=>{window.__pastes++;e.preventDefault();e.stopImmediatePropagation()};window.addEventListener('paste',window.__catch,true);true")
+  const before = (await writes('term-aider:p2')).length
+  for (const type of ['keyDown', 'keyUp']) ui.window.webContents.sendInputEvent({ type, keyCode: 'V', modifiers: ['control'] })
+  await ui.evaluate('new Promise(r=>setTimeout(r,300))')
+  const sent = (await writes('term-aider:p2')).slice(before)
+  if (process.platform === 'win32') {
+    assert.deepEqual(sent, [], 'on Windows Ctrl+V sends no key')
+    assert.equal(await ui.evaluate('window.__pastes'), 1, 'it pastes')
+  } else assert.deepEqual(sent, ['\x16'], 'elsewhere it is the key')
+  await ui.evaluate("window.removeEventListener('paste',window.__catch,true);true")
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 // The person's own arrangement: a group made (named straight away, there while empty), a task dragged into it (its row then
 // names its folder, its header names the group, a subject given later does not move it), a group folded (its counts stay, it
 // still takes a dropped task, it stays folded when Agents is opened again), a group of Togle's renamed and given its own name
@@ -1692,6 +1775,8 @@ app.whenReady().then(async () => {
     const store = new T.AgentStore(async () => '')
     await store.load()
     const agent = store.list()[0]
+    await checkWindowBar(T, agent)
+    await checkPaste(T, agent)
     await checkArrange(T, agent)
     await checkGroups(T, agent)
     await checkTasks(T, agent)

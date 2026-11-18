@@ -442,7 +442,17 @@ module.exports = function install(fixture) {
   api.terminalRead = async key => { record('terminalRead', [key]); return clone(terminals.get(key) ?? { text: '', end: 0 }) }
   api.terminalWrite = async (key, data) => { record('terminalWrite', [key, data]) }
   api.terminalResize = async (key, cols, rows) => { record('terminalResize', [key, cols, rows]) }
+  // A picture pasted into a terminal: kept where main keeps one (pasted-pictures.ts), here only by name. A type that is no picture fails as main's does.
+  api.savePastedPicture = async (bytes, type) => {
+    record('savePastedPicture', [bytes?.length ?? 0, type])
+    if (!/^image\//.test(type)) throw new Error('That is not a picture Togle can paste.')
+    return 'C:\\Users\\someone\\AppData\\Roaming\\Togle\\pasted\\paste-20261118-120000.png'
+  }
   api.typeTerminalWords = async key => { record('typeTerminalWords', [key]); delete runnerFind(key).words; runnerChanged() }
+  // The window's own buttons: maximized or not, as main tells it.
+  let maximized = false
+  api.isMaximized = async () => maximized
+  api.maximize = () => { record('maximize', []); maximized = !maximized; emit('onMaximized', maximized) }
   api.pickRunnerFolder = async () => { record('pickRunnerFolder', []); return 'C:\\work\\picked' }
   api.pickTaskBoxFolder = async () => { record('pickTaskBoxFolder', []); return 'C:\\work\\chosen-for-box' }
   api.openTaskBox = async opening => { record('openTaskBox', [opening]) }

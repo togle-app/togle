@@ -37,6 +37,18 @@ test('a disconnected monitor cannot leave the workspace off screen', () => {
   assert.equal(T.lastPlace(min), undefined)
 })
 
+test('a window left maximized opens maximized, at the place it goes back to', () => {
+  const window = new EventEmitter()
+  Object.assign(window, { isDestroyed: () => false, isMinimized: () => false, isMaximized: () => true, isFullScreen: () => false, getBounds: () => ({ x: 0, y: 0, width: 1920, height: 1040 }), getNormalBounds: () => ({ x: 200, y: 60, width: 900, height: 700 }) })
+  T.keepPlace(window)
+  window.emit('close')
+  assert.deepEqual(T.lastPlace(min), { x: 200, y: 60, width: 900, height: 700, maximized: true })
+  window.isMaximized = () => false
+  window.getBounds = () => ({ x: 200, y: 60, width: 900, height: 700 })
+  window.emit('close')
+  assert.deepEqual(T.lastPlace(min), { x: 200, y: 60, width: 900, height: 700 }, 'given back its size, it is not')
+})
+
 test('saving window position records the sidebar layout without losing a manual size', () => {
   const window = new EventEmitter()
   Object.assign(window, { isDestroyed: () => false, isMinimized: () => false, isMaximized: () => false, isFullScreen: () => false, getBounds: () => ({ x: 100, y: 40, width: 460, height: 700 }) })

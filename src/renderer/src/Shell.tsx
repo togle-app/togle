@@ -6,6 +6,7 @@ import { MANAGE_USAGE_URL } from '@shared/plan'
 import { quitQuestion, type CloseWarning } from '@shared/close-warning'
 import type { TogleMicrophoneStatus } from '@shared/microphone'
 import { Icon } from './Icon'
+import { BrandMark, WindowButtons } from './WindowBar'
 import { FirstMinute } from './FirstMinute'
 import { LiveCall } from './LiveCall'
 import { MeetingsPage } from './MeetingsPage'
@@ -149,14 +150,11 @@ export function Shell() {
   return (
     <div className={`app shell ${call.listening ? 'in-call' : ''}`}>
       <header className="titlebar">
-        {/* As the design draws the window: its name, quiet. A call going on shows on Meetings in the rail. */}
+        {/* Its mark and its name, quiet. A call going on shows on Meetings in the rail. */}
         <div className="title">
-          <span className="brand"><span className="brand-name">Togle</span></span>
+          <span className="brand"><BrandMark /><span className="brand-name">Togle</span></span>
         </div>
-        <div className="window-buttons">
-          <button className="icon" title="Minimize" aria-label="Minimize" onClick={() => api.minimize()}><Icon name="minimize" /></button>
-          <button className="icon close" title="Close to tray · Togle keeps running" aria-label="Close to tray" onClick={() => api.close()}><Icon name="close" /></button>
-        </div>
+        <WindowButtons closeTitle="Close to tray · Togle keeps running" closeLabel="Close to tray" onClose={() => api.close()} />
       </header>
 
       {/* Once, after the first sign-in with ChatGPT: what Togle uses counts toward the plan, and where to see it. */}

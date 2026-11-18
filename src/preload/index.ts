@@ -114,6 +114,7 @@ const api: TogleApi = {
   terminalRead: (key) => ipcRenderer.invoke('runners:terminal-read', key),
   terminalWrite: (key, data) => ipcRenderer.invoke('runners:terminal-write', key, data),
   terminalResize: (key, cols, rows) => ipcRenderer.invoke('runners:terminal-resize', key, cols, rows),
+  savePastedPicture: (bytes, type) => ipcRenderer.invoke('screen:paste-picture', bytes, type),
   typeTerminalWords: (key) => ipcRenderer.invoke('runners:terminal-words', key),
   onTerminalData: cb => subscribe('runners:terminal-data', chunk => cb(chunk as { key: string; at: number; data: string; screen?: string })),
   removeCodingAgent: (id) => ipcRenderer.invoke('runners:remove-agent', id),
@@ -193,6 +194,9 @@ const api: TogleApi = {
   openExternal: (url) => ipcRenderer.send('shell:open', url),
   platform: process.platform,
   minimize: () => ipcRenderer.send('window:minimize'),
+  maximize: () => ipcRenderer.send('window:maximize'),
+  isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  onMaximized: cb => subscribe('window:maximized', maximized => cb(maximized === true)),
   close: (confirmed) => ipcRenderer.send('window:close', confirmed),
   pageFailed: () => ipcRenderer.send('window:page-failed'),
   onConfirmClose: (cb) => subscribe<{ call?: boolean; tasks?: unknown; goesOn?: unknown } | undefined>('window:confirm-close', warning => cb({

@@ -10,6 +10,12 @@ const api = window.togle
 /** How long the note about a kept command stays, in milliseconds, unless it is put away. */
 const NOTE_MS = 15_000
 
+/** The kinds of picture a paste can hold that go into a screen as a file (a screenshot is a PNG; a bitmap is kept as one). */
+const PICTURE = /^image\/(png|jpeg|gif|webp|bmp)$/
+/** A path as it goes into a screen: in quotes when it has a space, as a terminal puts a file dropped on it. */
+const pathWords = (file: string): string => (/\s/.test(file) ? `"${file}"` : file)
+const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+
 /** The rows of the screen as it is drawn now, as text. */
 const visibleRows = (term: Terminal): string[] => {
   const buffer = term.buffer.active
@@ -95,6 +101,41 @@ export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; sc
         if (alive) setDrawn(true)
       }
     )
+    // On Windows, Ctrl+V pastes, as in the system's own terminal: the terminal would send the key itself, which pastes nothing.
+    // The paste comes as the page's own, below.
+    const windows = api.platform === 'win32'
+    term.attachCustomKeyEventHandler((event) => !(windows && event.type === 'keydown' && event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'v'))
+    // What is pasted. A picture with no words (a screenshot) is kept as a file, and its path goes in: Claude Code and Codex
+    // attach it as a picture, and any other agent can open it. Words go in as they are when the screen takes a paste as one
+    // (Claude Code, Codex and Hermes do), and as one line when it does not, since a line break would press Enter there.
+    const pasted = (event: ClipboardEvent): void => {
+      const data = event.clipboardData
+      if (!data || replaying) return
+      const text = data.getData('text/plain')
+      const picture = text ? null : (Array.from(data.items).find((item) => item.kind === 'file' && PICTURE.test(item.type))?.getAsFile() ?? null)
+      if (picture) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        void picture
+          .arrayBuffer()
+          .then((bytes) => api.savePastedPicture(new Uint8Array(bytes), picture.type))
+          .then(
+            (file) => {
+              if (alive) term.paste(pathWords(file))
+            },
+            (error: unknown) => {
+              if (alive) setNote({ title: 'The picture was not pasted.', body: errorText(error) })
+            }
+          )
+        return
+      }
+      if (text && !term.modes.bracketedPasteMode && /[\r\n]/.test(text)) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        term.paste(text.replace(/\r\n|\r|\n/g, ' '))
+      }
+    }
+    element.addEventListener('paste', pasted, true)
     const line = new TypedLine()
     const typed = term.onData((data) => {
       if (replaying) return
@@ -133,6 +174,7 @@ export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; sc
     return () => {
       alive = false
       stop()
+      element.removeEventListener('paste', pasted, true)
       typed.dispose()
       observer.disconnect()
       term.dispose()

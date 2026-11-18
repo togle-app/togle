@@ -101,6 +101,7 @@ import { SpeechInstaller, speechHome } from './stt/install'
 import { hearingStatus, OPENAI_MODEL, OPENAI_URL, SpeechApi } from './stt/speech-api'
 import { LocalWhisper } from './stt/whisper'
 import { keepPlace, lastPlace } from './window-place'
+import { prunePastedPictures, savePastedPicture } from './pasted-pictures'
 
 const auth = new ChatGPTAuth()
 const chatgpt = new ChatGPTProvider(auth)
@@ -757,8 +758,8 @@ function createWindow(): void {
   const width = Math.min(960, workArea.width - 40)
   const height = Math.min(820, workArea.height - 40)
   const min = { width: 400, height: 420 }
-  // Where it was left last time; the first time, at the top right of the main screen.
-  const place = lastPlace(min) ?? { width, height, x: workArea.x + workArea.width - width - 20, y: workArea.y + 20 }
+  // Where it was left last time (maximized, if it was left so); the first time, at the top right of the main screen.
+  const { maximized, ...place } = lastPlace(min) ?? { width, height, x: workArea.x + workArea.width - width - 20, y: workArea.y + 20, maximized: undefined }
   win = new BrowserWindow({
     ...place,
     minWidth: min.width,
@@ -787,8 +788,12 @@ function createWindow(): void {
     started.shown ??= Date.now()
     if (!app.isPackaged && process.env.TOGLE_HEADLESS === '1') return
     if (!app.isPackaged && process.env.TOGLE_NO_FOCUS) win?.showInactive()
+    else if (maximized) win?.maximize()
     else win?.show()
   })
+  // The window's own buttons show maximize or restore, as it is: it is also maximized by a double click on its bar, or by the system.
+  win.on('maximize', () => send('window:maximized', true))
+  win.on('unmaximize', () => send('window:maximized', false))
   win.webContents.setWindowOpenHandler(({ url }) => {
     const target = externalUrl(url)
     if (target) void shell.openExternal(target)
@@ -1597,6 +1602,17 @@ function registerIpc(): void {
     if (target) void shell.openExternal(target)
   })
   ipcMain.on('window:minimize', () => win?.minimize())
+  ipcMain.on('window:maximize', () => {
+    if (!win || win.isDestroyed()) return
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+  })
+  ipcMain.handle('window:is-maximized', () => !!win && !win.isDestroyed() && win.isMaximized())
+  // A picture pasted into an agent's screen in the window: kept as a file, whose path goes into the screen. Only the window sends it.
+  ipcMain.handle('screen:paste-picture', (event, bytes: unknown, type: unknown) => {
+    if (!win || event.sender !== win.webContents) throw new Error('Only Togle\'s window pastes pictures.')
+    return savePastedPicture(bytes as Uint8Array, typeof type === 'string' ? type : '')
+  })
   ipcMain.on('window:page-failed', () => (pageFailed = true))
   ipcMain.on('window:close', (_e, confirmed?: boolean) => {
     if (confirmed) { void requestQuit(true); return }
@@ -1785,6 +1801,8 @@ if (process.argv.includes('--togle-hook')) {
       renamed: (place, from, to) => { runnerGroups.change({ kind: 'rename-subject', group: place, from, to }) }
     })
     await Promise.all([runnerTitles.load(), runnerRecords.load(), runnerGroups.load(), freshTasks.load(), callAgentStore.load(), taskSubjects.load()])
+    // Pictures pasted into an agent's screen more than a week ago go.
+    void prunePastedPictures()
     // A test run can stand in for the agents with programs of its own. A packaged Togle never looks.
     const standIns = !app.isPackaged && process.env.TOGLE_TEST_RUNNERS ? await (require(process.env.TOGLE_TEST_RUNNERS) as { backends(): Promise<Backend[]> }).backends() : undefined
     todo = registerTodo({

@@ -174,6 +174,11 @@ export interface TogleApi {
   terminalWrite(key: string, data: string): Promise<void>
   /** The size that terminal is shown at, in characters. */
   terminalResize(key: string, cols: number, rows: number): Promise<void>
+  /**
+   * A picture pasted into a terminal (a screenshot), as its bytes and type: kept as a file for a week in Togle's own folder,
+   * whose path goes into the terminal for the agent to attach. The path comes back.
+   */
+  savePastedPicture(bytes: Uint8Array, type: string): Promise<string>
   /** Types the task's words into its terminal, without Enter. */
   typeTerminalWords(key: string): Promise<void>
   /** What a terminal of Togle's own printed, as it comes: `at` is where the part starts among all it printed. */
@@ -316,6 +321,12 @@ export interface TogleApi {
   /** The system Togle runs on: "win32", "darwin" (macOS) or "linux". */
   platform: string
   minimize(): void
+  /** Maximizes the window, or gives it back the size it had. */
+  maximize(): void
+  /** Whether the window is maximized now. */
+  isMaximized(): Promise<boolean>
+  /** The window was maximized, or given back its size (by its button, a double click on its bar, or the system). */
+  onMaximized(cb: (maximized: boolean) => void): Unsubscribe
   /** Closes Togle; during a call it asks first (onConfirmClose), unless `confirmed`. */
   close(confirmed?: boolean): void
   /** The window shows an error instead of the app: it can't ask before closing. */

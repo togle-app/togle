@@ -1,6 +1,6 @@
 import { Component, StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Icon } from './Icon'
+import { BrandMark, WindowButtons } from './WindowBar'
 import { DictationBar } from './DictationBar'
 import { TaskBox } from './TaskBox'
 import { CallNoticeSurface } from './CallNoticeSurface'
@@ -37,16 +37,9 @@ class Failed extends Component<{ children: ReactNode }, { error?: Error }> {
       <div className="app">
         <header className="titlebar">
           <div className="title">
-            <span className="brand">Togle</span>
+            <span className="brand"><BrandMark /><span className="brand-name">Togle</span></span>
           </div>
-          <div className="window-buttons">
-            <button className="icon" title="Minimize" aria-label="Minimize" onClick={() => window.togle.minimize()}>
-              <Icon name="minimize" />
-            </button>
-            <button className="icon close" title="Quit Togle" aria-label="Quit Togle" onClick={() => window.togle.close(true)}>
-              <Icon name="close" />
-            </button>
-          </div>
+          <WindowButtons closeTitle="Quit Togle" closeLabel="Quit Togle" onClose={() => window.togle.close(true)} />
         </header>
         <div className="failed">
           <p>Something in Togle's window broke.</p>

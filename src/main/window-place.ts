@@ -12,10 +12,11 @@ const TITLE_PX = 32
 
 /**
  * Where the window was last, if that's still on one of the screens: one unplugged since, or a smaller one, and it
- * opens where it always did, or fitted to the screen it's on.
+ * opens where it always did, or fitted to the screen it's on. `maximized`: it was left maximized, and opens so (the place
+ * is the one it goes back to).
  */
-export function lastPlace(min: { width: number; height: number }): Rectangle | undefined {
-  let saved: Rectangle & { layout?: string }
+export function lastPlace(min: { width: number; height: number }): (Rectangle & { maximized?: true }) | undefined {
+  let saved: Rectangle & { layout?: string; maximized?: unknown }
   try {
     saved = JSON.parse(readFileSync(file(), 'utf8')) as Rectangle
   } catch {
@@ -35,19 +36,21 @@ export function lastPlace(min: { width: number; height: number }): Rectangle | u
     x: migrate ? Math.max(area.x, Math.min(x, area.x + area.width - restoredWidth - 20)) : x,
     y: Math.max(y, area.y),
     width: restoredWidth,
-    height: Math.min(Math.max(height, min.height), area.y + area.height - Math.max(y, area.y))
+    height: Math.min(Math.max(height, min.height), area.y + area.height - Math.max(y, area.y)),
+    ...(saved.maximized === true ? { maximized: true as const } : {})
   }
 }
 
-/** Keeps where the window is, and its size, as it's moved or resized: Togle opens there the next time. */
+/** Keeps where the window is, its size, and whether it is maximized, as it's moved or resized: Togle opens so the next time. */
 export function keepPlace(win: BrowserWindow): void {
   let timer: ReturnType<typeof setTimeout> | undefined
   const save = (): void => {
     clearTimeout(timer)
-    // Minimized or maximized, the place to come back to is the one it had before.
-    if (win.isDestroyed() || win.isMinimized() || win.isMaximized() || win.isFullScreen()) return
+    // Minimized or full screen, what is kept is what it had before. Maximized, it is kept so, with the place it goes back to.
+    if (win.isDestroyed() || win.isMinimized() || win.isFullScreen()) return
+    const maximized = win.isMaximized()
     try {
-      writeFileSync(file(), JSON.stringify({ ...win.getBounds(), layout: 'agent-sidebar' }))
+      writeFileSync(file(), JSON.stringify({ ...(maximized && win.getNormalBounds ? win.getNormalBounds() : win.getBounds()), layout: 'agent-sidebar', ...(maximized ? { maximized: true } : {}) }))
     } catch (err) {
       console.warn('[window] place not kept:', (err as Error).message)
     }
@@ -58,5 +61,7 @@ export function keepPlace(win: BrowserWindow): void {
   }
   win.on('move', later)
   win.on('resize', later)
+  win.on('maximize', later)
+  win.on('unmaximize', later)
   win.on('close', save)
 }

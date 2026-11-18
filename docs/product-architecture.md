@@ -61,6 +61,7 @@ In Togle's data folder (`%APPDATA%\togle` on Windows):
 | Settings | `settings.json` | plain text, no secrets |
 | Agents' task names and records | `runner-titles.json`, `runner-tasks.json` | plain text |
 | The Agents list's headings, and how the person arranged it | `runner-subjects.json`, `runner-groups.json` | plain text |
+| Pictures pasted into an agent's screen (a screenshot), for the agent to attach | `pasted/` | image files, deleted after a week |
 | The channel's secret | `channel/` | a file in the person's own folder (on Mac and Linux, readable by their account alone) |
 
 Speech recognition, the models Togle downloads, is kept apart from the data (`%LOCALAPPDATA%\togle\speech` on Windows).
