@@ -32,6 +32,9 @@ app.setAppPath(path.resolve(__dirname, '..'))
 process.env.TOGLE_HEADLESS = '1'
 process.env.TOGLE_TEST_TRAY = '1'
 process.env.TOGLE_SILENT_AUDIO = '1'
+// A call on this computer (a program using the microphone, as one is when the test runs in the middle of a meeting) would put
+// Togle's own notice of a call in the corner, and a notice already there keeps the offer to change keys from coming.
+process.env.TOGLE_CALL_DETECT = '0'
 process.env.TOGLE_TEST_RUNNERS = path.join(__dirname, 'notice-runners.cjs')
 // Sorting by subject asks as soon as a place has two tasks, not once their names have held for a while.
 process.env.TOGLE_TEST_SORT_SETTLE_MS = '0'
