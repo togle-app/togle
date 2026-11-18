@@ -158,6 +158,12 @@ async function checkCall(T, agent) {
   await ui.emit('onTranscript', { id: 'l4', speaker: 'me', text: 'Sounds good to me.', at: now - 3000, end: now - 2500 })
   await ui.wait("document.querySelectorAll('.live-line').length===4")
   assert.deepEqual(await texts(ui, '.live-line .who'), ['Dario', 'Marta?', 'Voice 4', 'You'])
+  // Like a chat: each line has an avatar, the first letter of who said it (a guess's question mark is not part of it) on that
+  // voice's color; yours is Togle's, and the same voice is always the same color.
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.live-line')].map(line=>line.dataset.initial)"), ['D', 'M', 'V', 'Y'])
+  assert.equal(await ui.evaluate("document.querySelector('.live-line.me').style.getPropertyValue('--avatar')"), 'var(--togle)', 'yours is Togle’s color')
+  assert.ok(new Set(await ui.evaluate("[...document.querySelectorAll('.live-line.them')].map(line=>line.style.getPropertyValue('--avatar'))")).size >= 2, 'other voices have colors of their own')
+  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.live-line'),'::before').content"), '"D"', 'the avatar is drawn from the letter')
   assert.deepEqual(await texts(ui, '.live-people .person-chip'), ['You', 'Dario', 'Marta?', 'Voice 4'])
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.live-people .person-chip')].map(c=>c.classList.contains('guess'))"), [false, false, true, false], 'only the guess looks like one')
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.live-people .person-chip')].map(c=>c.classList.contains('ok'))"), [true, true, false, false], 'confirmed ones are green, as the design has them')

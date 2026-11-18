@@ -827,15 +827,23 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
   .live-actions { flex: 1 0 100%; justify-content: flex-end; margin-left: 0; }
 }
 .live-clock { background: var(--togle-soft); color: var(--togle); font-variant-numeric: tabular-nums; }
-.live-sources { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 12px; font-weight: 600; }
-.live-meter { display: inline-flex; align-items: center; gap: 0; }
-.live-meter .bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; margin-left: 5px; }
-.live-meter .bars i { display: block; width: 3px; border-radius: 1px; background: var(--line); }
+/* The call is being written down: a small red dot that breathes (opacity only; still with less motion asked for, and when hidden). */
+.live-clock::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--danger); vertical-align: 0.5px; animation: live-dot 1.8s ease-in-out infinite; }
+@keyframes live-dot { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .live-clock::before { animation: none; } }
+.live-sources { display: flex; flex-wrap: wrap; gap: 6px 8px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.live-meter { display: inline-flex; align-items: center; gap: 0; padding: 3px 11px 3px 12px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--raised) 45%, transparent); }
+.live-meter .bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; margin-left: 7px; }
+.live-meter .bars i { display: block; width: 3px; border-radius: 1px; background: color-mix(in srgb, var(--muted) 40%, transparent); }
 .live-meter .bars i.on { background: var(--togle); }
 .live-meter[data-state='off'] { color: var(--danger); }
 .live-problem { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--danger); font-size: 12px; }
 .live-problem button { color: var(--ink); }
-.tell-others { display: flex; flex-direction: column; gap: 7px; padding: 9px 10px; border: 1px solid var(--wait); border-radius: 10px; background: var(--wait-soft); font-size: 13px; }
+.tell-others { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 16px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--wait) 70%, var(--line)); border-radius: 12px; background: var(--wait-soft); font-size: 13px; }
+.tell-others > strong { grid-column: 1; grid-row: 1; }
+.tell-others > .tell-line { grid-column: 1; grid-row: 2; }
+.tell-others > .tell-actions { grid-column: 2; grid-row: 1 / span 2; flex-direction: column; align-items: flex-end; justify-content: center; gap: 8px; }
+@media (max-width: 640px) { .tell-others { grid-template-columns: minmax(0, 1fr); } .tell-others > .tell-actions { grid-column: 1; grid-row: 3; flex-direction: row; align-items: center; justify-content: space-between; } }
 .tell-others strong { font-size: 13px; font-weight: 600; }
 .tell-others .tell-line { margin: 0; color: var(--ink); font-size: 12.5px; line-height: 1.4; quotes: '\201C' '\201D'; user-select: text; }
 .tell-others .tell-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -857,15 +865,21 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 /* A long call has thousands of lines. As blocks, not flex items, they are laid out faster when the page opens on one;
    the ones out of sight are not laid out at all until they scroll into view. */
 .live-lines { flex: 1; min-height: 140px; padding: 0; overflow: auto; }
-.live-lines > * + * { margin-top: 5px; }
-.live-lines > .hint { margin: 0; }
-/* One line said: who and when on the left, the words on the right; a marked one stands out. */
-.live-line { display: grid; grid-template-columns: 4.4rem minmax(0, 1fr); gap: 0 0.6rem; align-items: start; padding: 5px 8px; border-radius: 8px; font-size: 13px; content-visibility: auto; contain-intrinsic-size: auto 40px; }
-.live-line .who { grid-column: 1; grid-row: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.live-line time { grid-column: 1; grid-row: 2; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.live-line p { grid-column: 2; grid-row: 1 / span 2; margin: 0; line-height: 1.4; overflow-wrap: anywhere; }
+.live-lines > * + * { margin-top: 2px; }
+/* Nothing said yet: one calm card, not a line of text. */
+.live-lines > .hint { margin: 0; padding: 22px 18px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }
+/* One line said, like a chat: an avatar (the voice's first letter on its own color), who said it and when, and the words under them;
+   a marked one stands out. */
+.live-line { --avatar: var(--muted); display: grid; grid-template-columns: 28px minmax(0, max-content) minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; align-items: baseline; padding: 8px 10px; border-radius: 10px; font-size: 14px; content-visibility: auto; contain-intrinsic-size: auto 62px; }
+.live-line:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.live-line::before { content: attr(data-initial); grid-column: 1; grid-row: 1 / span 2; align-self: start; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--avatar) 20%, transparent); color: var(--avatar); font-size: 12px; font-weight: 700; line-height: 1; }
+.live-line .who { grid-column: 2; grid-row: 1; max-width: 14rem; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-line.me .who { color: var(--togle); }
+.live-line time { grid-column: 3; grid-row: 1; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.live-line p { grid-column: 2 / -1; grid-row: 2; margin: 2px 0 0; line-height: 1.5; overflow-wrap: anywhere; }
 .live-line.marked { background: var(--togle-soft); }
-.live-line.partial { opacity: 0.6; }
+.live-line.partial { opacity: 0.65; }
+.live-line.partial p { font-style: italic; }
 .marked-tag { margin-left: 6px; vertical-align: 1px; }
 
 /* Who spoke?, its own stage after a call: who is confirmed, then each voice to confirm. */

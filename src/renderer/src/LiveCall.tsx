@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { PartialTranscript, Settings, TranscriptEntry } from '@shared/types'
 import { markedLineIds, speakerLabel } from '@shared/meeting'
 import { intoCall } from './CallTranscript'
@@ -9,6 +9,20 @@ import { CallAgentsRow } from './CallAgents'
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' })
+
+/** A voice's color in the transcript: yours is Togle's, each other voice one of a few, the same voice always the same one. */
+const VOICE_COLORS = ['#e5b865', '#55d3b6', '#ff9fb2', '#9ad46a', '#f0a36b', '#7fc4ff', '#c49bff']
+function colorOf(line: Pick<TranscriptEntry, 'speaker' | 'voiceId'>): CSSProperties {
+  let color = 'var(--togle)'
+  if (line.speaker !== 'me') {
+    let hash = 0
+    for (const letter of line.voiceId ?? 'call') hash = (hash * 31 + letter.charCodeAt(0)) >>> 0
+    color = VOICE_COLORS[hash % VOICE_COLORS.length]
+  }
+  return { '--avatar': color } as CSSProperties
+}
+/** The first letter of who said it, on the voice's color: a guess's question mark is not part of it. */
+const initialOf = (label: string): string => Array.from(label.replace(/[?\s]+$/, ''))[0]?.toUpperCase() ?? '?'
 
 /** How long the call has been going: "12:41", "1:05:20". It ticks by itself. */
 export function Elapsed({ since }: { since: number }) {
@@ -115,7 +129,7 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, ca
         {!transcript.length && !partials.length && <p className="hint">Listening… The words appear as people speak.</p>}
         {transcript.map((line) => <LiveLine key={line.id} line={line} since={since} marked={marked.has(line.id)} />)}
         {partials.map((partial) => (
-          <div key={partial.segmentId} className="live-line partial">
+          <div key={partial.segmentId} className={`live-line partial ${partial.speaker}`} style={colorOf(partial)} data-initial={initialOf(speakerLabel({ speaker: partial.speaker, voiceId: partial.voiceId, voiceName: partial.voiceName, voiceNamedBy: partial.voiceNamedBy }))}>
             <span className="who">{speakerLabel({ speaker: partial.speaker, voiceId: partial.voiceId, voiceName: partial.voiceName, voiceNamedBy: partial.voiceNamedBy })}</span>
             <time dateTime={new Date(partial.at).toISOString()} title={clock.format(partial.at)}>{intoCall(partial.at - since)}</time>
             <p>{partial.text}</p>
@@ -132,7 +146,7 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, ca
  */
 const LiveLine = memo(function LiveLine({ line, since, marked }: { line: TranscriptEntry; since: number; marked: boolean }) {
   return (
-    <div className={`live-line ${line.speaker} ${marked ? 'marked' : ''}`}>
+    <div className={`live-line ${line.speaker} ${marked ? 'marked' : ''}`} style={colorOf(line)} data-initial={initialOf(speakerLabel(line))}>
       {/* A long name is shortened in its column: all of it is on the pointer, and on the chips over the lines. */}
       <span className="who" title={speakerLabel(line)}>{speakerLabel(line)}</span>
       <time dateTime={new Date(line.at).toISOString()} title={clock.format(line.at)}>{intoCall(line.at - since)}</time>
