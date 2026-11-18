@@ -29,7 +29,7 @@ const task = (key, name, place = SITE, where = 'project website') => ({ key, nam
 const answering = (heading) => (input) => ({ subjects: Object.fromEntries(input.tasks.map((t) => [t.id, t.now ?? heading(t)])) })
 
 /** Sorting with a stand-in AI: each question is kept, and `answer` makes the reply (an Error fails it). */
-function sorting(answer, { settleMs = 0, retryMs = 60_000, file = null, on = true } = {}) {
+function sorting(answer, { settleMs = 0, retryMs = 60_000, timeoutMs = 60_000, file = null, on = true } = {}) {
   const asked = []
   const renamed = []
   let changes = 0
@@ -47,7 +47,9 @@ function sorting(answer, { settleMs = 0, retryMs = 60_000, file = null, on = tru
     renamed: (place, from, to) => renamed.push([place, from, to]),
     file,
     settleMs,
-    retryMs
+    retryMs,
+    timeoutMs,
+    warn: () => undefined
   })
   return { subjects, asked, renamed, changes: () => changes, turn: (value) => { isOn = value } }
 }
@@ -141,6 +143,31 @@ test('a failed sort waits before it is tried again; a task the answer left out i
   assert.equal(s.asked.length, 2, 'decided: not asked again')
   s.subjects.notice([two[0], task('codex:b', 'Rename the login button')])
   await until(() => s.asked.length === 3, 'renamed, it is sorted again')
+})
+
+test('an answer that never comes is given up at its time, and sorting goes on', async () => {
+  // The first question hangs, whatever the signal says; the next is answered.
+  const s = sorting((input, n) => (n === 1 ? new Promise(() => undefined) : answering(() => 'Login')(input)), { timeoutMs: 40, retryMs: 30 })
+  s.subjects.notice([task('claude:a', 'Fix login redirect'), task('codex:b', 'Login with magic link')])
+  await until(() => s.subjects.of('claude:a', SITE) === 'Login', 'sorted after the one that hung')
+  assert.equal(s.asked.length, 2)
+})
+
+test('a place that keeps failing waits twice as long each time', async () => {
+  const s = sorting(() => new Error('offline'), { retryMs: 50 })
+  s.subjects.notice([task('claude:a', 'Fix login redirect'), task('codex:b', 'Login with magic link')])
+  // Tried at about 0, 50, 150 and 350 ms: four times in 420 ms, where the same wait each time would be nine.
+  await pause(420)
+  assert.ok(s.asked.length >= 3 && s.asked.length <= 5, `asked ${s.asked.length} times`)
+})
+
+test('a place too big for one question is sorted in turns, each task asked about once', async () => {
+  const s = sorting(answering((t) => (Number(t.name.split(' ')[1]) % 2 ? 'Odd' : 'Even')))
+  const many = Array.from({ length: 170 }, (_, i) => task(`claude:${i}`, `Task ${i}`))
+  s.subjects.notice(many)
+  await until(() => many.every((t) => s.subjects.of(t.key, SITE)), 'every task sorted')
+  assert.deepEqual(s.asked.map((q) => q.input.tasks.length), [80, 80, 80], 'at most 80 in one question')
+  assert.deepEqual(s.asked.map((q) => q.input.tasks.filter((t) => !t.now).length), [80, 80, 10], 'the ones waiting first, the last with the latest sorted around them')
 })
 
 test('an answer that is not the JSON asked for changes nothing and waits like a failure', async () => {

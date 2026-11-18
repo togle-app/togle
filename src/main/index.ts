@@ -1779,6 +1779,8 @@ if (process.argv.includes('--togle-hook')) {
         }
       },
       changed: () => send('runners:changed', null),
+      // A test run from source need not wait for names to hold (a packaged Togle always does).
+      ...(!app.isPackaged && process.env.TOGLE_TEST_SORT_SETTLE_MS ? { settleMs: Number(process.env.TOGLE_TEST_SORT_SETTLE_MS) } : {}),
       // The tasks the person dropped on a heading the AI renamed follow it.
       renamed: (place, from, to) => { runnerGroups.change({ kind: 'rename-subject', group: place, from, to }) }
     })

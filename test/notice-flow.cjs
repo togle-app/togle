@@ -33,6 +33,8 @@ process.env.TOGLE_HEADLESS = '1'
 process.env.TOGLE_TEST_TRAY = '1'
 process.env.TOGLE_SILENT_AUDIO = '1'
 process.env.TOGLE_TEST_RUNNERS = path.join(__dirname, 'notice-runners.cjs')
+// Sorting by subject asks as soon as a place has two tasks, not once their names have held for a while.
+process.env.TOGLE_TEST_SORT_SETTLE_MS = '0'
 // The development messages (a shortcut pressed as if from another app) are there only with a debug port.
 process.env.TOGLE_DEBUG_PORT = '0'
 process.env.TOGLE_SPEECH_HOME = path.join(profile, 'speech')
@@ -200,6 +202,24 @@ async function run() {
   await wait(() => js(notice, "!!document.querySelector('.task-notice')"), 'the notice, once notices are on again')
   await invoke('runners:answer', fromBox.key, waitingNow.pending[0].id, 'refuse')
   await wait(async () => (await invoke('runners:list')).some((task) => task.key === fromBox.key && task.state === 'idle'), 'the task from the box to finish')
+
+  // Sorting by subject, turned on: the folder has its tasks, so main asks the AI set in Settings. There is none here (no
+  // sign-in): the question fails before anything is sent, is told in the log, and waits to be tried again. The list goes on as
+  // it was, with no heading, and nothing is kept. Turned off, it stays quiet.
+  assert.equal((await invoke('settings:get', {})).tasks.sortBySubject, false, 'off in a new Togle')
+  const warned = []
+  const warn = console.warn
+  console.warn = (...args) => { warned.push(args.join(' ')); warn(...args) }
+  await invoke('settings:update', { tasks: { sortBySubject: true } })
+  await invoke('runners:list')
+  await wait(() => warned.some((line) => line.startsWith('[sort by subject]')), 'the question to the AI, failing here')
+  console.warn = warn
+  assert.match(warned.find((line) => line.startsWith('[sort by subject]')), /Sign in/, 'it failed for want of a sign-in')
+  assert.equal(warned.filter((line) => line.startsWith('[sort by subject]')).length, 1, 'once: it waits before trying again')
+  const afterSorting = await invoke('runners:list')
+  assert.ok(afterSorting.length >= 2 && afterSorting.every((task) => !task.subject), 'the list as it was, with no heading')
+  assert.equal(fs.existsSync(path.join(profile, 'runner-subjects.json')), false, 'nothing sorted, nothing kept')
+  await invoke('settings:update', { tasks: { sortBySubject: false } })
 
   // During a call, notices wait (the news that a task finished, still showing, goes as the call starts): the tray still counts, and the notice comes once the call is over.
   await invoke('session:listening', true)

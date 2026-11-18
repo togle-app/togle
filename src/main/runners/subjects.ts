@@ -4,6 +4,7 @@
 // show that some belong together or that a heading has become too narrow. Togle then holds the list still: tasks under one
 // heading stay together, and a sorted task does not lose its heading. Made-up lists measured it (eval/groups.cjs). Only the
 // names of the tasks and the name of their place go to the AI, and only while the person has sorting turned on.
+import { abortable } from '../dictation-speech'
 import { readJson, writeJson } from '../storage'
 import { Later } from './titles'
 
@@ -38,6 +39,8 @@ export interface SubjectOptions {
   retryMs?: number
   /** How long one answer may take. */
   timeoutMs?: number
+  /** Where a failed question is told (the log, as call titles tell theirs). */
+  warn?: (message: string) => void
 }
 
 /** What Togle keeps of a task it sorted: the name it was sorted by, its heading (none for a name that says too little), its place. */
@@ -54,6 +57,10 @@ const KEEP = 2000
 /** A place is sorted from two tasks on: a heading over one task says nothing its name does not. */
 const FEWEST = 2
 const SUBJECT_MOST = 40
+/** The most tasks one question holds: a bigger place is sorted in turns, the ones waiting first. */
+const MOST_SENT = 80
+/** The longest a place that keeps failing waits before it is tried again. */
+const RETRY_MOST = 6 * 3600_000
 
 /** What the AI is asked: eval/groups.cjs measured this wording (RESORT_MERGE) on made-up lists. */
 export const SORT_PROMPT =
@@ -120,6 +127,8 @@ export class TaskSubjects {
   /** Since when each task has had the name it has now (in this run). */
   private readonly names = new Map<string, { name: string; since: number }>()
   private readonly retryAt = new Map<string, number>()
+  /** How many times in a row each place failed: each wait is twice the one before. */
+  private readonly failures = new Map<string, number>()
   private readonly queue = new Set<string>()
   private running: string | null = null
   private timer: NodeJS.Timeout | null = null
@@ -230,21 +239,31 @@ export class TaskSubjects {
       const kept = this.kept[task.key]
       return kept && kept.place === place ? [0, kept.at] : [1, this.names.get(task.key)?.since ?? 0]
     }
-    const ordered = [...tasks].sort((a, b) => joined(a)[0] - joined(b)[0] || joined(a)[1] - joined(b)[1])
+    const all = [...tasks].sort((a, b) => joined(a)[0] - joined(b)[0] || joined(a)[1] - joined(b)[1])
+    // At most MOST_SENT in one question: the ones waiting (the first to come first), with the latest sorted for their headings.
+    const waiting = all.filter((task) => this.waits(task)).slice(0, MOST_SENT)
+    const room = MOST_SENT - waiting.length
+    const ordered = [...(room > 0 ? all.filter((task) => !this.waits(task)).slice(-room) : []), ...waiting]
     const before = ordered.map((task) => this.headingOf(task))
     const user = JSON.stringify({ place: ordered[0].where, tasks: ordered.map((task, i) => ({ id: `t${i + 1}`, name: task.name, ...(before[i] ? { now: before[i] } : {}) })) })
     let answered: (string | null)[]
     try {
-      const text = await this.options.ask()(SORT_PROMPT, user, AbortSignal.timeout(this.options.timeoutMs ?? 60_000))
+      const signal = AbortSignal.timeout(this.options.timeoutMs ?? 60_000)
+      // An answer that does not come in time has failed, whether or not the AI stops at the signal: sorting goes on.
+      const text = await abortable(this.options.ask()(SORT_PROMPT, user, signal), signal)
       const given = (JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')) as { subjects?: Record<string, unknown> } | null)?.subjects
       if (!given || typeof given !== 'object') throw new Error('An answer with no subjects')
       answered = ordered.map((_, i) => cleanSubject(given[`t${i + 1}`]))
-    } catch {
-      this.retryAt.set(place, Date.now() + (this.options.retryMs ?? 10 * 60_000))
+    } catch (error) {
+      ;(this.options.warn ?? ((message: string) => console.warn(message)))(`[sort by subject] ${(error as Error).message}`)
+      const failed = (this.failures.get(place) ?? 0) + 1
+      this.failures.set(place, failed)
+      this.retryAt.set(place, Date.now() + Math.min((this.options.retryMs ?? 10 * 60_000) * 2 ** (failed - 1), RETRY_MOST))
       return
     }
     if (this.stopped) return
     this.retryAt.delete(place)
+    this.failures.delete(place)
     const { subjects, renamed } = settleSubjects(before, answered)
     const now = Date.now()
     let changed = false
