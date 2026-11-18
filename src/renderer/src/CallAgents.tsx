@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { KNOWN_AGENTS, stepsLine, type CallAgents as CallAgentList, type GiveResult, type RunnerKind, type RunnerStatus, type TaskView } from '@shared/runner'
 import { Markdown } from './Markdown'
+import { useKeptState } from './kept'
 import { Menu } from './Menu'
 import { openTaskFrom } from './open-task'
 import { RequestCard } from './RequestCard'
@@ -65,12 +66,12 @@ export function CallAgentsRow({ call, live }: { call: string; live: boolean }) {
   const { tasks } = useTasks()
   const [agents, setAgents] = useState<CallAgentList>({ keys: [], sent: {} })
   // The ones left unticked, so that a task connected later is ticked from the start.
-  const [unticked, setUnticked] = useState<string[]>([])
+  const [unticked, setUnticked] = useKeptState<string[]>(`call-unticked:${call}`, NONE)
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
   // A question for the agents on this call, and what was asked before on it (kept while the window is open).
-  const [question, setQuestion] = useState('')
+  const [question, setQuestion] = useKeptState(`call-question:${call}`, '')
   const [asking, setAsking] = useState(false)
   const [asked, setAsked] = useState<Asked[]>(() => askedOn.get(call) ?? [])
   useEffect(() => {
@@ -161,6 +162,7 @@ interface Asked {
 }
 // What was asked on each call, kept while the window is open: the page is drawn again when the person moves between screens.
 const askedOn = new Map<string, Asked[]>()
+const NONE: string[] = []
 let askedCount = 0
 const MOST_ASKS = 3
 // How often an answer is looked for while it is awaited, and how long after the question it is looked for at all.

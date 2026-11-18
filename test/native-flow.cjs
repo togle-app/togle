@@ -194,8 +194,10 @@ async function run() {
   await invoke('session:listening', false)
   assert.equal((await invoke('calls:get', empty.id)).transcript.length, 0)
   await invoke('session:clear')
-  // Meetings lists every saved call.
+  // Meetings lists every saved call. (Shown again after another place, it is on the call that was open; Meetings pressed once more, or
+  // a call that is gone, takes it to the list.)
   await evaluate("document.querySelector('.workspace-nav button[aria-label=\"To-do\"]').click()")
+  await evaluate("document.querySelector('.workspace-nav button[aria-label=\"Meetings\"]').click()")
   await evaluate("document.querySelector('.workspace-nav button[aria-label=\"Meetings\"]').click()")
   const saved = (await invoke('calls:list')).map(call => call.id)
   assert.ok(saved.includes(empty.id))

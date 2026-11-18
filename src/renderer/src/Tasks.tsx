@@ -5,7 +5,7 @@ import { useReach } from './Devices'
 import { openSettings } from './open-settings'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
-import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, WaitLine } from './kept'
+import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, useKeptState, WaitLine } from './kept'
 import { Menu } from './Menu'
 import { PointMenu, type Point } from './PointMenu'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
@@ -28,6 +28,13 @@ const REFRESH_MS = 4_000
 const RECENT_MS = 24 * 3600_000
 // The task looked at last, for when the screen is opened again.
 let remembered: string | undefined
+// Where each thread was read to when its task was last on screen, and the list's own scroll: kept while the window is open, so that a
+// place drawn again is where it was left.
+const threadScrolls = new Map<string, { top: number; stick: boolean }>()
+let listScroll = 0
+// What was asked for from outside (a notice, the to-do list) is taken once: Agents drawn again later does not go back to it.
+let focusTaken = 0
+let sessionTaken = 0
 // What the screen read last, for when it is opened again (see kept.tsx): the list of tasks, the agents, and the view tasks open in.
 const KEPT_TASKS = TASKS_LISTED
 const KEPT_STATUS = AGENTS_FOUND
@@ -384,7 +391,9 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   const [renaming, setRenaming] = useState<string>()
   const [rowMenu, setRowMenu] = useState<{ at: Point; key: string } | null>(null)
   const [now, setNow] = useState(Date.now())
-  const [showEarlier, setShowEarlier] = useState(false)
+  const [showEarlier, setShowEarlier] = useKeptState('agents.earlier', false)
+  const listBox = useRef<HTMLElement>(null)
+  useLayoutEffect(() => { if (listBox.current) listBox.current.scrollTop = listScroll }, [])
   // Take over pressed on a row: the task opens with the question that confirms it.
   const [takingOver, setTakingOver] = useState<string>()
   // A task handed back: the line that goes on in the person's own terminal, shown where the task was.
@@ -467,7 +476,8 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
 
   // Opened on a task from outside: it is the one shown.
   useEffect(() => {
-    if (!focus?.key) return
+    if (!focus?.key || focus.seq === focusTaken) return
+    focusTaken = focus.seq
     setSelected(focus.key)
   }, [focus?.key, focus?.seq])
 
@@ -488,12 +498,11 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
 
   // Opened from a notice that says an agent waits on its own screen (Hermes has no card for what it asks): the screen is what shows,
   // once for each time the task is asked for from outside, so that a pick of Chat afterwards stays.
-  const showedSession = useRef(0)
   useEffect(() => {
-    if (!focus?.key || showedSession.current === focus.seq) return
+    if (!focus?.key || sessionTaken === focus.seq) return
     const task = tasks.find((item) => item.key === focus.key)
     if (!task) return
-    showedSession.current = focus.seq
+    sessionTaken = focus.seq
     if (task.mine && task.screen && task.waitingFor && !task.pending.length) {
       if (views.of(task.key) !== 'session') views.pick(task.key, 'session')
       if (!task.terminal) void act(() => api.openRunnerTask(task.key))
@@ -699,7 +708,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
 
   return (
     <div className={`tasks ${selected ? 'has-detail' : ''}`} aria-label="Tasks">
-      <aside className="tasks-list" aria-label={remote.length ? 'Agent tasks on your devices' : 'Agent tasks on this computer'}>
+      <aside ref={listBox} className="tasks-list" aria-label={remote.length ? 'Agent tasks on your devices' : 'Agent tasks on this computer'} onScroll={(event) => { listScroll = event.currentTarget.scrollTop }}>
         <WaitLine waiting={!loaded} label="Reading the tasks" />
         <div className="tasks-head">
           <span className="tasks-label">This computer</span>
@@ -1026,9 +1035,10 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const twoViews = task.mine && !!task.screen
   // The agent's own screen is on screen: no card over it and no reply box, because what it asks is answered on it.
   const sessionShown = task.terminal && (!task.screen || view === 'session')
-  const [text, setText] = useState('')
+  // What is typed for a task stays with it, when another task or another place is shown and then this one again.
+  const [text, setText] = useKeptState(`reply:${task.key}`, '')
   // A part of a message the person is answering (Quote over a selection): it goes with their next reply, and with no other.
-  const [quoted, setQuoted] = useState<string | null>(null)
+  const [quoted, setQuoted] = useKeptState<string | null>(`quote:${task.key}`, null)
   const thread = useRef<HTMLDivElement>(null)
   const replyText = useRef<HTMLTextAreaElement>(null)
   // Stop, and the presses that open or move the task's screen: each says what it does until the task changes.
@@ -1048,7 +1058,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   // Of the turns shown only, so a count is not given for a conversation that has older turns left out.
   const changed = history?.more && !all ? 0 : changedFiles(shown)
   // The thread stays at its end while new words come, unless the person scrolled up to read: then a button brings the latest back.
-  const stick = useRef(true)
+  const stick = useRef(threadScrolls.get(task.key)?.stick ?? true)
+  // Back on a task that was read higher up: its conversation goes back to where it was, once it is long enough to.
+  const restore = useRef<number | null>(threadScrolls.get(task.key)?.stick === false ? threadScrolls.get(task.key)?.top ?? null : null)
   const [away, setAway] = useState(false)
   const toEnd = useCallback((): void => {
     const box = logBox.current
@@ -1066,11 +1078,17 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   }
   useLayoutEffect(() => {
     const box = logBox.current
+    if (box && restore.current !== null) {
+      if (box.scrollHeight - box.clientHeight >= restore.current) { box.scrollTop = restore.current; restore.current = null }
+      // The conversation is all read in and is not that long any more: the end is where it goes.
+      else if (historyLoaded) { restore.current = null; stick.current = true; toEnd() }
+      return
+    }
     if (box && kept.current) {
       if (kept.current.part.isConnected) box.scrollTop += kept.current.part.getBoundingClientRect().top - kept.current.top
       kept.current = null
     } else if (stick.current) toEnd()
-  }, [shown.length, lastShown?.id, lastShown?.status, task.pending.length, task.state, toEnd])
+  }, [shown.length, lastShown?.id, lastShown?.status, task.pending.length, task.state, toEnd, historyLoaded])
   // The questions asked, from the same entries the thread draws: a rail beside the conversation from the third on.
   const prompts = useMemo(() => promptsOf(shown), [shown])
   const railShown = prompts.length >= 3
@@ -1379,6 +1397,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
             const box = event.currentTarget
             const left = box.scrollHeight - box.scrollTop - box.clientHeight
             stick.current = left < 60
+            restore.current = null
+            threadScrolls.set(task.key, { top: box.scrollTop, stick: stick.current })
             setAway(left > 160)
             // Scrolled while earlier turns were on their way: the place they were asked from is not gone back to.
             kept.current = null

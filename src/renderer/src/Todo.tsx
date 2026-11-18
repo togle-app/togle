@@ -4,7 +4,7 @@ import { canAllowHere, shownPart } from '@shared/runner-command'
 import type { TodoItem, TodoList } from '@shared/todo'
 import type { CallOffer, TodoOffer } from '@shared/call-todo'
 import { meetingTitle } from './MeetingsPage'
-import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED } from './kept'
+import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, useKeptState } from './kept'
 import { StateMark, type MarkKind } from './StateMark'
 
 const api = window.togle
@@ -70,7 +70,8 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
   const [tasks, setTasks] = useState<TaskView[]>(() => keptAnswer<TaskView[]>(TASKS_LISTED) ?? [])
   const [status, setStatus] = useState<RunnerStatus[]>(() => keptAnswer<RunnerStatus[]>(AGENTS_FOUND) ?? [])
   const [keys, setKeys] = useState(() => keptAnswer<string>(KEPT_KEYS) ?? 'F9')
-  const [draft, setDraft] = useState('')
+  // What is typed for a new item stays when the window shows another place and the list again.
+  const [draft, setDraft] = useKeptState('todo.draft', '')
   const [editing, setEditing] = useState<{ line: number; text: string } | null>(null)
   const [error, setError] = useState('')
 

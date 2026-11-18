@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { Agent, CallSearchHit, CallSession, CallSessionSummary } from '@shared/types'
 import { namesToConfirm } from '@shared/confirm-names'
 import { CallAgentsRow, GivePanel } from './CallAgents'
-import { keepAnswer, keptAnswer } from './kept'
+import { keepAnswer, keptAnswer, useKeptState } from './kept'
 import { CallNotes } from './CallNotes'
 import { callLength, CallTranscript } from './CallTranscript'
 import { confirmOpen, ConfirmNames } from './ConfirmNames'
@@ -65,6 +65,8 @@ interface Props {
 }
 
 type Point = { x: number; y: number }
+// A call asked for from outside is opened once (see MeetingsPage).
+let focusTaken = 0
 
 /**
  * The calls Togle wrote down, newest first, with what is left to do for each: names to confirm, notes to read. Search
@@ -74,11 +76,12 @@ type Point = { x: number; y: number }
 export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown, focus, noise, microphone, home }: Props) {
   // The calls read last show at once when Meetings is opened again (see kept.tsx), and are read again behind them.
   const [calls, setCalls] = useState<CallSessionSummary[] | null>(() => keptAnswer<CallSessionSummary[]>('meetings.calls') ?? null)
-  const [openId, setOpenId] = useState<string>()
-  const [openTab, setOpenTab] = useState<'notes' | 'transcript'>('notes')
+  // Which call is open, on which tab, and what is searched stay when the window shows another place and Meetings again.
+  const [openId, setOpenId] = useKeptState<string | undefined>('meetings.open', undefined)
+  const [openTab, setOpenTab] = useKeptState<'notes' | 'transcript'>('meetings.tab', 'notes')
   // Rename picked from a call's menu in the list: its page opens with the name ready to change.
   const [renaming, setRenaming] = useState(false)
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useKeptState('meetings.query', '')
   const [hits, setHits] = useState<CallSearchHit[] | null>(null)
   const [searching, setSearching] = useState(false)
   const [menu, setMenu] = useState<{ at: Point; call: CallSessionSummary } | null>(null)
@@ -96,8 +99,22 @@ export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown,
     const stop = api.onCallSessions(() => load())
     return () => { current = false; stop() }
   }, [open])
-  useEffect(() => { setOpenId(undefined); setRenaming(false) }, [home])
-  useEffect(() => { if (focus?.id) { setOpenId(focus.id); setOpenTab('notes'); setRenaming(false) } }, [focus?.id, focus?.seq])
+  // Meetings pressed in the rail while it shows takes the page back to its list; drawn again, it is where it was left.
+  const homeSeen = useRef(home)
+  useEffect(() => {
+    if (homeSeen.current === home) return
+    homeSeen.current = home
+    setOpenId(undefined)
+    setRenaming(false)
+  }, [home])
+  // A call asked for from outside (the to-do list) opens once: the page drawn again later does not go back to it.
+  useEffect(() => {
+    if (!focus?.id || focus.seq === focusTaken) return
+    focusTaken = focus.seq
+    setOpenId(focus.id)
+    setOpenTab('notes')
+    setRenaming(false)
+  }, [focus?.id, focus?.seq])
   useEffect(() => {
     const text = query.trim()
     if (!text) { setHits(null); setSearching(false); return }
@@ -235,7 +252,10 @@ function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDelet
   useEffect(() => { void api.callAgents(id).then(found => setConnected(found?.keys ?? []), () => undefined) }, [id, giving])
   const selected = useRef(id)
   selected.current = id
-  const load = useCallback(() => { void api.callSession(id).then(found => { if (selected.current === id) { setRecord(found); if (!found) setError('This call is no longer available.') } }).catch(failure => setError(errorText(failure))) }, [id])
+  // A call that is gone (deleted while another place showed, and this page drawn again on it) takes the page back to the list.
+  const gone = useRef(onDeleted)
+  gone.current = onDeleted
+  const load = useCallback(() => { void api.callSession(id).then(found => { if (selected.current === id) { setRecord(found); if (!found) { setError('This call is no longer available.'); gone.current() } } }).catch(failure => setError(errorText(failure))) }, [id])
   useEffect(() => {
     setRecord(null); setError(''); setEditing(false); load()
     const stop = api.onCallSessions(change => { if (!change?.id || change.id === id) load() })

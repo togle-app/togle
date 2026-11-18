@@ -1983,6 +1983,88 @@ async function checkInterrupt(T, agent) {
   ui.window.destroy()
 }
 
+// What a place had when it was left is there when it is shown again. In Agents: the task that was open, what was typed for each task
+// and the part it quotes, how far each conversation was read, and the list's own scroll; a task asked for from outside is shown once,
+// not again each time Agents is drawn. In To-do: the new item that was being typed.
+async function checkKept(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Agents')
+  const answer = 'Here is how I read it.\n\n- First, the table keeps two plans.\n- Second, the prices come from one place.\n- Third, the page reads the same on a phone and on a desk.\n\nThen I changed the markup and ran the checks.'
+  const log = (count) => Array.from({ length: count }, (_, n) => [
+    { id: 1 + n * 3, at: Date.now() - 3_600_000 + n * 60_000, kind: 'you', text: ['Rebuild the pricing page.', 'Add a yearly price.'][n % 2] },
+    { id: 2 + n * 3, at: Date.now() - 3_600_000 + n * 60_000 + 5_000, kind: 'command', text: 'npm test', status: 'finished' },
+    { id: 3 + n * 3, at: Date.now() - 3_600_000 + n * 60_000 + 9_000, kind: 'agent', text: answer }
+  ]).flat()
+  await ui.evaluate('window.togleUITest.setTask("claude:s2",' + JSON.stringify({ log: log(8), state: 'idle' }) + ')')
+  // So many tasks that the list scrolls.
+  for (let n = 1; n <= 14; n++) await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:k' + n, runner: 'claude', title: 'Extra task ' + n, folder: 'C:\\work\\site' + (n % 4), terminal: false, mine: true, state: 'working', line: '' }) + ', "")')
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("document.querySelectorAll('.task-agent').length===8")
+  const thread = "document.querySelector('.task-log.thread')"
+  const list = "document.querySelector('.tasks-list')"
+  const box = "document.querySelector('.task-reply textarea')"
+  const header = "document.querySelector('.task-title h2')?.textContent"
+  const away = async (place) => { await ui.click('.workspace-nav button', place); await ui.wait("!document.querySelector('.tasks')"); await ui.click('.workspace-nav button', 'Agents'); await ui.wait("!!document.querySelector('.tasks')") }
+  // A quote picked from an answer, words typed for the reply, the conversation read higher up, and the list scrolled.
+  await ui.evaluate(thread + ".scrollTop=0")
+  await ui.paint()
+  await ui.evaluate("(()=>{const w=document.createTreeWalker(document.querySelectorAll('.task-agent')[0],NodeFilter.SHOW_TEXT);let n;while(n=w.nextNode()){const i=n.data.indexOf('the prices come from one place');if(i>=0){const r=document.createRange();r.setStart(n,i);r.setEnd(n,i+30);const s=getSelection();s.removeAllRanges();s.addRange(r);return}}})()")
+  await ui.wait("!!document.querySelector('.quote-float')")
+  await ui.evaluate("document.querySelector('.quote-float').click()")
+  await ui.fill('.task-reply textarea', 'A reply that is not sent yet')
+  await ui.evaluate(thread + ".scrollTop=420")
+  await ui.evaluate(list + ".scrollTop=160")
+  await ui.paint(); await ui.paint()
+  const readTo = await ui.evaluate(thread + ".scrollTop")
+  const listTo = await ui.evaluate(list + ".scrollTop")
+  assert.ok(readTo > 300 && listTo > 100, 'the conversation was read to ' + readTo + ' and the list scrolled to ' + listTo)
+  await away('Meetings')
+  assert.equal(await ui.evaluate(header), 'Rebuild the pricing page', 'the task that was open is open')
+  assert.equal(await ui.evaluate(box + ".value"), 'A reply that is not sent yet', 'what was typed for it is in its box')
+  assert.equal(await ui.evaluate("document.querySelector('.quote-bar-words span')?.textContent"), 'the prices come from one place', 'and the part it quotes')
+  await ui.wait("Math.abs(" + thread + ".scrollTop-" + readTo + ")<=2")
+  assert.ok(Math.abs((await ui.evaluate(list + ".scrollTop")) - listTo) <= 2, 'the list is scrolled as it was')
+  // Another task has a box of its own, and this one is as it was when it is shown again.
+  await ui.task('Extra task 1')
+  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Extra task 1'")
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea')?.value ?? ''"), '', 'its box is empty')
+  assert.equal(await ui.evaluate("!!document.querySelector('.quote-bar')"), false, 'and has no quote')
+  await ui.fill('.task-reply textarea', 'Words for the other one')
+  await ui.task('Rebuild the pricing page')
+  await ui.wait(header + "==='Rebuild the pricing page'")
+  assert.equal(await ui.evaluate(box + ".value"), 'A reply that is not sent yet')
+  assert.equal(await ui.evaluate("document.querySelector('.quote-bar-words span')?.textContent"), 'the prices come from one place')
+  await ui.task('Extra task 1')
+  assert.equal(await ui.evaluate(box + ".value"), 'Words for the other one')
+  // Sent, what was typed is gone and does not come back.
+  await ui.evaluate(box + ".dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
+  await ui.wait("!!document.querySelector('.you-row')")
+  await away('Meetings')
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea')?.value ?? ''"), '', 'a reply that was sent is not typed again')
+  // Asked for from outside (a notice, the to-do list), a task is shown once; Agents drawn again keeps the one the person picked since.
+  await ui.evaluate("window.togleUITest.emit('onShowTask','claude:s2')")
+  await ui.wait(header + "==='Rebuild the pricing page'")
+  await ui.task('Extra task 2')
+  await ui.wait(header + "==='Extra task 2'")
+  await away('Meetings')
+  assert.equal(await ui.evaluate(header), 'Extra task 2', 'not taken back to the task that was asked for before')
+  await ui.evaluate("window.togleUITest.emit('onShowTask','claude:s2')")
+  await ui.wait(header + "==='Rebuild the pricing page'")
+  // To-do: the new item being typed.
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.wait("!!document.querySelector('.todo-add input')")
+  await ui.fill('.todo-add input', 'Call the printer about the invoice')
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("!!document.querySelector('.tasks')")
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.wait("!!document.querySelector('.todo-add input')")
+  assert.equal(await ui.evaluate("document.querySelector('.todo-add input').value"), 'Call the printer about the invoice', 'what was being typed for a new item is still in its box')
+  await ui.evaluate("document.querySelector('.todo-add').requestSubmit()")
+  await ui.wait("document.querySelector('.todo-add input').value===''")
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 // The window's bar and rail: Togle's mark beside its name, the three buttons of a window (minimize, maximize or restore as the
 // window is, close), and each place's icon beside its name on a wide window, alone in a narrow one.
 async function checkWindowBar(T, agent) {
@@ -2161,6 +2243,7 @@ app.whenReady().then(async () => {
     await checkRail(T, agent)
     await checkQuote(T, agent)
     await checkInterrupt(T, agent)
+    await checkKept(T, agent)
     await checkArrange(T, agent)
     await checkGroups(T, agent)
     await checkTasks(T, agent)

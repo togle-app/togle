@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 /**
  * What the window read last from Togle's main process, kept while its place is not on show: the window draws one place at a
@@ -6,6 +6,35 @@ import { useEffect, useRef, useState } from 'react'
  * behind it, so that nothing on it empties and fills in while you look.
  */
 const answers = new Map<string, unknown>()
+
+const states = new Map<string, unknown>()
+const watchers = new Map<string, Set<() => void>>()
+
+/**
+ * State of a place that stays while the window is open: the window draws one place at a time, so what a place had when it was
+ * left (what was typed, what was opened or ticked) is there again when it is drawn again. Kept by a name that says what it
+ * belongs to ("reply:<task>"), and `initial` is a constant: a new one each time would read as a change.
+ */
+export function useKeptState<T>(name: string, initial: T): [T, (next: T | ((previous: T) => T)) => void] {
+  const subscribe = useCallback((notify: () => void) => {
+    let set = watchers.get(name)
+    if (!set) watchers.set(name, (set = new Set()))
+    set.add(notify)
+    return () => { set?.delete(notify) }
+  }, [name])
+  const value = useSyncExternalStore(subscribe, () => (states.has(name) ? (states.get(name) as T) : initial))
+  const change = useCallback((next: T | ((previous: T) => T)): void => {
+    const previous = (states.has(name) ? states.get(name) : initial) as T
+    const resolved = typeof next === 'function' ? (next as (previous: T) => T)(previous) : next
+    if (Object.is(resolved, previous)) return
+    // What is back to its first value is not kept.
+    if (Object.is(resolved, initial)) states.delete(name)
+    else states.set(name, resolved)
+    for (const notify of [...(watchers.get(name) ?? [])]) notify()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name])
+  return [value, change]
+}
 
 /** The agents found on this computer (runners:status), kept by the Agents screen and by Settings alike. */
 export const AGENTS_FOUND = 'agents.status'
