@@ -218,6 +218,13 @@ export interface TaskView extends TaskInfo {
   screenId?: string
   /** Why the screen is closed, when it closed by itself (it was opened in another window, or could not open). */
   screenClosed?: string
+  /**
+   * What it is about, in a few words, inside its project ("Pricing page"): given once, the first time Togle sees the task, and
+   * never changed by Togle after. None until it is given, and none without an AI plan to give it.
+   */
+  subject?: string
+  /** It finished (or stopped by an error) since the person last had it on screen: "done · new" until they open it. */
+  fresh?: boolean
 }
 
 /**

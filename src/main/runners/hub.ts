@@ -32,12 +32,19 @@ export interface RecordStore {
   add(record: TaskRecord): void
 }
 
+/** Which tasks finished since the person last had them on screen (titles.ts keeps it). */
+export interface FreshStore {
+  has(key: string): boolean
+}
+
 export interface HubOptions {
   backends: Backend[]
   /** Something the window shows has changed. Called at most about every 100 ms. */
   changed: () => void
   titles?: TitleStore
   records?: RecordStore
+  /** Which tasks finished since the person last looked: their rows say "done · new". */
+  fresh?: FreshStore
   /** How long the agents' lists are reused, in milliseconds. */
   cacheMs?: number
   /** How long the agents found count as found before they are looked for again (behind the last answer), in milliseconds. */
@@ -164,7 +171,7 @@ export class RunnerHub {
     const views = new Map<string, TaskView>()
     for (const info of infos) views.set(keyOf(info.runner, info.id), this.viewOfInfo(info))
     for (const owned of this.owned.values()) views.set(owned.key, this.viewOfOwned(owned, views.get(owned.key)))
-    return [...views.values()].map((view) => ({ ...view, agent: this.nameOf(view.runner) })).sort(order)
+    return [...views.values()].map((view) => ({ ...view, agent: this.nameOf(view.runner), ...(this.options.fresh?.has(view.key) ? { fresh: true } : {}) })).sort(order)
   }
 
   /** An agent's name as the person reads it. */

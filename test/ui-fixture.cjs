@@ -280,6 +280,14 @@ module.exports = function install(fixture) {
   const runnerFind = key => { const found = runnerTasks.find(item => item.key === key); if (!found) throw new Error('That task is gone.'); return found }
   const runnerRank = item => item.state === 'waiting' ? 0 : item.state === 'working' ? 1 : 2
   const runnerChanged = () => emit('onRunnersChanged')
+  // The task the window has on screen: one that finished is not new once seen, as main has it (titles.ts).
+  let onScreen = null
+  api.taskOnScreen = key => {
+    record('taskOnScreen', [key])
+    onScreen = key
+    const found = key && runnerTasks.find(item => item.key === key)
+    if (found?.fresh) { found.fresh = false; runnerChanged() }
+  }
   // Agents added in Settings, in memory: any that speaks ACP, by name and command.
   const addedAgents = []
   // Agents Togle finds by itself that were taken off its lists (Remove): listed as removed, so that they can be added back.
@@ -491,6 +499,8 @@ module.exports = function install(fixture) {
     terminalTask: (props, printed) => { const added = task(props.key, { mine: true, state: 'working', terminal: true, line: 'Working…', ...props }); runnerTasks.push(added); terminals.set(added.key, { text: printed, end: printed.length }); runnerChanged() },
     // A task Togle runs stops: by the person's Stop, or by itself (an error, or its agent signed out: `extra`).
     stopTask: (key, state, line, extra) => { const found = runnerFind(key); found.state = state; found.line = line; found.pending = []; Object.assign(found, extra ?? {}); runnerChanged() },
+    // A task changes by itself: its subject given, it finishes and is new (unless it is on screen), it is touched.
+    setTask: (key, props) => { const found = runnerFind(key); Object.assign(found, clone(props)); if (found.fresh && found.key === onScreen) found.fresh = false; runnerChanged() },
     // A task that cannot be sent a call: what giving it the call answers.
     giveFails: (key, problem) => { fixture.giveFails = { ...(fixture.giveFails ?? {}), [key]: problem } },
     // What the window is told of Claude Code's connection to Togle, changed by hand.

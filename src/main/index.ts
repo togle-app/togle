@@ -39,7 +39,7 @@ import { registerTodo } from './todo-register'
 import { registerRunners } from './runners/register'
 import { registerReach } from './reach/register'
 import type { Reach } from './reach/reach'
-import { StoredRecords, StoredTitles } from './runners/titles'
+import { StoredFresh, StoredRecords, StoredTitles } from './runners/titles'
 import { MICROPHONE_PRODUCT, microphonePage } from '@shared/microphone-link'
 import { readNoiseReport, shouldSuggest } from '@shared/microphone'
 import { TogleTray } from './tray'
@@ -507,12 +507,16 @@ function mainWindowActive(): boolean {
  * while one is on screen, a notice comes even though Togle's window is in front.
  */
 let sessionShown: string | null = null
+/** The tasks that finished since the person last had them on screen (titles.ts): "done · new" in the list. */
+const freshTasks = new StoredFresh(() => mainWindowActive())
 /** Tells the person what waits for them: a small notice while Togle's window is not in front, and a dot on the tray. */
 // A task that finished while a call was written down: said once the call is over.
 let finishedDuringCall: ReturnType<Attention['look']>['finished'][number] | undefined
 function refreshNotices(): void {
   if (quitting || !runners) return
   const look = attention.look(runners.attention())
+  // A task that finished is new in the list until the person has it on screen (not while they look at it already).
+  if (look.finished.map((ending) => freshTasks.finished(ending.key)).includes(true)) send('runners:changed', null)
   tray?.setWaiting(look.waiting)
   // During a call, notices wait: the tray still counts, and what finished meanwhile is kept to say after.
   if (ongoing.isListening) {
@@ -818,6 +822,8 @@ function createWindow(): void {
   win.on('responsive', () => (pageDown = false))
   // What waits for the person is told by a notice only while Togle's own window is not in front.
   for (const event of ['focus', 'blur', 'show', 'hide', 'minimize', 'restore'] as const) win.on(event as 'focus', refreshNotices)
+  // Back in front, the task on screen is seen: it is not new any more.
+  win.on('focus', () => { if (freshTasks.look()) send('runners:changed', null) })
   win.webContents.on('did-finish-load', () => {
     pageDown = false
     pageFailed = false
@@ -1604,6 +1610,11 @@ function registerIpc(): void {
     noticeWindow.show(null)
     refreshNotices()
   })
+  // The task the window has on screen, told by the window itself: a task that finished is seen there.
+  ipcMain.on('tasks:on-screen', (event, key: unknown) => {
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return
+    if (freshTasks.shown(typeof key === 'string' && key ? key : null)) send('runners:changed', null)
+  })
   // Which agent screen the window shows, told by the window itself.
   ipcMain.on('tasks:session-shown', (event, key: unknown) => {
     if (!win || win.isDestroyed() || event.sender !== win.webContents) return
@@ -1748,7 +1759,7 @@ if (process.argv.includes('--togle-hook')) {
     registerIpc()
     const runnerTitles = new StoredTitles()
     const runnerRecords = new StoredRecords()
-    await Promise.all([runnerTitles.load(), runnerRecords.load(), callAgentStore.load()])
+    await Promise.all([runnerTitles.load(), runnerRecords.load(), freshTasks.load(), callAgentStore.load()])
     // A test run can stand in for the agents with programs of its own. A packaged Togle never looks.
     const standIns = !app.isPackaged && process.env.TOGLE_TEST_RUNNERS ? await (require(process.env.TOGLE_TEST_RUNNERS) as { backends(): Promise<Backend[]> }).backends() : undefined
     todo = registerTodo({
@@ -1768,6 +1779,7 @@ if (process.argv.includes('--togle-hook')) {
       send,
       titles: runnerTitles,
       records: runnerRecords,
+      fresh: freshTasks,
       changed: () => { refreshNotices(); reach?.tasksChanged() },
       pickFolder: async () => {
         const chosen = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] }) : await dialog.showOpenDialog({ properties: ['openDirectory'] })

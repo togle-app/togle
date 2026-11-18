@@ -469,6 +469,33 @@ test('the agents are looked for once at a time; after the first look the last an
   }
 })
 
+test('a task that finished is new until it has been on screen with the window in front; one seen first is not new', async () => {
+  let front = true
+  const fresh = new T.StoredFresh(() => front, null)
+  assert.equal(fresh.has('claude:a'), false, 'seen for the first time: not new')
+  assert.equal(fresh.finished('claude:a'), true)
+  assert.equal(fresh.has('claude:a'), true, 'it finished: new')
+  fresh.shown('claude:b')
+  assert.equal(fresh.finished('claude:b'), false, 'on screen with the window in front: seen as it finishes')
+  front = false
+  assert.equal(fresh.finished('claude:b'), true, 'on screen, but the window is not in front: new')
+  front = true
+  assert.equal(fresh.look(), true, 'back in front: the task on screen is seen')
+  assert.equal(fresh.has('claude:b'), false)
+  assert.equal(fresh.shown('claude:a'), true, 'opened: not new any more')
+  assert.equal(fresh.has('claude:a'), false)
+  fresh.shown(null)
+  assert.equal(fresh.finished('claude:a'), true, 'none on screen: new again when it finishes again')
+  // The hub marks the rows the store has.
+  const claude = new FakeBackend('claude', { tasks: [info('claude', 'a', 'Fix the login redirect', 'idle', 300), info('claude', 'b', 'Port the API', 'idle', 200)] })
+  const { hub } = hubOf([claude], { fresh })
+  try {
+    assert.deepEqual((await hub.list()).map((task) => [task.key, task.fresh === true]), [['claude:a', true], ['claude:b', false]])
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('a look for the agents begun before one was added is not kept', async () => {
   const claude = new FakeBackend('claude')
   let open

@@ -156,6 +156,7 @@ const api: TogleApi = {
   dismissTaskNotice: id => ipcRenderer.send('notice:dismiss', id),
   onShowTask: cb => subscribe('tasks:show', cb),
   taskSessionShown: key => ipcRenderer.send('tasks:session-shown', key),
+  taskOnScreen: key => ipcRenderer.send('tasks:on-screen', key),
   onCallStrip: cb => subscribe('callstrip:state', state => cb((state ?? null) as import('../shared/call-strip').CallStripState | null)),
   callStripAction: action => ipcRenderer.send('callstrip:action', action),
   onCallNotice: cb => subscribe('callnotice:state', notice => cb((notice ?? null) as { app: import('../shared/call-apps').CallApp; name: string } | null)),

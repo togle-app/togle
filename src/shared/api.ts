@@ -252,6 +252,8 @@ export interface TogleApi {
   onShowTask(cb: (key: string) => void): Unsubscribe
   /** The task whose agent screen the window shows now (null: none). No card shows what it asks, so a notice still comes over it. */
   taskSessionShown(key: string | null): void
+  /** The task the window has on screen (Agents, with the task open), or none: a task that finished is not new once seen. */
+  taskOnScreen(key: string | null): void
   /** What the small strip shows while a call is written down and Togle's window is closed. Null when it is put away. */
   onCallStrip(cb: (state: import('./call-strip').CallStripState | null) => void): Unsubscribe
   /** A button of that strip. */

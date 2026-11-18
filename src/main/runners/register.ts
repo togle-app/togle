@@ -7,7 +7,7 @@ import { AcpBackend, commandIsAcp, commandWords, whereIs } from './acp'
 import { ClaudeBackend } from './claude'
 import { CodexBackend } from './codex'
 import { HermesBackend } from './hermes'
-import { RunnerHub, type RecordStore, type TitleStore } from './hub'
+import { RunnerHub, type FreshStore, type RecordStore, type TitleStore } from './hub'
 import { widenSearchPath } from './search-path'
 import { TerminalBackend, type TerminalChunk } from './terminal'
 import type { Backend } from './types'
@@ -37,6 +37,8 @@ export interface RunnerDeps {
   titles: TitleStore
   /** Which tasks Togle started, for the agents that cannot list their own. */
   records?: RecordStore
+  /** Which tasks finished since the person last looked at them. */
+  fresh?: FreshStore
   /** Something in the tasks changed, told to the main process as it is told to the window. */
   changed?: () => void
   /** Asks the person for a folder; null when they close the dialog. */
@@ -97,6 +99,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     },
     titles: deps.titles,
     records: deps.records,
+    fresh: deps.fresh,
     started: deps.started,
     // The agents on this computer, looked for as the person's terminal would; stand-ins are not looked for.
     ...(deps.backends ? {} : { widenPath: widenSearchPath })

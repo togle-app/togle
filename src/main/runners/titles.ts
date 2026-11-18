@@ -1,10 +1,11 @@
-// What Togle remembers of its tasks between runs: the names it gave them ("Port the settings screen"), and which tasks
-// it started, for the agents that cannot list their own sessions.
+// What Togle remembers of its tasks between runs: the names it gave them ("Port the settings screen"), which tasks it
+// started, for the agents that cannot list their own sessions, and which finished since the person last looked at them.
 import { readJson, writeJson } from '../storage'
-import type { RecordStore, TaskRecord, TitleStore } from './hub'
+import type { FreshStore, RecordStore, TaskRecord, TitleStore } from './hub'
 
 const TITLES = 'runner-titles.json'
 const RECORDS = 'runner-tasks.json'
+const FRESH = 'runner-fresh.json'
 const KEEP = 500
 
 /** Writes a file a moment after the last change, not once for each. */
@@ -60,5 +61,57 @@ export class StoredRecords implements RecordStore {
   add(record: TaskRecord): void {
     this.records = [...this.records.filter((r) => !(r.runner === record.runner && r.id === record.id)), record].slice(-KEEP)
     this.later.ask()
+  }
+}
+
+/**
+ * The tasks that finished since the person last had them on screen: "done · new" in the list until they open one. A task is
+ * marked when Togle sees its turn end (the same look that gives the notice that it finished), and not while it is on screen
+ * in Togle's window with that window in front. Kept between runs, so a restart makes old news neither new nor gone. A task
+ * Togle sees for the first time is not new: only what ends while Togle watches is.
+ */
+export class StoredFresh implements FreshStore {
+  private fresh: Record<string, number> = {}
+  private onScreen: string | null = null
+  private readonly later: Later
+
+  /** `front`: whether Togle's window is in front, where a task on screen is seen. `file`: where it is kept (a test gives none). */
+  constructor(private readonly front: () => boolean, private readonly file: string | null = FRESH) {
+    this.later = new Later(() => (file ? writeJson(file, this.fresh) : Promise.resolve()))
+  }
+
+  async load(): Promise<void> {
+    if (!this.file) return
+    const saved = await readJson<Record<string, unknown>>(this.file, {})
+    this.fresh = Object.fromEntries(Object.entries(saved).filter((entry): entry is [string, number] => typeof entry[1] === 'number'))
+  }
+
+  has(key: string): boolean {
+    return key in this.fresh
+  }
+
+  /** A task's turn ended, or it stopped by an error: new, unless the person is looking at it. Says whether it was marked. */
+  finished(key: string, at = Date.now()): boolean {
+    if (key === this.onScreen && this.front()) return false
+    delete this.fresh[key]
+    this.fresh[key] = at
+    const keys = Object.keys(this.fresh)
+    for (const old of keys.slice(0, Math.max(0, keys.length - KEEP))) delete this.fresh[old]
+    this.later.ask()
+    return true
+  }
+
+  /** The task on screen in the window, or none: it is seen now if the window is in front. Says whether one stopped being new. */
+  shown(key: string | null): boolean {
+    this.onScreen = key
+    return this.look()
+  }
+
+  /** The window came to the front: the task on screen is seen. Says whether one stopped being new. */
+  look(): boolean {
+    if (!this.onScreen || !this.front() || !(this.onScreen in this.fresh)) return false
+    delete this.fresh[this.onScreen]
+    this.later.ask()
+    return true
   }
 }

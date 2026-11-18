@@ -262,6 +262,17 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .tasks-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 14px 7px 14px 15px; border-right: 1px solid var(--line); }
 .tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .task-list { display: flex; flex-direction: column; gap: 6px; }
+/* The list by project, then by subject: a project's name over its tasks, with what waits, works and is new in it; a subject
+   a quiet word over its own tasks. Nothing to press: the headings only say where things are. */
+.task-groups { display: flex; flex-direction: column; gap: 16px; }
+.task-project { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* The name keeps its room: in a narrow list the counts go to a line of their own under it. */
+.task-project-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: 8px; min-width: 0; padding: 0 2px; }
+.task-project-name { max-width: 100%; overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.task-project-count { flex: none; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.task-subject { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin-top: 4px; }
+.task-subject-name { overflow: hidden; padding: 0 2px; color: var(--muted); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.task-copy span.task-new { color: var(--togle); font-weight: 600; }
 .task-item { position: relative; }
 .task-row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; }
 .task-row:hover:not(:disabled) { border-color: var(--muted); background: transparent; }

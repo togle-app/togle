@@ -122,6 +122,81 @@ function useRemoteTasks(): DeviceTasks[] {
   return remote
 }
 
+// ---- How the list is organized: by project, then by what the work is about, then by where each task stands ----
+
+/** It finished (or stopped by an error) and the person has not had it on screen since. */
+const isFresh = (task: TaskView): boolean => task.fresh === true && !needsYou(task) && task.state !== 'working' && task.state !== 'waiting'
+/** Where a task stands, in the order a subject lists them: it needs you, it works, it finished and you have not opened it, it is done. */
+const standing = (task: TaskView): number => (needsYou(task) ? 0 : task.state === 'working' ? 1 : isFresh(task) ? 2 : 3)
+/** Inside one standing the order holds still: the working ones by name (they change all the time), the others newest first. */
+const inOrder = (a: TaskView, b: TaskView): number =>
+  standing(a) - standing(b) || (standing(a) === 1 ? a.title.localeCompare(b.title) : b.updatedAt - a.updatedAt) || a.key.localeCompare(b.key)
+const byName = (a: string, b: string): number => a.localeCompare(b, undefined, { sensitivity: 'base' })
+/** A project is its folder: the same folder, the same project, however its path is written (Windows does not tell case apart). */
+const projectKey = (folder: string): string => {
+  const clean = folder.replace(/[\\/]+$/, '')
+  return api.platform === 'win32' ? clean.toLowerCase() : clean
+}
+
+interface ProjectGroup {
+  key: string
+  name: string
+  /** Its tasks with no subject yet: one just started, or all of them when no AI plan gives subjects. */
+  loose: TaskView[]
+  subjects: { name: string; tasks: TaskView[] }[]
+  /** What waits, works and is new in it, in words ("1 waiting · 1 new"). */
+  counts: string
+}
+
+/** How many of a project's tasks wait for you, work and finished unopened, in words ("1 waiting · 2 working"); none says nothing. */
+function countsOf(tasks: TaskView[]): string {
+  const counts: [number, string][] = [
+    [tasks.filter(needsYou).length, 'waiting'],
+    [tasks.filter((task) => task.state === 'working').length, 'working'],
+    [tasks.filter(isFresh).length, 'new']
+  ]
+  return counts.filter(([count]) => count > 0).map(([count, word]) => `${count} ${word}`).join(' · ')
+}
+
+/**
+ * The tasks by project (A to Z by the folder's name; two folders of one name are told apart by the folder they are in; a task
+ * with no folder goes under "No folder", last), then inside a project by subject (A to Z), each subject's tasks in the order
+ * of where they stand. Tasks with no subject come first in their project. Nothing here depends on when a task last changed,
+ * except among the ones that are done.
+ */
+function groupTasks(list: TaskView[]): ProjectGroup[] {
+  const projects = new Map<string, { folder: string; tasks: TaskView[] }>()
+  for (const task of list) {
+    const key = task.folder ? projectKey(task.folder) : ''
+    const group = projects.get(key) ?? { folder: task.folder, tasks: [] }
+    group.tasks.push(task)
+    projects.set(key, group)
+  }
+  const groups = [...projects.entries()].map(([key, group]) => ({ key, folder: group.folder, name: key ? baseName(group.folder) : 'No folder', tasks: group.tasks }))
+  const names = groups.filter((group) => group.key).map((group) => group.name.toLocaleLowerCase())
+  for (const group of groups) {
+    if (group.key && names.filter((name) => name === group.name.toLocaleLowerCase()).length > 1) {
+      group.name = `${baseName(group.folder.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '')) || group.folder}/${group.name}`
+    }
+  }
+  return groups
+    .sort((a, b) => Number(!a.key) - Number(!b.key) || byName(a.name, b.name) || a.key.localeCompare(b.key))
+    .map((group) => {
+      const subjects = new Map<string, TaskView[]>()
+      for (const task of group.tasks) {
+        const subject = task.subject?.trim()
+        if (subject) subjects.set(subject, [...(subjects.get(subject) ?? []), task])
+      }
+      return {
+        key: group.key,
+        name: group.name,
+        loose: group.tasks.filter((task) => !task.subject?.trim()).sort(inOrder),
+        subjects: [...subjects.entries()].sort(([a], [b]) => byName(a, b)).map(([name, tasks]) => ({ name, tasks: tasks.sort(inOrder) })),
+        counts: countsOf(group.tasks)
+      }
+    })
+}
+
 /** `focus`: a task to show, asked for from outside (a notice, the to-do list); a new `seq` asks again. */
 export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   // Opened again, the screen starts from what it read last (see kept.tsx), and reads again behind it.
@@ -260,11 +335,10 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   }, [focus?.key, focus?.seq, tasks, views, act])
 
   const installed = status.filter((s) => s.installed)
-  // One list, as the design has it: what waits for you comes first (a task Togle runs that stopped waits for a reply too),
-  // then what works, then what finished today. Older tasks fold under Earlier.
-  const recent = (task: TaskView): boolean => needsYou(task) || task.state === 'working' || now - task.updatedAt < RECENT_MS
-  const rank = (task: TaskView): number => (needsYou(task) ? 0 : task.state === 'working' ? 1 : 2)
-  const shown = tasks.filter(recent).sort((a, b) => rank(a) - rank(b))
+  // In the list: what waits for you or works, what finished within a day, and what finished that you have not opened (that
+  // never folds away unseen). Older tasks fold under Earlier. Both are organized the same way (groupTasks).
+  const recent = (task: TaskView): boolean => needsYou(task) || task.state === 'working' || isFresh(task) || now - task.updatedAt < RECENT_MS
+  const shown = groupTasks(tasks.filter(recent))
   const earlier = tasks.filter((task) => !recent(task))
   const row = (task: TaskView, old = false): ReactNode => (
     <TaskRow
@@ -277,6 +351,29 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
       onTakeOver={takesOver(task) ? () => { setTakingOver(task.key); setSelected(task.key) } : undefined}
     />
   )
+  // A project with its subjects, each subject a heading over its tasks; a project's tasks with no subject come first, with no heading.
+  const projectList = (groups: ProjectGroup[], old: boolean): ReactNode =>
+    groups.map((group) => (
+      <section key={group.key || 'no folder'} className="task-project" aria-label={group.counts && !old ? `${group.name}: ${group.counts}` : group.name}>
+        <div className="task-project-head">
+          <span className="task-project-name">{group.name}</span>
+          {!old && group.counts && <span className="task-project-count">{group.counts}</span>}
+        </div>
+        {!!group.loose.length && <div className="task-list" role="list">{group.loose.map((task) => row(task, old))}</div>}
+        {group.subjects.map((subject) => (
+          <div key={subject.name} className="task-subject" role="group" aria-label={subject.name}>
+            <span className="task-subject-name">{subject.name}</span>
+            <div className="task-list" role="list">{subject.tasks.map((task) => row(task, old))}</div>
+          </div>
+        ))}
+      </section>
+    ))
+  // The task on screen, told to main: one that finished is not new once it has been seen here.
+  const onScreen = detail?.task.key ?? null
+  useEffect(() => {
+    api.taskOnScreen(onScreen)
+  }, [onScreen])
+  useEffect(() => () => api.taskOnScreen(null), [])
   const reach = useReach()
   const remoteSelected = selected?.startsWith(REMOTE)
     ? remote.flatMap((device) => device.tasks.map((task) => ({ device, task }))).find(({ device, task }) => remoteKey(device.device, task.key) === selected)
@@ -293,13 +390,13 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
           </button>
         </div>
         {loaded && !installed.length && (status.some((agent) => agent.removed) ? <p className="empty">No agent is on Togle’s lists. Add one back in Settings.</p> : <NoAgents />)}
-        {!!shown.length && <div className="task-list" role="list">{shown.map((task) => row(task))}</div>}
+        {!!shown.length && <div className="task-groups">{projectList(shown, false)}</div>}
         {!!earlier.length && (
           <div className="task-earlier">
             <button className="link task-earlier-toggle" aria-expanded={showEarlier} onClick={() => setShowEarlier(!showEarlier)}>
               Earlier · {earlier.length} task{earlier.length === 1 ? '' : 's'}
             </button>
-            {showEarlier && <div className="task-list" role="list">{earlier.map((task) => row(task, true))}</div>}
+            {showEarlier && <div className="task-groups">{projectList(groupTasks(earlier), true)}</div>}
           </div>
         )}
         {loaded && !!installed.length && !tasks.length && <p className="empty">No tasks yet. Start one, or let an agent run in a terminal and it shows here.</p>}
@@ -421,15 +518,20 @@ function TaskRow({ task, now, old, selected, onSelect, onTakeOver }: { task: Tas
   // One line, as the design has it: the agent, where it works, and how it stands. A task in a terminal says so. Stopped
   // and waiting for a reply, it says why; done long ago, it says when.
   const detail = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : task.screen ? 'stopped · open it to go on' : 'stopped · reply to go on') : task.state === 'waiting' ? (task.waitingFor && !task.pending.length ? 'waiting on its screen' : 'waiting') : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `done · ${ago(task.updatedAt, now)}` : 'done'
-  // A session Hermes lists has no folder (its list says only a name): the line leaves that part out, and no empty one shows.
-  const line = elsewhere ? `${agentOf(task)} · terminal` : [agentOf(task), task.folder ? baseName(task.folder) : '', detail].filter(Boolean).join(' · ')
+  // Its project is the heading over it, so the line leaves out the folder.
+  const line = elsewhere ? `${agentOf(task)} · terminal` : [agentOf(task), detail].filter(Boolean).join(' · ')
+  const fresh = isFresh(task)
   return (
     <div className="task-item" role="listitem">
       <button className={`task-row ${selected ? 'selected' : ''} ${onTakeOver ? 'with-action' : ''}`} data-state={task.state} data-needs={stoppedHere ? 'you' : undefined} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
         <span className="task-dot" aria-hidden="true" />
         <span className="task-copy">
           <strong>{task.title}</strong>
-          <span>{line}</span>
+          <span>
+            {line}
+            {/* Finished, and not opened since: new until it has been on screen. */}
+            {fresh && <span className="task-new"> · new</span>}
+          </span>
         </span>
       </button>
       {onTakeOver && <button className="small task-row-action" onClick={onTakeOver}>Take over</button>}

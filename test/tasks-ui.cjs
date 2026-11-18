@@ -100,20 +100,25 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.workspace-nav button')].map(button=>button.getAttribute('aria-label'))"), ['To-do', 'Agents', 'Meetings', 'Settings'])
   await ui.click('.workspace-nav button', 'Agents')
   await ui.wait("document.querySelectorAll('.task-row').length===5")
-  assert.equal(await ui.evaluate("document.querySelectorAll('.task-group').length"), 0, 'one list, as the design has it: no headings')
+  // By project, A to Z by the folder's name, with what waits and works in each. No AI plan has given subjects here, so there
+  // are no subject headings: a project's tasks are in the order of where they stand.
+  assert.deepEqual(await texts(ui, '.task-groups .task-project-name'), ['api-server', 'notes', 'website'], 'by project, A to Z')
+  assert.deepEqual(await texts(ui, '.task-groups .task-project-count'), ['1 waiting', '1 working', '1 waiting · 1 working'])
+  assert.equal(await ui.evaluate("document.querySelectorAll('.task-subject').length"), 0, 'no subjects, no subject headings')
   assert.equal(await ui.evaluate("document.querySelector('.task-earlier-toggle').textContent"), 'Earlier · 1 task', 'what finished more than a day ago folds under Earlier')
   const rows = await ui.evaluate("[...document.querySelectorAll('.task-row')].map(row=>({title:row.querySelector('strong').textContent,state:row.dataset.state,more:row.querySelector('.task-copy span').textContent,danger:!!row.querySelector('.task-danger')}))")
-  assert.deepEqual(rows.map(row => row.title), ['Add the status column', 'Clean the build folder', 'Rebuild the pricing page', 'Write the release notes', 'Fix the login redirect'])
-  // One line each, as the design has it: the agent, where it works, and how it stands.
-  assert.equal(rows[0].more, 'Codex · api-server · waiting')
+  assert.deepEqual(rows.map(row => row.title), ['Add the status column', 'Write the release notes', 'Clean the build folder', 'Rebuild the pricing page', 'Fix the login redirect'], 'inside a project: what waits, then what works, then what is done')
+  // One line each: the agent and how it stands. The project is the heading over it.
+  assert.equal(rows[0].more, 'Codex · waiting')
   assert.deepEqual(rows.map(row => row.danger), [false, false, false, false, false], 'the red mark is on the command, not on the row')
-  assert.equal(rows[2].more, 'Claude Code · website · working')
-  assert.equal(rows[3].more, 'Claude Code · terminal', 'a task in a terminal says so')
-  assert.equal(rows[4].more, 'Claude Code · website · done', 'what finished today says done')
+  assert.equal(rows[3].more, 'Claude Code · working')
+  assert.equal(rows[1].more, 'Claude Code · terminal', 'a task in a terminal says so')
+  assert.equal(rows[4].more, 'Claude Code · done', 'what finished today says done')
   assert.deepEqual(await texts(ui, '.task-row-action'), ['Take over'], 'a Claude Code task in a terminal offers Take over on its row')
   await ui.click('.task-earlier-toggle', 'Earlier · 1 task')
   await ui.wait("document.querySelectorAll('.task-row').length===6")
-  assert.match((await texts(ui, '.task-earlier .task-copy > span'))[0], /^Codex · mobile-app · done · \d+ days ago$/, 'an older task says when it was last worked on')
+  assert.match((await texts(ui, '.task-earlier .task-copy > span'))[0], /^Codex · done · \d+ days ago$/, 'an older task says when it was last worked on')
+  assert.deepEqual(await texts(ui, '.task-earlier .task-project-name'), ['mobile-app'], 'Earlier is by project too')
   assert.equal(await ui.evaluate("!!document.querySelector('.tasks-found')"), false, 'the agents found are listed in Settings')
   await ui.capture('tasks-list')
 
@@ -1293,7 +1298,8 @@ async function checkStoppedTasks(T, agent) {
   await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','The plan limit is reached until 14:00.')")
   await ui.evaluate("window.togleUITest.stopTask('claude:s4','stopped','')")
   await ui.wait("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page'))?.dataset.needs==='you'")
-  assert.deepEqual((await texts(ui, '.task-list .task-copy strong')).slice(0, 3), ['Add the status column', 'Clean the build folder', 'Rebuild the pricing page'], 'what waits for you comes first')
+  const website = "[...document.querySelectorAll('.task-groups .task-project')].find(p=>p.querySelector('.task-project-name').textContent==='website')"
+  assert.deepEqual((await ui.evaluate('[...' + website + ".querySelectorAll('.task-row strong')].map(e=>e.textContent)")).slice(0, 2).sort(), ['Clean the build folder', 'Rebuild the pricing page'], 'in its project, what waits for you comes first')
   assert.ok((await ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page')).textContent")).includes('stopped by an error: The plan limit is reached until 14:00.'), 'it says why')
   assert.equal(await ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page')).dataset.needs"), 'you')
   assert.equal(await ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Write the release notes')).dataset.needs"), undefined, 'a task in its own window that stopped is not Togle\'s to continue')
@@ -1317,7 +1323,7 @@ async function checkSignedOut(T, agent) {
   await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','Claude Code is signed out.',{signedOut:true,fix:'claude auth login'})")
   const taskRow = "[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page'))"
   await ui.wait(taskRow + "?.textContent.includes('signed out')")
-  assert.equal(await ui.evaluate(taskRow + ".querySelector('.task-copy > span').textContent"), 'Claude Code · website · signed out · sign in with claude auth login')
+  assert.equal(await ui.evaluate(taskRow + ".querySelector('.task-copy > span').textContent"), 'Claude Code · signed out · sign in with claude auth login')
   assert.equal(await ui.evaluate(taskRow + ".dataset.needs"), 'you', 'amber: it waits for the person')
   await ui.task('Rebuild the pricing page')
   await ui.wait("!!document.querySelector('.task-banner.signed-out')")
@@ -1487,12 +1493,54 @@ async function checkSlowMain(T, agent) {
   ui.window.destroy()
 }
 
+// The list by subject: subjects given (as an AI plan gives them) go A to Z under their project, each with its tasks in the
+// order of where they stand. A task just started has none yet and comes first in its project, then goes under its subject
+// once: the one move Togle makes by itself. Two working tasks keep their order when one changes. A task that finished while
+// it was not on screen is new, and counted on its project, until it is opened.
+async function checkGroups(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  const set = (key, props) => ui.evaluate('window.togleUITest.setTask(' + JSON.stringify(key) + ',' + JSON.stringify(props) + ')')
+  const website = "[...document.querySelectorAll('.task-groups .task-project')].find(p=>p.querySelector('.task-project-name').textContent==='website')"
+  const titles = (within) => ui.evaluate('[...' + within + ".querySelectorAll('.task-row strong')].map(e=>e.textContent)")
+  const subject = (name) => '[...' + website + ".querySelectorAll('.task-subject')].find(s=>s.querySelector('.task-subject-name').textContent===" + JSON.stringify(name) + ')'
+  const lineOf = (title) => ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.querySelector('strong').textContent===" + JSON.stringify(title) + ").querySelector('.task-copy > span').textContent")
+  await set('claude:s2', { subject: 'Pricing page' })
+  await set('claude:s3', { subject: 'Login' })
+  await set('claude:s5', { subject: 'Build' })
+  await ui.wait("document.querySelectorAll('.task-subject').length===3")
+  assert.deepEqual(await ui.evaluate('[...' + website + ".querySelectorAll('.task-subject-name')].map(e=>e.textContent)"), ['Build', 'Login', 'Pricing page'], 'subjects A to Z')
+  assert.deepEqual(await texts(ui, '.task-groups .task-project-name'), ['api-server', 'notes', 'website'], 'projects keep their order')
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'codex:n1', runner: 'codex', title: 'Check the pricing tests', folder: 'C:\\work\\website', terminal: false, mine: true, state: 'working', line: 'Working…' }) + ', "")')
+  await ui.wait("document.querySelectorAll('.task-row').length===6")
+  assert.equal((await titles(website))[0], 'Check the pricing tests', 'just started, with no subject yet: first in its project, with no heading')
+  await set('codex:n1', { subject: 'Pricing page' })
+  await ui.wait('!!' + subject('Pricing page') + '&&' + subject('Pricing page') + ".querySelectorAll('.task-row').length===2")
+  assert.deepEqual(await titles(subject('Pricing page')), ['Check the pricing tests', 'Rebuild the pricing page'], 'given its subject, it goes under it; two working tasks by name')
+  await set('claude:s2', { updatedAt: Date.now() + 60_000 })
+  await ui.evaluate('new Promise(r=>setTimeout(r,200))')
+  assert.deepEqual(await titles(subject('Pricing page')), ['Check the pricing tests', 'Rebuild the pricing page'], 'one changed: the order holds')
+  await set('codex:n1', { state: 'idle', line: '', fresh: true })
+  await ui.wait("[...document.querySelectorAll('.task-row')].some(r=>r.textContent.includes('done · new'))")
+  assert.equal(await lineOf('Check the pricing tests'), 'Codex · done · new', 'finished while not on screen: new')
+  assert.deepEqual(await titles(subject('Pricing page')), ['Rebuild the pricing page', 'Check the pricing tests'], 'what works, then what is new')
+  assert.equal(await ui.evaluate(website + ".querySelector('.task-project-count').textContent"), '1 waiting · 1 working · 1 new', 'and its project counts it')
+  await ui.task('Check the pricing tests')
+  await ui.wait("[...document.querySelectorAll('.task-row')].find(r=>r.querySelector('strong').textContent==='Check the pricing tests').querySelector('.task-copy > span').textContent==='Codex · done'")
+  assert.ok((await ui.calls('taskOnScreen')).some((call) => call.args[0] === 'codex:n1'), 'the window told main which task is on screen')
+  assert.equal(await ui.evaluate(website + ".querySelector('.task-project-count').textContent"), '1 waiting · 1 working', 'opened, it is not new')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 app.whenReady().then(async () => {
   try {
     const T = await import(pathToFileURL(path.join(__dirname, '.build/togle.mjs')).href)
     const store = new T.AgentStore(async () => '')
     await store.load()
     const agent = store.list()[0]
+    await checkGroups(T, agent)
     await checkTasks(T, agent)
     await checkNarrow(T, agent)
     await checkSlowMain(T, agent)
