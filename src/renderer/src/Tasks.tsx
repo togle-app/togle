@@ -336,9 +336,12 @@ const SPRING_MS = 500
 /** A box, or a heading in one, as one word: what a dragged task is over, and what it opened. */
 const spot = (group: string, subject = ''): string => `${group}\n${subject}`
 
+/** What waits, works and is new in a group or a folded heading, in words. */
+const countWords = (counts: Counted): string => [counts.waiting && `${counts.waiting} waiting`, counts.working && `${counts.working} working`, counts.fresh && `${counts.fresh} new`].filter(Boolean).join(', ')
+
 /** What waits, works and is new in a group or a folded heading: numbers in the colors of the dots that say it, and the words for a screen reader. */
 function Counts({ counts }: { counts: Counted }) {
-  const words = [counts.waiting && `${counts.waiting} waiting`, counts.working && `${counts.working} working`, counts.fresh && `${counts.fresh} new`].filter(Boolean).join(', ')
+  const words = countWords(counts)
   if (!words) return null
   return (
     <span className="group-counts" role="img" aria-label={words} title={words}>
@@ -627,7 +630,8 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
               />
             </span>
           ) : (
-            <button type="button" className="group-fold" aria-expanded={!isFolded} onClick={() => toggleFold(group.key)}>
+            // The counts fade while the pointer is on the head, for its menu: their words are on all of it.
+            <button type="button" className="group-fold" aria-expanded={!isFolded} title={old ? undefined : countWords(group.counts) || undefined} onClick={() => toggleFold(group.key)}>
               <span className="fold-chevron" aria-hidden="true"><Icon name="chevron" size={12} /></span>
               <GroupMark group={group} />
               <span className="task-project-title">

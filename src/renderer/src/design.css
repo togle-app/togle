@@ -274,12 +274,13 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-project.has-open { border-color: var(--ink); }
 .task-project-head { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
 /* The head's arrow, mark, name with where it is, and its counts on one center line. The menu shares the counts' place: while
-   the pointer or the keys are on the head it shows and they fade, so the name keeps the width the menu would take. */
+   the pointer or the keys are on the head it shows and they fade, so the name keeps the width the menu would take. (Not after
+   a click: the head keeps the focus, and the counts would stay hidden.) */
 .group-fold, .group-renaming { display: grid; flex: 1 1 auto; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; column-gap: 8px; min-width: 0; height: auto; padding: 5px 4px 5px 2px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; }
 .task-project-head:has(> .menu-anchor) > .group-fold { grid-template-columns: auto auto minmax(0, 1fr) minmax(26px, auto); }
 .task-project-head > .menu-anchor { position: absolute; top: 50%; right: 0; transform: translateY(-50%); }
 .group-fold > .group-counts { justify-self: end; }
-.task-project-head:hover .group-counts, .task-project-head:focus-within .group-counts, .task-project-head:has(.group-more.open) .group-counts { opacity: 0; }
+.task-project-head:hover .group-counts, .task-project-head:has(:focus-visible) .group-counts, .task-project-head:has(.group-more.open) .group-counts { opacity: 0; }
 .group-renaming { grid-template-columns: auto minmax(0, 1fr); padding-left: 22px; }
 .group-fold:hover:not(:disabled) { background: none; }
 .group-fold:focus-visible { outline: 2px solid var(--togle); outline-offset: -2px; }
@@ -287,7 +288,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-project.folded .fold-chevron { transform: rotate(-90deg); }
 .group-rename { min-width: 0; height: 30px; padding: 3px 8px; font-size: 13.5px; font-weight: 650; }
 .task-project-head button.group-more { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border-color: transparent; background: none; color: var(--muted); opacity: 0; }
-.task-project-head:hover button.group-more, .task-project-head:focus-within button.group-more, button.group-more.open { opacity: 1; }
+.task-project-head:hover button.group-more, .task-project-head:has(:focus-visible) button.group-more, button.group-more.open { opacity: 1; }
 .group-empty { margin: 0; padding: 6px 8px 8px; color: var(--muted); font-size: 12px; }
 .task-subject.drop { border-radius: 8px; box-shadow: inset 0 0 0 1px var(--togle); }
 .task-item.dragging { opacity: 0.45; }
@@ -359,19 +360,20 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .tasks-back, .tasks-back-to-task { display: none; }
 /* Where a task is, from its box to it, on one center line: the box's mark and name as in the list, the heading it is under,
    then its own name in the color of the words. Short of room, each part gives up room in step with its length, the box and the
-   heading never more than a third each; narrower, the heading goes, then the box's name, and its mark stays. */
+   heading never more than about a third each. Narrower, the heading goes and the box keeps its third: with one pane, the
+   header is the only place that says where the task is. */
 .task-title { display: flex; flex: 1 1 13rem; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 13px; line-height: 20px; container-type: inline-size; }
 .task-title h2 { flex: 0 1 auto; min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font: 600 13px/20px var(--font-body); text-overflow: ellipsis; white-space: nowrap; }
 .crumb { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 6px; min-width: 0; max-width: 30%; white-space: nowrap; }
 .crumb-place { min-width: 15px; }
 .crumb-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-@container (max-width: 360px) { .crumb-heading, .crumb-heading + .crumb-gap { display: none; } }
-@container (max-width: 260px) { .crumb-place .crumb-words { display: none; } }
+@container (max-width: 360px) { .crumb-heading, .crumb-heading + .crumb-gap { display: none; } .crumb-place { flex-shrink: 0; } }
 .crumb .project-mark.small { margin-right: 0; }
 .crumb-gap { display: inline-grid; flex: none; place-items: center; color: color-mix(in srgb, var(--muted) 70%, transparent); }
 .crumb-gap svg { transform: rotate(-90deg); }
 /* The agent that does it, after how it stands; what comes right after it is set apart by a dot. */
 .task-agent-name { color: var(--muted); font-size: 12px; }
+.task-agent-name + .hint:not(:has(+ .view-switch)) { margin-left: -5px; }
 .task-agent-name + .hint:not(:has(+ .view-switch))::before { content: '·'; }
 .task-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
 .task-actions:empty { display: none; }
