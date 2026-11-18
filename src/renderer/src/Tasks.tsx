@@ -341,7 +341,7 @@ function Counts({ counts }: { counts: Counted }) {
     <span className="group-counts" role="img" aria-label={words} title={words}>
       {!!counts.waiting && <span className="count-pill wait">{counts.waiting}</span>}
       {!!counts.working && <span className="count-pill work">{counts.working}</span>}
-      {!!counts.fresh && <span className="count-pill fresh">{counts.fresh} new</span>}
+      {!!counts.fresh && <span className="count-pill fresh">{counts.fresh}</span>}
     </span>
   )
 }
@@ -629,14 +629,14 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
               <GroupMark group={group} />
               <span className="task-project-title">
                 <span className="task-project-name">{group.name}</span>
-                {/* Under the name, so that the name has all the width: where it is, and what waits, works and is new in it. */}
                 <span className="task-project-sub">
                   <span className="task-project-where" title={group.folder || undefined}>
                     {group.kind === 'project' ? group.where : group.kind === 'scheduled' ? 'Jobs that run by themselves' : group.kind === 'everyday' ? 'Not in a project' : 'Your group'}
                   </span>
-                  {!old && <Counts counts={group.counts} />}
                 </span>
               </span>
+              {/* What waits, works and is new in it, at the head's right, level with its mark: numbers only, the words on the pointer. */}
+              {!old && <Counts counts={group.counts} />}
             </button>
           )}
           {!old && renaming !== group.key && <Menu className="group-more" label={<Icon name="more" size={14} />} ariaLabel={`Change ${group.name}`} title="Rename" align="right" items={menu} />}
