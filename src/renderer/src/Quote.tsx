@@ -34,15 +34,18 @@ export function useQuoteSpot(place: RefObject<HTMLElement | null>, enabled: bool
       const message = messageOf(range.startContainer)
       if (!message || message !== messageOf(range.endContainer) || !box.contains(message)) return setSpot(null)
       const text = cleanQuote(selection.toString())
-      const lines = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0)
-      if (!text || !lines.length) return setSpot(null)
-      const first = lines[0]
-      const last = lines[lines.length - 1]
       const frame0 = box.getBoundingClientRect()
-      // Over the first line, centered on it; under the last line when there is no room over it.
-      const below = first.top - frame0.top < 44
+      // Only the lines in view count: a selection scrolled out of the conversation has no button, which would land on the reply box.
+      const seen = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0 && rect.bottom > frame0.top + 4 && rect.top < frame0.bottom - 4)
+      if (!text || !seen.length) return setSpot(null)
+      const first = seen[0]
+      const last = seen[seen.length - 1]
+      // Over the first line, centered on it; under the last line when there is no room over it; always inside the conversation's height.
+      const room = 36
+      const below = first.top - frame0.top < room + 8
       const x = Math.min(Math.max(first.left + first.width / 2 - frame0.left, 48), Math.max(48, frame0.width - 48))
-      setSpot({ text, x, y: (below ? last.bottom : first.top) - frame0.top, below })
+      const y = below ? Math.min(last.bottom - frame0.top, frame0.height - room - 4) : Math.max(first.top - frame0.top, room + 4)
+      setSpot({ text, x, y, below })
     }
     const soon = (): void => {
       if (!frame) frame = requestAnimationFrame(look)
