@@ -439,7 +439,7 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.task-row[aria-current=\"true\"]').textContent.includes('Take over')"), false, 'no Take over once it is here')
   await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'r7', kind: 'command', command: 'npm run migrate', raw: 'npm run migrate', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
   await ui.wait("document.querySelector('.state-chip')?.textContent==='Waiting for you'")
-  assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false, 'no card over a screen that asks on its own: the notice says it')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false, 'no card over a screen that asks on its own: it is answered there')
   assert.deepEqual(await texts(ui, '.task-actions button'), ['Stop', 'Hand back'], 'it waits: Stop beside Hand back, as the design page has them')
   await ui.capture('tasks-screen')
   // Chat: the card for what it asks, in the same task, and a reply box that takes words all the while: what is sent while it
