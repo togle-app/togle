@@ -201,6 +201,9 @@ function GroupMark({ group, size = 'big' }: { group: Pick<TaskGroup, 'kind' | 'k
   return <span className={`project-mark ${size}`} style={{ background: markColor(group.key) }} data-letter={markLetter(group.name)} aria-hidden="true" />
 }
 
+/** The mark between two parts of where a task is, in its header. */
+const CrumbGap = () => <span className="crumb-gap" aria-hidden="true"><Icon name="chevron" size={12} /></span>
+
 function groupOf(base: Omit<TaskGroup, 'loose' | 'subjects' | 'counts'>, tasks: TaskView[], placed: TaskGroups['placed']): TaskGroup {
   // Scheduled jobs keep the order of their names: a job's row stays where it is as it runs.
   const order = base.kind === 'scheduled' ? (a: TaskView, b: TaskView): number => byName(a.title, b.title) || a.key.localeCompare(b.key) : inOrder
@@ -1174,21 +1177,29 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
     else if (event.key === 'Tab') { event.preventDefault(); setText(listed.kind === 'models' ? `/model ${listed.items[at].id}` : `/${listed.items[at].name} `) }
     else if (event.key === 'Enter') { event.preventDefault(); choose(at) }
   }
+  // Where it is, as the list has it: its box, and the heading it is under there.
+  const where = place ? place.name : kindOf(task) === 'project' ? baseName(task.folder) : kindOf(task) === 'scheduled' ? 'Scheduled' : 'Everyday'
+  const heading = place?.subjects.find((subject) => subject.tasks.some((one) => one.key === task.key))?.name
   return (
     <div className="task-panel">
       <header className="task-header">
         <button className="ghost small tasks-back" onClick={onBack} aria-label="Back to the list">
           <Icon name="back" size={14} />
         </button>
+        {/* From its box to it, on one line: the box's mark and name as in the list, the heading it is under, then its name. */}
         <div className="task-title">
-          <h2 title={task.title}>
-            {task.title}
-            <span className="task-where" title={task.folder}>
-              {' · '}{agentOf(task)}{' · '}
-              {/* Its project's mark, as on its group in the list. */}
-              {place ? <><GroupMark group={place} size="small" />{place.name}</> : kindOf(task) === 'project' ? baseName(task.folder) : kindOf(task) === 'scheduled' ? 'Scheduled' : 'Everyday'}
-            </span>
-          </h2>
+          <span className="crumb crumb-place" title={task.folder || undefined}>
+            {place && <GroupMark group={place} size="small" />}
+            <span className="crumb-words">{where}</span>
+          </span>
+          <CrumbGap />
+          {heading && (
+            <>
+              <span className="crumb crumb-heading" title={heading}><span className="crumb-words">{heading}</span></span>
+              <CrumbGap />
+            </>
+          )}
+          <h2 title={task.title}>{task.title}</h2>
         </div>
         <div className="task-actions">
           {/* Stop, then what follows from it, then Hand back, as the design page has them in a header. */}
@@ -1211,6 +1222,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
       </header>
       <div className="task-status">
         <span className="state-chip" data-state={task.signedOut ? 'failed' : task.state}>{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
+        <span className="task-agent-name">{agentOf(task)}</span>
         {changed > 0 && <span className="hint">{`${changed} ${changed === 1 ? 'file' : 'files'} changed`}</span>}
         {twoViews && (
           <span className="segmented view-switch" role="group" aria-label="View">
@@ -1467,11 +1479,20 @@ function RemotePanel({ device, task, now, onBack, act }: { device: DeviceTasks; 
         <button className="ghost small tasks-back" onClick={onBack} aria-label="Back to the list">
           <Icon name="back" size={14} />
         </button>
+        {/* From the device to it, as for a task here: the device, the folder it works in, then its name. */}
         <div className="task-title">
-          <h2 title={task.title}>
-            {task.title}
-            <span className="task-where"> · {task.agent} · {task.folder}</span> <span className="task-device-chip">{device.name}</span>
-          </h2>
+          <span className="crumb crumb-place" title={device.name}>
+            <span className="project-mark small device-mark" aria-hidden="true"><Icon name={device.role === 'phone' ? 'phone' : 'monitor'} size={10} /></span>
+            <span className="crumb-words">{device.name}</span>
+          </span>
+          <CrumbGap />
+          {!task.terminal && task.folder && (
+            <>
+              <span className="crumb crumb-heading" title={task.folder}><span className="crumb-words">{task.folder}</span></span>
+              <CrumbGap />
+            </>
+          )}
+          <h2 title={task.title}>{task.title}</h2>
         </div>
         <div className="task-actions">
           {here && running && <button className="small" disabled={!device.online} onClick={() => act({ what: 'stop', task: task.key })}>Stop</button>}
@@ -1484,6 +1505,7 @@ function RemotePanel({ device, task, now, onBack, act }: { device: DeviceTasks; 
       </header>
       <div className="task-status">
         <span className="state-chip" data-state={task.state}>{STATE_WORDS[task.state]}</span>
+        <span className="task-agent-name">{task.agent}</span>
         {!running && <span className="hint">{ago(task.updatedAt, now)}</span>}
       </div>
 

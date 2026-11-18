@@ -146,7 +146,8 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.task-log').getAttribute('aria-label')"), 'The conversation')
   assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Waiting for you')
   assert.ok((await ui.evaluate("document.querySelector('.task-status .hint').textContent")).startsWith('2 files changed'))
-  assert.equal(await ui.evaluate("document.querySelector('.task-where').textContent"), ' · Codex · api-server', 'the agent and the folder beside its name')
+  assert.deepEqual(await texts(ui, '.task-title .crumb-words, .task-title h2'), ['api-server', 'Add the status column'], 'its box, then its name')
+  assert.equal(await ui.evaluate("document.querySelector('.task-agent-name').textContent"), 'Codex', 'the agent after how it stands')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request .hint')"), false, 'no folder line under the command')
   assert.ok((await ui.evaluate("document.querySelector('.task-reply textarea').placeholder")) === 'Reply, or hold F9 and talk')
   assert.ok(await ui.evaluate("(()=>{const pane=document.querySelector('.tasks-detail').getBoundingClientRect(),box=document.querySelector('.task-reply-place').getBoundingClientRect();return Math.abs(pane.bottom-14-box.bottom)<=2})()"), 'the reply box is at the foot of the pane, however short the conversation is')
@@ -295,13 +296,13 @@ async function checkTasks(T, agent) {
   assert.deepEqual((await sent()).slice(1), ['/context', '/model haiku', '/compact', '/compact keep the pricing decisions'])
   // An agent that tells no commands lists none: the slash is a word like any other.
   await ui.task('Add the status column')
-  await ui.wait("document.querySelector('.task-where').textContent.includes('Codex')")
+  await ui.wait("document.querySelector('.task-agent-name')?.textContent==='Codex'")
   await ui.fill('.task-reply textarea', '/')
   await ui.paint()
   assert.equal(await ui.evaluate("!!document.querySelector('.slash-list')"), false)
   await ui.fill('.task-reply textarea', '')
   await ui.task('Rebuild the pricing page')
-  await ui.wait("document.querySelector('.task-where').textContent.includes('Claude Code')")
+  await ui.wait("document.querySelector('.task-agent-name')?.textContent==='Claude Code'")
 
   // A task Togle does not run shows its conversation as its agent keeps it, in the open, with the steps between folded: the last turns
   // first, and "Show earlier" brings the ones before. Nothing can be replied to: it is not Togle's to answer.
@@ -409,7 +410,7 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await ui.evaluate("[...document.querySelector('.task-steps').querySelectorAll('.fold-body > .task-agent, .fold-body .task-cmd code')].map(e=>e.textContent)"), ['Step 1 of the plan.', 'npm run step1', 'Step 2 of the plan.', 'npm run step2'], 'opened, the earlier parts in order')
   // A task that keeps no conversation to read shows what happened while Togle watched.
   await ui.task('Rebuild the pricing page')
-  await ui.wait("document.querySelector('.task-where').textContent.includes('Claude Code')")
+  await ui.wait("document.querySelector('.task-agent-name')?.textContent==='Claude Code'")
 
   // A task in a terminal can be seen and, after a warning, taken over: from the task, or from its row.
   await ui.task('Write the release notes')
@@ -1096,6 +1097,8 @@ async function checkReach(T, agent) {
   await ui.wait("document.querySelector('.task-command')?.textContent==='terraform apply -var-file=staging.tfvars'")
   const panel = await ui.evaluate("document.querySelector('.task-panel').innerText")
   assert.match(panel, /build-server/)
+  assert.deepEqual(await texts(ui, '.task-title .crumb-words, .task-title h2'), ['build-server', 'infra', 'Apply the staging plan'], 'from the device to it')
+  assert.equal(await ui.evaluate("document.querySelector('.task-agent-name').textContent"), 'Codex', 'the agent after how it stands')
   assert.match(panel, /Allow it on build-server/, 'Allow stays on its own computer until the proof that you are there is built')
   assert.equal(await ui.evaluate("[...document.querySelectorAll('.task-request button')].some(b=>b.textContent.trim()==='Allow once')"), false)
   await ui.capture('reach-agents')
@@ -1611,7 +1614,10 @@ async function checkGroups(T, agent) {
   await ui.wait(subject('Pricing page') + ".querySelectorAll('.task-row').length===3")
   assert.equal(await ui.evaluate(fold('Pricing page') + ".getAttribute('aria-expanded')"), 'true', 'opened, its rows are back')
   // The open task's header has its project's mark, the same letter on the same color as its group in the list.
-  assert.deepEqual(await ui.evaluate("[document.querySelector('.task-where .project-mark'), " + website + ".querySelector('.project-mark')].map(m=>m.dataset.letter+' '+getComputedStyle(m).backgroundColor)").then((both) => both[0] === both[1]), true, 'the same mark in the header as on its group')
+  assert.deepEqual(await ui.evaluate("[document.querySelector('.task-title .crumb-place .project-mark'), " + website + ".querySelector('.project-mark')].map(m=>m.dataset.letter+' '+getComputedStyle(m).backgroundColor)").then((both) => both[0] === both[1]), true, 'the same mark in the header as on its group')
+  // And where it is, from its box to it, on one center line: the box, the heading it is under, then its name.
+  assert.deepEqual(await texts(ui, '.task-title .crumb-words, .task-title h2'), ['website', 'Pricing page', 'Check the pricing tests'], 'from its box to it')
+  assert.ok(await ui.evaluate("(()=>{const mid=e=>{const b=e.getBoundingClientRect();return b.top+b.height/2};const parts=[...document.querySelectorAll('.task-title > *, .task-title .project-mark, .task-title .crumb-words')];return parts.length===8&&parts.every(e=>Math.abs(mid(e)-mid(parts[0]))<=0.5)})()"), 'on one center line')
   // Work in no project (no folder, or the home folder) and scheduled jobs: groups of their own, in places that do not change.
   const add = (props) => ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ terminal: false, mine: false, state: 'idle', line: '', ...props }) + ', "")')
   await add({ key: 'hermes:e1', runner: 'hermes', title: 'Plan the team offsite', folder: '' })
@@ -1782,7 +1788,7 @@ async function checkArrange(T, agent) {
   await pause(250)
   assert.deepEqual(await titles(box('Launch week')), ['Fix the login redirect'], 'a subject given later does not move it')
   await ui.task('Fix the login redirect')
-  await ui.wait("document.querySelector('.task-where')?.textContent.includes('Launch week')")
+  await ui.wait("document.querySelector('.task-title .crumb-place')?.textContent==='Launch week'")
   // A group folded: its rows go and its counts stay. A task dragged over it and held there opens it, and it folds again when
   // the task goes elsewhere; dropped in, it opens for good with the task in it. Folded, it stays folded.
   await ui.evaluate(box('website') + ".querySelector('.group-fold').click()")
