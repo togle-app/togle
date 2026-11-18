@@ -2065,6 +2065,32 @@ async function checkKept(T, agent) {
   ui.window.destroy()
 }
 
+// A secret an agent asks for (a password box) is never kept with the drafts: not when another place is shown and this one again, and
+// not in the box that comes after the question, which has what was typed before it.
+async function checkSecret(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("!!document.querySelector('.task-reply textarea')")
+  await ui.fill('.task-reply textarea', 'Words typed before the question')
+  await ui.evaluate('window.togleUITest.setTask("claude:s2",{state:"waiting",pending:[{id:"sec1",kind:"question",questions:[{id:"0",text:"Your API key?",options:[],free:true,secret:true}],offersAlways:false}]})')
+  await ui.wait("!!document.querySelector('.task-reply input[type=password]')")
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply input[type=password]').value"), '', 'the password box starts empty, not with the words typed before')
+  await ui.fill('.task-reply input[type=password]', 'hunter2-not-kept')
+  await ui.click('.workspace-nav button', 'Meetings')
+  await ui.wait("!document.querySelector('.tasks')")
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("!!document.querySelector('.task-reply input[type=password]')")
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply input[type=password]').value"), '', 'a secret is not kept when another place is shown')
+  await ui.fill('.task-reply input[type=password]', 'hunter3-not-kept')
+  await ui.evaluate('window.togleUITest.setTask("claude:s2",{state:"idle",pending:[]})')
+  await ui.wait("!!document.querySelector('.task-reply textarea')")
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), 'Words typed before the question', 'the box after the question has what was typed before it, and never the secret')
+  assert.equal(await ui.evaluate("document.body.innerText.includes('hunter')"), false, 'it is nowhere on the page')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 // The window's bar and rail: Togle's mark beside its name, the three buttons of a window (minimize, maximize or restore as the
 // window is, close), and each place's icon beside its name on a wide window, alone in a narrow one.
 async function checkWindowBar(T, agent) {
@@ -2244,6 +2270,7 @@ app.whenReady().then(async () => {
     await checkQuote(T, agent)
     await checkInterrupt(T, agent)
     await checkKept(T, agent)
+    await checkSecret(T, agent)
     await checkArrange(T, agent)
     await checkGroups(T, agent)
     await checkTasks(T, agent)

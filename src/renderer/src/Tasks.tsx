@@ -1035,8 +1035,15 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const twoViews = task.mine && !!task.screen
   // The agent's own screen is on screen: no card over it and no reply box, because what it asks is answered on it.
   const sessionShown = task.terminal && (!task.screen || view === 'session')
-  // What is typed for a task stays with it, when another task or another place is shown and then this one again.
-  const [text, setText] = useKeptState(`reply:${task.key}`, '')
+  // What is typed for a task stays with it, when another task or another place is shown and then this one again. A secret (what an
+  // agent asks for in a password box) is never kept: it has a box of its own, which goes with the place, and the words typed before
+  // are still there when the question is over.
+  const secretAsked = task.pending.some((request) => request.kind === 'question' && !!request.questions?.[0]?.secret)
+  const [typed, setTyped] = useKeptState(`reply:${task.key}`, '')
+  const [hidden, setHidden] = useState('')
+  useEffect(() => { if (!secretAsked) setHidden('') }, [secretAsked])
+  const text = secretAsked ? hidden : typed
+  const setText = (value: string): void => (secretAsked ? setHidden(value) : setTyped(value))
   // A part of a message the person is answering (Quote over a selection): it goes with their next reply, and with no other.
   const [quoted, setQuoted] = useKeptState<string | null>(`quote:${task.key}`, null)
   const thread = useRef<HTMLDivElement>(null)
