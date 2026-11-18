@@ -437,7 +437,6 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'nothing to stop: it is done')
   assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Done')
   assert.equal(await ui.evaluate("document.querySelector('.task-row[aria-current=\"true\"]').textContent.includes('Take over')"), false, 'no Take over once it is here')
-  assert.deepEqual((await ui.calls('taskSessionShown')).map(call => call.args).at(-1), ['claude:s4'], 'the window says which screen it shows, so that a notice still comes over it')
   await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'r7', kind: 'command', command: 'npm run migrate', raw: 'npm run migrate', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
   await ui.wait("document.querySelector('.state-chip')?.textContent==='Waiting for you'")
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false, 'no card over a screen that asks on its own: the notice says it')
@@ -448,7 +447,6 @@ async function checkTasks(T, agent) {
   await ui.click('.view-switch button', 'Chat')
   await ui.wait("!!document.querySelector('.task-request')")
   assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal')"), false, 'Web does not show the screen')
-  assert.deepEqual((await ui.calls('taskSessionShown')).map(call => call.args).at(-1), [null], 'and the window says it shows none')
   assert.deepEqual(await texts(ui, '.task-request button'), ['Allow once', 'Refuse'], 'the same card as anywhere')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request .hint')"), false, 'it says nothing of a screen to answer on')
   assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').disabled"), false, 'it takes words while the agent asks')
@@ -487,7 +485,6 @@ async function checkTasks(T, agent) {
   await ui.click('.view-switch button', 'Terminal')
   await ui.wait("!!document.querySelector('.task-terminal')")
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false)
-  assert.deepEqual((await ui.calls('taskSessionShown')).map(call => call.args).at(-1), ['claude:s4'])
   // Hand back closes the screen here and gives the line that opens it in the person's own terminal. The task goes on.
   await ui.click('.task-actions button', 'Hand back')
   await ui.wait("!!document.querySelector('.handed-back')")

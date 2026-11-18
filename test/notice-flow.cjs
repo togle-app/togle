@@ -151,15 +151,11 @@ async function run() {
   await wait(() => icon.tooltip.includes('1 task waiting for you'), 'the tray to say so')
   await sleep(400)
   assert.equal(await js(notice, "!!document.querySelector('.task-notice')"), false, 'no notice while Togle itself is in front')
-  // Only the main window can say which screen it shows: another window's word changes nothing.
-  await js(notice, "window.togle.taskSessionShown('hermes:elsewhere')")
+  // Nor over the task that waits, open in that window (its own screen, or its Chat): the person is looking at it.
+  main.webContents.send('tasks:show', second.key)
+  await wait(() => js(main, "document.querySelector('.task-title h2')?.firstChild?.textContent==='Second task'"), 'the task that waits to open in the window')
   await sleep(400)
-  assert.equal(await js(notice, "!!document.querySelector('.task-notice')"), false, 'a message from another window changes nothing')
-  // An agent's own screen on screen has no card over it, so what it asks is said in a notice all the same, though Togle is in front.
-  await js(main, "window.togle.taskSessionShown('hermes:session')")
-  await wait(() => js(notice, "document.querySelector('.task-notice-head strong')?.textContent==='Second task'"), 'the notice over a screen that is shown, though Togle is in front')
-  await js(main, "window.togle.taskSessionShown(null)")
-  await wait(async () => !(await js(notice, "!!document.querySelector('.task-notice')")), 'the notice to go once no screen is shown')
+  assert.equal(await js(notice, "!!document.querySelector('.task-notice')"), false, 'no notice over the task that waits while Togle is in front')
   main.isFocused = () => false
   main.emit('blur')
   await wait(() => js(notice, "document.querySelector('.task-notice-head strong')?.textContent==='Second task'"), 'the notice, once Togle went behind')

@@ -163,7 +163,6 @@ const api: TogleApi = {
   openTaskFromNotice: key => ipcRenderer.send('notice:open', key),
   dismissTaskNotice: id => ipcRenderer.send('notice:dismiss', id),
   onShowTask: cb => subscribe('tasks:show', cb),
-  taskSessionShown: key => ipcRenderer.send('tasks:session-shown', key),
   taskOnScreen: key => ipcRenderer.send('tasks:on-screen', key),
   taskGroups: () => ipcRenderer.invoke('runners:groups'),
   changeTaskGroups: change => ipcRenderer.invoke('runners:groups-change', change),

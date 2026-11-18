@@ -506,11 +506,6 @@ async function setVoiceBar(visible: boolean): Promise<void> {
 function mainWindowActive(): boolean {
   return !!win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && win.isFocused()
 }
-/**
- * The task whose agent screen the window shows. The screen has no card over it, so what it asks is not said anywhere else:
- * while one is on screen, a notice comes even though Togle's window is in front.
- */
-let sessionShown: string | null = null
 /** The tasks that finished since the person last had them on screen (titles.ts): "done · new" in the list. */
 const freshTasks = new StoredFresh(() => mainWindowActive())
 /** Tells the person what waits for them: a small notice while Togle's window is not in front, and a dot on the tray. */
@@ -530,7 +525,9 @@ function refreshNotices(): void {
   }
   const finishedNews = look.finished.length ? look.finished[look.finished.length - 1] : finishedDuringCall
   finishedDuringCall = undefined
-  if (mainWindowActive() && !sessionShown) { noticeWindow.show(null); return }
+  // While the person works in Togle's window nothing pops up over it, on whatever view: the list, the To-do count and the
+  // screen on show say what waits, and the tray's dot counts. A notice comes once the window is not in front.
+  if (mainWindowActive()) { noticeWindow.show(null); return }
   // Settings → Coding agents can turn either notice off; the tray's dot stays.
   const { notices, finished } = getSettings().tasks
   const first = notices ? look.notices[0] : undefined
@@ -829,10 +826,8 @@ function createWindow(): void {
   let savedForClose = false
   win.webContents.on('did-start-loading', () => {
     if (pageLoads++) restoredFrom = undefined
-    // A page that loads again (or crashed) shows no screen until it says so: it cannot have said it no longer does. The same
-    // for the task it had on screen: until it says again, a task that finishes is new.
+    // A page that loads again (or crashed) has no task on screen until it says so: until it says again, a task that finishes is new.
     freshTasks.shown(null)
-    if (sessionShown) { sessionShown = null; refreshNotices() }
   })
   win.on('unresponsive', () => (pageDown = true))
   win.on('responsive', () => (pageDown = false))
@@ -1642,14 +1637,6 @@ function registerIpc(): void {
   ipcMain.on('tasks:on-screen', (event, key: unknown) => {
     if (!win || win.isDestroyed() || event.sender !== win.webContents) return
     if (freshTasks.shown(typeof key === 'string' && key ? key : null)) send('runners:changed', null)
-  })
-  // Which agent screen the window shows, told by the window itself.
-  ipcMain.on('tasks:session-shown', (event, key: unknown) => {
-    if (!win || win.isDestroyed() || event.sender !== win.webContents) return
-    const next = typeof key === 'string' && key ? key : null
-    if (next === sessionShown) return
-    sessionShown = next
-    refreshNotices()
   })
   // F8 Show's overlay: the frozen screen it shows, and the picture or the cancel it gives back.
   ipcMain.handle('show:picture', (event) => (showWindow.owns(event.sender) ? showWindow.picture() : null))

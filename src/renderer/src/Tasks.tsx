@@ -460,14 +460,6 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   const detail: TaskDetail | null = listed ? { task: listed, log: log?.key === listed.key ? log.entries : [] } : null
   const logRead = !!listed && (log?.key === listed.key || !listed.mine)
 
-  // The window says which agent screen it shows (one with no card over it), so that a notice still comes over it.
-  const sessionKey = detail && detail.task.mine && detail.task.terminal && (!detail.task.screen || views.of(detail.task.key) === 'session') ? detail.task.key : null
-  useEffect(() => {
-    api.taskSessionShown(sessionKey)
-  }, [sessionKey])
-  // Away from the Tasks screen, none is shown. (Not on every change of the task: a pick of another screen would flash the notice away.)
-  useEffect(() => () => api.taskSessionShown(null), [])
-
   // Opened on a task from outside: it is the one shown.
   useEffect(() => {
     if (!focus?.key) return

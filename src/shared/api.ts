@@ -266,8 +266,6 @@ export interface TogleApi {
   dismissTaskNotice(id: string): void
   /** Togle was opened on a task, from a notice or the tray: show it. */
   onShowTask(cb: (key: string) => void): Unsubscribe
-  /** The task whose agent screen the window shows now (null: none). No card shows what it asks, so a notice still comes over it. */
-  taskSessionShown(key: string | null): void
   /** The task the window has on screen (Agents, with the task open), or none: a task that finished is not new once seen. */
   taskOnScreen(key: string | null): void
   /** The person's own arrangement of the Agents list: groups they made, names they gave, tasks they moved. */
