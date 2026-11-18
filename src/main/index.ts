@@ -815,7 +815,9 @@ function createWindow(): void {
   let savedForClose = false
   win.webContents.on('did-start-loading', () => {
     if (pageLoads++) restoredFrom = undefined
-    // A page that loads again (or crashed) shows no screen until it says so: it cannot have said it no longer does.
+    // A page that loads again (or crashed) shows no screen until it says so: it cannot have said it no longer does. The same
+    // for the task it had on screen: until it says again, a task that finishes is new.
+    freshTasks.shown(null)
     if (sessionShown) { sessionShown = null; refreshNotices() }
   })
   win.on('unresponsive', () => (pageDown = true))
