@@ -8,7 +8,7 @@ import { Icon } from './Icon'
 import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, WaitLine } from './kept'
 import { Menu } from './Menu'
 import { PointMenu, type Point } from './PointMenu'
-import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, type GroupChange, type TaskGroups } from '@shared/task-groups'
+import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { RequestCard } from './RequestCard'
 import { clock, currentPlan, lastTurnKey, PlanCard, Thread, turnStart, useHistory } from './TaskThread'
 import { TerminalView } from './TerminalView'
@@ -167,6 +167,13 @@ function markColor(key: string): string {
 const markLetter = (name: string): string => (name.match(/[\p{L}\p{N}]/u)?.[0] ?? '?').toLocaleUpperCase()
 
 type GroupKind = 'made' | 'scheduled' | 'everyday' | 'project'
+/** What waits for you, works and is new among some tasks. */
+interface Counted {
+  waiting: number
+  working: number
+  fresh: number
+}
+const countsOf = (tasks: TaskView[]): Counted => ({ waiting: tasks.filter(needsYou).length, working: tasks.filter((task) => task.state === 'working').length, fresh: tasks.filter(isFresh).length })
 interface TaskGroup {
   key: string
   kind: GroupKind
@@ -176,8 +183,8 @@ interface TaskGroup {
   where: string
   /** Its tasks under no heading: one just started, one alone in its subject, one the person dropped on the group, or all of them while sorting is off. */
   loose: TaskView[]
-  subjects: { name: string; tasks: TaskView[] }[]
-  counts: { waiting: number; working: number; fresh: number }
+  subjects: { name: string; tasks: TaskView[]; counts: Counted }[]
+  counts: Counted
   /** A group of Togle's own that the person gave a name: its own name can be given back. */
   renamed: boolean
 }
@@ -210,8 +217,8 @@ function groupOf(base: Omit<TaskGroup, 'loose' | 'subjects' | 'counts'>, tasks: 
   return {
     ...base,
     loose: tasks.filter((task) => !underHeading.has(task.key)).sort(order),
-    subjects: headed.sort(([a], [b]) => byName(a, b)).map(([subject, list]) => ({ name: subject, tasks: list.sort(order) })),
-    counts: { waiting: tasks.filter(needsYou).length, working: tasks.filter((task) => task.state === 'working').length, fresh: tasks.filter(isFresh).length }
+    subjects: headed.sort(([a], [b]) => byName(a, b)).map(([subject, list]) => ({ name: subject, tasks: list.sort(order), counts: countsOf(list) })),
+    counts: countsOf(tasks)
   }
 }
 
@@ -321,8 +328,8 @@ function useFolded(): [Set<string>, (key: string) => void] {
 /** What a dragged task carries: its key. */
 const DRAG = 'application/x-togle-task'
 
-/** What waits, works and is new in a group: numbers in the colors of the dots that say it, and the words for a screen reader. */
-function Counts({ counts }: { counts: TaskGroup['counts'] }) {
+/** What waits, works and is new in a group or a folded heading: numbers in the colors of the dots that say it, and the words for a screen reader. */
+function Counts({ counts }: { counts: Counted }) {
   const words = [counts.waiting && `${counts.waiting} waiting`, counts.working && `${counts.working} working`, counts.fresh && `${counts.fresh} new`].filter(Boolean).join(', ')
   if (!words) return null
   return (
@@ -564,6 +571,8 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   // A group is a box. Its head folds it (a folded box keeps its counts and still takes a dropped task) and has its own menu
   // beside: Rename, Togle's own name back, Delete a group the person made. Its mark (a letter on its color; a clock for
   // scheduled jobs, a house for Everyday), its name, where a project's folder is, and what waits, works and is new in it.
+  // A subject heading in it folds the same way: it says how many tasks it holds and, folded, what waits, works and is new
+  // in them; it still takes a dropped task, and it shows when the task open is in it. Its tasks hang from it on a line.
   const groupBox = (group: TaskGroup, old: boolean): ReactNode => {
     const isFolded = folded.has(group.key)
     const hasOpen = isFolded && [...group.loose, ...group.subjects.flatMap((subject) => subject.tasks)].some((task) => task.key === selected)
@@ -614,12 +623,22 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
         {!isFolded && (
           <>
             {!!group.loose.length && <div className="task-list" role="list">{group.loose.map((task) => row(task, old))}</div>}
-            {group.subjects.map((subject) => (
-              <div key={subject.name} className={`task-subject${dropAt === `${group.key}|${subject.name}` ? ' drop' : ''}`} role="group" aria-label={subject.name} {...dropOn(group.key, subject.name)}>
-                <span className="task-subject-name">{subject.name}</span>
-                <div className="task-list" role="list">{subject.tasks.map((task) => row(task, old))}</div>
-              </div>
-            ))}
+            {group.subjects.map((subject) => {
+              const subjectIsFolded = subjectFolded(arrangement, group.key, subject.name)
+              const holdsOpen = subjectIsFolded && subject.tasks.some((task) => task.key === selected)
+              const held = `${subject.tasks.length} tasks`
+              return (
+                <div key={subject.name} className={`task-subject${subjectIsFolded ? ' folded' : ''}${dropAt === `${group.key}|${subject.name}` ? ' drop' : ''}${holdsOpen ? ' has-open' : ''}`} role="group" aria-label={subject.name} {...dropOn(group.key, subject.name)}>
+                  <button type="button" className="subject-fold" aria-expanded={!subjectIsFolded} onClick={() => changeGroups({ kind: 'fold-subject', group: group.key, subject: subject.name, folded: !subjectIsFolded })}>
+                    <span className="fold-chevron" aria-hidden="true"><Icon name="chevron" size={11} /></span>
+                    <span className="task-subject-name" title={subject.name}>{subject.name}</span>
+                    <span className="subject-count" role="img" aria-label={held} title={held}>{subject.tasks.length}</span>
+                    {subjectIsFolded && !old && <Counts counts={subject.counts} />}
+                  </button>
+                  {!subjectIsFolded && <div className="task-list" role="list">{subject.tasks.map((task) => row(task, old))}</div>}
+                </div>
+              )
+            })}
             {group.kind === 'made' && !group.loose.length && !group.subjects.length && <p className="group-empty">Drag a task here, or right-click one and pick Move to.</p>}
           </>
         )}

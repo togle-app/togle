@@ -289,7 +289,7 @@ module.exports = function install(fixture) {
     if (found?.fresh) { found.fresh = false; runnerChanged() }
   }
   // The person's own arrangement of the list, in memory, changed as main changes it (task-groups.ts, in short).
-  let groups = clone(fixture.groups ?? { made: [], names: {}, placed: {} })
+  let groups = clone(fixture.groups ?? { made: [], names: {}, placed: {}, folded: [] })
   api.taskGroups = async () => clone(groups)
   api.changeTaskGroups = async change => {
     record('changeTaskGroups', [change])
@@ -298,9 +298,13 @@ module.exports = function install(fixture) {
     if (change.kind === 'make' && change.name.trim() && !next.made.some(group => group.id === change.id)) next.made.push({ id: change.id, name: change.name.trim() })
     else if (change.kind === 'rename' && change.group.startsWith('made:')) { const group = next.made.find(item => 'made:' + item.id === change.group); if (group && change.name.trim()) group.name = change.name.trim() }
     else if (change.kind === 'rename') { if (change.name.trim()) next.names[change.group] = change.name.trim(); else delete next.names[change.group] }
-    else if (change.kind === 'remove' && made(change.group)) { next.made = next.made.filter(group => 'made:' + group.id !== change.group); for (const [task, at] of Object.entries(next.placed)) if (at.group === change.group) delete next.placed[task] }
+    else if (change.kind === 'remove' && made(change.group)) { next.made = next.made.filter(group => 'made:' + group.id !== change.group); for (const [task, at] of Object.entries(next.placed)) if (at.group === change.group) delete next.placed[task]; next.folded = next.folded.filter(at => at.group !== change.group) }
     else if (change.kind === 'place' && change.group !== 'scheduled' && (!change.group.startsWith('made:') || made(change.group))) next.placed[change.task] = change.subject ? { group: change.group, subject: change.subject } : { group: change.group }
     else if (change.kind === 'put-back') delete next.placed[change.task]
+    else if (change.kind === 'fold-subject') {
+      next.folded = next.folded.filter(at => !(at.group === change.group && at.subject.toLowerCase() === change.subject.toLowerCase()))
+      if (change.folded) next.folded.push({ group: change.group, subject: change.subject })
+    }
     groups = next
     return clone(groups)
   }

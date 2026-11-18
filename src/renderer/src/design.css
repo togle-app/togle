@@ -305,8 +305,19 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-project .task-row { padding: 7px 8px; border-color: transparent; }
 .task-project .task-row:hover:not(:disabled) { border-color: transparent; background: color-mix(in srgb, var(--ink) 6%, transparent); }
 .task-project .task-row.selected, .task-project .task-row.selected:hover:not(:disabled) { border-color: var(--ink); background: transparent; }
-.task-subject { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-top: 6px; }
-.task-subject-name { overflow: hidden; padding: 0 8px; color: var(--muted); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+/* A subject in a group: a heading in the color of the words that folds like the group's head (smaller, with no mark), with
+   how many tasks it holds and, folded, what waits, works and is new in them. Its tasks hang from it on a line that starts
+   under its arrow, so it is plain which tasks are under it and which are under no heading. */
+.task-subject { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-top: 4px; border-radius: 8px; }
+.subject-fold { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; height: auto; padding: 6px 8px 5px 6px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; text-align: left; }
+.subject-fold:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.subject-fold:focus-visible { outline: 2px solid var(--togle); outline-offset: -2px; }
+.task-subject.folded .fold-chevron { transform: rotate(-90deg); }
+.task-subject.has-open > .subject-fold { box-shadow: inset 0 0 0 1px var(--ink); }
+.task-subject-name { min-width: 0; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.subject-count { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.subject-fold .group-counts { margin-left: auto; }
+.task-subject > .task-list { margin-left: 12px; padding-left: 6px; border-left: 1px solid color-mix(in srgb, var(--muted) 35%, transparent); }
 .task-copy span.task-new { color: var(--togle); font-weight: 600; }
 .task-item { position: relative; }
 .task-row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; }

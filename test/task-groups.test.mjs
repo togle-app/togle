@@ -1,5 +1,5 @@
-// The person's own arrangement of the Agents list (task-groups.ts): groups they make, names they give, tasks they move, and
-// main's store of it (titles.ts). Only what fits is kept.
+// The person's own arrangement of the Agents list (task-groups.ts): groups they make, names they give, tasks they move,
+// headings they fold, and main's store of it (titles.ts). Only what fits is kept.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
@@ -39,12 +39,69 @@ test('a group of Togle\'s keeps the name the person gave it, and an empty name g
 })
 
 test('what was kept or sent is cleaned: odd ids, empty names, a place in Scheduled are left out', () => {
-  assert.deepEqual(T.cleanGroups({ made: [{ id: 'OK!', name: 'x' }, { id: 'g2abc', name: '' }, { id: 'g3abc', name: 'Team' }], names: { everyday: 'Home', bad: 5 }, placed: { a: { group: 'scheduled' }, b: { group: 'made:g3abc', subject: 'Plans' }, c: { group: '' } } }), {
+  assert.deepEqual(T.cleanGroups({
+    made: [{ id: 'OK!', name: 'x' }, { id: 'g2abc', name: '' }, { id: 'g3abc', name: 'Team' }],
+    names: { everyday: 'Home', bad: 5 },
+    placed: { a: { group: 'scheduled' }, b: { group: 'made:g3abc', subject: 'Plans' }, c: { group: '' } },
+    folded: [{ group: 'everyday', subject: ' Email ' }, { group: 'everyday', subject: 'EMAIL' }, { group: 'scheduled', subject: 'Jobs' }, { group: 'everyday', subject: '' }, 'odd', null]
+  }), {
     made: [{ id: 'g3abc', name: 'Team' }],
     names: { everyday: 'Home' },
-    placed: { b: { group: 'made:g3abc', subject: 'Plans' } }
+    placed: { b: { group: 'made:g3abc', subject: 'Plans' } },
+    folded: [{ group: 'everyday', subject: 'Email' }]
   })
   assert.deepEqual(T.cleanGroups('not this'), T.NO_GROUPS)
+  assert.deepEqual(T.cleanGroups({ made: [], names: {}, placed: {} }).folded, [], 'kept before headings folded: none is')
+})
+
+test('a subject heading folded stays folded, under its new name too, and goes with the group it is in', () => {
+  const website = 'project:c:\\work\\website'
+  let groups = T.applyGroupChange(T.NO_GROUPS, { kind: 'fold-subject', group: website, subject: 'Signup', folded: true })
+  assert.deepEqual(groups.folded, [{ group: website, subject: 'Signup' }])
+  assert.equal(T.subjectFolded(groups, website, 'SIGNUP'), true, 'the same heading in another case')
+  assert.equal(T.subjectFolded(groups, 'everyday', 'Signup'), false, 'a heading of that name in another group is not')
+  assert.equal(T.applyGroupChange(groups, { kind: 'fold-subject', group: website, subject: 'signup', folded: true }), groups, 'folded already: nothing changes')
+  assert.equal(T.applyGroupChange(groups, { kind: 'fold-subject', group: website, subject: 'Blog', folded: 'yes' }), groups, 'only a yes or a no')
+  assert.equal(T.applyGroupChange(groups, { kind: 'fold-subject', group: 'scheduled', subject: 'Jobs', folded: true }), groups, 'Scheduled has no headings')
+  // Togle's sorting gives it another name: folded still. A heading it is not, nor one in another group, is left as it is.
+  groups = T.applyGroupChange(groups, { kind: 'fold-subject', group: 'everyday', subject: 'Signup', folded: true })
+  groups = T.applyGroupChange(groups, { kind: 'rename-subject', group: website, from: 'signup', to: 'Authentication' })
+  assert.deepEqual(groups.folded, [{ group: 'everyday', subject: 'Signup' }, { group: website, subject: 'Authentication' }])
+  const open = T.applyGroupChange(T.NO_GROUPS, { kind: 'place', task: 'codex:t1', group: website, subject: 'Blog' })
+  assert.deepEqual(T.applyGroupChange(open, { kind: 'rename-subject', group: website, from: 'Blog', to: 'Writing' }).folded, [], 'one not folded stays open')
+  // Joined to a heading that was folded too: one fold, under the name it joined.
+  groups = T.applyGroupChange(groups, { kind: 'fold-subject', group: website, subject: 'Login', folded: true })
+  groups = T.applyGroupChange(groups, { kind: 'rename-subject', group: website, from: 'Login', to: 'authentication' })
+  assert.deepEqual(groups.folded.filter((at) => at.group === website), [{ group: website, subject: 'authentication' }])
+  // Opened again.
+  groups = T.applyGroupChange(groups, { kind: 'fold-subject', group: website, subject: 'Authentication', folded: false })
+  assert.deepEqual(groups.folded, [{ group: 'everyday', subject: 'Signup' }])
+  // A made group deleted: its headings' folds go with it.
+  groups = T.applyGroupChange(groups, { kind: 'make', id: 'g1abc', name: 'Launch' })
+  groups = T.applyGroupChange(groups, { kind: 'fold-subject', group: 'made:g1abc', subject: 'Plans', folded: true })
+  groups = T.applyGroupChange(groups, { kind: 'remove', group: 'made:g1abc' })
+  assert.deepEqual(groups.folded, [{ group: 'everyday', subject: 'Signup' }])
+})
+
+test('main keeps a folded heading between runs', async () => {
+  const fs = await import('node:fs/promises')
+  // Where what is kept goes, in this test (the stand-in for Electron reads it).
+  const folder = path.join(here, '.work', 'task-groups-' + process.pid)
+  await fs.rm(folder, { recursive: true, force: true })
+  await fs.mkdir(folder, { recursive: true })
+  process.env.TOGLE_TEST_USER_DATA = folder
+  try {
+    const first = new T.StoredGroups('runner-groups.json')
+    await first.load()
+    first.change({ kind: 'fold-subject', group: 'everyday', subject: 'Email', folded: true })
+    const kept = () => fs.readFile(path.join(folder, 'runner-groups.json'), 'utf8').catch(() => '')
+    for (let n = 0; n < 150 && !(await kept()).includes('Email'); n++) await new Promise((resolve) => setTimeout(resolve, 20))
+    const second = new T.StoredGroups('runner-groups.json')
+    await second.load()
+    assert.deepEqual(second.get().folded, [{ group: 'everyday', subject: 'Email' }])
+  } finally {
+    await fs.rm(folder, { recursive: true, force: true })
+  }
 })
 
 test('main keeps the arrangement and gives it back as it is after each change', () => {

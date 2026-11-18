@@ -76,6 +76,8 @@ async function open(T, agent, width, surface, extra = {}) {
 }
 
 const texts = (ui, selector) => ui.evaluate("[...document.querySelectorAll(" + JSON.stringify(selector) + ")].map(e=>e.textContent.trim().replace(/\\s+/g,' '))")
+// A task in the Agents list dragged and dropped on what `target` finds, as the page sees a drag (a real drag is tried in the layout harness).
+const dragOnto = (ui, title, target) => ui.evaluate("(async()=>{const item=[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent===" + JSON.stringify(title) + ");const to=" + target + ";const data=new DataTransfer();item.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:data}));await new Promise(r=>setTimeout(r,60));to.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:data}));await new Promise(r=>setTimeout(r,30));to.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data}));item.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:data}));return true})()")
 // A choice of Settings (a microphone, a language, where tasks open): its button opens Togle's own list, and a choice in
 // the list is pressed by its words. The button is brought into view first: a list does not open from a button out of sight.
 const choiceButton = label => "document.querySelector(" + JSON.stringify('[data-choice=' + JSON.stringify(label) + ']') + ")"
@@ -1509,7 +1511,7 @@ async function checkSlowMain(T, agent) {
 // task's name says, so that task stays with the ones under no heading, first in its project. A task just started has no
 // subject yet; given one that another task has, it goes under it with that task: the one move Togle makes by itself. Two
 // working tasks keep their order when one changes. A task that finished while it was not on screen is new, and counted on
-// its project, until it is opened.
+// its project, until it is opened. A heading folds and opens like a group's head.
 async function checkGroups(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.workspace-nav button', 'Agents')
@@ -1548,6 +1550,30 @@ async function checkGroups(T, agent) {
   await ui.wait("[...document.querySelectorAll('.task-row')].find(r=>r.querySelector('strong').textContent==='Check the pricing tests').querySelector('.task-copy > span').textContent==='Codex · done'")
   assert.ok((await ui.calls('taskOnScreen')).some((call) => call.args[0] === 'codex:n1'), 'the window told main which task is on screen')
   assert.equal(await ui.evaluate(website + ".querySelector('.group-counts').getAttribute('aria-label')"), '1 waiting, 1 working', 'opened, it is not new')
+  // A heading folds and opens like a group's head. It says how many tasks it holds; folded, its rows go, and it says what
+  // waits and works in them and that the task open is in it; it still takes a dropped task; it stays folded when Agents is
+  // opened again; main keeps it (and when Togle's sorting gives it another name, the fold goes with it: task-groups.test.mjs).
+  const fold = (name) => subject(name) + ".querySelector('.subject-fold')"
+  assert.equal(await ui.evaluate(fold('Pricing page') + ".getAttribute('aria-expanded')"), 'true', 'a heading is open until it is folded')
+  assert.equal(await ui.evaluate(subject('Pricing page') + ".querySelector('.subject-count').getAttribute('aria-label')"), '2 tasks', 'it says how many tasks it holds')
+  await ui.evaluate(fold('Pricing page') + '.click()')
+  await ui.wait(subject('Pricing page') + ".querySelectorAll('.task-row').length===0")
+  assert.equal(await ui.evaluate(fold('Pricing page') + ".getAttribute('aria-expanded')"), 'false')
+  assert.equal(await ui.evaluate(subject('Pricing page') + ".querySelector('.group-counts').getAttribute('aria-label')"), '1 working', 'folded, it says what works in it')
+  assert.equal(await ui.evaluate(subject('Pricing page') + ".classList.contains('has-open')"), true, 'and that the task open is in it')
+  assert.deepEqual(await titles(subject('Build')), ['Clean the build folder', 'Fix the login redirect'], 'the other heading stays open')
+  const folding = (await ui.calls('changeTaskGroups')).at(-1).args[0]
+  assert.deepEqual([folding.kind, folding.subject, folding.folded], ['fold-subject', 'Pricing page', true], 'main keeps it')
+  await dragOnto(ui, 'Clean the build folder', subject('Pricing page'))
+  await ui.wait(subject('Pricing page') + "?.querySelector('.subject-count')?.textContent==='3'")
+  assert.equal(await ui.evaluate(subject('Pricing page') + ".querySelector('.group-counts').getAttribute('aria-label')"), '1 waiting, 1 working', 'folded, it takes a dropped task and counts it')
+  await ui.click('.workspace-nav button', 'Meetings')
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait('!!' + subject('Pricing page'))
+  assert.equal(await ui.evaluate(fold('Pricing page') + ".getAttribute('aria-expanded')"), 'false', 'opened again, it is still folded')
+  await ui.evaluate(fold('Pricing page') + '.click()')
+  await ui.wait(subject('Pricing page') + ".querySelectorAll('.task-row').length===3")
+  assert.equal(await ui.evaluate(fold('Pricing page') + ".getAttribute('aria-expanded')"), 'true', 'opened, its rows are back')
   // The open task's header has its project's mark, the same letter on the same color as its group in the list.
   assert.deepEqual(await ui.evaluate("[document.querySelector('.task-where .project-mark'), " + website + ".querySelector('.project-mark')].map(m=>m.dataset.letter+' '+getComputedStyle(m).backgroundColor)").then((both) => both[0] === both[1]), true, 'the same mark in the header as on its group')
   // Work in no project (no folder, or the home folder) and scheduled jobs: groups of their own, in places that do not change.
@@ -1580,8 +1606,7 @@ async function checkArrange(T, agent) {
     await ui.evaluate("(()=>{const input=document.querySelector('.group-rename');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input," + JSON.stringify(words) + ");input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))})()")
     await ui.wait("!document.querySelector('.group-rename')")
   }
-  // A task dragged and dropped, as the page sees a drag (a real drag is tried in the layout harness).
-  const drag = (title, target) => ui.evaluate("(async()=>{const item=[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent===" + JSON.stringify(title) + ");const to=" + target + ";const data=new DataTransfer();item.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:data}));await new Promise(r=>setTimeout(r,60));to.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:data}));await new Promise(r=>setTimeout(r,30));to.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data}));item.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:data}));return true})()")
+  const drag = (title, target) => dragOnto(ui, title, target)
   const menuOf = async (group, item) => {
     await ui.evaluate(box(group) + ".querySelector('button.group-more').click()")
     await ui.wait("!!document.querySelector('.menu-overlay')")

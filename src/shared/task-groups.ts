@@ -1,6 +1,6 @@
 // The person's own arrangement of the Agents list, over the one Togle makes by itself: the groups they made, the names they
-// gave groups, and the tasks they moved. Main keeps it (titles.ts); the window shows a change at once, laid over what main
-// last sent. Both apply a change with applyGroupChange, so the two agree.
+// gave groups, the tasks they moved, and the subject headings they folded. Main keeps it (titles.ts); the window shows a
+// change at once, laid over what main last sent. Both apply a change with applyGroupChange, so the two agree.
 
 /** A group's key: a made group is `made:<id>`, a project `project:<its folder, as projectKey gives it>`, and `everyday`, `scheduled`. */
 export interface TaskGroups {
@@ -10,6 +10,11 @@ export interface TaskGroups {
   names: Record<string, string>
   /** The tasks the person moved, by task key: the group they put each in, and the subject there when they dropped it on one. */
   placed: Record<string, { group: string; subject?: string }>
+  /**
+   * The subject headings the person folded: the group and the heading's name. Kept here, not in the window, because Togle's
+   * sorting can give a heading another name, and the fold goes with it (rename-subject). A group's own fold is the window's.
+   */
+  folded: { group: string; subject: string }[]
 }
 
 export type GroupChange =
@@ -21,11 +26,17 @@ export type GroupChange =
   | { kind: 'place'; task: string; group: string; subject?: string }
   /** The task goes back to where Togle puts it. */
   | { kind: 'put-back'; task: string }
-  /** Togle's sorting gave a subject in one of its groups another name: the tasks the person dropped on it follow it. */
+  /** Togle's sorting gave a subject in one of its groups another name: the tasks the person dropped on it follow it, and so does its fold. */
   | { kind: 'rename-subject'; group: string; from: string; to: string }
+  /** A subject heading folded, or opened again. */
+  | { kind: 'fold-subject'; group: string; subject: string; folded: boolean }
 
-export const NO_GROUPS: TaskGroups = { made: [], names: {}, placed: {} }
+export const NO_GROUPS: TaskGroups = { made: [], names: {}, placed: {}, folded: [] }
 export const madeKey = (id: string): string => `made:${id}`
+
+/** Whether the person folded this heading in this group (a heading's name in another case is the same heading). */
+export const subjectFolded = (groups: TaskGroups, group: string, subject: string): boolean =>
+  groups.folded.some((at) => at.group === group && at.subject.toLowerCase() === subject.toLowerCase())
 
 /** A project's key, from its folder: no slash at the end, and on Windows in lower case, where a folder's case does not count. */
 export const projectKeyOf = (folder: string, platform: string): string => {
@@ -42,6 +53,7 @@ export function ownGroupOf(task: { schedule?: string; outsideProject?: boolean; 
 
 const MOST_MADE = 50
 const MOST_PLACED = 2000
+const MOST_FOLDED = 200
 const NAME_MOST = 60
 const KEY_MOST = 600
 const ID = /^[a-z0-9-]{4,40}$/
@@ -77,7 +89,8 @@ export function applyGroupChange(groups: TaskGroups, change: GroupChange): TaskG
       return {
         ...groups,
         made: groups.made.filter((made) => madeKey(made.id) !== group),
-        placed: Object.fromEntries(Object.entries(groups.placed).filter(([, at]) => at.group !== group))
+        placed: Object.fromEntries(Object.entries(groups.placed).filter(([, at]) => at.group !== group)),
+        folded: groups.folded.filter((at) => at.group !== group)
       }
     }
     case 'place': {
@@ -106,8 +119,21 @@ export function applyGroupChange(groups: TaskGroups, change: GroupChange): TaskG
       const to = nameOf(change.to)
       if (!group || !from || !to) return groups
       const moved = Object.entries(groups.placed).filter(([, at]) => at.group === group && at.subject?.toLowerCase() === from)
-      if (!moved.length) return groups
-      return { ...groups, placed: { ...groups.placed, ...Object.fromEntries(moved.map(([task, at]) => [task, { ...at, subject: to }])) } }
+      // Folded, it stays folded under its new name (and so does a heading it joins).
+      const wasFolded = subjectFolded(groups, group, from)
+      if (!moved.length && !wasFolded) return groups
+      return {
+        ...groups,
+        placed: { ...groups.placed, ...Object.fromEntries(moved.map(([task, at]) => [task, { ...at, subject: to }])) },
+        folded: wasFolded ? [...groups.folded.filter((at) => at.group !== group || ![from, to.toLowerCase()].includes(at.subject.toLowerCase())), { group, subject: to }] : groups.folded
+      }
+    }
+    case 'fold-subject': {
+      const group = keyOf(change.group)
+      const subject = nameOf(change.subject)
+      if (!group || group === 'scheduled' || !subject || typeof change.folded !== 'boolean' || subjectFolded(groups, group, subject) === change.folded) return groups
+      const others = groups.folded.filter((at) => at.group !== group || at.subject.toLowerCase() !== subject.toLowerCase())
+      return { ...groups, folded: change.folded ? [...others, { group, subject }].slice(-MOST_FOLDED) : others }
     }
     default:
       return groups
@@ -134,5 +160,13 @@ export function cleanGroups(value: unknown): TaskGroups {
       .slice(-MOST_PLACED)
       .map(([task, at]) => [task, nameOf(at.subject) ? { group: String(at.group), subject: nameOf(at.subject) } : { group: String(at.group) }])
   )
-  return { made, names, placed }
+  const folded: TaskGroups['folded'] = []
+  for (const item of Array.isArray(given.folded) ? given.folded : []) {
+    const at = (item ?? {}) as { group?: unknown; subject?: unknown }
+    const group = keyOf(at.group)
+    const subject = nameOf(at.subject)
+    if (!group || group === 'scheduled' || !subject || subjectFolded({ ...NO_GROUPS, folded }, group, subject)) continue
+    folded.push({ group, subject })
+  }
+  return { made, names, placed, folded: folded.slice(-MOST_FOLDED) }
 }
