@@ -46,12 +46,22 @@ const oneLine = (text: string, max: number): string => {
 
 /** The most of what was asked first that Togle's sorting reads with a task's name. */
 const ASKED_CHARS = 300
+/** The line Togle adds after the words a task is given with a call (TaskBox.tsx, call-agents.ts): where the call is saved, not what was asked. */
+const CALL_LINE = /\s*A call is saved at [\s\S]*$/
+/** A path in the person's home folder, written from ~: the folder's name is their user name. */
+function withoutHome(text: string): string {
+  const home = os.homedir().replace(/[\\/]+$/, '')
+  if (!home) return text
+  const pattern = home.split(/[\\/]+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\\\/]+')
+  return text.replace(new RegExp(pattern, process.platform === 'win32' ? 'gi' : 'g'), '~')
+}
 /**
- * What was asked first in a task, as Togle's sorting reads it: one line with no secret in it, at most 300 characters. None
- * when it says no more than the task's name (a task named by its first words).
+ * What was asked first in a task, as Togle's sorting reads it: the person's words (without Togle's line about a saved call),
+ * in one line with no secret in it and the home folder written as ~, at most 300 characters. None when it says no more than
+ * the task's name (a task named by its first words).
  */
 export function askedLine(text: string, title: string): string | undefined {
-  const asked = oneLine(withoutSecrets(text.slice(0, 4000)), ASKED_CHARS)
+  const asked = oneLine(withoutHome(withoutSecrets(text.slice(0, 4000).replace(CALL_LINE, ''))), ASKED_CHARS)
   const plain = (line: string): string => line.replace(/…$/, '').replace(/\s+/g, ' ').trim().toLowerCase()
   if (!asked || plain(title).startsWith(plain(asked)) || (plain(asked).startsWith(plain(title)) && asked.length <= title.length + 8)) return undefined
   return asked

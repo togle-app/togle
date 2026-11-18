@@ -350,8 +350,9 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
           })}
         </span>
       </Row>
-      {/* Off until the person turns it on: the names of their tasks go to the AI they set. What it does is said where "Tasks
-          open in" says its own, over the switch: the design keeps notes off these rows, so all of it fits on one screen. */}
+      {/* On until the person turns it off: the names of their tasks and the start of what was asked in each go to the AI they
+          set. What it does is said where "Tasks open in" says its own, over the switch: the design keeps notes off these rows,
+          so all of it fits on one screen. */}
       <Row name="Sort tasks by subject">
         <input type="checkbox" role="switch" className="switch" title="The AI set in Accounts reads the names of your tasks, the start of what you asked in each, and the names of their folders, and puts tasks about the same thing under one heading."
           checked={settings.tasks.sortBySubject === true} onChange={(event) => void save({ tasks: { sortBySubject: event.target.checked } })} />

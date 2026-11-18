@@ -3,6 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, rmSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -54,7 +55,7 @@ function sorting(answer, { settleMs = 0, retryMs = 60_000, timeoutMs = 60_000, f
   return { subjects, asked, renamed, changes: () => changes, turn: (value) => { isOn = value } }
 }
 
-test('a place is sorted from its second task, and the AI reads only the names of the tasks and of the place', async () => {
+test('a place is sorted from its second task, and the AI reads the names of the tasks and of the place', async () => {
   const s = sorting(answering(() => 'Login'))
   s.subjects.notice([task('claude:a', 'Fix login redirect')])
   await pause(30)
@@ -90,6 +91,12 @@ test('what was asked, as sorting reads it: one line, no secret, at most 300 char
   assert.ok(!T.askedLine('Use the key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 to call it', 'API call').includes('abcdefghijklmnop'), 'a secret is left out')
   const long = T.askedLine('word '.repeat(200), 'Words')
   assert.ok(long.length <= 300 && long.endsWith('…'), 'cut at 300 characters')
+  // A task given with a call: Togle's line about where the call is saved is not what was asked, and a path names the user.
+  const saved = path.join(os.homedir(), 'AppData', 'Roaming', 'Togle', 'shared-calls', 'call-1.txt')
+  assert.equal(T.askedLine(`Summarize the decisions\n\nA call is saved at "${saved}". It has the notes first and the transcript after.`, 'Summarize'), 'Summarize the decisions')
+  assert.equal(T.askedLine(`A call is saved at "${saved}". It has the notes first.`, 'Call'), undefined, 'nothing but that line: nothing')
+  const inHome = T.askedLine(`Fix the build in ${path.join(os.homedir(), 'work', 'site')} today`, 'Build')
+  assert.ok(!inHome.includes(os.homedir()) && inHome.includes('~'), 'the home folder is written as ~')
 })
 
 test('the same list again sends nothing; a task joining sends the place again, each task with its heading', async () => {
