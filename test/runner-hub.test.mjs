@@ -496,6 +496,22 @@ test('a task that finished is new until it has been on screen with the window in
   }
 })
 
+test('a task in no folder, or in the home folder, is in no project; one in a folder of its own is', async () => {
+  const home = process.platform === 'win32' ? 'C:\\Users\\someone' : '/home/someone'
+  const inHome = process.platform === 'win32' ? 'c:\\users\\SOMEONE\\' : '/home/someone/'
+  const claude = new FakeBackend('claude', { tasks: [
+    { ...info('claude', 'a', 'Fix the login redirect', 'idle', 300), folder: process.platform === 'win32' ? 'C:\\work\\site' : '/work/site' },
+    { ...info('claude', 'b', 'Check my email', 'idle', 200), folder: inHome },
+    { ...info('claude', 'c', 'Plan the offsite', 'idle', 100), folder: '' }
+  ] })
+  const { hub } = hubOf([claude], { home })
+  try {
+    assert.deepEqual((await hub.list()).map((task) => [task.key, task.outsideProject === true]), [['claude:a', false], ['claude:b', true], ['claude:c', true]])
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('a look for the agents begun before one was added is not kept', async () => {
   const claude = new FakeBackend('claude')
   let open

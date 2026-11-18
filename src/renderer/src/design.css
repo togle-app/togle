@@ -262,16 +262,33 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .tasks-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 14px 7px 14px 15px; border-right: 1px solid var(--line); }
 .tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .task-list { display: flex; flex-direction: column; gap: 6px; }
-/* The list by project, then by subject: a project's name over its tasks, with what waits, works and is new in it; a subject
-   a quiet word over its own tasks. Nothing to press: the headings only say where things are. */
-.task-groups { display: flex; flex-direction: column; gap: 16px; }
-.task-project { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-/* The name keeps its room: in a narrow list the counts go to a line of their own under it. */
-.task-project-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: 8px; min-width: 0; padding: 0 2px; }
-.task-project-name { max-width: 100%; overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.task-project-count { flex: none; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.task-subject { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin-top: 4px; }
-.task-subject-name { overflow: hidden; padding: 0 2px; color: var(--muted); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+/* The list in groups, each a box with what it holds: scheduled jobs, work in no project (Everyday), one box per project. A
+   project is known by its mark (its letter on a color of its own, never one a state uses), its name and the folder it is in;
+   the numbers say what waits, works and is new in it, in the colors of the dots. Its tasks are its contents: they have no box
+   of their own until the pointer is on one or it is open. Nothing to press on a heading: it only says where things are. */
+.task-groups { display: flex; flex-direction: column; gap: 12px; }
+.task-project { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--raised) 55%, transparent); }
+.task-project-head { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 9px; min-width: 0; padding: 3px 4px 7px; }
+.task-project-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; line-height: 1.3; }
+.task-project-name { overflow: hidden; color: var(--ink); font-size: 13.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.task-project-sub { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.task-project-where { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.project-mark { display: inline-grid; flex: none; place-items: center; border-radius: 7px; color: #12151c; font-weight: 700; line-height: 1; }
+.project-mark::after { content: attr(data-letter); }
+.project-mark.big { width: 28px; height: 28px; font-size: 13px; }
+.project-mark.small { width: 15px; height: 15px; margin-right: 5px; border-radius: 4px; font-size: 9.5px; vertical-align: -2px; }
+.project-mark.scheduled, .project-mark.everyday { border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
+.group-counts { display: flex; flex: none; gap: 4px; }
+.count-pill { min-width: 20px; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+.count-pill.wait { background: var(--wait-soft); color: var(--wait); }
+.count-pill.work { background: var(--togle-soft); color: var(--togle); }
+.count-pill.fresh { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--togle) 55%, transparent); color: var(--togle); }
+.task-project .task-list { gap: 2px; }
+.task-project .task-row { padding: 7px 8px; border-color: transparent; }
+.task-project .task-row:hover:not(:disabled) { border-color: transparent; background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.task-project .task-row.selected, .task-project .task-row.selected:hover:not(:disabled) { border-color: var(--ink); background: transparent; }
+.task-subject { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-top: 6px; }
+.task-subject-name { overflow: hidden; padding: 0 8px; color: var(--muted); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .task-copy span.task-new { color: var(--togle); font-weight: 600; }
 .task-item { position: relative; }
 .task-row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; }

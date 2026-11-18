@@ -225,6 +225,12 @@ export interface TaskView extends TaskInfo {
   subject?: string
   /** It finished (or stopped by an error) since the person last had it on screen: "done · new" until they open it. */
   fresh?: boolean
+  /** It works in no project: it has no folder, or its folder is the person's home folder (an email check, a chat). */
+  outsideProject?: boolean
+  /** A scheduled job's schedule, as its agent says it ("every day at 8:00"): the row is the job, and how its last run went. */
+  schedule?: string
+  /** When a scheduled job runs next, in milliseconds. */
+  nextRun?: number
 }
 
 /**

@@ -2,6 +2,7 @@
 // backends (codex.ts, claude.ts) know how to talk to their agent; this joins them: the tasks they keep on this computer,
 // the ones Togle runs (with what happened in each, so the window can show it), and the actions on a task by its key.
 import { promises as fs } from 'node:fs'
+import { homedir } from 'node:os'
 import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Decision, type LogEntry, type RunnerKind, type RunnerStatus, type StartRequest, type StepDetail, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
 import { carriedFlags } from './claude-job'
@@ -45,6 +46,8 @@ export interface HubOptions {
   records?: RecordStore
   /** Which tasks finished since the person last looked: their rows say "done · new". */
   fresh?: FreshStore
+  /** The person's home folder: a task that works there, or in no folder, is in no project. A test gives its own. */
+  home?: string
   /** How long the agents' lists are reused, in milliseconds. */
   cacheMs?: number
   /** How long the agents found count as found before they are looked for again (behind the last answer), in milliseconds. */
@@ -171,7 +174,16 @@ export class RunnerHub {
     const views = new Map<string, TaskView>()
     for (const info of infos) views.set(keyOf(info.runner, info.id), this.viewOfInfo(info))
     for (const owned of this.owned.values()) views.set(owned.key, this.viewOfOwned(owned, views.get(owned.key)))
-    return [...views.values()].map((view) => ({ ...view, agent: this.nameOf(view.runner), ...(this.options.fresh?.has(view.key) ? { fresh: true } : {}) })).sort(order)
+    return [...views.values()].map((view) => ({ ...view, agent: this.nameOf(view.runner), ...(this.options.fresh?.has(view.key) ? { fresh: true } : {}), ...(this.outsideProject(view.folder) ? { outsideProject: true } : {}) })).sort(order)
+  }
+
+  /** Whether a folder is no project: none at all, or the person's home folder, where an agent works that is not on any project. */
+  private outsideProject(folder: string): boolean {
+    const clean = (place: string): string => {
+      const trimmed = place.trim().replace(/[\\/]+$/, '')
+      return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed
+    }
+    return !folder.trim() || clean(folder) === clean(this.options.home ?? homedir())
   }
 
   /** An agent's name as the person reads it. */

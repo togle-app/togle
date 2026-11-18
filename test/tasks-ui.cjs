@@ -103,7 +103,9 @@ async function checkTasks(T, agent) {
   // By project, A to Z by the folder's name, with what waits and works in each. No AI plan has given subjects here, so there
   // are no subject headings: a project's tasks are in the order of where they stand.
   assert.deepEqual(await texts(ui, '.task-groups .task-project-name'), ['api-server', 'notes', 'website'], 'by project, A to Z')
-  assert.deepEqual(await texts(ui, '.task-groups .task-project-count'), ['1 waiting', '1 working', '1 waiting · 1 working'])
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.task-groups .group-counts')].map(e=>e.getAttribute('aria-label'))"), ['1 waiting', '1 working', '1 waiting, 1 working'], 'what waits and works in each, in the colors of the dots')
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.task-groups .task-project-where')].map(e=>e.textContent)"), ['C:\\work', 'C:\\work', 'C:\\work'], 'where each project is')
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.task-groups .project-mark')].map(e=>e.dataset.letter)"), ['A', 'N', 'W'], 'each project has its mark')
   assert.equal(await ui.evaluate("document.querySelectorAll('.task-subject').length"), 0, 'no subjects, no subject headings')
   assert.equal(await ui.evaluate("document.querySelector('.task-earlier-toggle').textContent"), 'Earlier · 1 task', 'what finished more than a day ago folds under Earlier')
   const rows = await ui.evaluate("[...document.querySelectorAll('.task-row')].map(row=>({title:row.querySelector('strong').textContent,state:row.dataset.state,more:row.querySelector('.task-copy span').textContent,danger:!!row.querySelector('.task-danger')}))")
@@ -1525,11 +1527,22 @@ async function checkGroups(T, agent) {
   await ui.wait("[...document.querySelectorAll('.task-row')].some(r=>r.textContent.includes('done · new'))")
   assert.equal(await lineOf('Check the pricing tests'), 'Codex · done · new', 'finished while not on screen: new')
   assert.deepEqual(await titles(subject('Pricing page')), ['Rebuild the pricing page', 'Check the pricing tests'], 'what works, then what is new')
-  assert.equal(await ui.evaluate(website + ".querySelector('.task-project-count').textContent"), '1 waiting · 1 working · 1 new', 'and its project counts it')
+  assert.equal(await ui.evaluate(website + ".querySelector('.group-counts').getAttribute('aria-label')"), '1 waiting, 1 working, 1 new', 'and its project counts it')
   await ui.task('Check the pricing tests')
   await ui.wait("[...document.querySelectorAll('.task-row')].find(r=>r.querySelector('strong').textContent==='Check the pricing tests').querySelector('.task-copy > span').textContent==='Codex · done'")
   assert.ok((await ui.calls('taskOnScreen')).some((call) => call.args[0] === 'codex:n1'), 'the window told main which task is on screen')
-  assert.equal(await ui.evaluate(website + ".querySelector('.task-project-count').textContent"), '1 waiting · 1 working', 'opened, it is not new')
+  assert.equal(await ui.evaluate(website + ".querySelector('.group-counts').getAttribute('aria-label')"), '1 waiting, 1 working', 'opened, it is not new')
+  // The open task's header has its project's mark, the same letter on the same color as its group in the list.
+  assert.deepEqual(await ui.evaluate("[document.querySelector('.task-where .project-mark'), " + website + ".querySelector('.project-mark')].map(m=>m.dataset.letter+' '+getComputedStyle(m).backgroundColor)").then((both) => both[0] === both[1]), true, 'the same mark in the header as on its group')
+  // Work in no project (no folder, or the home folder) and scheduled jobs: groups of their own, in places that do not change.
+  const add = (props) => ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ terminal: false, mine: false, state: 'idle', line: '', ...props }) + ', "")')
+  await add({ key: 'hermes:e1', runner: 'hermes', title: 'Plan the team offsite', folder: '' })
+  await add({ key: 'claude:e2', runner: 'claude', title: 'Check the flight prices', folder: 'C:\\Users\\someone', outsideProject: true })
+  await add({ key: 'hermes:c1', runner: 'hermes', title: 'Check my email', folder: '', schedule: 'every day at 8:00', nextRun: Date.now() + 86_400_000 })
+  await ui.wait("document.querySelectorAll('.task-groups .task-project').length===5")
+  assert.deepEqual(await texts(ui, '.task-groups .task-project-name'), ['Scheduled', 'Everyday', 'api-server', 'notes', 'website'], 'scheduled jobs, then Everyday, then the projects')
+  assert.deepEqual((await ui.evaluate("[...document.querySelectorAll('.task-project.everyday .task-row strong')].map(e=>e.textContent)")).sort(), ['Check the flight prices', 'Plan the team offsite'], 'no folder, or the home folder: Everyday')
+  assert.match(await lineOf('Check my email'), /^Hermes · every day at 8:00 · next tomorrow /, 'a scheduled job says its schedule and its next run')
   assert.deepEqual(ui.errors, [])
   ui.window.destroy()
 }

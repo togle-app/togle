@@ -36,6 +36,15 @@ function keepLog(key: string, entries: LogEntry[]): void {
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
 
+/** When a scheduled job runs next, as a person says it: "4:00 PM", "tomorrow 8:00 AM", "Mon 9:00 AM". */
+function nextTime(at: number, now: number): string {
+  const when = new Date(at)
+  const today = new Date(now)
+  const time = when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  const days = Math.round((new Date(when.getFullYear(), when.getMonth(), when.getDate()).getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / 86_400_000)
+  return days <= 0 ? time : days === 1 ? `tomorrow ${time}` : `${when.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`
+}
+
 function ago(at: number, now: number): string {
   if (!at) return ''
   const minutes = Math.max(0, Math.round((now - at) / 60_000))
@@ -137,64 +146,105 @@ const projectKey = (folder: string): string => {
   const clean = folder.replace(/[\\/]+$/, '')
   return api.platform === 'win32' ? clean.toLowerCase() : clean
 }
+/** The folder a folder is in ("C:\work" for "C:\work\website"): where a project is, to know it by. */
+const parentOf = (folder: string): string => folder.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '')
+/** A scheduled job's row is the job; work outside any project is Everyday; the rest is in a project, its folder. */
+const kindOf = (task: TaskView): GroupKind => (task.schedule ? 'scheduled' : task.outsideProject || !task.folder ? 'everyday' : 'project')
 
-interface ProjectGroup {
+/**
+ * The colors of a project's mark. None is amber, indigo, green or red: those say how a task stands. A project keeps its
+ * color: it is worked out from its folder, so it is the same each time and in each place, with nothing kept.
+ */
+const MARK_COLORS = ['#f29ac6', '#c3a3ff', '#6ec5ef', '#b6d86c', '#a7b0c2']
+function markColor(key: string): string {
+  let hash = 0
+  for (let at = 0; at < key.length; at++) hash = (hash * 31 + key.charCodeAt(at)) >>> 0
+  return MARK_COLORS[hash % MARK_COLORS.length]
+}
+/** The letter on a project's mark: the first letter or digit of its name. */
+const markLetter = (name: string): string => (name.match(/[\p{L}\p{N}]/u)?.[0] ?? '?').toLocaleUpperCase()
+
+/** A project's mark, the same on its group in the list and on its tasks: its letter on its color. */
+function ProjectMark({ folder, size = 'big' }: { folder: string; size?: 'big' | 'small' }) {
+  const name = baseName(folder)
+  return <span className={`project-mark ${size}`} style={{ background: markColor(projectKey(folder)) }} data-letter={markLetter(name)} aria-hidden="true" />
+}
+
+type GroupKind = 'scheduled' | 'everyday' | 'project'
+interface TaskGroup {
   key: string
+  kind: GroupKind
   name: string
+  /** A project's folder, and the folder it is in, to know it by; none for the other kinds. */
+  folder: string
+  where: string
   /** Its tasks with no subject yet: one just started, or all of them when no AI plan gives subjects. */
   loose: TaskView[]
   subjects: { name: string; tasks: TaskView[] }[]
-  /** What waits, works and is new in it, in words ("1 waiting · 1 new"). */
-  counts: string
+  counts: { waiting: number; working: number; fresh: number }
 }
 
-/** How many of a project's tasks wait for you, work and finished unopened, in words ("1 waiting · 2 working"); none says nothing. */
-function countsOf(tasks: TaskView[]): string {
-  const counts: [number, string][] = [
-    [tasks.filter(needsYou).length, 'waiting'],
-    [tasks.filter((task) => task.state === 'working').length, 'working'],
-    [tasks.filter(isFresh).length, 'new']
-  ]
-  return counts.filter(([count]) => count > 0).map(([count, word]) => `${count} ${word}`).join(' · ')
+function groupOf(key: string, kind: GroupKind, name: string, folder: string, tasks: TaskView[]): TaskGroup {
+  // Scheduled jobs keep the order of their names: a job's row stays where it is as it runs.
+  const order = kind === 'scheduled' ? (a: TaskView, b: TaskView): number => byName(a.title, b.title) || a.key.localeCompare(b.key) : inOrder
+  const subjects = new Map<string, TaskView[]>()
+  for (const task of tasks) {
+    const subject = kind === 'scheduled' ? '' : task.subject?.trim()
+    if (subject) subjects.set(subject, [...(subjects.get(subject) ?? []), task])
+  }
+  return {
+    key,
+    kind,
+    name,
+    folder,
+    where: folder ? parentOf(folder) : '',
+    loose: tasks.filter((task) => kind === 'scheduled' || !task.subject?.trim()).sort(order),
+    subjects: [...subjects.entries()].sort(([a], [b]) => byName(a, b)).map(([subject, list]) => ({ name: subject, tasks: list.sort(order) })),
+    counts: { waiting: tasks.filter(needsYou).length, working: tasks.filter((task) => task.state === 'working').length, fresh: tasks.filter(isFresh).length }
+  }
 }
 
 /**
- * The tasks by project (A to Z by the folder's name; two folders of one name are told apart by the folder they are in; a task
- * with no folder goes under "No folder", last), then inside a project by subject (A to Z), each subject's tasks in the order
- * of where they stand. Tasks with no subject come first in their project. Nothing here depends on when a task last changed,
- * except among the ones that are done.
+ * The tasks in groups, each in a place of its own that does not change: scheduled jobs first, then work outside any project
+ * (Everyday), then one group for each project, A to Z by its folder's name (two folders of one name are told apart by the
+ * folder they are in). Inside a group, by subject (A to Z), each subject's tasks in the order of where they stand; tasks with
+ * no subject come first. Nothing here depends on when a task last changed, except among the ones that are done.
  */
-function groupTasks(list: TaskView[]): ProjectGroup[] {
+function groupTasks(list: TaskView[]): TaskGroup[] {
+  const groups: TaskGroup[] = []
+  const scheduled = list.filter((task) => kindOf(task) === 'scheduled')
+  const everyday = list.filter((task) => kindOf(task) === 'everyday')
+  if (scheduled.length) groups.push(groupOf('scheduled', 'scheduled', 'Scheduled', '', scheduled))
+  if (everyday.length) groups.push(groupOf('everyday', 'everyday', 'Everyday', '', everyday))
   const projects = new Map<string, { folder: string; tasks: TaskView[] }>()
-  for (const task of list) {
-    const key = task.folder ? projectKey(task.folder) : ''
+  for (const task of list.filter((item) => kindOf(item) === 'project')) {
+    const key = projectKey(task.folder)
     const group = projects.get(key) ?? { folder: task.folder, tasks: [] }
     group.tasks.push(task)
     projects.set(key, group)
   }
-  const groups = [...projects.entries()].map(([key, group]) => ({ key, folder: group.folder, name: key ? baseName(group.folder) : 'No folder', tasks: group.tasks }))
-  const names = groups.filter((group) => group.key).map((group) => group.name.toLocaleLowerCase())
-  for (const group of groups) {
-    if (group.key && names.filter((name) => name === group.name.toLocaleLowerCase()).length > 1) {
-      group.name = `${baseName(group.folder.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '')) || group.folder}/${group.name}`
+  const named = [...projects.entries()].map(([key, group]) => ({ key, folder: group.folder, name: baseName(group.folder), tasks: group.tasks }))
+  for (const group of named) {
+    if (named.filter((other) => other.name.toLocaleLowerCase() === group.name.toLocaleLowerCase()).length > 1) {
+      group.name = `${baseName(parentOf(group.folder)) || parentOf(group.folder)}/${group.name}`
     }
   }
+  named.sort((a, b) => byName(a.name, b.name) || a.key.localeCompare(b.key))
+  for (const group of named) groups.push(groupOf(group.key, 'project', group.name, group.folder, group.tasks))
   return groups
-    .sort((a, b) => Number(!a.key) - Number(!b.key) || byName(a.name, b.name) || a.key.localeCompare(b.key))
-    .map((group) => {
-      const subjects = new Map<string, TaskView[]>()
-      for (const task of group.tasks) {
-        const subject = task.subject?.trim()
-        if (subject) subjects.set(subject, [...(subjects.get(subject) ?? []), task])
-      }
-      return {
-        key: group.key,
-        name: group.name,
-        loose: group.tasks.filter((task) => !task.subject?.trim()).sort(inOrder),
-        subjects: [...subjects.entries()].sort(([a], [b]) => byName(a, b)).map(([name, tasks]) => ({ name, tasks: tasks.sort(inOrder) })),
-        counts: countsOf(group.tasks)
-      }
-    })
+}
+
+/** What waits, works and is new in a group: numbers in the colors of the dots that say it, and the words for a screen reader. */
+function Counts({ counts }: { counts: TaskGroup['counts'] }) {
+  const words = [counts.waiting && `${counts.waiting} waiting`, counts.working && `${counts.working} working`, counts.fresh && `${counts.fresh} new`].filter(Boolean).join(', ')
+  if (!words) return null
+  return (
+    <span className="group-counts" role="img" aria-label={words} title={words}>
+      {!!counts.waiting && <span className="count-pill wait">{counts.waiting}</span>}
+      {!!counts.working && <span className="count-pill work">{counts.working}</span>}
+      {!!counts.fresh && <span className="count-pill fresh">{counts.fresh} new</span>}
+    </span>
+  )
 }
 
 /** `focus`: a task to show, asked for from outside (a notice, the to-do list); a new `seq` asks again. */
@@ -352,12 +402,29 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
     />
   )
   // A project with its subjects, each subject a heading over its tasks; a project's tasks with no subject come first, with no heading.
-  const projectList = (groups: ProjectGroup[], old: boolean): ReactNode =>
+  // A group is a box: its mark (a project's letter on its color; a clock for scheduled jobs, a house for Everyday), its name,
+  // where a project's folder is, and what waits, works and is new in it; then its tasks, by subject.
+  const projectList = (groups: TaskGroup[], old: boolean): ReactNode =>
     groups.map((group) => (
-      <section key={group.key || 'no folder'} className="task-project" aria-label={group.counts && !old ? `${group.name}: ${group.counts}` : group.name}>
+      <section key={group.key} className={`task-project ${group.kind}`} aria-label={group.name}>
         <div className="task-project-head">
-          <span className="task-project-name">{group.name}</span>
-          {!old && group.counts && <span className="task-project-count">{group.counts}</span>}
+          {group.kind === 'project' ? (
+            <ProjectMark folder={group.folder} />
+          ) : (
+            <span className={`project-mark big ${group.kind}`} aria-hidden="true">
+              <Icon name={group.kind === 'scheduled' ? 'clock' : 'home'} size={14} />
+            </span>
+          )}
+          <span className="task-project-title">
+            <span className="task-project-name">{group.name}</span>
+            {/* Under the name, so that the name has all the width: where it is, and what waits, works and is new in it. */}
+            <span className="task-project-sub">
+              <span className="task-project-where" title={group.folder || undefined}>
+                {group.kind === 'project' ? group.where : group.kind === 'scheduled' ? 'Jobs that run by themselves' : 'Not in a project'}
+              </span>
+              {!old && <Counts counts={group.counts} />}
+            </span>
+          </span>
         </div>
         {!!group.loose.length && <div className="task-list" role="list">{group.loose.map((task) => row(task, old))}</div>}
         {group.subjects.map((subject) => (
@@ -518,8 +585,10 @@ function TaskRow({ task, now, old, selected, onSelect, onTakeOver }: { task: Tas
   // One line, as the design has it: the agent, where it works, and how it stands. A task in a terminal says so. Stopped
   // and waiting for a reply, it says why; done long ago, it says when.
   const detail = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : task.screen ? 'stopped · open it to go on' : 'stopped · reply to go on') : task.state === 'waiting' ? (task.waitingFor && !task.pending.length ? 'waiting on its screen' : 'waiting') : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `done · ${ago(task.updatedAt, now)}` : 'done'
+  // A scheduled job's row is the job: its schedule, when it runs next (or that it runs now), and its last run when that failed.
+  const job = task.schedule ? [agentOf(task), task.state === 'failed' ? 'last run failed' : '', task.schedule, task.state === 'working' ? 'running now' : task.nextRun ? `next ${nextTime(task.nextRun, now)}` : ''].filter(Boolean).join(' · ') : ''
   // Its project is the heading over it, so the line leaves out the folder.
-  const line = elsewhere ? `${agentOf(task)} · terminal` : [agentOf(task), detail].filter(Boolean).join(' · ')
+  const line = job || (elsewhere ? `${agentOf(task)} · terminal` : [agentOf(task), detail].filter(Boolean).join(' · '))
   const fresh = isFresh(task)
   return (
     <div className="task-item" role="listitem">
@@ -822,7 +891,11 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
         <div className="task-title">
           <h2 title={task.title}>
             {task.title}
-            <span className="task-where" title={task.folder}> · {agentOf(task)} · {task.folder ? baseName(task.folder) : 'no folder'}</span>
+            <span className="task-where" title={task.folder}>
+              {' · '}{agentOf(task)}{' · '}
+              {/* Its project's mark, as on its group in the list. */}
+              {kindOf(task) === 'project' ? <><ProjectMark folder={task.folder} size="small" />{baseName(task.folder)}</> : kindOf(task) === 'scheduled' ? 'Scheduled' : 'Everyday'}
+            </span>
           </h2>
         </div>
         <div className="task-actions">

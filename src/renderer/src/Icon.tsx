@@ -131,6 +131,15 @@ const SHAPES = {
       <path d="m5.6 5.6 12.8 12.8" />
     </>
   ),
+  // Scheduled jobs: a clock.
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </>
+  ),
+  // Work in no project: a house.
+  home: <path d="M3 11 12 4l9 7M5 10v10h5v-6h4v6h5V10" />,
   // The agent market: a shop's front.
   store: (
     <>
