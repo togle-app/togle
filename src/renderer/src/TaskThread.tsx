@@ -765,9 +765,8 @@ function YouCard({ entry, at, fresh, pinned, taskKey }: { entry: LogEntry; at?: 
   const box = useRef<HTMLDivElement>(null)
   const [long, setLong] = useState(false)
   const [whole, setWhole] = useState(false)
-  // With its pictures shown, the words that stand in for them ("[Image #1]") are not said again.
   const pictures = entry.images ?? []
-  const words = pictures.length ? entry.text.replace(/\[Image #\d+\]\s*/g, '').trim() : entry.text
+  const words = youWords(entry)
   useLayoutEffect(() => {
     const el = box.current
     if (!el || whole) return
@@ -836,6 +835,29 @@ export function lastTurnKey(entries: readonly LogEntry[]): number | undefined {
 }
 
 const isPlan = (entry: LogEntry): boolean => entry.kind === 'step' && entry.step === 'plan'
+
+/** What the person said, as words: with its pictures shown, the words that stand in for them ("[Image #1]") are not said again. */
+export function youWords(entry: LogEntry): string {
+  return entry.images?.length ? entry.text.replace(/\[Image #\d+\]\s*/g, '').trim() : entry.text
+}
+
+/** What the person asked in one turn, for the rail beside the conversation: the turn's key, the words, and when they were said. */
+export interface Prompt {
+  key: number
+  text: string
+  at?: number
+}
+
+/** The questions of a conversation, turn by turn. A turn that starts with the agent, or with nothing said, has none. */
+export function promptsOf(entries: readonly LogEntry[]): Prompt[] {
+  const prompts: Prompt[] = []
+  for (const turn of turnsOf(entries.filter((entry) => !isPlan(entry)))) {
+    if (!turn.you) continue
+    const text = youWords(turn.you).replace(/\s+/g, ' ').trim() || (turn.you.images?.length ? 'A picture' : '')
+    if (text) prompts.push({ key: turn.key, text, ...(realTime(turn.you.at) ? { at: turn.you.at } : {}) })
+  }
+  return prompts
+}
 
 /**
  * A conversation as a chat: what the person said in a card of its own (the last one, what the agent works on, pinned at the top
@@ -921,7 +943,7 @@ export function Thread({ entries, state, settled, taskKey, known = null, stepsRu
       inside.push(<Meta key={`meta-${end.id}`} at={realTime(end.at) ? end.at : undefined} text={answer.map((entry) => entry.text).join('\n\n')} fresh={isNew(end.id)} />)
     }
     blocks.push(
-      <div key={turn.key} className="turn">
+      <div key={turn.key} className="turn" data-turn={turn.key}>
         {turn.you && <YouCard entry={turn.you} at={asked} fresh={isNew(turn.you.id)} pinned={last} taskKey={taskKey} />}
         {inside}
       </div>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, type LogEntry, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
 import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
 import { useReach } from './Devices'
@@ -11,7 +11,8 @@ import { PointMenu, type Point } from './PointMenu'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { RequestCard } from './RequestCard'
 import { StateMark, type MarkKind } from './StateMark'
-import { clock, currentPlan, lastTurnKey, PlanCard, Thread, turnStart, useHistory } from './TaskThread'
+import { clock, currentPlan, lastTurnKey, PlanCard, promptsOf, Thread, turnStart, useHistory } from './TaskThread'
+import { ThreadRail } from './ThreadRail'
 import { TerminalView } from './TerminalView'
 
 const api = window.togle
@@ -1055,6 +1056,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
       kept.current = null
     } else if (stick.current) toEnd()
   }, [shown.length, lastShown?.id, lastShown?.status, task.pending.length, task.state, toEnd])
+  // The questions asked, from the same entries the thread draws: a rail beside the conversation from the third on.
+  const prompts = useMemo(() => promptsOf(shown), [shown])
+  const railShown = prompts.length >= 3
   // The turn that was the last one when the task last stood still. A reply makes the task work at once and the agent's
   // record has the reply a moment later: until then that turn is drawn as over, and the clock waits for the new turn.
   const turnKey = lastTurnKey(shown)
@@ -1309,7 +1313,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
       <div className="thread-place">
         <WaitLine waiting={readingConversation} label="Reading the conversation" words="Reading the conversation…" />
         <div
-          className="task-log thread"
+          className={`task-log thread${railShown ? ' has-rail' : ''}`}
           role="log"
           aria-label="The conversation"
           ref={logBox}
@@ -1330,6 +1334,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
           {/* That it works, and for how long this turn has run: when no step of it runs, which has its own clock. */}
           {task.state === 'working' && !stepRuns && <NowLine since={newTurn ? turnStart(shown) : undefined} />}
         </div>
+        {railShown && <ThreadRail key={task.key} prompts={prompts} log={logBox} onEarlier={history?.more && !all ? showEarlierTurns : undefined} onLeaveEnd={() => { stick.current = false }} />}
         {away && (
           <button
             type="button"

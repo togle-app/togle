@@ -1666,6 +1666,105 @@ async function checkPictures(T, agent) {
   ui.window.destroy()
 }
 
+// The rail of questions beside a long conversation: a tick for each question from the third on, the one being read lit, its words in
+// a tip, a press taking the conversation there and keeping it there while the task goes on, the keys, and a tick for the turns
+// not read in yet. (A real mouse and wheel are tried in the layout harness.)
+async function checkRail(T, agent) {
+  const ui = await open(T, agent, 1024)
+  // A window that is not shown has no focus of its own, and a tick focused would not say so: the page is told it has it.
+  ui.window.webContents.debugger.attach('1.3')
+  await ui.window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+  await ui.click('.workspace-nav button', 'Agents')
+  const asked = ['Rebuild the pricing page.', 'Add a yearly price.', 'Why is the table wide on a phone?', 'Make the second plan stand out.', 'Rename Pro to Team.', 'Check it with a screen reader.', 'Show me the diff.', 'Ship it.']
+  const base = Date.now() - 3_600_000
+  const turns = (count, from = 1) => asked.slice(0, count).flatMap((text, n) => [
+    { id: from + n * 3, at: base + n * 60_000, kind: 'you', text },
+    { id: from + n * 3 + 1, at: base + n * 60_000 + 5_000, kind: 'agent', text: 'Here is how I read it.\n\n- one\n- two\n- three\n\nThat is the whole change. It is small, easy to undo, and every check passed.' },
+    { id: from + n * 3 + 2, at: base + n * 60_000 + 9_000, kind: 'agent', text: 'Done.' }
+  ])
+  const set = (props) => ui.evaluate('window.togleUITest.setTask("claude:s2",' + JSON.stringify(props) + ')')
+  const list = "[...document.querySelectorAll('.rail-tick:not(.rail-earlier)')]"
+  const log = "document.querySelector('.task-log.thread')"
+  const lit = list + ".findIndex(t=>t.getAttribute('aria-current')==='location')"
+  const topOf = (index) => "document.querySelectorAll('.turn[data-turn]')[" + index + "].offsetTop"
+  // Two questions: no rail, and the conversation has all its width.
+  await set({ log: turns(2), state: 'idle' })
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("document.querySelectorAll('.turn[data-turn]').length===2")
+  assert.equal(await ui.evaluate("!!document.querySelector('.thread-rail')"), false, 'two questions are no conversation to find a place in')
+  assert.equal(await ui.evaluate("parseFloat(getComputedStyle(" + log + ").paddingRight)"), 7, 'and nothing is kept back for it')
+  // Eight: a tick each, the last lit at the end, a room of its own at the conversation's right.
+  await set({ log: turns(8) })
+  await ui.wait("document.querySelectorAll('.rail-tick').length===8")
+  assert.deepEqual(await ui.evaluate(list + ".map(t=>t.getAttribute('aria-label'))"), asked, 'each tick is named by its question')
+  assert.equal(await ui.evaluate("document.querySelector('.thread-rail').getAttribute('aria-label')"), 'Your questions in this conversation')
+  assert.equal(await ui.evaluate(lit), 7, 'at the end of the conversation the last question is the one read')
+  assert.equal(await ui.evaluate("parseFloat(getComputedStyle(" + log + ").paddingRight)"), 29, 'the conversation keeps 7px and the rail 22px')
+  assert.ok(await ui.evaluate("(()=>{const l=" + log + ",card=document.querySelector('.you-row').getBoundingClientRect(),rail=document.querySelector('.thread-rail').getBoundingClientRect();return Math.abs(l.clientWidth-parseFloat(getComputedStyle(l).paddingRight)-card.width)<=1&&card.right<=rail.left&&l.scrollWidth<=l.clientWidth+1})()"), 'the cards end before the rail, and nothing scrolls sideways')
+  assert.equal(await ui.evaluate("document.querySelectorAll('.rail-tick[tabindex=\"0\"]').length"), 1, 'one tick is in the order of the keys: the lit one')
+  // Its question in a tip, by the keys or by the pointer.
+  await ui.evaluate(list + "[2].focus()")
+  await ui.wait("document.querySelector('.rail-tip span')?.textContent==='Why is the table wide on a phone?'")
+  assert.equal(await ui.evaluate("document.querySelector('.rail-tip').getAttribute('aria-hidden')"), 'true', 'the tick has the words; the tip is for the eyes')
+  await ui.evaluate("document.activeElement.blur()")
+  await ui.wait("!document.querySelector('.rail-tip')")
+  await ui.evaluate(list + "[4].dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'}))")
+  await ui.wait("document.querySelector('.rail-tip span')?.textContent==='Rename Pro to Team.'")
+  await ui.evaluate("document.querySelector('.thread-rail').dispatchEvent(new PointerEvent('pointerout',{bubbles:true,pointerType:'mouse',relatedTarget:document.body}))")
+  // A press takes the conversation to that question, and its tick is lit.
+  await ui.evaluate(list + "[2].click()")
+  await ui.wait("Math.abs(" + log + ".scrollTop-" + topOf(2) + ")<=1")
+  assert.equal(await ui.evaluate(lit), 2, 'its tick is lit')
+  // The task goes on while the person is there: a new question comes, and the conversation stays where it is.
+  const there = await ui.evaluate(log + ".scrollTop")
+  await set({ state: 'working', log: turns(8).concat([{ id: 900, at: Date.now() - 1000, kind: 'you', text: 'One more thing.' }, { id: 901, at: Date.now() - 500, kind: 'agent', text: 'On it.' }]) })
+  await ui.wait("document.querySelectorAll('.rail-tick').length===9")
+  assert.ok(Math.abs(await ui.evaluate(log + ".scrollTop") - there) <= 1, 'new words do not take the person from the question')
+  assert.equal(await ui.evaluate(lit), 2, 'and the tick stays lit')
+  await set({ state: 'idle', log: turns(8) })
+  await ui.wait("document.querySelectorAll('.rail-tick').length===8")
+  // A press on a late question lights it, though the conversation cannot be scrolled far enough to put it at the top.
+  await ui.evaluate(list + "[7].click()")
+  await ui.wait("Math.abs(" + log + ".scrollTop-(" + log + ".scrollHeight-" + log + ".clientHeight))<=1")
+  assert.equal(await ui.evaluate(lit), 7)
+  await ui.evaluate(list + "[6].click()")
+  await ui.wait("Math.abs(" + log + ".scrollTop-(" + log + ".scrollHeight-" + log + ".clientHeight))<=1")
+  assert.equal(await ui.evaluate(lit), 6, 'and the one before it, the end being as far as the conversation goes')
+  // The person scrolls on their own: the tick that is lit follows what is read.
+  await ui.evaluate(log + ".dispatchEvent(new WheelEvent('wheel',{deltaY:-60}));" + log + ".scrollTop=0")
+  await ui.wait(lit + "===0")
+  // The keys: Arrow Down and Arrow Up move among the ticks, Home and End go to the first and the last; a press jumps.
+  await ui.evaluate(list + "[0].focus()")
+  const key = (name) => ui.evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:" + JSON.stringify(name) + ",bubbles:true,cancelable:true}))")
+  const focused = "[...document.querySelectorAll('.rail-tick')].indexOf(document.activeElement)"
+  await key('ArrowDown')
+  assert.equal(await ui.evaluate(focused), 1)
+  await key('End')
+  assert.equal(await ui.evaluate(focused), 7)
+  await key('ArrowUp')
+  assert.equal(await ui.evaluate(focused), 6)
+  await key('Home')
+  assert.equal(await ui.evaluate(focused), 0)
+  // Other tasks: the rail goes with the conversation that has it.
+  await ui.task('Fix the login redirect')
+  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Fix the login redirect'")
+  assert.equal(await ui.evaluate("!!document.querySelector('.thread-rail')"), false, 'a conversation of few questions has none')
+  // A conversation of which only the last turns are read in: a tick at the top brings the rest in, and the rail has them all.
+  const older = turns(2, 100).map((entry) => ({ ...entry, at: entry.at - 7_200_000 }))
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:r9', runner: 'claude', title: 'A long conversation', folder: 'C:\\work\\website', terminal: false, mine: true, state: 'idle', line: '', history: { older, entries: turns(3, 1) } }) + ', "")')
+  await ui.wait("[...document.querySelectorAll('.task-row strong')].some(e=>e.textContent==='A long conversation')")
+  await ui.task('A long conversation')
+  await ui.wait("document.querySelectorAll('.rail-tick').length===4")
+  assert.equal(await ui.evaluate("document.querySelector('.rail-tick').classList.contains('rail-earlier')"), true, 'the first tick is for the turns not read in')
+  assert.equal(await ui.evaluate("document.querySelector('.rail-earlier').getAttribute('aria-label')"), 'Show earlier turns')
+  await ui.evaluate("document.querySelector('.rail-earlier').click()")
+  await ui.wait("document.querySelectorAll('.rail-tick').length===5")
+  assert.equal(await ui.evaluate("!!document.querySelector('.rail-earlier')"), false, 'once they are in, the tick is gone')
+  assert.deepEqual((await ui.calls('runnerHistory')).map((call) => call.args).at(-1), ['claude:r9', true], 'it asked for all of them, as Show earlier does')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 // The window's bar and rail: Togle's mark beside its name, the three buttons of a window (minimize, maximize or restore as the
 // window is, close), and each place's icon beside its name on a wide window, alone in a narrow one.
 async function checkWindowBar(T, agent) {
@@ -1841,6 +1940,7 @@ app.whenReady().then(async () => {
     await checkWindowBar(T, agent)
     await checkPaste(T, agent)
     await checkPictures(T, agent)
+    await checkRail(T, agent)
     await checkArrange(T, agent)
     await checkGroups(T, agent)
     await checkTasks(T, agent)
