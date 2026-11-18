@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { Icon } from './Icon'
 
 // The parts a page of settings is made of, as Settings has them and the other pages that set something (sharing an
 // agent): a card of rows, each a setting with its control on the right, switches for what's on or off.
@@ -126,6 +127,42 @@ export function FormOver({ label, className = '', busy = false, onClose, onSubmi
   return (
     <div className="form-backdrop" role="dialog" aria-modal="true" aria-label={label}>
       <form ref={form} className={`setting-detail over ${className}`} aria-label={label} onSubmit={(event) => { event.preventDefault(); onSubmit() }}>{children}</form>
+    </div>
+  )
+}
+
+/**
+ * A picture shown whole over the dimmed window (one in a conversation, opened from its small one), as big as the window lets
+ * it be. Escape, the close button, or a click beside the picture closes it, and the keys go back to what opened it; while it
+ * is open they stay on its close button.
+ */
+export function PictureOver({ src, label, onClose }: { src: string; label: string; onClose: () => void }) {
+  const closer = useRef<HTMLButtonElement>(null)
+  const close = useRef(onClose)
+  close.current = onClose
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    if (++dialogs === 1) document.body.classList.add('has-dialog')
+    closer.current?.focus({ preventScroll: true })
+    const key = (event: KeyboardEvent): void => {
+      if (event.key === 'Tab') { event.preventDefault(); closer.current?.focus(); return }
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      close.current()
+    }
+    document.addEventListener('keydown', key)
+    return () => {
+      if (--dialogs === 0) document.body.classList.remove('has-dialog')
+      document.removeEventListener('keydown', key)
+      if (opener?.isConnected) opener.focus({ preventScroll: true })
+    }
+  }, [])
+  return (
+    <div className="picture-backdrop" role="dialog" aria-modal="true" aria-label={label} onClick={(event) => { if (event.target === event.currentTarget) close.current() }}>
+      <img className="picture-whole" src={src} alt={label} />
+      <button ref={closer} type="button" className="icon picture-close" aria-label="Close the picture" title="Close" onClick={() => close.current()}>
+        <Icon name="close" />
+      </button>
     </div>
   )
 }

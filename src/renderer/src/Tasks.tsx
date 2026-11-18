@@ -373,7 +373,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   // Take over pressed on a row: the task opens with the question that confirms it.
   const [takingOver, setTakingOver] = useState<string>()
   // A task handed back: the line that goes on in the person's own terminal, shown where the task was.
-  const [handedBack, setHandedBack] = useState<{ key: string; command: string; folder: string }>()
+  const [handedBack, setHandedBack] = useState<{ key: string; command: string; folder: string; held?: string }>()
   const remote = useRemoteTasks()
   const views = useTaskViews()
   const selectedNow = useRef(selected)
@@ -767,6 +767,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             onAnswer={(requestId, decision) => act(() => api.answerRunnerTask(detail.task.key, requestId, decision))}
             onReply={(requestId, text) => act(() => api.replyRunnerTask(detail.task.key, requestId, text))}
             onSend={(text) => act(() => api.sendToRunnerTask(detail.task.key, text))}
+            onHeld={(action) => act(() => api.heldRunnerReply(detail.task.key, action))}
             onStop={() => act(() => api.stopRunnerTask(detail.task.key))}
             onEndCommands={() => act(() => api.endRunnerCommands(detail.task.key))}
             onOpen={() => act(() => api.openRunnerTask(detail.task.key))}
@@ -886,13 +887,17 @@ function TaskRow({ task, now, old, selected, withFolder, dragging, onSelect, onT
   )
 }
 
-/** After Hand back: the line that goes on in the person's own terminal, to run in the folder the task worked in. */
-function HandedBack({ command, folder }: { command: string; folder: string }) {
+/**
+ * After Hand back: the line that goes on in the person's own terminal, to run in the folder the task worked in, and what they
+ * had sent from Chat that waited to go in and now does not (its words, to type there).
+ */
+function HandedBack({ command, folder, held }: { command: string; folder: string; held?: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <div className="task-banner handed-back" role="note">
       <span>
         To open it in your terminal, run <code>{command}</code> in <code>{folder}</code>.
+        {held && <> What you sent and was waiting did not go in: <q className="held-back">{held}</q></>}
       </span>
       <button className="small" onClick={() => void navigator.clipboard.writeText(command).then(() => setCopied(true), () => undefined)}>
         {copied ? 'Copied' : 'Copy'}
@@ -960,6 +965,8 @@ interface PanelProps {
   onAnswer: (requestId: string, decision: 'allow-once' | 'allow-always' | 'refuse') => void
   onReply: (requestId: string, text: string) => void
   onSend: (text: string) => void
+  /** What waits to go in from Chat: sent now, or taken back. */
+  onHeld: (action: 'send' | 'drop') => void
   onStop: () => Promise<void>
   onEndCommands: () => Promise<void>
   onOpen: () => Promise<void>
@@ -970,8 +977,8 @@ interface PanelProps {
   /** Take over was pressed on the task's row: the question that confirms it shows at once. */
   takeOverAsked: boolean
   onHandBack: () => Promise<void>
-  /** The task was just handed back: the line that goes on in the person's own terminal. */
-  handedBack?: { command: string; folder: string }
+  /** The task was just handed back: the line that goes on in the person's own terminal, and what waited from Chat. */
+  handedBack?: { command: string; folder: string; held?: string }
   /** Whether Togle's own log of the task has been read (a task it does not run has none). */
   logRead: boolean
   /** The group the list shows it in: the header shows the same. */
@@ -995,7 +1002,7 @@ function usePressed(task: TaskView): [string | undefined, (name: string, work: (
   return [pressed, press]
 }
 
-function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack, logRead, place }: PanelProps) {
+function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack, logRead, place }: PanelProps) {
   const { task, log } = detail
   const talkKey = useHotkeys().find((key) => key.id === 'dictate')?.keys || 'F9'
   // A task whose agent has a screen Togle can show is seen in two views; any other task has the one it has.
@@ -1097,9 +1104,14 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
   const closedSession = task.mine && !!task.screen && view === 'session' && !task.terminal
   const cardsView = !sessionShown && !closedSession
   const answers = task.mine && cardsView
-  // An agent that can only be written to on its screen takes words when its turn has ended; Codex takes them while it works too.
+  // An agent that can only be written to on its screen takes words when its turn has ended (Codex takes them while it works too):
+  // what is sent while it works waits, and goes in then. The box takes words all the while.
   const holdsReply = !!task.screen && task.runner !== 'codex' && (task.state === 'working' || task.state === 'waiting' || !!task.waitingFor) && !task.pending.some((request) => request.kind === 'question')
-  const replyHint = holdsReply ? 'Reply when it has finished' : 'Reply, or hold ' + talkKey + ' and talk'
+  const replyHint = holdsReply ? `Reply: it goes in when ${agentOf(task)} finishes` : 'Reply, or hold ' + talkKey + ' and talk'
+  // What waits to go in, and why it has not: it goes in by itself when the turn ends, unless the task stopped or it did not go in.
+  const held = task.held ?? []
+  const heldWaitsForYou = !!task.heldPaused || task.state === 'stopped' || task.state === 'failed'
+  const heldLine = task.heldNote ? `It did not go in: ${task.heldNote}` : heldWaitsForYou ? 'Not sent: the task stopped.' : `Goes in when ${agentOf(task)} finishes this turn.`
   useEffect(() => {
     if (!answers) { setOffers(NO_OFFERS); return }
     let live = true
@@ -1213,7 +1225,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
 
       {task.mine && task.signedOut && <SignedOut task={task} />}
 
-      {handedBack && !task.terminal && <HandedBack command={handedBack.command} folder={handedBack.folder} />}
+      {handedBack && !task.terminal && <HandedBack command={handedBack.command} folder={handedBack.folder} held={handedBack.held} />}
 
       {!task.mine && (
         <div className="task-banner" role="note">
@@ -1339,6 +1351,22 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
       {/* The agent's own checklist for the turn at hand, on top of the reply box. */}
       {plan && <PlanCard key={`${task.key} ${lastTurnKey(shown) ?? ''}`} plan={plan} />}
 
+      {/* What was sent while the agent worked, waiting for its turn to end: as it will be said, with when it goes in. */}
+      {task.mine && held.length > 0 && (
+        <div className="held-reply" role="status" aria-label="Waiting to go in">
+          <div className="held-words">
+            {held.map((words, index) => <p key={index}>{words}</p>)}
+          </div>
+          <div className="held-foot">
+            <span className={task.heldNote ? 'held-line bad' : 'held-line'}>{heldLine}</span>
+            <span className="held-actions">
+              {heldWaitsForYou && <button type="button" className="small" onClick={() => onHeld('send')}>Send now</button>}
+              <button type="button" className="ghost small" onClick={() => onHeld('drop')}>Remove</button>
+            </span>
+          </div>
+        </div>
+      )}
+
       {task.mine && (
         <div className="task-reply-place" ref={replyPlace}>
           {listed && (
@@ -1361,11 +1389,11 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
           <form className="task-reply" onSubmit={send}>
             {/* A box that grows with what is typed: Enter sends, Shift+Enter starts a new line. A password is one line, and not shown. */}
             {question?.questions?.[0]?.secret ? (
-              <input value={text} disabled={holdsReply} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" type="password" />
+              <input value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" type="password" />
             ) : (
-              <textarea rows={1} value={text} disabled={holdsReply} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" aria-autocomplete="list" aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
+              <textarea rows={1} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" aria-autocomplete="list" aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
             )}
-            <button className={!holdsReply && text.trim() ? 'reply-send primary' : 'reply-send'} disabled={holdsReply || !text.trim()} aria-label="Send">
+            <button className={text.trim() ? 'reply-send primary' : 'reply-send'} disabled={!text.trim()} aria-label={holdsReply ? 'Send when it finishes' : 'Send'} title={holdsReply ? `It goes in when ${agentOf(task)} finishes` : undefined}>
               <Icon name="send" size={14} />
             </button>
           </form>

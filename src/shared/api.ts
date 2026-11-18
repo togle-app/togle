@@ -200,12 +200,23 @@ export interface TogleApi {
   openRunnerTask(key: string): Promise<TaskView>
   /** Ends the program a task runs in elsewhere (a terminal), and picks the task up here. */
   takeOverRunnerTask(key: string): Promise<TaskView>
+  /**
+   * What the person sends from Chat. An agent written to on its own screen takes words only once its turn has ended: sent while
+   * it works, they wait (the task's `held`) and go in then.
+   */
   sendToRunnerTask(key: string, text: string): Promise<void>
+  /** What waits to go in to a task: sent now (if the agent takes words now), or taken back. */
+  heldRunnerReply(key: string, action: 'send' | 'drop'): Promise<void>
+  /** A picture in a task's conversation, by the key it came with, as a data: address; null when it is no longer kept. */
+  runnerPicture(key: string, picture: string): Promise<string | null>
   /** Allows or refuses one command or edit a task waits to do. Allowing is once only. */
   answerRunnerTask(key: string, requestId: string, decision: Decision): Promise<void>
   replyRunnerTask(key: string, requestId: string, text: string): Promise<void>
-  /** Lets go of a task that is the agent's own screen here: its program ends, and the line to go on in a terminal comes back. */
-  handBackRunnerTask(key: string): Promise<{ command: string; folder: string }>
+  /**
+   * Lets go of a task that is the agent's own screen here: its program ends, and the line to go on in a terminal comes back,
+   * with what waited to go in from Chat (`held`), which does not go in now.
+   */
+  handBackRunnerTask(key: string): Promise<{ command: string; folder: string; held?: string }>
   /** What a task's reply box lists when "/" is typed: its agent's own commands and models. */
   runnerOffers(key: string): Promise<import('./runner').TaskOffers>
   /** A task's conversation as its agent keeps it (its last turns, or all with `all`), for the Chat view; null when the agent keeps none to read. */

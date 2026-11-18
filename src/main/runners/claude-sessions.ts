@@ -463,7 +463,10 @@ function push(state: Conversation, kind: LogEntry['kind'], text: string, at: num
   if (state.entries.length > ENTRIES_MOST) {
     const dropped = new Set(state.entries.splice(0, state.entries.length - ENTRIES_MOST))
     for (const [call, waiting] of state.tools) if (waiting.entry && dropped.has(waiting.entry)) state.tools.delete(call)
-    for (const gone of dropped) if (gone.more) state.places.delete(gone.more)
+    for (const gone of dropped) {
+      if (gone.more) state.places.delete(gone.more)
+      for (const picture of gone.images ?? []) state.places.delete(picture)
+    }
     state.cut = true
   }
   return entry
@@ -642,7 +645,10 @@ export function feedConversation(state: Conversation, lines: string[], places?: 
     const blocks = Array.isArray(content) ? content.filter(isObject) : []
     if (r.type === 'user') {
       if (said(r)) {
-        push(state, 'you', theirWords(textOf(content)).slice(0, WORDS_MOST), at)
+        // The pictures in it (one pasted, a screenshot), each read again from this line when the window shows it.
+        const pictures = place ? blocks.flatMap((block, position) => (isPicture(block) ? [`image:${place.offset}#${position}`] : [])) : []
+        push(state, 'you', theirWords(textOf(content)).slice(0, WORDS_MOST), at, pictures.length ? { images: pictures } : {})
+        for (const picture of pictures) state.places.set(picture, place as Place)
         return
       }
       const results = blocks.filter((block) => block.type === 'tool_result')
@@ -756,10 +762,10 @@ export function claudeConversation(id: string, all = false): Promise<TaskHistory
 }
 
 /** The line of a session's file where its conversation found what a key names, read again; null when it is not held any more. */
-async function lineAt(id: string, key: string): Promise<Json | null> {
+async function lineAt(id: string, key: string, most = DETAIL_LINE_MOST): Promise<Json | null> {
   const held = conversations.get(id)
   const place = held?.state.places.get(key)
-  if (!held || !place || place.length > DETAIL_LINE_MOST) return null
+  if (!held || !place || place.length > most) return null
   const handle = await fs.open(held.file, 'r').catch(() => null)
   if (!handle) return null
   try {
@@ -769,6 +775,29 @@ async function lineAt(id: string, key: string): Promise<Json | null> {
   } finally {
     await handle.close()
   }
+}
+
+/** The kinds of picture Claude Code keeps in what was said, and that the window shows. */
+const PICTURE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+/** The longest line read again for a picture in it: a big screenshot is several megabytes of base64. */
+const PICTURE_LINE_MOST = 48 * 1048576
+
+/** A picture block in what the person said: its bytes are in the line, in base64. */
+const isPicture = (block: Json): boolean => block.type === 'image' && isObject(block.source) && block.source.type === 'base64' && PICTURE_TYPES.has(str(block.source.media_type)) && !!str(block.source.data)
+
+/**
+ * A picture the person put in what they said (one pasted, a screenshot), read again from its line: `key` is the one its entry
+ * came with ("image:<where the line is>#<which block>"). Null when the line is not held any more or holds no such picture.
+ */
+export async function claudePicture(id: string, key: string): Promise<{ type: string; data: string } | null> {
+  const position = Number(/^image:\d+#(\d+)$/.exec(key)?.[1] ?? NaN)
+  if (!Number.isInteger(position)) return null
+  const r = await lineAt(id, key, PICTURE_LINE_MOST)
+  if (!r || r.type !== 'user' || !isObject(r.message) || !Array.isArray(r.message.content)) return null
+  const block = r.message.content[position]
+  if (!isObject(block) || !isPicture(block)) return null
+  const source = block.source as Json
+  return { type: str(source.media_type), data: str(source.data) }
 }
 
 /**

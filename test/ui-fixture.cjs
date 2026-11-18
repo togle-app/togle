@@ -397,12 +397,29 @@ module.exports = function install(fixture) {
     const printed = 'Claude Code v2.1.323\r\n> '
     terminals.set(key, { text: printed, end: printed.length }); runnerChanged(); return clone(runnerView(found))
   }
+  // As main does (hub.ts sendOrHold): words for an agent written to on its screen wait while it works, and go in when its turn ends.
+  const takesNoWords = found => !!found.screen && found.runner !== 'codex' && (found.state === 'working' || found.state === 'waiting' || !!found.waitingFor)
+  const dropHeld = found => { const held = found.held ?? []; delete found.held; delete found.heldNote; delete found.heldPaused; return held }
   api.handBackRunnerTask = async key => {
     record('handBackRunnerTask', [key]); const found = runnerFind(key)
-    delete found.terminal; delete found.screenId; runnerChanged()
-    return { command: 'claude attach 3f2a9c1e', folder: found.folder }
+    delete found.terminal; delete found.screenId
+    const held = dropHeld(found); runnerChanged()
+    return { command: 'claude attach 3f2a9c1e', folder: found.folder, ...(held.length ? { held: held.join('\n\n') } : {}) }
   }
-  api.sendToRunnerTask = async (key, text) => { record('sendToRunnerTask', [key, text]); const found = runnerFind(key); found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged() }
+  api.sendToRunnerTask = async (key, text) => {
+    record('sendToRunnerTask', [key, text]); const found = runnerFind(key)
+    if (takesNoWords(found)) { found.held = [...(found.held ?? []), text]; delete found.heldNote; delete found.heldPaused; runnerChanged(); return }
+    found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged()
+  }
+  api.heldRunnerReply = async (key, action) => {
+    record('heldRunnerReply', [key, action]); const found = runnerFind(key)
+    if (action === 'drop') { dropHeld(found); runnerChanged(); return }
+    if (takesNoWords(found)) throw new Error('Claude Code is still working. It goes in when it finishes.')
+    const text = dropHeld(found).join('\n\n')
+    found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged()
+  }
+  // A picture in a conversation: a task given `history.pictures` keeps each as a data: address by its key.
+  api.runnerPicture = async (key, picture) => { record('runnerPicture', [key, picture]); return runnerFind(key).history?.pictures?.[picture] ?? null }
   api.answerRunnerTask = async (key, requestId, decision) => {
     record('answerRunnerTask', [key, requestId, decision]); const found = runnerFind(key)
     found.pending = found.pending.filter(request => request.id !== requestId)
@@ -434,7 +451,7 @@ module.exports = function install(fixture) {
       ]
     }
   }
-  api.stopRunnerTask = async key => { record('stopRunnerTask', [key]); const found = runnerFind(key); found.state = 'stopped'; found.pending = []; found.line = ''; if (found.runner === 'codex') found.commandsRunning = true; runnerChanged() }
+  api.stopRunnerTask = async key => { record('stopRunnerTask', [key]); const found = runnerFind(key); found.state = 'stopped'; found.pending = []; found.line = ''; if (found.runner === 'codex') found.commandsRunning = true; if (found.held?.length) found.heldPaused = true; runnerChanged() }
   api.endRunnerCommands = async key => { record('endRunnerCommands', [key]); runnerFind(key).commandsRunning = false; runnerChanged(); return 1 }
   api.closeRunnerTask = async key => { record('closeRunnerTask', [key]); runnerFind(key).mine = false; runnerChanged() }
   // A task in a terminal of Togle's own: what it printed (a test adds to it with onTerminalData), and what is sent to it.

@@ -136,6 +136,11 @@ export interface Backend {
    * the conversation gave is looked up: the key says nothing of where to read.
    */
   step?(id: string, more: string): Promise<StepDetail | null>
+  /**
+   * A picture in what the person said in that conversation, by the key its entry came with (`LogEntry.images`): its type and
+   * its bytes in base64. Read again from the agent's own record only when the window shows it; null when it is not kept.
+   */
+  picture?(id: string, key: string): Promise<{ type: string; data: string } | null>
   /** Stops using the agent's program. Tasks that run in the background go on. */
   close(): Promise<void>
 }

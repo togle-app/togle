@@ -16,7 +16,7 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { StepDetail, TaskHistory, TaskInfo } from '@shared/runner'
-import { claudeChange, claudeConversation, claudeHasSession, claudeLastSaid, claudeSessions, claudeStep, claudeWrittenAt } from './claude-sessions'
+import { claudeChange, claudeConversation, claudeHasSession, claudeLastSaid, claudePicture, claudeSessions, claudeStep, claudeWrittenAt } from './claude-sessions'
 import { HookServer, type HookTarget } from './claude-hooks'
 import { ClaudeJob, claudeEnv, isJob, rowOf, stateOfJob, type AgentRow, type JobContext, type JobRow } from './claude-job'
 import { oneLine } from './claude-requests'
@@ -330,6 +330,11 @@ export class ClaudeBackend implements Backend {
   /** A session's conversation as its file keeps it: what the Chat view shows, also of what was said before Togle opened it. */
   history(id: string, all: boolean): Promise<TaskHistory | null> {
     return (this.options.conversation ?? claudeConversation)(id, all)
+  }
+
+  /** A picture the person put in that conversation (pasted, a screenshot), read again from the session's file. */
+  picture(id: string, key: string): Promise<{ type: string; data: string } | null> {
+    return claudePicture(id, key)
   }
 
   /** What a step of that conversation holds (what a command printed, a thought's words, how a file changed), read again from the session's file. */

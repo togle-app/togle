@@ -258,6 +258,77 @@ test('the list joins every installed agent, waiting first and then working, with
   }
 })
 
+test('words sent from Chat while an agent written to on its screen works wait, and go in together once its turn has ended', async () => {
+  const claude = new FakeBackend('claude', { screens: true })
+  const { hub } = hubOf([claude])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const task = claude.started[0]
+    assert.equal(task.state, 'working')
+    await hub.sendOrHold(view.key, 'Also keep the old link working')
+    await hub.sendOrHold(view.key, 'and add a test')
+    assert.deepEqual(task.sent, ['Fix the login redirect'], 'nothing typed while it works')
+    assert.deepEqual((await hub.list()).find((t) => t.key === view.key).held, ['Also keep the old link working', 'and add a test'])
+    await assert.rejects(hub.sendOrHold(view.key, '/exit'), /A command is typed on the agent’s screen/, 'a command of its own is refused at once')
+    task.done()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    assert.deepEqual(task.sent, ['Fix the login redirect'], 'not on the first moment of idle')
+    await new Promise((resolve) => setTimeout(resolve, 1_600))
+    assert.deepEqual(task.sent, ['Fix the login redirect', 'Also keep the old link working\n\nand add a test'], 'once the turn has ended, all of it in one message')
+    assert.equal((await hub.list()).find((t) => t.key === view.key).held, undefined)
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+})
+
+test('what waits does not go in after a Stop; the person sends it or takes it back, and Hand back gives it back', async () => {
+  const claude = new FakeBackend('claude', { screens: true })
+  const { hub } = hubOf([claude])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const task = claude.started[0]
+    await hub.sendOrHold(view.key, 'Use the new router')
+    await hub.stop(view.key)
+    task.done()
+    await new Promise((resolve) => setTimeout(resolve, 1_800))
+    assert.deepEqual(task.sent, ['Fix the login redirect'], 'stopped: it does not start the agent again by itself')
+    const stopped = (await hub.list()).find((t) => t.key === view.key)
+    assert.deepEqual([stopped.held, stopped.heldPaused], [['Use the new router'], true])
+    await hub.held(view.key, 'send')
+    assert.deepEqual(task.sent, ['Fix the login redirect', 'Use the new router'], 'sent when the person says so')
+    await hub.sendOrHold(view.key, 'One more thing')
+    await assert.rejects(hub.held(view.key, 'send'), /still working/, 'not while it works')
+    await hub.held(view.key, 'drop')
+    assert.equal((await hub.list()).find((t) => t.key === view.key).held, undefined, 'taken back')
+    await hub.sendOrHold(view.key, 'Then check the tests')
+    const back = await hub.handBack(view.key)
+    assert.equal(back.held, 'Then check the tests', 'handed back: the words come back, and do not go in')
+    task.done()
+    await new Promise((resolve) => setTimeout(resolve, 1_800))
+    assert.equal(task.sent.includes('Then check the tests'), false)
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+})
+
+test('Codex takes words while it works: nothing waits', async () => {
+  const codex = new FakeBackend('codex', { screens: true })
+  const { hub } = hubOf([codex])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'codex', folder, prompt: 'Add the status column' })
+    await hub.sendOrHold(view.key, 'Name it state')
+    assert.deepEqual(codex.started[0].sent, ['Add the status column', 'Name it state'])
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+})
+
 test('a task started here asks before commands, is named, is logged, and the window is told', async () => {
   const claude = new FakeBackend('claude')
   const { hub, changes, titles } = hubOf([claude])

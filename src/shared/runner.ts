@@ -163,6 +163,8 @@ export interface LogEntry {
   status?: 'running' | 'finished' | 'declined' | 'failed'
   /** The files a `files` step changed, or a `read` step read. */
   paths?: string[]
+  /** The pictures in what the person said (one pasted, a screenshot), by the key each is read with when it is shown. */
+  images?: string[]
   /** What a `step` was. */
   step?: StepKind
   /** How long it took, in milliseconds, where the agent's record says so or its times tell. */
@@ -236,6 +238,14 @@ export interface TaskView extends TaskInfo {
   schedule?: string
   /** When a scheduled job runs next, in milliseconds. */
   nextRun?: number
+  /**
+   * What the person sent from Chat while the agent worked, and that waits to go in when its turn ends: an agent written to
+   * on its own screen takes words only then. With why it did not go in yet, when it did not (`heldNote`), and whether it
+   * waits for the person to send it (`heldPaused`: the task was stopped, or the words did not go in).
+   */
+  held?: string[]
+  heldNote?: string
+  heldPaused?: boolean
 }
 
 /**

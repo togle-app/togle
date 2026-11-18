@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import type { LogEntry, PlanItem, StepDetail, TaskHistory, TaskState, TaskView } from '@shared/runner'
 import { Icon, type IconName } from './Icon'
 import { Markdown } from './Markdown'
+import { PictureOver } from './Rows'
 
 const api = window.togle
 
@@ -697,16 +698,76 @@ function Meta({ at, text, fresh }: { at?: number; text: string; fresh?: boolean 
   )
 }
 
+/** The pictures read so far, by task and key: a picture shown again is not asked for again. */
+const picturesRead = new Map<string, Promise<string | null>>()
+function pictureOf(taskKey: string, picture: string): Promise<string | null> {
+  const at = `${taskKey}\n${picture}`
+  let found = picturesRead.get(at)
+  if (!found) {
+    // One that could not be read is asked for again the next time it is shown (its conversation may be read again by then).
+    const forget = (): null => {
+      picturesRead.delete(at)
+      return null
+    }
+    found = api.runnerPicture(taskKey, picture).then((src) => src ?? forget(), forget)
+    picturesRead.set(at, found)
+    while (picturesRead.size > 30) picturesRead.delete(picturesRead.keys().next().value as string)
+  }
+  return found
+}
+
+/**
+ * A picture in what the person said: small in its card, in a place of its own size before it comes (nothing moves when it
+ * does); pressed, it opens whole over the window. One no longer kept says so.
+ */
+function Picture({ taskKey, picture, index }: { taskKey: string; picture: string; index: number }): ReactNode {
+  const [src, setSrc] = useState<string | null | undefined>(undefined)
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    let live = true
+    void pictureOf(taskKey, picture).then((found) => {
+      if (live) setSrc(found)
+    })
+    return () => {
+      live = false
+    }
+  }, [taskKey, picture])
+  const label = `Picture ${index + 1}`
+  if (src === null) return <span className="you-picture gone">The picture is no longer kept</span>
+  return (
+    <>
+      <button
+        type="button"
+        className="you-picture"
+        aria-label={`${label}: open it`}
+        title="Open the picture"
+        disabled={!src}
+        onClick={(event) => {
+          // The keys come back here when it closes.
+          event.currentTarget.focus()
+          setOpen(true)
+        }}
+      >
+        {src && <img src={src} alt="" />}
+      </button>
+      {open && src && <PictureOver src={src} label={label} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
 /**
  * What the person said, as a card of its own at the head of its turn, set apart from what the agent says. The last one (`pinned`),
  * what the agent works on now, stays at the top of the conversation while its turn is in view, so that it is always there; the
  * ones before scroll away with their turns. A long one shows its first lines, fading out, and opens to all of it (and then it
  * scrolls away like the rest).
  */
-function YouCard({ entry, at, fresh, pinned }: { entry: LogEntry; at?: number; fresh?: boolean; pinned: boolean }): ReactNode {
+function YouCard({ entry, at, fresh, pinned, taskKey }: { entry: LogEntry; at?: number; fresh?: boolean; pinned: boolean; taskKey: string }): ReactNode {
   const box = useRef<HTMLDivElement>(null)
   const [long, setLong] = useState(false)
   const [whole, setWhole] = useState(false)
+  // With its pictures shown, the words that stand in for them ("[Image #1]") are not said again.
+  const pictures = entry.images ?? []
+  const words = pictures.length ? entry.text.replace(/\[Image #\d+\]\s*/g, '').trim() : entry.text
   useLayoutEffect(() => {
     const el = box.current
     if (!el || whole) return
@@ -725,9 +786,16 @@ function YouCard({ entry, at, fresh, pinned }: { entry: LogEntry; at?: number; f
         <span className="you-label">You</span>
         {at !== undefined && <When at={at} />}
       </div>
-      <div ref={box} className={`task-you${long && !whole ? ' clamped' : ''}${whole ? ' whole' : ''}`}>
-        {entry.text}
-      </div>
+      {(words || !pictures.length) && (
+        <div ref={box} className={`task-you${long && !whole ? ' clamped' : ''}${whole ? ' whole' : ''}`}>
+          {words}
+        </div>
+      )}
+      {!!pictures.length && (
+        <div className="you-pictures">
+          {pictures.map((picture, index) => <Picture key={picture} taskKey={taskKey} picture={picture} index={index} />)}
+        </div>
+      )}
       {(long || whole) && (
         <button type="button" className="link you-more" aria-expanded={whole} onClick={() => setWhole((was) => !was)}>
           {whole ? 'Show less' : 'Show all'}
@@ -854,7 +922,7 @@ export function Thread({ entries, state, settled, taskKey, known = null, stepsRu
     }
     blocks.push(
       <div key={turn.key} className="turn">
-        {turn.you && <YouCard entry={turn.you} at={asked} fresh={isNew(turn.you.id)} pinned={last} />}
+        {turn.you && <YouCard entry={turn.you} at={asked} fresh={isNew(turn.you.id)} pinned={last} taskKey={taskKey} />}
         {inside}
       </div>
     )

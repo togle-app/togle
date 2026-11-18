@@ -145,7 +145,13 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   })
   handle('runners:open', (key) => hub.open(word(key, 'The task')))
   handle('runners:take-over', (key) => hub.takeOver(word(key, 'The task')))
-  handle('runners:send', (key, text) => hub.send(word(key, 'The task'), typeof text === 'string' ? text : ''))
+  // What the person sends from Chat: words an agent cannot take while it works wait, and go in when its turn ends.
+  handle('runners:send', (key, text) => hub.sendOrHold(word(key, 'The task'), typeof text === 'string' ? text : ''))
+  handle('runners:held', (key, action) => hub.held(word(key, 'The task'), action === 'send' ? 'send' : 'drop'))
+  handle('runners:picture', async (key, picture) => {
+    const found = await hub.picture(word(key, 'The task'), word(picture, 'The picture').slice(0, 200))
+    return found ? `data:${found.type};base64,${found.data}` : null
+  })
   handle('runners:answer', (key, requestId, decision) => hub.answer(word(key, 'The task'), word(requestId, 'The request'), decision as 'allow-once' | 'allow-always' | 'refuse'))
   handle('runners:reply', (key, requestId, text) => hub.reply(word(key, 'The task'), word(requestId, 'The request'), typeof text === 'string' ? text : ''))
   handle('runners:hand-back', (key) => hub.handBack(word(key, 'The task')))

@@ -13,7 +13,8 @@ const dir = workDir('claude-conversation')
 const claudeHome = path.join(dir, '.claude')
 process.env.CLAUDE_CONFIG_DIR = claudeHome
 
-const { claudeChange, claudeConversation, claudeStep, detailOf, diffOf } = await import('./.build/togle.mjs')
+const T = await import('./.build/togle.mjs')
+const { claudeChange, claudeConversation, claudeStep, detailOf, diffOf } = T
 
 const file = (n) => path.join(claudeHome, 'projects', 'C--work-shop', `bbbb${n}111-2222-4333-8444-555566667777.jsonl`)
 const id = (n) => `bbbb${n}111-2222-4333-8444-555566667777`
@@ -58,6 +59,26 @@ test('what was asked, what it answered, the commands with how each ended, the fi
   assert.deepEqual(history.entries.filter((entry) => entry.kind === 'command').map((entry) => entry.took), [4000, 4000, 4000], 'how long each command took: from its call to its result')
   assert.equal(new Set(history.entries.map((entry) => entry.id)).size, history.entries.length, 'each entry has an id of its own')
   assert.ok(history.entries.every((entry) => entry.at === Date.parse('2026-11-16T10:00:00.000Z') || entry.at === Date.parse('2026-11-16T10:00:05.000Z')), 'the time of each line is kept')
+})
+
+test('a picture the person pasted is in what they said, by a key, and read again from the file when it is shown', async () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  write(7,
+    line(asked(7, [{ type: 'text', text: '[Image #1] Why is this button cut?' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }])) +
+    line(said(7, [{ type: 'text', text: 'It is too narrow.' }])) +
+    // A picture a tool read is the tool's result, not what the person said.
+    line({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'x', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }] }] }, sessionId: id(7), timestamp: '2026-11-16T10:00:09.000Z', isSidechain: false })
+  )
+  const history = await T.claudeConversation(id(7))
+  const you = history.entries.find((entry) => entry.kind === 'you')
+  assert.equal(you.text, '[Image #1] Why is this button cut?')
+  assert.equal(you.images.length, 1)
+  assert.match(you.images[0], /^image:\d+#1$/)
+  assert.equal(JSON.stringify(history).includes(png), false, 'the picture itself is not in the conversation')
+  assert.deepEqual(await T.claudePicture(id(7), you.images[0]), { type: 'image/png', data: png })
+  assert.equal(await T.claudePicture(id(7), you.images[0].replace(/#1$/, '#0')), null, 'a block that is no picture')
+  assert.equal(await T.claudePicture(id(7), 'image:999999#1'), null, 'a key the conversation never gave')
+  assert.equal(history.entries.filter((entry) => entry.images).length, 1, 'only what the person said carries pictures')
 })
 
 test('it is read again as the file grows: earlier entries keep their ids, and a line half written waits for its end', async () => {

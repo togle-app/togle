@@ -1,6 +1,6 @@
 // Exercises the Tasks screen in the production renderer with a fake IPC API: the list, an answer, a refusal, Stop and
 // its second press, a reply, a new task, continuing and taking over. No agent, account or network is used.
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, nativeImage } = require('electron')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -442,15 +442,26 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false, 'no card over a screen that asks on its own: the notice says it')
   assert.deepEqual(await texts(ui, '.task-actions button'), ['Stop', 'Hand back'], 'it waits: Stop beside Hand back, as the design page has them')
   await ui.capture('tasks-screen')
-  // Chat: the card for what it asks, in the same task, and a reply box that takes words once it has finished.
+  // Chat: the card for what it asks, in the same task, and a reply box that takes words all the while: what is sent while it
+  // asks or works waits, as a card of its own, and goes in when its turn ends.
   await ui.click('.view-switch button', 'Chat')
   await ui.wait("!!document.querySelector('.task-request')")
   assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal')"), false, 'Web does not show the screen')
   assert.deepEqual((await ui.calls('taskSessionShown')).map(call => call.args).at(-1), [null], 'and the window says it shows none')
   assert.deepEqual(await texts(ui, '.task-request button'), ['Allow once', 'Refuse'], 'the same card as anywhere')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request .hint')"), false, 'it says nothing of a screen to answer on')
-  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').disabled"), true, 'while it asks, words typed would answer its question on a screen nobody sees')
-  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').placeholder"), 'Reply when it has finished')
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').disabled"), false, 'it takes words while the agent asks')
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').placeholder"), 'Reply: it goes in when Claude Code finishes')
+  await ui.fill('.task-reply textarea', 'Also the header')
+  await ui.click('.task-reply button', 'Send when it finishes')
+  await ui.wait("!!document.querySelector('.held-reply')")
+  assert.deepEqual(await texts(ui, '.held-words p'), ['Also the header'], 'it waits, as it will be said')
+  assert.equal(await ui.evaluate("document.querySelector('.held-line').textContent"), 'Goes in when Claude Code finishes this turn.')
+  assert.deepEqual(await texts(ui, '.held-actions button'), ['Remove'], 'it goes in by itself: only Remove')
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), '', 'the box is empty again')
+  await ui.click('.held-actions button', 'Remove')
+  await ui.wait("!document.querySelector('.held-reply')")
+  assert.deepEqual((await ui.calls('heldRunnerReply')).map(call => call.args).at(-1), ['claude:s4', 'drop'])
   await ui.capture('tasks-screen-cards')
   await ui.click('.task-request button', 'Allow once')
   await ui.wait("!document.querySelector('.task-request')")
@@ -460,6 +471,17 @@ async function checkTasks(T, agent) {
   await ui.fill('.task-reply textarea', 'Now the footer')
   await ui.click('.task-reply button', 'Send')
   assert.deepEqual((await ui.calls('sendToRunnerTask')).map(call => call.args).at(-1), ['claude:s4', 'Now the footer'], 'a reply goes to the task, whichever view it is in')
+  // Sent while it works, then the task is stopped: what waits does not go in by itself, and Send now sends it.
+  await ui.wait("document.querySelector('.state-chip')?.textContent==='Working'")
+  await ui.fill('.task-reply textarea', 'And the links')
+  await ui.click('.task-reply button', 'Send when it finishes')
+  await ui.wait("!!document.querySelector('.held-reply')")
+  await ui.click('.task-actions button', 'Stop')
+  await ui.wait("document.querySelector('.held-line')?.textContent==='Not sent: the task stopped.'")
+  assert.deepEqual(await texts(ui, '.held-actions button'), ['Send now', 'Remove'])
+  await ui.click('.held-actions button', 'Send now')
+  await ui.wait("!document.querySelector('.held-reply')")
+  assert.deepEqual((await ui.calls('heldRunnerReply')).map(call => call.args).at(-1), ['claude:s4', 'send'])
   // The view is picked for the task: back to Terminal, and the screen is there.
   await ui.click('.view-switch button', 'Terminal')
   await ui.wait("!!document.querySelector('.task-terminal')")
@@ -1603,6 +1625,44 @@ async function checkGroups(T, agent) {
   ui.window.destroy()
 }
 
+// A picture the person put in what they said (one pasted, a screenshot), in the Chat view: small in their card, in a place of
+// its own size, with the words that stood in for it left out; pressed, it opens whole over the window, and Escape closes it.
+// One that is no longer kept says so.
+async function checkPictures(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Agents')
+  const picture = nativeImage.createFromBuffer(Buffer.alloc(40 * 30 * 4, 0x9a), { width: 40, height: 30 }).toDataURL()
+  const at = Date.now() - 60_000
+  const entries = [
+    { id: 1, at, kind: 'you', text: '[Image #1] Why is this button cut?', images: ['image:0#1'] },
+    { id: 2, at: at + 5_000, kind: 'agent', text: 'It is too narrow.' },
+    { id: 3, at: at + 9_000, kind: 'you', text: '[Image #1] And this one?', images: ['image:900#1'] },
+    { id: 4, at: at + 12_000, kind: 'agent', text: 'That one too.' }
+  ]
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:p9', runner: 'claude', title: 'Why is the button cut', folder: 'C:\\work\\website', terminal: false, mine: true, state: 'idle', line: '', history: { entries, pictures: { 'image:0#1': picture } } }) + ', "")')
+  await ui.wait("[...document.querySelectorAll('.task-row strong')].some(e=>e.textContent==='Why is the button cut')")
+  await ui.task('Why is the button cut')
+  await ui.wait("document.querySelector('.you-picture img')?.naturalWidth===40")
+  assert.deepEqual(await texts(ui, '.task-you'), ['Why is this button cut?', 'And this one?'], 'the words that stood in for a picture are not said again')
+  assert.deepEqual(await ui.evaluate("(()=>{const r=document.querySelector('.you-picture').getBoundingClientRect();return [Math.round(r.width),Math.round(r.height)]})()"), [168, 112], 'its place has its size')
+  await ui.wait("!!document.querySelector('.you-picture.gone')")
+  assert.equal(await ui.evaluate("document.querySelector('.you-picture.gone').textContent"), 'The picture is no longer kept')
+  await ui.click('.you-picture', 'Picture 1: open it')
+  await ui.wait("document.querySelector('.picture-backdrop .picture-whole')?.naturalWidth===40")
+  assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Close the picture', 'the keys are on its close button')
+  assert.equal(await ui.evaluate("document.body.classList.contains('has-dialog')"), true, 'the page under it holds still')
+  await ui.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+  await ui.wait("!document.querySelector('.picture-backdrop')")
+  assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Picture 1: open it', 'the keys go back to the picture')
+  await ui.click('.you-picture', 'Picture 1: open it')
+  await ui.wait("!!document.querySelector('.picture-backdrop')")
+  await ui.evaluate("document.querySelector('.picture-backdrop').click()")
+  await ui.wait("!document.querySelector('.picture-backdrop')")
+  assert.equal((await ui.calls('runnerPicture')).filter((call) => call.args[1] === 'image:0#1').length, 1, 'a picture read is not asked for again')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 // The window's bar and rail: Togle's mark beside its name, the three buttons of a window (minimize, maximize or restore as the
 // window is, close), and each place's icon beside its name on a wide window, alone in a narrow one.
 async function checkWindowBar(T, agent) {
@@ -1777,6 +1837,7 @@ app.whenReady().then(async () => {
     const agent = store.list()[0]
     await checkWindowBar(T, agent)
     await checkPaste(T, agent)
+    await checkPictures(T, agent)
     await checkArrange(T, agent)
     await checkGroups(T, agent)
     await checkTasks(T, agent)

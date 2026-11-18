@@ -10,6 +10,7 @@ import { carriedFlags } from './claude-job'
 import { askedLine } from './claude-sessions'
 import { endTree, listProcesses } from './process-tree'
 import { placeWords, type SortTask } from './subjects'
+import { refuseCommand } from './terminal'
 import type { Backend, Detected, TaskHandle } from './types'
 
 /** The agents Togle knows by name; an added agent is named by its backend. */
@@ -81,7 +82,20 @@ interface Owned {
   justSaid?: string
   /** Why the agent's program stopped, when it stopped by itself. */
   crash?: string
+  /** What the person sent from Chat while the agent could not take words, waiting for its turn to end (see `sendOrHold`). */
+  held?: string[]
+  /** Why what is held did not go in, when it did not. */
+  heldNote?: string
+  /** What is held waits for the person to send it: the task was stopped, or the words did not go in. */
+  heldPaused?: boolean
+  /** The moment after a turn ended, once more looked at, before what is held goes in. */
+  heldTimer?: ReturnType<typeof setTimeout>
 }
+
+/** The most messages that wait for one task. */
+const HELD_MOST = 20
+/** How long a task stays idle after its turn ends before what waits goes in (an agent can show idle for a moment between steps). */
+const HELD_SETTLE_MS = 1_500
 
 const LOG_LIMIT = 400
 const keyOf = (runner: RunnerKind, id: string): string => `${runner}:${id}`
@@ -315,15 +329,23 @@ export class RunnerHub {
    * Closes the screen of a task in the background here, and says how to open it in a terminal of the person's own. The
    * task goes on: a conversation has one screen at a time, and the next one to open it takes it.
    */
-  async handBack(key: string): Promise<{ command: string; folder: string }> {
+  async handBack(key: string): Promise<{ command: string; folder: string; held?: string }> {
     const owned = this.mine(key)
     const screen = owned.handle.screen
     if (!screen) throw new Error('Only a task that is the agent’s own screen can be handed back.')
     const command = screen.line
     const folder = owned.handle.folder
     await screen.hide()
+    // The screen is the person's now: what waited to go in from Chat does not go in behind them. Its words come back to them.
+    const held = this.dropHeld(owned)
     this.fresh()
-    return { command, folder }
+    return { command, folder, ...(held.length ? { held: held.join('\n\n') } : {}) }
+  }
+
+  /** A picture in a task's conversation, by the key it came with, as its agent's record keeps it; null when it is no longer kept. */
+  async picture(key: string, picture: string): Promise<{ type: string; data: string } | null> {
+    const kept = await this.recordOf(key)
+    return (kept && (await kept.backend.picture?.(kept.id, picture).catch(() => null))) ?? null
   }
 
   /**
@@ -371,6 +393,84 @@ export class RunnerHub {
     this.fresh()
   }
 
+  /**
+   * What the person sends from Chat. An agent written to on its own screen (Claude Code, Hermes) takes words only once its
+   * turn has ended: typed while it works or asks, they could answer its question. So words sent then wait, in the order they
+   * came, and go in together when the turn ends (not after a Stop or an error: then they wait for the person). A command of
+   * the agent's own is refused at once, as it would be when it went in. Codex takes words while it works.
+   */
+  async sendOrHold(key: string, text: string): Promise<void> {
+    const owned = this.mine(key)
+    const message = text.trim()
+    if (!message) return
+    if (!this.takesNoWords(owned)) {
+      await this.send(key, message)
+      return
+    }
+    refuseCommand(message)
+    owned.held = [...(owned.held ?? []), message].slice(-HELD_MOST)
+    owned.heldNote = undefined
+    owned.heldPaused = false
+    this.touch(owned)
+    this.fresh()
+  }
+
+  /** What waits to go in to a task: sent now, if its agent takes words now, or taken back. */
+  async held(key: string, action: 'send' | 'drop'): Promise<void> {
+    const owned = this.mine(key)
+    if (action === 'drop') {
+      this.dropHeld(owned)
+      this.fresh()
+      return
+    }
+    if (!owned.held?.length) return
+    if (this.takesNoWords(owned)) throw new Error(`${this.nameOf(owned.handle.runner)} is still working. It goes in when it finishes.`)
+    await this.deliverHeld(owned, true)
+  }
+
+  /** Whether a task's agent cannot be written to now: one written to on its screen, while it works or asks. */
+  private takesNoWords(owned: Owned): boolean {
+    const { handle } = owned
+    return !!handle.screen && handle.runner !== 'codex' && (handle.state === 'working' || handle.state === 'waiting' || !!handle.waitingFor)
+  }
+
+  private dropHeld(owned: Owned): string[] {
+    const dropped = owned.held ?? []
+    clearTimeout(owned.heldTimer)
+    owned.held = undefined
+    owned.heldNote = undefined
+    owned.heldPaused = undefined
+    return dropped
+  }
+
+  /** A task's state changed: when its turn has ended, what waits goes in after a moment, if it is still idle then. */
+  private heldMayGo(owned: Owned): void {
+    clearTimeout(owned.heldTimer)
+    if (!owned.held?.length || owned.heldPaused) return
+    const { handle } = owned
+    if (handle.state !== 'idle' || handle.pending.length || handle.waitingFor) return
+    owned.heldTimer = setTimeout(() => void this.deliverHeld(owned, false), HELD_SETTLE_MS)
+    owned.heldTimer.unref?.()
+  }
+
+  /** What waits goes in, as one message: by itself once the turn has ended, or when the person sends it. */
+  private async deliverHeld(owned: Owned, asked: boolean): Promise<void> {
+    if (this.disposed || this.owned.get(owned.key) !== owned || !owned.held?.length) return
+    if (!asked && (owned.heldPaused || owned.handle.state !== 'idle' || owned.handle.pending.length || owned.handle.waitingFor)) return
+    const words = owned.held.join('\n\n')
+    this.dropHeld(owned)
+    try {
+      await this.send(owned.key, words)
+    } catch (error) {
+      // It did not go in: it waits again, for the person, with why.
+      owned.held = [words]
+      owned.heldNote = (error as Error).message
+      owned.heldPaused = true
+      this.fresh()
+      if (asked) throw error
+    }
+  }
+
   answer(key: string, requestId: string, decision: Decision): void {
     if (decision !== 'allow-once' && decision !== 'allow-always' && decision !== 'refuse') throw new Error('Allow once or refuse.')
     // Always only where the agent offered it for this very request, and never for one that looks dangerous.
@@ -392,6 +492,8 @@ export class RunnerHub {
 
   async stop(key: string): Promise<void> {
     const owned = this.mine(key)
+    // Stopped, what waits does not go in by itself: that would start the agent again. It waits for the person.
+    if (owned.held?.length) owned.heldPaused = true
     await owned.handle.stop()
     this.touch(owned)
     this.fresh()
@@ -630,6 +732,7 @@ export class RunnerHub {
     if (first) this.log(owned, 'you', first)
     owned.off = handle.on((event) => {
       this.record(owned, event)
+      if (event.type === 'state') this.heldMayGo(owned)
       this.changedSoon()
     })
     return owned
@@ -771,7 +874,8 @@ export class RunnerHub {
       ...(fix ? { fix } : {}),
       ...(handle.terminal ? { terminal: true, ...(handle.terminal.words ? { words: handle.terminal.words } : {}) } : {}),
       ...(handle.waitingFor ? { waitingFor: handle.waitingFor } : {}),
-      ...(handle.screen ? { screen: true, job: handle.screen.job, ...(handle.screen.screenId ? { screenId: handle.screen.screenId } : {}), ...(handle.screen.closed ? { screenClosed: handle.screen.closed } : {}) } : {})
+      ...(handle.screen ? { screen: true, job: handle.screen.job, ...(handle.screen.screenId ? { screenId: handle.screen.screenId } : {}), ...(handle.screen.closed ? { screenClosed: handle.screen.closed } : {}) } : {}),
+      ...(owned.held?.length ? { held: [...owned.held], ...(owned.heldNote ? { heldNote: owned.heldNote } : {}), ...(owned.heldPaused ? { heldPaused: true } : {}) } : {})
     }
   }
 }
