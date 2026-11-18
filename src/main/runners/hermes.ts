@@ -25,6 +25,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { LogEntry, StepDetail, TaskHistory, TaskInfo } from '@shared/runner'
 import { exists, lines } from './acp'
+import { askedLine } from './claude-sessions'
 import { hermesEntries } from './hermes-history'
 import { lastTurns } from './history-turns'
 import { detailOf, diffOf, isFileKey } from './step-detail'
@@ -68,6 +69,8 @@ export async function findHermes(): Promise<string | null> {
 export interface StoredRow {
   id: string
   title: string
+  /** The start of the session's first message, when the list has titles too and a column for it. */
+  preview?: string
   /** The folder's name only: that is all the list says. */
   workspace: string
   /** When it last changed, in milliseconds (the list says "4h ago" or a date). */
@@ -113,7 +116,9 @@ export function parseSessionList(output: string, now = Date.now()): StoredRow[] 
     // A row whose id is cut or missing is not one.
     if (!key || cells.length <= id) continue
     const place = workspace > 0 ? cells.slice(workspace, active).join('').trim() : ''
-    found.push({ id: key, title: cells.slice(0, firstEnds).join('').trim(), workspace: place === '—' ? '' : place, updatedAt: ageOf(cells.slice(active, ageEnds).join(''), now) })
+    // With titles, a column of its own holds the start of the first message.
+    const said = preview > 0 && /^\s*Title\b/.test(header) ? cells.slice(preview, active).join('').trim() : ''
+    found.push({ id: key, title: cells.slice(0, firstEnds).join('').trim(), ...(said && said !== '—' ? { preview: said } : {}), workspace: place === '—' ? '' : place, updatedAt: ageOf(cells.slice(active, ageEnds).join(''), now) })
   }
   return found
 }
@@ -598,7 +603,11 @@ export class HermesBackend implements Backend {
     const found: TaskInfo[] = this.cache.rows
       // A session that a task of Togle's runs is that task, and not a second row.
       .filter((row) => !mine.has(row.id))
-      .map((row) => ({ id: startedAs.get(row.id) ?? row.id, runner: 'hermes', title: row.title || row.workspace || 'Hermes task', folder: '', state: 'idle', updatedAt: row.updatedAt }))
+      .map((row): TaskInfo => {
+        const title = row.title || row.workspace || 'Hermes task'
+        const asked = row.preview ? askedLine(row.preview, title) : undefined
+        return { id: startedAs.get(row.id) ?? row.id, runner: 'hermes', title, ...(asked ? { asked } : {}), folder: '', state: 'idle', updatedAt: row.updatedAt }
+      })
     for (const task of live) {
       found.push({ id: task.id as string, runner: 'hermes', title: task.title || 'Hermes task', folder: task.folder, state: task.state, updatedAt: Date.now(), job: task.job, ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}) })
     }

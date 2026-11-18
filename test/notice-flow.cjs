@@ -66,6 +66,11 @@ const find = async (check, what, ms = 10000) => {
   throw new Error('Timed out waiting for ' + what)
 }
 const timeout = setTimeout(() => { console.error('Notice flow timed out'); app.exit(1) }, 90_000)
+// What main puts in its log as a warning, from the start: sorting by subject is on in a new Togle and says there why it failed.
+const warned = []
+const consoleWarn = console.warn
+console.warn = (...args) => { warned.push(args.join(' ')); consoleWarn(...args) }
+const sortWarnings = () => warned.filter((line) => line.startsWith('[sort by subject]'))
 require('../out/main/index.js')
 
 async function run() {
@@ -203,19 +208,17 @@ async function run() {
   await invoke('runners:answer', fromBox.key, waitingNow.pending[0].id, 'refuse')
   await wait(async () => (await invoke('runners:list')).some((task) => task.key === fromBox.key && task.state === 'idle'), 'the task from the box to finish')
 
-  // Sorting by subject, turned on: the folder has its tasks, so main asks the AI set in Settings. There is none here (no
-  // sign-in): the question fails before anything is sent, is told in the log, and waits to be tried again. The list goes on as
-  // it was, with no heading, and nothing is kept. Turned off, it stays quiet.
-  assert.equal((await invoke('settings:get', {})).tasks.sortBySubject, false, 'off in a new Togle')
-  const warned = []
-  const warn = console.warn
-  console.warn = (...args) => { warned.push(args.join(' ')); warn(...args) }
-  await invoke('settings:update', { tasks: { sortBySubject: true } })
+  // Sorting by subject is on in a new Togle: the folder has its tasks, so main asks the AI set in Settings. There is none
+  // here (no sign-in): the question fails before anything is sent, is told in the log, and waits to be tried again. The list
+  // goes on as it was, with no heading, and nothing is kept. Turned off, it stays quiet.
+  assert.equal((await invoke('settings:get', {})).tasks.sortBySubject, true, 'on in a new Togle')
   await invoke('runners:list')
-  await wait(() => warned.some((line) => line.startsWith('[sort by subject]')), 'the question to the AI, failing here')
-  console.warn = warn
-  assert.match(warned.find((line) => line.startsWith('[sort by subject]')), /Sign in/, 'it failed for want of a sign-in')
-  assert.equal(warned.filter((line) => line.startsWith('[sort by subject]')).length, 1, 'once: it waits before trying again')
+  await wait(() => sortWarnings().length > 0, 'the question to the AI, failing here')
+  assert.match(sortWarnings()[0], /Sign in/, 'it failed for want of a sign-in')
+  const failedOnce = sortWarnings().length
+  await invoke('runners:list')
+  await sleep(300)
+  assert.equal(sortWarnings().length, failedOnce, 'it waits before trying again')
   const afterSorting = await invoke('runners:list')
   assert.ok(afterSorting.length >= 2 && afterSorting.every((task) => !task.subject), 'the list as it was, with no heading')
   assert.equal(fs.existsSync(path.join(profile, 'runner-subjects.json')), false, 'nothing sorted, nothing kept')

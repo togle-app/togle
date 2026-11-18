@@ -408,7 +408,7 @@ export interface Settings {
     view: 'session' | 'cards'
     /**
      * Whether the AI set in Accounts sorts the tasks of a project, and of Everyday, under subjects. It reads the names of the
-     * tasks and of their folders: off until the person turns it on.
+     * tasks, the start of what was asked in each, and the names of their folders: on until the person turns it off.
      */
     sortBySubject: boolean
   }

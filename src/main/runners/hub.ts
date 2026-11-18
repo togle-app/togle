@@ -7,6 +7,7 @@ import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Decision, type LogEnt
 import { dangerOf } from '@shared/runner-command'
 import { ownGroupOf } from '@shared/task-groups'
 import { carriedFlags } from './claude-job'
+import { askedLine } from './claude-sessions'
 import { endTree, listProcesses } from './process-tree'
 import { placeWords, type SortTask } from './subjects'
 import type { Backend, Detected, TaskHandle } from './types'
@@ -181,12 +182,21 @@ export class RunnerHub {
     const listed: TaskView[] = [...views.values()].map((view) => ({ ...view, agent: this.nameOf(view.runner), ...(this.options.fresh?.has(view.key) ? { fresh: true } : {}), ...(this.outsideProject(view.folder) ? { outsideProject: true } : {}) }))
     const subjects = this.options.subjects
     if (subjects) {
+      // What was asked first in each task, as its agent's list tells it, or as Togle's own log of a task it runs has it.
+      const asked = new Map<string, string>()
+      for (const info of infos) if (info.asked) asked.set(keyOf(info.runner, info.id), info.asked)
+      for (const owned of this.owned.values()) {
+        const first = owned.log.find((entry) => entry.kind === 'you')?.text
+        const line = first ? askedLine(first, this.titleOf(owned.key, owned.handle.title)) : undefined
+        if (line) asked.set(owned.key, line)
+      }
       // A scheduled job is its own row in Scheduled: it is not sorted.
       const sorting: SortTask[] = []
       for (const view of listed) {
         if (view.schedule) continue
         const place = ownGroupOf(view, process.platform)
-        sorting.push({ key: view.key, name: view.title, place, where: placeWords(place, view.folder) })
+        const words = asked.get(view.key)
+        sorting.push({ key: view.key, name: view.title, ...(words ? { asked: words } : {}), place, where: placeWords(place, view.folder) })
         const subject = subjects.of(view.key, place)
         if (subject) view.subject = subject
       }
@@ -710,10 +720,12 @@ export class RunnerHub {
   }
 
   private viewOfInfo(info: TaskInfo): TaskView {
+    // What was asked first is for sorting only: the window and other devices are not sent it.
+    const { asked: _asked, ...shown } = info
     const key = keyOf(info.runner, info.id)
     const where = info.job ? 'in the background' : 'in its own window'
     const line = info.waitingFor ? `Waiting ${where}: ${info.waitingFor}` : info.state === 'working' ? `Working ${where}` : ''
-    return { ...info, key, title: this.titleOf(key, info.title), mine: false, line, pending: [], commandsRunning: false }
+    return { ...shown, key, title: this.titleOf(key, info.title), mine: false, line, pending: [], commandsRunning: false }
   }
 
   private viewOfOwned(owned: Owned, info: TaskView | undefined): TaskView {

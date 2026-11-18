@@ -19,6 +19,7 @@ import { execFile, spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { AgentQuestion, StepDetail, TaskHistory, TaskInfo, TaskState } from '@shared/runner'
+import { askedLine } from './claude-sessions'
 import { daemonPid, daemonState, startDaemon } from './codex-daemon'
 import { codexEntries, turnsOf } from './codex-history'
 import { detailOf, diffOf, isFileKey } from './step-detail'
@@ -119,10 +120,14 @@ const waitingOf = (status: unknown): string | undefined => {
 const infoOf = (thread: Record<string, unknown>, live: CodexTask | undefined, shared: boolean): TaskInfo => {
   const loaded = rec(thread.status).type !== 'notLoaded'
   const state = live ? live.state : stateOf(thread.status)
+  const title = live?.title || titleOf(thread)
+  // Codex's preview of a thread is the start of what was asked first in it.
+  const asked = askedLine(text(thread.preview), title)
   return {
     id: text(thread.id),
     runner: 'codex',
-    title: live?.title || titleOf(thread),
+    title,
+    ...(asked ? { asked } : {}),
     folder: folderOf(thread) || live?.folder || '',
     state,
     updatedAt: (typeof thread.updatedAt === 'number' ? thread.updatedAt : 0) * 1000,

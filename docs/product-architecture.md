@@ -60,6 +60,7 @@ In Togle's data folder (`%APPDATA%\togle` on Windows):
 | Sign-ins and keys | `chatgpt-auth.bin`, `accounts/`, `connections/` | encrypted |
 | Settings | `settings.json` | plain text, no secrets |
 | Agents' task names and records | `runner-titles.json`, `runner-tasks.json` | plain text |
+| The Agents list's headings, and how the person arranged it | `runner-subjects.json`, `runner-groups.json` | plain text |
 | The channel's secret | `channel/` | a file in the person's own folder (on Mac and Linux, readable by their account alone) |
 
 Speech recognition, the models Togle downloads, is kept apart from the data (`%LOCALAPPDATA%\togle\speech` on Windows).
@@ -70,8 +71,9 @@ Speech recognition, the models Togle downloads, is kept apart from the data (`%L
 
 - After a call: its words, marks and the person's own notes, to the AI the person set up, for the notes and the title.
 - With dictation cleanup on: the dictated words, to the same AI.
+- From Agents, while sorting by subject is on (it is until turned off in Settings → Agents): the names of the tasks, the start of what was asked first in each (one line, with text that looks like a key or a password left out) and the names of their folders, to the same AI, to put tasks about the same thing under one heading (`subjects.ts`). Togle keeps the headings, not what was asked.
 - Speech: heard on this computer, unless the person picks a speech service for a side of the call.
-- Nothing during a call, and nothing from Agents or To-do.
+- Nothing during a call, and nothing from To-do.
 
 ## Tests
 

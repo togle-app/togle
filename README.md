@@ -76,6 +76,7 @@ Togle has no account and no bill of its own. **Sign in with ChatGPT** (Settings 
 | Voice | Fixes punctuation, drops filler words and follows a correction you make halfway | Types the words as heard |
 | Meetings | Writes the notes as soon as a call ends, and gives the call a title | Keeps the transcript. You can give the call to an agent, which writes them |
 | To-do | Offers the action items from each call | You add items yourself |
+| Agents | Puts tasks about the same thing under one heading, from their names and the start of what you asked in each (Settings → Agents turns it off) | No headings |
 
 Your plan gets words, never sound. Your agents keep their own sign-ins, which Togle never touches.
 

@@ -103,6 +103,11 @@ export interface TaskInfo {
   runner: RunnerKind
   /** What it is for: the name its agent gave it, else what was asked first. */
   title: string
+  /**
+   * The start of what was asked first in it, in one line, when its agent's list tells it and it says more than the name:
+   * what Togle's sorting reads besides the name. Main keeps it: the window and other devices are not sent it.
+   */
+  asked?: string
   /** The folder it works in. */
   folder: string
   state: TaskState

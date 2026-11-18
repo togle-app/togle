@@ -536,6 +536,24 @@ test('the sorting by subject is told the tasks as listed, each with its place, a
   }
 })
 
+test('what was asked first in a task goes to the sorting with its name, and not to the window', async () => {
+  const site = process.platform === 'win32' ? 'C:\\work\\Site' : '/work/Site'
+  const claude = new FakeBackend('claude', { tasks: [
+    { ...info('claude', 'a', 'Continue from yesterday', 'idle', 300), folder: site, asked: 'Finish the pricing table with two plans' },
+    { ...info('claude', 'b', 'Pricing page copy', 'idle', 200), folder: site }
+  ] })
+  const told = []
+  const { hub } = hubOf([claude], { subjects: { of: () => undefined, notice: (tasks) => told.push(tasks) } })
+  try {
+    const tasks = await hub.list()
+    assert.deepEqual(told.at(-1).map((task) => [task.key, task.asked]), [['claude:a', 'Finish the pricing table with two plans'], ['claude:b', undefined]])
+    assert.ok(tasks.every((task) => !('asked' in task)), 'the window is not sent it')
+    assert.ok(!('asked' in (await hub.detail('claude:a')).task))
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('a look for the agents begun before one was added is not kept', async () => {
   const claude = new FakeBackend('claude')
   let open

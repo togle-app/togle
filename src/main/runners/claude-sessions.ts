@@ -8,10 +8,14 @@ import path from 'node:path'
 import type { LogEntry, PlanItem, StepKind, TaskHistory } from '@shared/runner'
 import { lastTurns } from './history-turns'
 
-/** A session in the list: its id, its title (the one Claude Code or the person gave it, else what was asked first), where it worked, when it last changed. */
+/**
+ * A session in the list: its id, its title (the one Claude Code or the person gave it, else what was asked first), what was
+ * asked first when the title is something else, where it worked, when it last changed.
+ */
 export interface ClaudeSession {
   id: string
   title: string
+  asked?: string
   cwd?: string
   updatedAt: number
 }
@@ -38,6 +42,19 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 const oneLine = (text: string, max: number): string => {
   const line = text.replace(/\s+/g, ' ').trim()
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line
+}
+
+/** The most of what was asked first that Togle's sorting reads with a task's name. */
+const ASKED_CHARS = 300
+/**
+ * What was asked first in a task, as Togle's sorting reads it: one line with no secret in it, at most 300 characters. None
+ * when it says no more than the task's name (a task named by its first words).
+ */
+export function askedLine(text: string, title: string): string | undefined {
+  const asked = oneLine(withoutSecrets(text.slice(0, 4000)), ASKED_CHARS)
+  const plain = (line: string): string => line.replace(/…$/, '').replace(/\s+/g, ' ').trim().toLowerCase()
+  if (!asked || plain(title).startsWith(plain(asked)) || (plain(asked).startsWith(plain(title)) && asked.length <= title.length + 8)) return undefined
+  return asked
 }
 
 // ---- Keys, passwords and tokens ----
@@ -265,8 +282,9 @@ async function entryOf(file: string, size: number, mtime: number): Promise<Claud
   if (!start.first) return null
   // Its title as it is now: one they gave it (/rename), wherever it was written (Claude Code goes on writing its own
   // titles after it), else the one Claude Code wrote, else what was asked first.
-  const title = lastField(tail.raw, 'customTitle') || lastField(head.raw, 'customTitle') || titleIn(tail.raw) || titleIn(head.raw) || start.first
-  return { id: start.id, title: oneLine(withoutSecrets(title.slice(0, 2000)), TITLE_CHARS), cwd: start.cwd, updatedAt: mtime }
+  const title = oneLine(withoutSecrets((lastField(tail.raw, 'customTitle') || lastField(head.raw, 'customTitle') || titleIn(tail.raw) || titleIn(head.raw) || start.first).slice(0, 2000)), TITLE_CHARS)
+  const asked = askedLine(start.first, title)
+  return { id: start.id, title, ...(asked ? { asked } : {}), cwd: start.cwd, updatedAt: mtime }
 }
 
 // List entries by file, as long as the file is the same: a list asked for again reads only what changed.

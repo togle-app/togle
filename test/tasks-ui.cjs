@@ -76,6 +76,9 @@ async function open(T, agent, width, surface, extra = {}) {
 }
 
 const texts = (ui, selector) => ui.evaluate("[...document.querySelectorAll(" + JSON.stringify(selector) + ")].map(e=>e.textContent.trim().replace(/\\s+/g,' '))")
+// A task in the Agents list dragged over what `target` finds and held there (no drop), and then let go of elsewhere.
+const holdOver = (ui, title, target) => ui.evaluate("(async()=>{const item=[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent===" + JSON.stringify(title) + ");window.__held=new DataTransfer();item.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:window.__held}));await new Promise(r=>setTimeout(r,60));" + target + ".dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:window.__held}));return true})()")
+const letGo = (ui, title) => ui.evaluate("[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent===" + JSON.stringify(title) + ").dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:window.__held}))")
 // A task in the Agents list dragged and dropped on what `target` finds, as the page sees a drag (a real drag is tried in the layout harness).
 const dragOnto = (ui, title, target) => ui.evaluate("(async()=>{const item=[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent===" + JSON.stringify(title) + ");const to=" + target + ";const data=new DataTransfer();item.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:data}));await new Promise(r=>setTimeout(r,60));to.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:data}));await new Promise(r=>setTimeout(r,30));to.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data}));item.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:data}));return true})()")
 // A choice of Settings (a microphone, a language, where tasks open): its button opens Togle's own list, and a choice in
@@ -912,15 +915,15 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).at(-1), { tasks: { view: 'cards' } })
   await ui.click(viewSwitch + ' [role=radio]', 'Terminal')
   await ui.wait(pickedView + "==='Terminal'")
-  // Sorting by subject: off until the person turns it on, since the names of their tasks go to their AI; the switch says so.
+  // Sorting by subject: on until the person turns it off; the switch says what goes to their AI.
   const sortSwitch = "[...document.querySelectorAll('#settings-agents input[role=switch]')].find(e=>e.closest('.setting')?.textContent.includes('Sort tasks by subject'))"
-  assert.equal(await ui.evaluate(sortSwitch + '?.checked'), false, 'off at first')
-  assert.match(await ui.evaluate(sortSwitch + '.title'), /reads the names of your tasks and their folders/, 'it says what goes to the AI')
-  await ui.evaluate(sortSwitch + '.click()')
-  await ui.wait(sortSwitch + '.checked')
-  assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).at(-1), { tasks: { sortBySubject: true } })
+  assert.equal(await ui.evaluate(sortSwitch + '?.checked'), true, 'on at first')
+  assert.match(await ui.evaluate(sortSwitch + '.title'), /reads the names of your tasks, the start of what you asked in each, and the names of their folders/, 'it says what goes to the AI')
   await ui.evaluate(sortSwitch + '.click()')
   await ui.wait('!' + sortSwitch + '.checked')
+  assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).at(-1), { tasks: { sortBySubject: false } })
+  await ui.evaluate(sortSwitch + '.click()')
+  await ui.wait(sortSwitch + '.checked')
   assert.equal(await ui.evaluate("!!document.querySelector('.settings .card-note, .settings .setting > .note')"), false, 'no notes under the rows: everything fits on one screen')
   assert.deepEqual(await texts(ui, '#settings-agents .setting-value'), ['Found', 'Found', 'Not found'])
   // Remove takes an agent Togle finds off its lists, after asking: it stays installed, its tasks go on in it, and it can be added back.
@@ -1551,8 +1554,10 @@ async function checkGroups(T, agent) {
   assert.ok((await ui.calls('taskOnScreen')).some((call) => call.args[0] === 'codex:n1'), 'the window told main which task is on screen')
   assert.equal(await ui.evaluate(website + ".querySelector('.group-counts').getAttribute('aria-label')"), '1 waiting, 1 working', 'opened, it is not new')
   // A heading folds and opens like a group's head. It says how many tasks it holds; folded, its rows go, and it says what
-  // waits and works in them and that the task open is in it; it still takes a dropped task; it stays folded when Agents is
-  // opened again; main keeps it (and when Togle's sorting gives it another name, the fold goes with it: task-groups.test.mjs).
+  // waits and works in them and that the task open is in it. A task dragged over it and held there opens it, and it folds
+  // again when the task goes elsewhere; dropped in, it opens for good with the task in it. Folded, it stays folded when
+  // Agents is opened again; main keeps it (and when Togle's sorting gives it another name, the fold goes with it:
+  // task-groups.test.mjs).
   const fold = (name) => subject(name) + ".querySelector('.subject-fold')"
   assert.equal(await ui.evaluate(fold('Pricing page') + ".getAttribute('aria-expanded')"), 'true', 'a heading is open until it is folded')
   assert.equal(await ui.evaluate(subject('Pricing page') + ".querySelector('.subject-count').getAttribute('aria-label')"), '2 tasks', 'it says how many tasks it holds')
@@ -1564,9 +1569,18 @@ async function checkGroups(T, agent) {
   assert.deepEqual(await titles(subject('Build')), ['Clean the build folder', 'Fix the login redirect'], 'the other heading stays open')
   const folding = (await ui.calls('changeTaskGroups')).at(-1).args[0]
   assert.deepEqual([folding.kind, folding.subject, folding.folded], ['fold-subject', 'Pricing page', true], 'main keeps it')
+  await holdOver(ui, 'Clean the build folder', subject('Pricing page'))
+  await ui.wait(fold('Pricing page') + ".getAttribute('aria-expanded')==='true'&&" + subject('Pricing page') + ".querySelectorAll('.task-row').length===2")
+  await letGo(ui, 'Clean the build folder')
+  await ui.wait(fold('Pricing page') + ".getAttribute('aria-expanded')==='false'")
+  assert.equal(await ui.evaluate(subject('Pricing page') + ".querySelectorAll('.task-row').length"), 0, 'held over, it opened; let go of elsewhere, it folds again')
+  assert.deepEqual((await ui.calls('changeTaskGroups')).at(-1).args[0], folding, 'and main was told nothing')
   await dragOnto(ui, 'Clean the build folder', subject('Pricing page'))
-  await ui.wait(subject('Pricing page') + "?.querySelector('.subject-count')?.textContent==='3'")
-  assert.equal(await ui.evaluate(subject('Pricing page') + ".querySelector('.group-counts').getAttribute('aria-label')"), '1 waiting, 1 working', 'folded, it takes a dropped task and counts it')
+  await ui.wait(subject('Pricing page') + "?.querySelectorAll('.task-row').length===3")
+  assert.equal(await ui.evaluate(fold('Pricing page') + ".getAttribute('aria-expanded')"), 'true', 'dropped in, it opens for good, with the task in it')
+  assert.deepEqual((await ui.calls('changeTaskGroups')).slice(-2).map((call) => [call.args[0].kind, call.args[0].subject, call.args[0].folded]), [['place', 'Pricing page', undefined], ['fold-subject', 'Pricing page', false]])
+  await ui.evaluate(fold('Pricing page') + '.click()')
+  await ui.wait(subject('Pricing page') + ".querySelectorAll('.task-row').length===0")
   await ui.click('.workspace-nav button', 'Meetings')
   await ui.click('.workspace-nav button', 'Agents')
   await ui.wait('!!' + subject('Pricing page'))
@@ -1626,14 +1640,24 @@ async function checkArrange(T, agent) {
   assert.deepEqual(await titles(box('Launch week')), ['Fix the login redirect'], 'a subject given later does not move it')
   await ui.task('Fix the login redirect')
   await ui.wait("document.querySelector('.task-where')?.textContent.includes('Launch week')")
-  // A group folded: its rows go, its counts stay, it still takes a dropped task, and it stays folded.
+  // A group folded: its rows go and its counts stay. A task dragged over it and held there opens it, and it folds again when
+  // the task goes elsewhere; dropped in, it opens for good with the task in it. Folded, it stays folded.
   await ui.evaluate(box('website') + ".querySelector('.group-fold').click()")
   await ui.wait(box('website') + ".querySelectorAll('.task-row').length===0")
   assert.equal(await ui.evaluate(box('website') + ".querySelector('.group-fold').getAttribute('aria-expanded')"), 'false')
   assert.equal(await ui.evaluate(box('website') + ".querySelector('.group-counts').getAttribute('aria-label')"), '1 waiting, 1 working', 'folded, it still says what waits and works')
+  await holdOver(ui, 'Add the status column', box('website'))
+  await ui.wait(box('website') + ".querySelector('.group-fold').getAttribute('aria-expanded')==='true'&&" + box('website') + ".querySelectorAll('.task-row').length===2")
+  await letGo(ui, 'Add the status column')
+  await ui.wait(box('website') + ".querySelector('.group-fold').getAttribute('aria-expanded')==='false'")
+  assert.equal(await ui.evaluate(box('website') + ".querySelectorAll('.task-row').length"), 0, 'held over, it opened; let go of elsewhere, it folds again')
   await drag('Add the status column', box('website'))
-  await ui.wait(box('website') + "?.querySelector('.group-counts')?.getAttribute('aria-label')==='2 waiting, 1 working'")
+  await ui.wait(box('website') + "?.querySelectorAll('.task-row').length===3")
+  assert.equal(await ui.evaluate(box('website') + ".querySelector('.group-fold').getAttribute('aria-expanded')"), 'true', 'dropped in, it opens for good, with the task in it')
+  assert.equal(await ui.evaluate(box('website') + ".querySelector('.group-counts').getAttribute('aria-label')"), '2 waiting, 1 working')
   assert.equal(await ui.evaluate("!!" + box('api-server')), false, 'its own group, empty now, is gone')
+  await ui.evaluate(box('website') + ".querySelector('.group-fold').click()")
+  await ui.wait(box('website') + ".querySelectorAll('.task-row').length===0")
   await ui.click('.workspace-nav button', 'Meetings')
   await ui.click('.workspace-nav button', 'Agents')
   await ui.wait('!!' + box('website'))

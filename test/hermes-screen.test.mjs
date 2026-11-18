@@ -104,10 +104,12 @@ test('the list is read in each of the four tables Hermes prints, and an emoji in
   // Some session has a title and none has a folder: a session that failed its first turn can be all there is.
   const noFolder = table([['Title', 32], ['Preview', 40], ['Last Active', 13], ['ID', 0]], [['togle-1a2b3c4d', 'Reply with only the word ok.', 'just now', 'local-ccc'], ['Fix the redirect', 'Fix the redirect in the router', '2d ago', 'local-ddd']])
   assert.deepEqual(summary(noFolder), [['local-ccc', 'togle-1a2b3c4d', ''], ['local-ddd', 'Fix the redirect', '']])
+  assert.deepEqual(T.parseSessionList(noFolder, now).map((row) => row.preview), ['Reply with only the word ok.', 'Fix the redirect in the router'], 'with titles, the start of the first message is kept too')
 
   // No session has a title: the first column is the start of the first message.
   const noTitle = table([['Preview', 38], ['Workspace', 18], ['Last Active', 13], ['Src', 16], ['ID', 0]], [['Start of a message', 'site', '1h ago', 'cli', 'local-eee']])
   assert.deepEqual(summary(noTitle), [['local-eee', 'Start of a message', 'site']])
+  assert.equal(T.parseSessionList(noTitle, now)[0].preview, undefined, 'with no titles, the first column is that start already')
   assert.equal(T.parseSessionList(noTitle, now)[0].updatedAt, now - 3_600_000)
   const bare = table([['Preview', 50], ['Last Active', 13], ['Src', 16], ['ID', 0]], [['What is the time', '5m ago', 'telegram', 'local-fff']])
   assert.deepEqual(summary(bare), [['local-fff', 'What is the time', '']])

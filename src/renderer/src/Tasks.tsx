@@ -298,9 +298,9 @@ function useArrangement(): [TaskGroups, (change: GroupChange) => void] {
   return [pending.reduce(applyGroupChange, fromMain), change]
 }
 
-/** The groups folded, kept in the page between runs, as the view picked for each task is. */
+/** The groups folded, kept in the page between runs, as the view picked for each task is. `fold` folds or opens one (by itself, the other of what it is). */
 const FOLDED = 'togle.foldedgroups'
-function useFolded(): [Set<string>, (key: string) => void] {
+function useFolded(): [Set<string>, (key: string, fold?: boolean) => void] {
   const [folded, setFolded] = useState<Set<string>>(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(FOLDED) ?? '[]') as unknown
@@ -309,8 +309,9 @@ function useFolded(): [Set<string>, (key: string) => void] {
       return new Set()
     }
   })
-  const toggle = useCallback((key: string) => {
+  const toggle = useCallback((key: string, fold?: boolean) => {
     setFolded((was) => {
+      if (fold !== undefined && was.has(key) === fold) return was
       const next = new Set(was)
       if (next.has(key)) next.delete(key)
       else next.add(key)
@@ -327,6 +328,10 @@ function useFolded(): [Set<string>, (key: string) => void] {
 
 /** What a dragged task carries: its key. */
 const DRAG = 'application/x-togle-task'
+/** How long a dragged task stays over a folded box or heading before it opens. */
+const SPRING_MS = 500
+/** A box, or a heading in one, as one word: what a dragged task is over, and what it opened. */
+const spot = (group: string, subject = ''): string => `${group}\n${subject}`
 
 /** What waits, works and is new in a group or a folded heading: numbers in the colors of the dots that say it, and the words for a screen reader. */
 function Counts({ counts }: { counts: Counted }) {
@@ -353,12 +358,14 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   const [lookingFor, setLookingFor] = useState<string>()
   const [error, setError] = useState('')
   const [loaded, setLoaded] = useState(() => keptAnswer(KEPT_TASKS) !== undefined)
-  // The person's own arrangement of the list, and what they are doing to it: a group folded, a task dragged (and where it is
-  // over), a group being named, a row's menu.
+  // The person's own arrangement of the list, and what they are doing to it: a group folded, a task dragged (where it is
+  // over, and the folded boxes and headings it opened by staying over them, open until the drag ends), a group being
+  // named, a row's menu.
   const [arrangement, changeGroups] = useArrangement()
   const [folded, toggleFold] = useFolded()
   const [dragging, setDragging] = useState<string>()
-  const [dropAt, setDropAt] = useState<string>()
+  const [dropAt, setDropAt] = useState<{ group: string; subject: string }>()
+  const [sprung, setSprung] = useState<Set<string>>(() => new Set())
   const [renaming, setRenaming] = useState<string>()
   const [rowMenu, setRowMenu] = useState<{ at: Point; key: string } | null>(null)
   const [now, setNow] = useState(Date.now())
@@ -505,9 +512,10 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
     if (group === ownGroup(task) && (subject ?? '') === (task.subject?.trim() ?? '')) changeGroups({ kind: 'put-back', task: key })
     else changeGroups({ kind: 'place', task: key, group, ...(subject ? { subject } : {}) })
   }
-  // A group and a subject take a dropped task (not Scheduled: only scheduled jobs are there).
-  const dropOn = (group: string, subject?: string) => {
-    const at = `${group}|${subject ?? ''}`
+  // A group and a subject take a dropped task (not Scheduled: only scheduled jobs are there). Folded, one opens when the
+  // task stays over it a moment (and folds again if the task goes elsewhere), and one the task is dropped in opens for good.
+  const dropOn = (group: string, subject = '') => {
+    const here = (was: { group: string; subject: string } | undefined): boolean => was?.group === group && was.subject === subject
     return group === 'scheduled'
       ? {}
       : {
@@ -516,10 +524,10 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             event.preventDefault()
             event.stopPropagation()
             event.dataTransfer.dropEffect = 'move'
-            if (dropAt !== at) setDropAt(at)
+            setDropAt((was) => (here(was) ? was : { group, subject }))
           },
           onDragLeave: (event: ReactDragEvent) => {
-            if (!(event.currentTarget as Node).contains(event.relatedTarget as Node)) setDropAt((was) => (was === at ? undefined : was))
+            if (!(event.currentTarget as Node).contains(event.relatedTarget as Node)) setDropAt((was) => (here(was) ? undefined : was))
           },
           onDrop: (event: ReactDragEvent) => {
             event.preventDefault()
@@ -527,10 +535,22 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             const key = event.dataTransfer.getData(DRAG) || dragging
             setDropAt(undefined)
             setDragging(undefined)
-            if (key) dropTask(key, group, subject)
+            setSprung(new Set())
+            if (!key) return
+            dropTask(key, group, subject || undefined)
+            if (folded.has(group)) toggleFold(group, false)
+            if (subject && subjectFolded(arrangement, group, subject)) changeGroups({ kind: 'fold-subject', group, subject, folded: false })
           }
         }
   }
+  // Where a dragged task is, when that is a folded box or heading: it opens there after a moment.
+  const overSpot = dragging && dropAt ? spot(dropAt.group, dropAt.subject) : undefined
+  const overFolded = !!dropAt && (dropAt.subject ? subjectFolded(arrangement, dropAt.group, dropAt.subject) : folded.has(dropAt.group))
+  useEffect(() => {
+    if (!overSpot || !overFolded || sprung.has(overSpot)) return
+    const timer = setTimeout(() => setSprung((was) => new Set(was).add(overSpot)), SPRING_MS)
+    return () => clearTimeout(timer)
+  }, [overSpot, overFolded, sprung])
   // The name typed for a group, kept once, however the box closes (Enter, Escape or a click elsewhere).
   const finishRename = (group: TaskGroup, typed: string): void => {
     if (renaming !== group.key) return
@@ -564,6 +584,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
       onDragEnd={() => {
         setDragging(undefined)
         setDropAt(undefined)
+        setSprung(new Set())
       }}
       onMenu={(at) => setRowMenu({ at, key: task.key })}
     />
@@ -574,7 +595,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   // A subject heading in it folds the same way: it says how many tasks it holds and, folded, what waits, works and is new
   // in them; it still takes a dropped task, and it shows when the task open is in it. Its tasks hang from it on a line.
   const groupBox = (group: TaskGroup, old: boolean): ReactNode => {
-    const isFolded = folded.has(group.key)
+    const isFolded = folded.has(group.key) && !sprung.has(spot(group.key))
     const hasOpen = isFolded && [...group.loose, ...group.subjects.flatMap((subject) => subject.tasks)].some((task) => task.key === selected)
     const menu = [
       { label: 'Rename', onSelect: () => setRenaming(group.key) },
@@ -582,7 +603,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
       ...(group.kind === 'made' ? [{ label: 'Delete group', danger: true, onSelect: () => changeGroups({ kind: 'remove', group: group.key }) }] : [])
     ]
     return (
-      <section key={group.key} className={`task-project ${group.kind}${isFolded ? ' folded' : ''}${dropAt === `${group.key}|` ? ' drop' : ''}${hasOpen ? ' has-open' : ''}`} aria-label={group.name} {...dropOn(group.key)}>
+      <section key={group.key} className={`task-project ${group.kind}${isFolded ? ' folded' : ''}${dropAt?.group === group.key && !dropAt.subject ? ' drop' : ''}${hasOpen ? ' has-open' : ''}`} aria-label={group.name} {...dropOn(group.key)}>
         <div className="task-project-head">
           {renaming === group.key ? (
             <span className="group-renaming">
@@ -624,11 +645,11 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
           <>
             {!!group.loose.length && <div className="task-list" role="list">{group.loose.map((task) => row(task, old))}</div>}
             {group.subjects.map((subject) => {
-              const subjectIsFolded = subjectFolded(arrangement, group.key, subject.name)
+              const subjectIsFolded = subjectFolded(arrangement, group.key, subject.name) && !sprung.has(spot(group.key, subject.name))
               const holdsOpen = subjectIsFolded && subject.tasks.some((task) => task.key === selected)
               const held = `${subject.tasks.length} tasks`
               return (
-                <div key={subject.name} className={`task-subject${subjectIsFolded ? ' folded' : ''}${dropAt === `${group.key}|${subject.name}` ? ' drop' : ''}${holdsOpen ? ' has-open' : ''}`} role="group" aria-label={subject.name} {...dropOn(group.key, subject.name)}>
+                <div key={subject.name} className={`task-subject${subjectIsFolded ? ' folded' : ''}${dropAt?.group === group.key && dropAt.subject === subject.name ? ' drop' : ''}${holdsOpen ? ' has-open' : ''}`} role="group" aria-label={subject.name} {...dropOn(group.key, subject.name)}>
                   <button type="button" className="subject-fold" aria-expanded={!subjectIsFolded} onClick={() => changeGroups({ kind: 'fold-subject', group: group.key, subject: subject.name, folded: !subjectIsFolded })}>
                     <span className="fold-chevron" aria-hidden="true"><Icon name="chevron" size={11} /></span>
                     <span className="task-subject-name" title={subject.name}>{subject.name}</span>

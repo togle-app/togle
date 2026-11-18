@@ -30,6 +30,8 @@ import type { Backend, Detected, ResumeOptions, StartOptions, TaskHandle } from 
 export interface StoredSession {
   id: string
   title: string
+  /** What was asked first, when the title is something else (claude-sessions.ts). */
+  asked?: string
   cwd: string
   updatedAt: number
 }
@@ -89,7 +91,7 @@ export async function findClaude(): Promise<string | null> {
 }
 
 async function storedSessions(): Promise<StoredSession[]> {
-  return (await claudeSessions(100)).map((session) => ({ id: session.id, title: session.title, cwd: session.cwd ?? '', updatedAt: session.updatedAt }))
+  return (await claudeSessions(100)).map((session) => ({ id: session.id, title: session.title, ...(session.asked ? { asked: session.asked } : {}), cwd: session.cwd ?? '', updatedAt: session.updatedAt }))
 }
 
 /** A task Togle ran and that goes on without it: what is needed to hear it and to open it again. */
@@ -232,7 +234,7 @@ export class ClaudeBackend implements Backend {
     const rows = await this.rows(1_500).catch(() => [] as AgentRow[])
     const stored = await (this.options.stored ?? storedSessions)().catch(() => [] as StoredSession[])
     const found = new Map<string, TaskInfo>()
-    for (const session of stored) found.set(session.id, { id: session.id, runner: 'claude', title: session.title, folder: session.cwd, state: 'idle', updatedAt: session.updatedAt })
+    for (const session of stored) found.set(session.id, { id: session.id, runner: 'claude', title: session.title, ...(session.asked ? { asked: session.asked } : {}), folder: session.cwd, state: 'idle', updatedAt: session.updatedAt })
     // One session can be listed twice: as a background session that was stopped, and as the program in a terminal that has
     // it open now. The program that runs is the one to take over, and the background session is the one that opens after.
     for (const row of [...rows.filter(isJob), ...rows.filter((candidate) => !isJob(candidate))]) {
@@ -245,6 +247,7 @@ export class ClaudeBackend implements Backend {
         id: row.sessionId,
         runner: 'claude',
         title: before?.title || (job ? this.known.get(row.id)?.title : '') || named || path.basename(row.cwd ?? '') || 'Claude Code task',
+        ...(before?.asked ? { asked: before.asked } : {}),
         folder: row.cwd ?? before?.folder ?? '',
         state: stateOfJob(row),
         updatedAt: before?.updatedAt ?? row.startedAt ?? 0,
@@ -259,7 +262,7 @@ export class ClaudeBackend implements Backend {
       // After "/clear" Claude Code keeps the task in another session: that one is this task, and not a second row.
       if (task.session() !== task.id) found.delete(task.session())
       const before = found.get(task.id)
-      found.set(task.id, { id: task.id, runner: 'claude', title: task.title || before?.title || 'Claude Code task', folder: task.folder || before?.folder || '', state: task.state, updatedAt: before?.updatedAt ?? Date.now(), job: task.screen.job, ...(before?.pid ? { pid: before.pid } : {}), ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}) })
+      found.set(task.id, { id: task.id, runner: 'claude', title: task.title || before?.title || 'Claude Code task', ...(before?.asked ? { asked: before.asked } : {}), folder: task.folder || before?.folder || '', state: task.state, updatedAt: before?.updatedAt ?? Date.now(), job: task.screen.job, ...(before?.pid ? { pid: before.pid } : {}), ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}) })
     }
     return [...found.values()].sort((a, b) => b.updatedAt - a.updatedAt)
   }
