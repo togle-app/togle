@@ -775,7 +775,14 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             onAnswer={(requestId, decision) => act(() => api.answerRunnerTask(detail.task.key, requestId, decision))}
             onReply={(requestId, text) => act(() => api.replyRunnerTask(detail.task.key, requestId, text))}
             onSend={(text) => act(() => api.sendToRunnerTask(detail.task.key, text))}
-            onHeld={(action) => act(() => api.heldRunnerReply(detail.task.key, action))}
+            onHeld={(action, index) => act(() => api.heldRunnerReply(detail.task.key, action, index))}
+            onInterrupt={async (text) => {
+              let sent = true
+              await act(async () => {
+                try { await api.interruptRunnerTask(detail.task.key, text) } catch (caught) { sent = false; throw caught }
+              })
+              return sent
+            }}
             onStop={() => act(() => api.stopRunnerTask(detail.task.key))}
             onEndCommands={() => act(() => api.endRunnerCommands(detail.task.key))}
             onOpen={() => act(() => api.openRunnerTask(detail.task.key))}
@@ -973,8 +980,10 @@ interface PanelProps {
   onAnswer: (requestId: string, decision: 'allow-once' | 'allow-always' | 'refuse') => void
   onReply: (requestId: string, text: string) => void
   onSend: (text: string) => void
-  /** What waits to go in from Chat: sent now, or taken back. */
-  onHeld: (action: 'send' | 'drop') => void
+  /** What waits to go in from Chat: sent now, sent now with the agent stopped first, or taken back (all of it, or one message). */
+  onHeld: (action: 'send' | 'drop' | 'interrupt', index?: number) => Promise<void>
+  /** Stops what the agent does and sends these words as soon as it has: true when they went in. */
+  onInterrupt: (text: string) => Promise<boolean>
   onStop: () => Promise<void>
   onEndCommands: () => Promise<void>
   onOpen: () => Promise<void>
@@ -1010,7 +1019,7 @@ function usePressed(task: TaskView): [string | undefined, (name: string, work: (
   return [pressed, press]
 }
 
-function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack, logRead, place }: PanelProps) {
+function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterrupt, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack, logRead, place }: PanelProps) {
   const { task, log } = detail
   const talkKey = useHotkeys().find((key) => key.id === 'dictate')?.keys || 'F9'
   // A task whose agent has a screen Togle can show is seen in two views; any other task has the one it has.
@@ -1121,6 +1130,23 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
     const message = text.trim()
     if (message) say(message)
   }
+  // Interrupt: stop what the agent does and send these words as soon as it has stopped. They stay in the box until they have
+  // gone in, and stay if they could not. (What is queued waits for the end of the turn they start.)
+  const [interrupting, setInterrupting] = useState(false)
+  const interruptible = running && !question && !!text.trim()
+  const interrupt = async (): Promise<void> => {
+    const message = text.trim()
+    if (!message || interrupting || !interruptible) return
+    const withIt = !!quoted && !/^[/!]/.test(message)
+    stick.current = true
+    toEnd()
+    setInterrupting(true)
+    const sent = await onInterrupt(withIt && quoted ? withQuote(quoted, message) : message)
+    setInterrupting(false)
+    if (!sent) return
+    setText('')
+    if (withIt) setQuoted(null)
+  }
   // The agent's own commands, listed over the reply box while a "/" and the start of a name are typed, and its models
   // after "/model ". What the agent offers is asked when the task opens, and again when a "/" starts the reply.
   const [offers, setOffers] = useState<TaskOffers>(NO_OFFERS)
@@ -1191,7 +1217,11 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
     if (event.nativeEvent.isComposing || event.keyCode === 229) return
     if (!listed) {
       // In the box of several lines, Enter sends and Shift+Enter starts a new line. (A password's box sends as any form does.)
-      if (event.key === 'Enter' && !event.shiftKey && event.currentTarget instanceof HTMLTextAreaElement) {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && interruptible && event.currentTarget instanceof HTMLTextAreaElement) {
+        // Ctrl+Enter interrupts: it stops what the agent does and sends these words now.
+        event.preventDefault()
+        void interrupt()
+      } else if (event.key === 'Enter' && !event.shiftKey && event.currentTarget instanceof HTMLTextAreaElement) {
         event.preventDefault()
         const message = text.trim()
         if (message) say(message)
@@ -1401,18 +1431,39 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
 
       {/* What was sent while the agent worked, waiting for its turn to end: as it will be said, with when it goes in. */}
       {task.mine && held.length > 0 && (
-        <div className="held-reply" role="status" aria-label="Waiting to go in">
-          <div className="held-words">
+        <div className="held-reply" role="status" aria-label="Queued messages">
+          <div className="held-head">
+            <span className="held-title">Queued</span>
+            <span className="held-count" aria-label={`${held.length} ${held.length === 1 ? 'message' : 'messages'}`}>{held.length}</span>
+          </div>
+          <ol className="held-words">
             {held.map((words, index) => {
               const split = splitQuote(words)
-              return <p key={index}>{split && <QuoteBlock text={split.quote} />}{split ? split.reply : words}</p>
+              return (
+                <li key={index} className="held-row">
+                  <span className="held-text">{split && <QuoteBlock text={split.quote} />}{split ? split.reply : words}</span>
+                  <span className="held-row-actions">
+                    {/* Back in the box to change, when the box is empty. */}
+                    {!text && (
+                      <button type="button" className="ghost small held-edit" aria-label={`Edit queued message ${index + 1}`} title="Put it back in the box to change it" onClick={() => {
+                        if (split) { setQuoted(split.quote); setText(split.reply) } else setText(words)
+                        void onHeld('drop', index)
+                        replyText.current?.focus()
+                      }}>Edit</button>
+                    )}
+                    <button type="button" className="ghost small held-remove" aria-label={`Remove queued message ${index + 1}`} title="Take it back" onClick={() => void onHeld('drop', index)}>×</button>
+                  </span>
+                </li>
+              )
             })}
-          </div>
+          </ol>
           <div className="held-foot">
             <span className={task.heldNote ? 'held-line bad' : 'held-line'}>{heldLine}</span>
             <span className="held-actions">
-              {heldWaitsForYou && <button type="button" className="small" onClick={() => onHeld('send')}>Send now</button>}
-              <button type="button" className="ghost small" onClick={() => onHeld('drop')}>Remove</button>
+              {heldWaitsForYou
+                ? <button type="button" className="small" disabled={!!pressed} onClick={press('held-send', () => onHeld('send'))}>{pressed === 'held-send' ? 'Sending…' : 'Send now'}</button>
+                : <button type="button" className="small" disabled={!!pressed} onClick={press('held-interrupt', () => onHeld('interrupt'))} title={`Stops what ${agentOf(task)} is doing and sends what is queued now`}>{pressed === 'held-interrupt' ? 'Interrupting…' : 'Interrupt and send'}</button>}
+              {held.length > 1 && <button type="button" className="ghost small" onClick={() => void onHeld('drop')}>Remove all</button>}
             </span>
           </div>
         </div>
@@ -1444,6 +1495,12 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
               <input value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" type="password" />
             ) : (
               <textarea ref={replyText} rows={1} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" aria-autocomplete="list" aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
+            )}
+            {interruptible && (
+              <button type="button" className="reply-interrupt small" disabled={interrupting} onClick={() => void interrupt()} title={`Stops what ${agentOf(task)} is doing and sends this now (Ctrl+Enter)`}>
+                <Icon name="stop" size={11} />
+                {interrupting ? 'Interrupting…' : 'Interrupt'}
+              </button>
             )}
             <button className={text.trim() ? 'reply-send primary' : 'reply-send'} disabled={!text.trim()} aria-label={holdsReply ? 'Send when it finishes' : 'Send'} title={holdsReply ? `It goes in when ${agentOf(task)} finishes` : undefined}>
               <Icon name="send" size={14} />

@@ -647,12 +647,24 @@ button.plan-head:hover:not(:disabled) { border-color: transparent; }
 .task-reply:focus-within { border-color: var(--togle); }
 .task-reply input, .task-reply textarea { flex: 1; min-width: 0; padding: 4px 10px; border: 0; background: transparent; }
 .task-reply textarea { field-sizing: content; min-height: 26px; max-height: 12.5rem; line-height: 1.4; resize: none; }
+/* Interrupt: beside Send while the agent works and words are typed: it stops the agent and sends them now (Ctrl+Enter). */
+.task-reply button.reply-interrupt { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 26px; margin-bottom: 1px; padding: 0 9px; border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); color: var(--danger); font-size: 12px; }
+.task-reply button.reply-interrupt:hover:not(:disabled) { border-color: var(--danger); background: var(--danger-soft); }
 .task-reply button.reply-send { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; }
 /* What was sent while the agent worked, waiting for its turn to end: a card like the person's own words, with a dashed edge
    because it has not gone in yet, and when it goes in under it. */
 .held-reply { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 7px 10px 7px 12px; border: 1px dashed color-mix(in srgb, var(--togle) 55%, var(--line)); border-left: 3px solid color-mix(in srgb, var(--togle) 55%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--togle-soft) 55%, transparent); }
-.held-words { display: flex; flex-direction: column; gap: 4px; max-height: 7.5rem; overflow-y: auto; }
-.held-words p { margin: 0; color: var(--ink); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* What is queued: a row for each message, in the order it will go in, each with its own way back. */
+.held-head { display: flex; align-items: center; gap: 6px; }
+.held-title { color: var(--togle); font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+.held-count { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--togle-soft); color: var(--togle); font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.held-words { display: flex; flex-direction: column; gap: 4px; max-height: 9rem; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.held-row { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.held-text { flex: 1; min-width: 0; color: var(--ink); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.held-row-actions { display: inline-flex; flex: none; align-items: center; gap: 2px; }
+.held-row-actions button { height: 22px; padding: 0 7px; color: var(--muted); font-size: 12px; }
+.held-row-actions button:hover:not(:disabled) { color: var(--ink); }
+.held-remove { width: 22px; padding: 0; font-size: 15px; line-height: 1; }
 .held-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; }
 .held-line { min-width: 0; color: var(--muted); font-size: 12px; }
 .held-line.bad { color: var(--danger); }

@@ -96,6 +96,8 @@ interface Owned {
 const HELD_MOST = 20
 /** How long a task stays idle after its turn ends before what waits goes in (an agent can show idle for a moment between steps). */
 const HELD_SETTLE_MS = 1_500
+/** How long an interrupt waits for the agent to stop before it says it did not (Stop is asked, and an agent may take a moment to show it). */
+const STOP_WAIT_MS = 8_000
 
 const LOG_LIMIT = 400
 const keyOf = (runner: RunnerKind, id: string): string => `${runner}:${id}`
@@ -415,17 +417,78 @@ export class RunnerHub {
     this.fresh()
   }
 
-  /** What waits to go in to a task: sent now, if its agent takes words now, or taken back. */
-  async held(key: string, action: 'send' | 'drop'): Promise<void> {
+  /**
+   * What waits to go in to a task: sent now, if its agent takes words now; sent now with what the agent does stopped first
+   * (`interrupt`); or taken back, all of it or the one message at `index`.
+   */
+  async held(key: string, action: 'send' | 'drop' | 'interrupt', index?: number): Promise<void> {
     const owned = this.mine(key)
     if (action === 'drop') {
-      this.dropHeld(owned)
+      if (index === undefined) this.dropHeld(owned)
+      else this.dropOneHeld(owned, index)
       this.fresh()
       return
     }
     if (!owned.held?.length) return
+    if (action === 'interrupt') {
+      if (this.atWork(owned)) {
+        await this.stop(key)
+        await this.untilStopped(owned)
+      }
+      await this.deliverHeld(owned, true)
+      return
+    }
     if (this.takesNoWords(owned)) throw new Error(`${this.nameOf(owned.handle.runner)} is still working. It goes in when it finishes.`)
     await this.deliverHeld(owned, true)
+  }
+
+  /** Whether a task's agent is at work or asks something: what an interrupt would stop. */
+  private atWork(owned: Owned): boolean {
+    const { handle } = owned
+    return handle.state === 'working' || handle.state === 'waiting' || !!handle.waitingFor
+  }
+
+  /** Waits for a task's agent to show that it has stopped, or says it did not. */
+  private async untilStopped(owned: Owned): Promise<void> {
+    const began = Date.now()
+    while (this.atWork(owned) && Date.now() - began < STOP_WAIT_MS) await new Promise((resolve) => setTimeout(resolve, 100))
+    if (this.atWork(owned)) throw new Error(`${this.nameOf(owned.handle.runner)} has not stopped yet. Press Stop, and send it when it has.`)
+  }
+
+  /**
+   * An interrupt from Chat: what the agent is doing is stopped, as the Stop button stops it, and the person's new words go in as
+   * soon as it has stopped. What was queued before is not sent with them: it waits for the end of the turn they start. An agent
+   * that is not at work has nothing to interrupt, and the words go in as any reply does.
+   */
+  async interrupt(key: string, text: string): Promise<void> {
+    const owned = this.mine(key)
+    const message = text.trim()
+    if (!message) return
+    if (!this.atWork(owned)) {
+      await this.sendOrHold(key, message)
+      return
+    }
+    // A line that starts as a command of the agent's own is not typed on a screen: that is told before anything is stopped.
+    if (owned.handle.screen && owned.handle.runner !== 'codex') refuseCommand(message)
+    await this.stop(key)
+    await this.untilStopped(owned)
+    await this.send(key, message)
+    // The words started a turn: what was queued goes in when it ends (the Stop had paused it, so that it would not start the agent again).
+    if (!owned.heldNote) owned.heldPaused = undefined
+    this.touch(owned)
+    this.fresh()
+  }
+
+  /** Takes one waiting message back. */
+  private dropOneHeld(owned: Owned, index: number): void {
+    const rest = (owned.held ?? []).filter((_, at) => at !== index)
+    if (rest.length === (owned.held ?? []).length) return
+    if (!rest.length) {
+      this.dropHeld(owned)
+      return
+    }
+    owned.held = rest
+    this.touch(owned)
   }
 
   /** Whether a task's agent cannot be written to now: one written to on its screen, while it works or asks. */

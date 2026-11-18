@@ -205,8 +205,16 @@ export interface TogleApi {
    * it works, they wait (the task's `held`) and go in then.
    */
   sendToRunnerTask(key: string, text: string): Promise<void>
-  /** What waits to go in to a task: sent now (if the agent takes words now), or taken back. */
-  heldRunnerReply(key: string, action: 'send' | 'drop'): Promise<void>
+  /**
+   * An interrupt: what the agent is doing is stopped, and these words go in as soon as it has stopped. What was queued before
+   * waits for the end of the turn they start. An agent that is not at work has nothing to stop: the words go in as any reply does.
+   */
+  interruptRunnerTask(key: string, text: string): Promise<void>
+  /**
+   * What waits to go in to a task: sent now (if the agent takes words now), sent now with the agent stopped first ('interrupt'),
+   * or taken back, all of it or the one message at `index`.
+   */
+  heldRunnerReply(key: string, action: 'send' | 'drop' | 'interrupt', index?: number): Promise<void>
   /** A picture in a task's conversation, by the key it came with, as a data: address; null when it is no longer kept. */
   runnerPicture(key: string, picture: string): Promise<string | null>
   /** Allows or refuses one command or edit a task waits to do. Allowing is once only. */

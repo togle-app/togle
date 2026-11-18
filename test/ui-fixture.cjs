@@ -411,11 +411,24 @@ module.exports = function install(fixture) {
     if (takesNoWords(found)) { found.held = [...(found.held ?? []), text]; delete found.heldNote; delete found.heldPaused; runnerChanged(); return }
     found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged()
   }
-  api.heldRunnerReply = async (key, action) => {
-    record('heldRunnerReply', [key, action]); const found = runnerFind(key)
-    if (action === 'drop') { dropHeld(found); runnerChanged(); return }
-    if (takesNoWords(found)) throw new Error('Claude Code is still working. It goes in when it finishes.')
+  api.heldRunnerReply = async (key, action, index) => {
+    record('heldRunnerReply', index === undefined ? [key, action] : [key, action, index]); const found = runnerFind(key)
+    if (action === 'drop') {
+      if (index === undefined) dropHeld(found)
+      else { found.held = (found.held ?? []).filter((_, at) => at !== index); if (!found.held.length) dropHeld(found) }
+      runnerChanged(); return
+    }
+    // An interrupt stops what the agent does first, and what is queued goes in at once.
+    if (action !== 'interrupt' && takesNoWords(found)) throw new Error('Claude Code is still working. It goes in when it finishes.')
     const text = dropHeld(found).join('\n\n')
+    if (!text) return
+    found.pending = []
+    found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged()
+  }
+  // An interrupt, as main does it (hub.ts interrupt): what the agent does is stopped, and these words go in at once.
+  api.interruptRunnerTask = async (key, text) => {
+    record('interruptRunnerTask', [key, text]); const found = runnerFind(key)
+    found.pending = []
     found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged()
   }
   // A picture in a conversation: a task given `history.pictures` keeps each as a data: address by its key.

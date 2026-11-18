@@ -147,7 +147,9 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   handle('runners:take-over', (key) => hub.takeOver(word(key, 'The task')))
   // What the person sends from Chat: words an agent cannot take while it works wait, and go in when its turn ends.
   handle('runners:send', (key, text) => hub.sendOrHold(word(key, 'The task'), typeof text === 'string' ? text : ''))
-  handle('runners:held', (key, action) => hub.held(word(key, 'The task'), action === 'send' ? 'send' : 'drop'))
+  // An interrupt: what the agent does is stopped and these words go in as soon as it has stopped (what was queued waits for the end of that turn).
+  handle('runners:interrupt', (key, text) => hub.interrupt(word(key, 'The task'), typeof text === 'string' ? text : ''))
+  handle('runners:held', (key, action, index) => hub.held(word(key, 'The task'), action === 'send' ? 'send' : action === 'interrupt' ? 'interrupt' : 'drop', typeof index === 'number' && Number.isInteger(index) && index >= 0 ? index : undefined))
   handle('runners:picture', async (key, picture) => {
     const found = await hub.picture(word(key, 'The task'), word(picture, 'The picture').slice(0, 200))
     return found ? `data:${found.type};base64,${found.data}` : null

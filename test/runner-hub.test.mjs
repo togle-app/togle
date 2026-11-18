@@ -329,6 +329,109 @@ test('Codex takes words while it works: nothing waits', async () => {
   }
 })
 
+test('an interrupt stops what the agent does and says the new words at once; what was queued goes in after the turn they start', async () => {
+  const claude = new FakeBackend('claude', { screens: true })
+  const { hub } = hubOf([claude])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const task = claude.started[0]
+    let stops = 0
+    const stop = task.stop.bind(task)
+    task.stop = async () => { stops++; await stop() }
+    await hub.sendOrHold(view.key, 'and add a test')
+    await hub.interrupt(view.key, '  No, use the other approach  ')
+    assert.equal(stops, 1, 'what it did was stopped')
+    assert.deepEqual(task.sent, ['Fix the login redirect', 'No, use the other approach'], 'then the new words went in, and not what was queued')
+    const after = (await hub.list()).find((t) => t.key === view.key)
+    assert.deepEqual([after.held, after.heldPaused], [['and add a test'], undefined], 'the queue waits, and is not held back by the stop')
+    await new Promise((resolve) => setTimeout(resolve, 1_800))
+    assert.equal(task.sent.length, 2, 'not while the new turn works')
+    task.done()
+    await new Promise((resolve) => setTimeout(resolve, 1_800))
+    assert.deepEqual(task.sent.at(-1), 'and add a test', 'once the turn they started has ended, the queue goes in')
+    assert.equal((await hub.list()).find((t) => t.key === view.key).held, undefined)
+    // An agent that is not at work has nothing to stop: the words go in as any reply does.
+    task.done()
+    await hub.interrupt(view.key, 'Thanks')
+    assert.equal(stops, 1, 'nothing was stopped')
+    assert.equal(task.sent.at(-1), 'Thanks')
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+})
+
+test('an interrupt with a command of the agent’s own is refused before anything is stopped; one that cannot go in is told', async () => {
+  const claude = new FakeBackend('claude', { screens: true })
+  const { hub } = hubOf([claude])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const task = claude.started[0]
+    await assert.rejects(hub.interrupt(view.key, '/exit'), /A command is typed on the agent’s screen/)
+    assert.equal(task.state, 'working', 'it was not stopped')
+    // An agent that does not show that it stopped: the person is told, and nothing was typed.
+    task.stop = async () => {}
+    await assert.rejects(hub.interrupt(view.key, 'Stop that'), /has not stopped yet/)
+    assert.deepEqual(task.sent, ['Fix the login redirect'])
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+}, { timeout: 20_000 })
+
+test('Codex is interrupted too: stopped, then the new words', async () => {
+  const codex = new FakeBackend('codex', { screens: true })
+  const { hub } = hubOf([codex])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'codex', folder, prompt: 'Add the status column' })
+    const task = codex.started[0]
+    await hub.interrupt(view.key, 'Name it state instead')
+    assert.deepEqual(task.sent, ['Add the status column', 'Name it state instead'])
+    assert.equal(task.state, 'working', 'and it works on them')
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+})
+
+test('the queue: one message taken back, all of it sent with an interrupt, and an interrupt whose words cannot go in waits with why', async () => {
+  const claude = new FakeBackend('claude', { screens: true })
+  const { hub } = hubOf([claude])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const task = claude.started[0]
+    const held = async () => (await hub.list()).find((t) => t.key === view.key).held
+    await hub.sendOrHold(view.key, 'first')
+    await hub.sendOrHold(view.key, 'second')
+    await hub.sendOrHold(view.key, 'third')
+    await hub.held(view.key, 'drop', 1)
+    assert.deepEqual(await held(), ['first', 'third'], 'the second was taken back, the others wait')
+    await hub.held(view.key, 'drop', 9)
+    assert.deepEqual(await held(), ['first', 'third'], 'a place that is not there changes nothing')
+    // Sent now with an interrupt: stopped, then all of it as one message.
+    await hub.held(view.key, 'interrupt')
+    assert.deepEqual(task.sent, ['Fix the login redirect', 'first\n\nthird'])
+    assert.equal(await held(), undefined)
+    // The words did not go in: they wait again, for the person, with why.
+    await hub.sendOrHold(view.key, 'and then this')
+    const send = task.send.bind(task)
+    task.send = async () => { throw new Error('Its screen could not be opened.') }
+    await assert.rejects(hub.held(view.key, 'interrupt'), /Its screen could not be opened/)
+    const waiting = (await hub.list()).find((t) => t.key === view.key)
+    assert.deepEqual([waiting.held, waiting.heldPaused, waiting.heldNote], [['and then this'], true, 'Its screen could not be opened.'])
+    task.send = send
+    await hub.held(view.key, 'send')
+    assert.equal(task.sent.at(-1), 'and then this', 'and goes in when the person says so')
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+}, { timeout: 20_000 })
+
 test('a task started here asks before commands, is named, is logged, and the window is told', async () => {
   const claude = new FakeBackend('claude')
   const { hub, changes, titles } = hubOf([claude])
