@@ -55,3 +55,25 @@ test('main keeps the arrangement and gives it back as it is after each change', 
   assert.equal(store.change({ kind: 'make', id: 'g9xyz', name: 'Again' }), made, 'one id once')
   assert.deepEqual(store.change({ kind: 'place', task: 'hermes:c1', group: 'made:g9xyz' }).placed, { 'hermes:c1': { group: 'made:g9xyz' } })
 })
+
+test('a subject renamed by Togle\'s sorting takes along the tasks dropped on it in that group, and only those', () => {
+  let groups = T.applyGroupChange(T.NO_GROUPS, { kind: 'place', task: 'codex:t1', group: 'project:c:\\work\\website', subject: 'Signup' })
+  groups = T.applyGroupChange(groups, { kind: 'place', task: 'codex:t2', group: 'everyday', subject: 'Signup' })
+  groups = T.applyGroupChange(groups, { kind: 'place', task: 'codex:t3', group: 'project:c:\\work\\website', subject: 'Blog' })
+  const after = T.applyGroupChange(groups, { kind: 'rename-subject', group: 'project:c:\\work\\website', from: 'signup', to: 'Authentication' })
+  assert.deepEqual(after.placed, {
+    'codex:t1': { group: 'project:c:\\work\\website', subject: 'Authentication' },
+    'codex:t2': { group: 'everyday', subject: 'Signup' },
+    'codex:t3': { group: 'project:c:\\work\\website', subject: 'Blog' }
+  })
+  assert.equal(T.applyGroupChange(groups, { kind: 'rename-subject', group: 'project:c:\\work\\website', from: 'Orders', to: 'Shop' }), groups, 'nobody dropped a task on it: nothing changes')
+})
+
+test('the group Togle puts a task in, the same in the window and in main', () => {
+  assert.equal(T.ownGroupOf({ folder: 'C:\\Work\\Website\\' }, 'win32'), 'project:c:\\work\\website')
+  assert.equal(T.ownGroupOf({ folder: '/work/Website/' }, 'linux'), 'project:/work/Website', 'case counts where the system tells it apart')
+  assert.equal(T.ownGroupOf({ folder: '', outsideProject: true }, 'win32'), 'everyday')
+  assert.equal(T.ownGroupOf({ folder: 'C:\\Users\\sam', outsideProject: true }, 'win32'), 'everyday')
+  assert.equal(T.ownGroupOf({ folder: 'C:\\work', schedule: 'every day at 8:00' }, 'win32'), 'scheduled')
+  assert.equal(T.projectKeyOf('C:\\Work\\', 'win32'), 'c:\\work')
+})

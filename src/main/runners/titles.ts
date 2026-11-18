@@ -11,7 +11,7 @@ const GROUPS = 'runner-groups.json'
 const KEEP = 500
 
 /** Writes a file a moment after the last change, not once for each. */
-class Later {
+export class Later {
   private timer: NodeJS.Timeout | null = null
   constructor(private readonly save: () => Promise<void>) {}
   ask(): void {

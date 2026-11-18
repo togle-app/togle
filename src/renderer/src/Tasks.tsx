@@ -8,7 +8,7 @@ import { Icon } from './Icon'
 import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, WaitLine } from './kept'
 import { Menu } from './Menu'
 import { PointMenu, type Point } from './PointMenu'
-import { applyGroupChange, madeKey, NO_GROUPS, type GroupChange, type TaskGroups } from '@shared/task-groups'
+import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { RequestCard } from './RequestCard'
 import { clock, currentPlan, lastTurnKey, PlanCard, Thread, turnStart, useHistory } from './TaskThread'
 import { TerminalView } from './TerminalView'
@@ -145,16 +145,13 @@ const inOrder = (a: TaskView, b: TaskView): number =>
   standing(a) - standing(b) || (standing(a) === 1 ? a.title.localeCompare(b.title) : b.updatedAt - a.updatedAt) || a.key.localeCompare(b.key)
 const byName = (a: string, b: string): number => a.localeCompare(b, undefined, { sensitivity: 'base' })
 /** A project is its folder: the same folder, the same project, however its path is written (Windows does not tell case apart). */
-const projectKey = (folder: string): string => {
-  const clean = folder.replace(/[\\/]+$/, '')
-  return api.platform === 'win32' ? clean.toLowerCase() : clean
-}
+const projectKey = (folder: string): string => projectKeyOf(folder, api.platform)
 /** The folder a folder is in ("C:\work" for "C:\work\website"): where a project is, to know it by. */
 const parentOf = (folder: string): string => folder.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '')
 /** A scheduled job's row is the job; work outside any project is Everyday; the rest is in a project, its folder. */
 const kindOf = (task: TaskView): 'scheduled' | 'everyday' | 'project' => (task.schedule ? 'scheduled' : task.outsideProject || !task.folder ? 'everyday' : 'project')
-/** The group Togle puts a task in by itself, by its key (task-groups.ts). */
-const ownGroup = (task: TaskView): string => (kindOf(task) === 'project' ? `project:${projectKey(task.folder)}` : kindOf(task))
+/** The group Togle puts a task in by itself, by its key (task-groups.ts): main sorts each of these by subject. */
+const ownGroup = (task: TaskView): string => ownGroupOf(task, api.platform)
 
 /**
  * The colors of a group's mark. None is amber, indigo, green or red: those say how a task stands. A group keeps its color:
@@ -177,7 +174,7 @@ interface TaskGroup {
   /** A project's folder, and the folder it is in, to know it by; none for the other kinds. */
   folder: string
   where: string
-  /** Its tasks with no subject: one just started, one the person dropped on the group, or all of them with no AI plan. */
+  /** Its tasks under no heading: one just started, one alone in its subject, one the person dropped on the group, or all of them while sorting is off. */
   loose: TaskView[]
   subjects: { name: string; tasks: TaskView[] }[]
   counts: { waiting: number; working: number; fresh: number }
@@ -207,10 +204,13 @@ function groupOf(base: Omit<TaskGroup, 'loose' | 'subjects' | 'counts'>, tasks: 
     const subject = subjectOf(task)
     if (subject) subjects.set(subject, [...(subjects.get(subject) ?? []), task])
   }
+  // A heading shows once two tasks share it: over one task it would say what the task's own name says.
+  const headed = [...subjects.entries()].filter(([, list]) => list.length > 1)
+  const underHeading = new Set(headed.flatMap(([, list]) => list.map((task) => task.key)))
   return {
     ...base,
-    loose: tasks.filter((task) => !subjectOf(task)).sort(order),
-    subjects: [...subjects.entries()].sort(([a], [b]) => byName(a, b)).map(([subject, list]) => ({ name: subject, tasks: list.sort(order) })),
+    loose: tasks.filter((task) => !underHeading.has(task.key)).sort(order),
+    subjects: headed.sort(([a], [b]) => byName(a, b)).map(([subject, list]) => ({ name: subject, tasks: list.sort(order) })),
     counts: { waiting: tasks.filter(needsYou).length, working: tasks.filter((task) => task.state === 'working').length, fresh: tasks.filter(isFresh).length }
   }
 }
@@ -219,8 +219,8 @@ function groupOf(base: Omit<TaskGroup, 'loose' | 'subjects' | 'counts'>, tasks: 
  * The tasks in groups, each in a place of its own that does not change: the groups the person made, in the order they made
  * them (`withMade`: also the empty ones); scheduled jobs; work outside any project (Everyday); then one group for each project,
  * A to Z by its name (two folders of one name are told apart by the folder they are in). A task the person moved is in the
- * group they put it in. Inside a group, by subject (A to Z), each subject's tasks in the order of where they stand; tasks with
- * no subject come first. Nothing here depends on when a task last changed, except among the ones that are done.
+ * group they put it in. Inside a group, by subject (A to Z), each subject's tasks in the order of where they stand; tasks under
+ * no heading come first. Nothing here depends on when a task last changed, except among the ones that are done.
  */
 function groupTasks(list: TaskView[], arrangement: TaskGroups, withMade: boolean): TaskGroup[] {
   const made = new Set(arrangement.made.map((group) => madeKey(group.id)))
@@ -265,12 +265,18 @@ function useArrangement(): [TaskGroups, (change: GroupChange) => void] {
   const [pending, setPending] = useState<GroupChange[]>([])
   useEffect(() => {
     let live = true
-    void api.taskGroups().then((groups) => {
-      keepAnswer(KEPT_GROUPS, groups)
-      if (live) setFromMain(groups)
-    }, () => undefined)
+    const read = (): void => {
+      void api.taskGroups().then((groups) => {
+        keepAnswer(KEPT_GROUPS, groups)
+        if (live) setFromMain((was) => (JSON.stringify(was) === JSON.stringify(groups) ? was : groups))
+      }, () => undefined)
+    }
+    read()
+    // Main changes it too: the tasks dropped on a heading that Togle's sorting renamed follow it.
+    const off = api.onRunnersChanged(read)
     return () => {
       live = false
+      off()
     }
   }, [])
   const change = useCallback((next: GroupChange) => {

@@ -406,6 +406,11 @@ export interface Settings {
     finished: boolean
     /** Which view a task opens in (a switch in its header changes it for that task): its agent's own screen, or the cards and a reply box. */
     view: 'session' | 'cards'
+    /**
+     * Whether the AI set in Accounts sorts the tasks of a project, and of Everyday, under subjects. It reads the names of the
+     * tasks and of their folders: off until the person turns it on.
+     */
+    sortBySubject: boolean
   }
   /** Writing calls down. */
   meetings: {

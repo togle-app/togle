@@ -350,6 +350,12 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
           })}
         </span>
       </Row>
+      {/* Off until the person turns it on: the names of their tasks go to the AI they set. What it does is said where "Tasks
+          open in" says its own, over the switch: the design keeps notes off these rows, so all of it fits on one screen. */}
+      <Row name="Sort tasks by subject">
+        <input type="checkbox" role="switch" className="switch" title="The AI set in Accounts reads the names of your tasks and their folders, and puts tasks about the same thing under one heading. Off until you turn it on."
+          checked={settings.tasks.sortBySubject === true} onChange={(event) => void save({ tasks: { sortBySubject: event.target.checked } })} />
+      </Row>
       {/* The button stays where it is while its form is open under it, over the page. */}
       <div className="setting add-row"><button className="small" aria-expanded={adding} title="Any other agent: one that speaks ACP, or any that runs in a terminal" onClick={() => { setError(''); setAdding(!adding) }}>Add an agent</button></div>
       {adding && <AddAgent onAdded={(list) => { take(list); setAdding(false) }} onCancel={() => setAdding(false)} />}

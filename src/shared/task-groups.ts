@@ -21,9 +21,24 @@ export type GroupChange =
   | { kind: 'place'; task: string; group: string; subject?: string }
   /** The task goes back to where Togle puts it. */
   | { kind: 'put-back'; task: string }
+  /** Togle's sorting gave a subject in one of its groups another name: the tasks the person dropped on it follow it. */
+  | { kind: 'rename-subject'; group: string; from: string; to: string }
 
 export const NO_GROUPS: TaskGroups = { made: [], names: {}, placed: {} }
 export const madeKey = (id: string): string => `made:${id}`
+
+/** A project's key, from its folder: no slash at the end, and on Windows in lower case, where a folder's case does not count. */
+export const projectKeyOf = (folder: string, platform: string): string => {
+  const clean = folder.replace(/[\\/]+$/, '')
+  return platform === 'win32' ? clean.toLowerCase() : clean
+}
+
+/** The group Togle puts a task in by itself: Scheduled for a scheduled job, Everyday for work outside any project, else its project. */
+export function ownGroupOf(task: { schedule?: string; outsideProject?: boolean; folder: string }, platform: string): string {
+  if (task.schedule) return 'scheduled'
+  if (task.outsideProject || !task.folder) return 'everyday'
+  return `project:${projectKeyOf(task.folder, platform)}`
+}
 
 const MOST_MADE = 50
 const MOST_PLACED = 2000
@@ -84,6 +99,15 @@ export function applyGroupChange(groups: TaskGroups, change: GroupChange): TaskG
       const placed = { ...groups.placed }
       delete placed[task]
       return { ...groups, placed }
+    }
+    case 'rename-subject': {
+      const group = keyOf(change.group)
+      const from = nameOf(change.from).toLowerCase()
+      const to = nameOf(change.to)
+      if (!group || !from || !to) return groups
+      const moved = Object.entries(groups.placed).filter(([, at]) => at.group === group && at.subject?.toLowerCase() === from)
+      if (!moved.length) return groups
+      return { ...groups, placed: { ...groups.placed, ...Object.fromEntries(moved.map(([task, at]) => [task, { ...at, subject: to }])) } }
     }
     default:
       return groups

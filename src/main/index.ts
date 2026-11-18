@@ -40,6 +40,7 @@ import { registerRunners } from './runners/register'
 import { registerReach } from './reach/register'
 import type { Reach } from './reach/reach'
 import { StoredFresh, StoredGroups, StoredRecords, StoredTitles } from './runners/titles'
+import { TaskSubjects } from './runners/subjects'
 import { MICROPHONE_PRODUCT, microphonePage } from '@shared/microphone-link'
 import { readNoiseReport, shouldSuggest } from '@shared/microphone'
 import { TogleTray } from './tray'
@@ -226,6 +227,8 @@ let tray: TogleTray | undefined
 let quitting = false
 // The coding agents' tasks (Codex, Claude Code): the Tasks screen's side of the app.
 let runners: RunnerHub | null = null
+// Their sorting by subject, by the AI set in Accounts, while the person has it on.
+let taskSubjects: TaskSubjects | undefined
 /** Reach, part of Togle Studio: only in development runs with a courier set, until an outside review. */
 let reach: Reach | undefined
 // The to-do list: a plain text file in Togle's folder.
@@ -578,6 +581,7 @@ async function requestQuit(confirmed = false): Promise<void> {
   microphoneLink.stop()
   // The agents' programs are ended here, where it can be waited for: left to the last moment of the quit, a task in the middle of its turn would be left running.
   const agentsEnded = Promise.race([runners?.dispose(), new Promise(resolve => setTimeout(resolve, 5000))])
+  taskSubjects?.stop()
   try { await Promise.all([meetingNotes.stop(), callTitles.stop()]); await voices.flush(); await callFile.flush(); await dictationHistory.flush() }
   catch (error) { console.warn('[quit] could not finish saving:', (error as Error).message) }
   finally { await agentsEnded; app.quit() }
@@ -1130,6 +1134,7 @@ function registerIpc(): void {
     if (patch?.assist?.voiceLabels !== undefined && ongoing.isListening) { if (patch.assist.voiceLabels) void voices.start(); else voices.stop() }
     if (patch?.assist?.rememberVoices !== undefined) void voices.memoryChanged()
     if (patch?.tasks) refreshNotices()
+    if (patch?.tasks?.sortBySubject !== undefined) void saved.then(() => taskSubjects?.turned())
     if (patch?.assist?.autoNotes === false || patch?.assist?.rememberCalls === false) meetingNotes.pauseAutomatic()
     if (patch?.assist?.rememberCalls === false) { callTitles.pause(); titleQueue.clear() }
     // Right away, not after the save: dragging the opacity slider should feel live.
@@ -1762,7 +1767,22 @@ if (process.argv.includes('--togle-hook')) {
     const runnerTitles = new StoredTitles()
     const runnerRecords = new StoredRecords()
     const runnerGroups = new StoredGroups()
-    await Promise.all([runnerTitles.load(), runnerRecords.load(), runnerGroups.load(), freshTasks.load(), callAgentStore.load()])
+    taskSubjects = new TaskSubjects({
+      on: () => getSettings().tasks.sortBySubject === true,
+      // The AI the person set for background jobs, as call titles use it.
+      ask: () => {
+        const provider = activeProvider()
+        return async (system, user, signal) => {
+          let text = ''
+          await provider.stream({ system, user, lane: 'background', effort: 'low', tools: [], webSearch: false }, { signal, onDelta: part => { text += part.slice(0, Math.max(0, 20000 - text.length)) } })
+          return text
+        }
+      },
+      changed: () => send('runners:changed', null),
+      // The tasks the person dropped on a heading the AI renamed follow it.
+      renamed: (place, from, to) => { runnerGroups.change({ kind: 'rename-subject', group: place, from, to }) }
+    })
+    await Promise.all([runnerTitles.load(), runnerRecords.load(), runnerGroups.load(), freshTasks.load(), callAgentStore.load(), taskSubjects.load()])
     // A test run can stand in for the agents with programs of its own. A packaged Togle never looks.
     const standIns = !app.isPackaged && process.env.TOGLE_TEST_RUNNERS ? await (require(process.env.TOGLE_TEST_RUNNERS) as { backends(): Promise<Backend[]> }).backends() : undefined
     todo = registerTodo({
@@ -1784,6 +1804,7 @@ if (process.argv.includes('--togle-hook')) {
       records: runnerRecords,
       fresh: freshTasks,
       groups: runnerGroups,
+      subjects: taskSubjects,
       changed: () => { refreshNotices(); reach?.tasksChanged() },
       pickFolder: async () => {
         const chosen = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] }) : await dialog.showOpenDialog({ properties: ['openDirectory'] })

@@ -10,6 +10,7 @@ import { HermesBackend } from './hermes'
 import { RunnerHub, type FreshStore, type RecordStore, type TitleStore } from './hub'
 import { NO_GROUPS, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { widenSearchPath } from './search-path'
+import type { SortTask } from './subjects'
 import { TerminalBackend, type TerminalChunk } from './terminal'
 import type { Backend } from './types'
 
@@ -42,6 +43,8 @@ export interface RunnerDeps {
   fresh?: FreshStore
   /** The person's own arrangement of the list: groups they made, names they gave, tasks they moved. */
   groups?: { get(): TaskGroups; change(change: GroupChange): TaskGroups }
+  /** Togle's sorting by subject (subjects.ts). A task the person moved is theirs: it is not sorted. */
+  subjects?: { of(key: string, place: string): string | undefined; notice(tasks: SortTask[]): void }
   /** Something in the tasks changed, told to the main process as it is told to the window. */
   changed?: () => void
   /** Asks the person for a folder; null when they close the dialog. */
@@ -103,6 +106,17 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     titles: deps.titles,
     records: deps.records,
     fresh: deps.fresh,
+    ...(deps.subjects
+      ? {
+          subjects: {
+            of: (key: string, place: string) => deps.subjects?.of(key, place),
+            notice: (tasks: SortTask[]) => {
+              const placed = deps.groups?.get().placed ?? {}
+              deps.subjects?.notice(tasks.filter((task) => !(task.key in placed)))
+            }
+          }
+        }
+      : {}),
     started: deps.started,
     // The agents on this computer, looked for as the person's terminal would; stand-ins are not looked for.
     ...(deps.backends ? {} : { widenPath: widenSearchPath })

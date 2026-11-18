@@ -51,7 +51,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hotkeys: {},
   // A task that waits is told in a notice, and one that finished too, until turned off in Settings → Coding agents. A task
   // opens as its agent's own screen (Terminal) until Settings says Chat.
-  tasks: { notices: true, finished: true, view: 'session' },
+  tasks: { notices: true, finished: true, view: 'session', sortBySubject: false },
   // Said once, before the first call is written down.
   meetings: { introSeen: false, confirmNames: true, notice: true, apps: {} },
   // The first minute: once, on a Togle that has never run.

@@ -512,6 +512,30 @@ test('a task in no folder, or in the home folder, is in no project; one in a fol
   }
 })
 
+test('the sorting by subject is told the tasks as listed, each with its place, and a task shows the heading it has; a scheduled job is not sorted', async () => {
+  const site = process.platform === 'win32' ? 'C:\\work\\Site' : '/work/Site'
+  const place = process.platform === 'win32' ? 'project:c:\\work\\site' : 'project:/work/Site'
+  const claude = new FakeBackend('claude', { tasks: [
+    { ...info('claude', 'a', 'Fix the login redirect', 'idle', 300), folder: site },
+    { ...info('claude', 'b', 'Check my email', 'idle', 200), folder: '' },
+    { ...info('claude', 'c', 'Morning summary', 'idle', 100), folder: '', schedule: 'every day at 8:00' }
+  ] })
+  const told = []
+  const subjects = { of: (key, at) => (key === 'claude:a' && at === place ? 'Login' : undefined), notice: (tasks) => told.push(tasks) }
+  const { hub } = hubOf([claude], { subjects })
+  try {
+    const tasks = await hub.list()
+    assert.equal(tasks.find((t) => t.key === 'claude:a').subject, 'Login')
+    assert.equal(tasks.find((t) => t.key === 'claude:b').subject, undefined)
+    assert.deepEqual(told.at(-1), [
+      { key: 'claude:a', name: 'Fix the login redirect', place, where: 'project Site' },
+      { key: 'claude:b', name: 'Check my email', place: 'everyday', where: 'Everyday (work outside any project)' }
+    ])
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('a look for the agents begun before one was added is not kept', async () => {
   const claude = new FakeBackend('claude')
   let open

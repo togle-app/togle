@@ -5,8 +5,10 @@ import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
 import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Decision, type LogEntry, type RunnerKind, type RunnerStatus, type StartRequest, type StepDetail, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
+import { ownGroupOf } from '@shared/task-groups'
 import { carriedFlags } from './claude-job'
 import { endTree, listProcesses } from './process-tree'
+import { placeWords, type SortTask } from './subjects'
 import type { Backend, Detected, TaskHandle } from './types'
 
 /** The agents Togle knows by name; an added agent is named by its backend. */
@@ -46,6 +48,8 @@ export interface HubOptions {
   records?: RecordStore
   /** Which tasks finished since the person last looked: their rows say "done · new". */
   fresh?: FreshStore
+  /** Togle's sorting (subjects.ts): each task's heading, and the tasks as listed, for the places a task joined. */
+  subjects?: { of(key: string, place: string): string | undefined; notice(tasks: SortTask[]): void }
   /** The person's home folder: a task that works there, or in no folder, is in no project. A test gives its own. */
   home?: string
   /** How long the agents' lists are reused, in milliseconds. */
@@ -174,7 +178,21 @@ export class RunnerHub {
     const views = new Map<string, TaskView>()
     for (const info of infos) views.set(keyOf(info.runner, info.id), this.viewOfInfo(info))
     for (const owned of this.owned.values()) views.set(owned.key, this.viewOfOwned(owned, views.get(owned.key)))
-    return [...views.values()].map((view) => ({ ...view, agent: this.nameOf(view.runner), ...(this.options.fresh?.has(view.key) ? { fresh: true } : {}), ...(this.outsideProject(view.folder) ? { outsideProject: true } : {}) })).sort(order)
+    const listed: TaskView[] = [...views.values()].map((view) => ({ ...view, agent: this.nameOf(view.runner), ...(this.options.fresh?.has(view.key) ? { fresh: true } : {}), ...(this.outsideProject(view.folder) ? { outsideProject: true } : {}) }))
+    const subjects = this.options.subjects
+    if (subjects) {
+      // A scheduled job is its own row in Scheduled: it is not sorted.
+      const sorting: SortTask[] = []
+      for (const view of listed) {
+        if (view.schedule) continue
+        const place = ownGroupOf(view, process.platform)
+        sorting.push({ key: view.key, name: view.title, place, where: placeWords(place, view.folder) })
+        const subject = subjects.of(view.key, place)
+        if (subject) view.subject = subject
+      }
+      subjects.notice(sorting)
+    }
+    return listed.sort(order)
   }
 
   /** Whether a folder is no project: none at all, or the person's home folder, where an agent works that is not on any project. */

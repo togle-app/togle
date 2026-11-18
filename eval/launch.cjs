@@ -30,10 +30,11 @@ for (const name of ['settings.json', 'Local State', ...(signedIn ? [SIGN_IN] : [
 if (fs.existsSync(path.join(SOURCE, 'agents'))) fs.cpSync(path.join(SOURCE, 'agents'), path.join(copy, 'agents'), { recursive: true })
 
 // The options travel in the environment: on Electron's command line an argument like gpt-6-luna:low (a colon,
-// as in a URL) makes it exit before the script runs.
+// as in a URL) makes it exit before the script runs. The sign-in is a copy: renewing it would sign the real Togle
+// out, so a run whose sign-in is due for renewal stops instead (use Togle once, and it renews its own).
 const child = spawn(electron, [script], {
   stdio: 'inherit',
-  env: { ...process.env, TOGLE_EVAL_DATA: copy, TOGLE_EVAL_ARGS: JSON.stringify(args) }
+  env: { ...process.env, TOGLE_EVAL_DATA: copy, TOGLE_EVAL_ARGS: JSON.stringify(args), TOGLE_NO_REFRESH: '1' }
 })
 const removeCopy = () => fs.rmSync(copy, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill())

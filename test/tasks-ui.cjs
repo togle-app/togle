@@ -894,7 +894,7 @@ async function checkAgentSettings(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.shell-settings', 'Settings')
   // The agents Togle found, as the design's Settings lists them.
-  await ui.wait("document.querySelectorAll('#settings-agents .setting').length===5")
+  await ui.wait("document.querySelectorAll('#settings-agents .setting').length===6")
   assert.deepEqual(await texts(ui, '#settings-agents .agent-label'), ['Claude Code', 'Codex', 'Hermes'])
   assert.deepEqual(await texts(ui, '#settings-agents .agent-name .av'), ['C', 'X', 'H'], 'each agent with its letter, as the design marks them')
   assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add an agent'])
@@ -910,6 +910,15 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).at(-1), { tasks: { view: 'cards' } })
   await ui.click(viewSwitch + ' [role=radio]', 'Terminal')
   await ui.wait(pickedView + "==='Terminal'")
+  // Sorting by subject: off until the person turns it on, since the names of their tasks go to their AI; the switch says so.
+  const sortSwitch = "[...document.querySelectorAll('#settings-agents input[role=switch]')].find(e=>e.closest('.setting')?.textContent.includes('Sort tasks by subject'))"
+  assert.equal(await ui.evaluate(sortSwitch + '?.checked'), false, 'off at first')
+  assert.match(await ui.evaluate(sortSwitch + '.title'), /reads the names of your tasks and their folders/, 'it says what goes to the AI')
+  await ui.evaluate(sortSwitch + '.click()')
+  await ui.wait(sortSwitch + '.checked')
+  assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).at(-1), { tasks: { sortBySubject: true } })
+  await ui.evaluate(sortSwitch + '.click()')
+  await ui.wait('!' + sortSwitch + '.checked')
   assert.equal(await ui.evaluate("!!document.querySelector('.settings .card-note, .settings .setting > .note')"), false, 'no notes under the rows: everything fits on one screen')
   assert.deepEqual(await texts(ui, '#settings-agents .setting-value'), ['Found', 'Found', 'Not found'])
   // Remove takes an agent Togle finds off its lists, after asking: it stays installed, its tasks go on in it, and it can be added back.
@@ -1495,10 +1504,12 @@ async function checkSlowMain(T, agent) {
   ui.window.destroy()
 }
 
-// The list by subject: subjects given (as an AI plan gives them) go A to Z under their project, each with its tasks in the
-// order of where they stand. A task just started has none yet and comes first in its project, then goes under its subject
-// once: the one move Togle makes by itself. Two working tasks keep their order when one changes. A task that finished while
-// it was not on screen is new, and counted on its project, until it is opened.
+// The list by subject: subjects given (as Togle's sorting gives them) go A to Z under their project, each with its tasks in
+// the order of where they stand. A subject draws a heading once two tasks share it: over one task it would say what the
+// task's name says, so that task stays with the ones under no heading, first in its project. A task just started has no
+// subject yet; given one that another task has, it goes under it with that task: the one move Togle makes by itself. Two
+// working tasks keep their order when one changes. A task that finished while it was not on screen is new, and counted on
+// its project, until it is opened.
 async function checkGroups(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.workspace-nav button', 'Agents')
@@ -1511,15 +1522,20 @@ async function checkGroups(T, agent) {
   await set('claude:s2', { subject: 'Pricing page' })
   await set('claude:s3', { subject: 'Login' })
   await set('claude:s5', { subject: 'Build' })
-  await ui.wait("document.querySelectorAll('.task-subject').length===3")
-  assert.deepEqual(await ui.evaluate('[...' + website + ".querySelectorAll('.task-subject-name')].map(e=>e.textContent)"), ['Build', 'Login', 'Pricing page'], 'subjects A to Z')
+  await ui.evaluate('new Promise(r=>setTimeout(r,250))')
+  assert.equal(await ui.evaluate("document.querySelectorAll('.task-subject').length"), 0, 'a subject over one task draws no heading')
   assert.deepEqual(await texts(ui, '.task-groups .task-project-name'), ['api-server', 'notes', 'website'], 'projects keep their order')
   await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'codex:n1', runner: 'codex', title: 'Check the pricing tests', folder: 'C:\\work\\website', terminal: false, mine: true, state: 'working', line: 'Working…' }) + ', "")')
   await ui.wait("document.querySelectorAll('.task-row').length===6")
-  assert.equal((await titles(website))[0], 'Check the pricing tests', 'just started, with no subject yet: first in its project, with no heading')
+  assert.ok((await titles(website)).includes('Check the pricing tests'), 'just started, with no subject yet: in its project')
+  assert.equal(await ui.evaluate("document.querySelectorAll('.task-subject').length"), 0, 'and under no heading')
   await set('codex:n1', { subject: 'Pricing page' })
   await ui.wait('!!' + subject('Pricing page') + '&&' + subject('Pricing page') + ".querySelectorAll('.task-row').length===2")
-  assert.deepEqual(await titles(subject('Pricing page')), ['Check the pricing tests', 'Rebuild the pricing page'], 'given its subject, it goes under it; two working tasks by name')
+  assert.deepEqual(await titles(subject('Pricing page')), ['Check the pricing tests', 'Rebuild the pricing page'], 'given the subject another task has: the heading shows over both; two working tasks by name')
+  assert.deepEqual(await titles(website), ['Clean the build folder', 'Fix the login redirect', 'Check the pricing tests', 'Rebuild the pricing page'], 'the tasks under no heading come first')
+  await set('claude:s3', { subject: 'Build' })
+  await ui.wait("document.querySelectorAll('.task-subject').length===2")
+  assert.deepEqual(await ui.evaluate('[...' + website + ".querySelectorAll('.task-subject-name')].map(e=>e.textContent)"), ['Build', 'Pricing page'], 'headings A to Z')
   await set('claude:s2', { updatedAt: Date.now() + 60_000 })
   await ui.evaluate('new Promise(r=>setTimeout(r,200))')
   assert.deepEqual(await titles(subject('Pricing page')), ['Check the pricing tests', 'Rebuild the pricing page'], 'one changed: the order holds')
