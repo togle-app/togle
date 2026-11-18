@@ -757,14 +757,46 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .call-detail-content { font-size: 13px; line-height: 1.5; }
 .meeting-notes { display: flex; flex-direction: column; gap: 10px; }
 .meeting-notes > p { margin: 0; }
-.notes-by { margin: 0; color: var(--muted); font-size: 12px; }
-/* The notes, as the design shows them: small labels over what was marked, decided and left to do. */
-.notes-text { display: flex; flex-direction: column; gap: 4px; }
-.notes-text h1, .notes-text h2, .notes-text h3, .notes-text h4 { margin: 10px 0 2px; font: 600 11px/1.4 var(--font-body); letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
-.notes-text > :first-child { margin-top: 0; }
-.notes-text p { margin: 0; }
-.notes-text ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 0; list-style: none; }
-.notes-text li { margin: 0; }
+/* A call with no notes yet: one calm card with what to do, not a line of text and a button as wide as the page. */
+.notes-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 16px 18px; border: 1px dashed var(--line); border-radius: 12px; background: color-mix(in srgb, var(--raised) 35%, transparent); }
+.notes-empty-mark { display: inline-grid; place-items: center; width: 30px; height: 30px; margin-bottom: 2px; border-radius: 9px; background: var(--togle-soft); color: var(--togle); }
+.notes-empty b { color: var(--ink); font-size: 14px; font-weight: 650; }
+.meeting-notes .notes-empty p { margin: 0; max-width: 56ch; }
+.meeting-notes .notes-empty button { margin-top: 6px; }
+.notes-by { align-self: flex-start; margin: 0; padding: 2px 10px; border-radius: 999px; background: var(--raised); color: var(--muted); font-size: 12px; }
+/* The notes: the lead first, then a card for each section (what was marked, decided, left to do, or is still open) in as many columns
+   as the window has room for, a table or a long section on a row of its own. A time in them is a chip, and under To do the name
+   of who took an item comes first. (notes-sections.ts splits the text; the text itself is never changed.) */
+.notes-text { display: flex; flex-direction: column; gap: 14px; container-type: inline-size; }
+.notes-lead { color: var(--ink); font-size: 14px; line-height: 1.6; }
+.notes-lead .md { font-size: 14px; line-height: 1.6; }
+.notes-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+@container (min-width: 660px) { .notes-sections { grid-template-columns: repeat(2, minmax(0, 1fr)); } .notes-sections > .notes-section:last-child:nth-child(odd) { grid-column: 1 / -1; } }
+@container (min-width: 1000px) { .notes-sections { grid-template-columns: repeat(3, minmax(0, 1fr)); } .notes-sections > .notes-section:last-child:nth-child(odd) { grid-column: auto; } }
+.notes-section { --kind: var(--muted); --kind-soft: var(--raised); min-width: 0; padding: 12px 16px 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--raised) 40%, transparent); }
+.notes-sections > .notes-section { margin: 0; }
+.notes-section[data-wide] { grid-column: 1 / -1; }
+.notes-section[data-kind='marked'] { --kind: var(--wait); --kind-soft: var(--wait-soft); }
+.notes-section[data-kind='decided'] { --kind: var(--ok); --kind-soft: var(--ok-soft); }
+.notes-section[data-kind='todo'] { --kind: var(--togle); --kind-soft: var(--togle-soft); }
+.notes-section .notes-heading { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; color: var(--ink); font: 650 13px/1.3 var(--font-body); letter-spacing: 0; text-transform: none; }
+.notes-mark { display: inline-grid; flex: none; place-items: center; width: 22px; height: 22px; border-radius: 7px; background: var(--kind-soft); color: var(--kind); }
+.notes-section .md { font-size: 13px; line-height: 1.55; }
+.notes-section .md > :last-child { margin-bottom: 0; }
+.notes-section .md ul, .notes-section .md ol { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.notes-section .md li { position: relative; margin: 0; padding-left: 16px; }
+.notes-section .md li + li { margin-top: 0; }
+.notes-section .md li::before { content: ''; position: absolute; top: 0.62em; left: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--kind); opacity: 0.85; }
+.notes-section .md li.md-task { padding-left: 22px; }
+.notes-section .md li.md-task::before { display: none; }
+.notes-section .md li.md-task .md-checkbox { position: absolute; top: 0.3em; left: 0; margin: 0; }
+.notes-section .md ol { counter-reset: note; }
+.notes-section .md ol > li { counter-increment: note; padding-left: 24px; }
+.notes-section .md ol > li::before { content: counter(note); top: 0.1em; left: 0; display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--kind-soft); color: var(--kind); font-size: 10px; font-weight: 700; opacity: 1; }
+.notes-section[data-kind='todo'] .md li > strong:first-child { display: inline-block; margin-right: 6px; padding: 0 8px; border-radius: 999px; background: var(--togle-soft); color: var(--togle); font-size: 12px; font-weight: 650; line-height: 19px; }
+.notes-section .md h5, .notes-section .md h6 { margin: 10px 0 4px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.notes-section .md blockquote { margin: 8px 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--kind); color: var(--muted); }
+.md-time { display: inline-block; margin: 0 1px 0 4px; padding: 0 6px; border-radius: 6px; background: var(--raised); color: var(--muted); font: 500 11px/18px var(--font-mono); font-variant-numeric: tabular-nums; vertical-align: 1px; white-space: nowrap; }
 .notes-foot { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .history-transcript-line { display: grid; grid-template-columns: 4.4rem minmax(0, 1fr); gap: 0 0.6rem; align-items: start; padding: 5px 8px; border: 0; border-radius: 8px; }
 .history-transcript-line .who { flex: none; min-width: 0; color: var(--ink); font-size: 13px; font-weight: 600; }

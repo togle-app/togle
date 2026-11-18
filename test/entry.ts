@@ -80,6 +80,7 @@ export { findHermes, HermesBackend, markerOf, parseSessionList } from '../src/ma
 export { StoredFresh, StoredGroups, StoredRecords, StoredTitles } from '../src/main/runners/titles'
 export { applyGroupChange, cleanGroups, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded } from '../src/shared/task-groups'
 export { cleanQuote, QUOTE_MOST, splitQuote, withQuote } from '../src/shared/quote'
+export { notesKind, splitNotes } from '../src/shared/notes-sections'
 export { placeWords, settleSubjects, SORT_PROMPT, TaskSubjects } from '../src/main/runners/subjects'
 export { readJson, writeJson } from '../src/main/storage'
 export { addressedNames, confirmVoices, namesToConfirm, pruneConfirm } from '../src/shared/confirm-names'

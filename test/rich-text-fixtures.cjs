@@ -30,4 +30,24 @@ const reply = [
   '',
   '[notes]: https://example.com/releases/2026-11-03'
 ].join('\n')
-module.exports = { reply, code }
+// Notes as Togle writes them: a title, then what was marked, decided and left to do, with the times they cite.
+const notes = [
+  '# Pricing review with Dario',
+  '',
+  'The team agreed on two plans and on who sends what.',
+  '',
+  '## Marked',
+  '- [2:14] Dario: ship two plans first, Team later.',
+  '',
+  '## Decided',
+  '- Launch with two plans, Starter and Team, on the first of the month. [12:38]',
+  '- Refunds stay at 14 days for both plans. [18:40]',
+  '',
+  '## To do',
+  '- You: Send the pricing table to Marta by Friday. [21:05]',
+  '- Marta: Check the tax wording for the EU page. [22:11]',
+  '',
+  '## Open questions',
+  '- Does the old yearly price carry over? [9:30]'
+].join('\n')
+module.exports = { reply, code, notes }

@@ -1,4 +1,4 @@
-import { createElement, Fragment, memo, useDeferredValue, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { createContext, createElement, Fragment, memo, useContext, useDeferredValue, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import type { Token, Tokens } from 'marked'
 import type { Source } from '@shared/types'
 import { externalUrl } from '@shared/links'
@@ -36,7 +36,24 @@ function CodeBlock({ code, language = '' }: { code: string; language?: string })
   </div>
 }
 
+/** Whether the times a call's notes cite ("[12:38]") are drawn as chips: the notes ask for it, an agent's answer does not. */
+const TimesContext = createContext(false)
+const TIME = /\[\d{1,2}:\d{2}(?::\d{2})?\]/
+
+function TimeText({ text, sources }: { text: string; sources: Sources }): ReactNode {
+  const chips = useContext(TimesContext)
+  if (!chips) return <>{plainCitations(text, sources)}</>
+  return <>{text.split(/(\[\d{1,2}:\d{2}(?::\d{2})?\])/g).map((part, index) => {
+    const time = /^\[(\d{1,2}:\d{2}(?::\d{2})?)\]$/.exec(part)?.[1]
+    return time ? <span key={index} className="md-time" title={`${time} in the call`}>{time}</span> : <Fragment key={index}>{plainCitations(part, sources)}</Fragment>
+  })}</>
+}
+
 function citations(text: string, sources: Sources): ReactNode {
+  return text.includes('[') && TIME.test(text) ? <TimeText text={text} sources={sources} /> : plainCitations(text, sources)
+}
+
+function plainCitations(text: string, sources: Sources): ReactNode {
   if (!sources.size || !text.includes('[')) return text
   return text.split(/(\[\d+(?:\s*,\s*\d+)*\])/g).map((part, index) => {
     const match = /^\[(\d+(?:\s*,\s*\d+)*)\]$/.exec(part)
@@ -121,9 +138,10 @@ const Content = memo(function Content({ text, sources, streaming }: { text: stri
 })
 
 /** Defer streamed formatting behind typing; completed blocks are memoized independently. */
-export const Markdown = memo(function Markdown({ text, sources = NO_SOURCES, streaming = false }: { text: string; sources?: Source[]; streaming?: boolean }): ReactNode {
+export const Markdown = memo(function Markdown({ text, sources = NO_SOURCES, streaming = false, times = false }: { text: string; sources?: Source[]; streaming?: boolean; times?: boolean }): ReactNode {
   const deferred = useDeferredValue(streaming ? text : '')
-  return <Content text={streaming ? deferred : text} sources={sources} streaming={streaming} />
+  const content = <Content text={streaming ? deferred : text} sources={sources} streaming={streaming} />
+  return times ? <TimesContext.Provider value>{content}</TimesContext.Provider> : content
 })
 
 /** Evidence excerpts can contain links without inserting block elements into a paragraph. */

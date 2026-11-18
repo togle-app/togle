@@ -36,7 +36,7 @@ async function open(T, agent, scenario, width = 1024, height = 850, surface) {
   // The first minute is gone through once; only its own scenarios have not.
   settings.firstMinute = { done: !scenario.startsWith('first-minute') }
   const names = [...fs.readFileSync(path.join(project, 'src/shared/api.ts'), 'utf8').matchAll(/^  (\w+)\(/gm)].map(m => m[1])
-  const richText = scenario === 'rich-text' ? require('./rich-text-fixtures.cjs').reply : undefined
+  const richText = scenario === 'rich-text' ? require('./rich-text-fixtures.cjs').reply : scenario === 'meeting-notes' ? require('./rich-text-fixtures.cjs').notes : undefined
   // F8 Show: a frozen screen at twice the window's size, as on a screen scaled to 200%.
   const showPicture = scenario === 'show' ? { dataUrl: nativeImage.createFromBitmap(Buffer.alloc(width * 2 * height * 2 * 4, 0x60), { width: width * 2, height: height * 2 }).toDataURL(), width: width * 2, height: height * 2 } : undefined
   const fixture = JSON.stringify({ showPicture, settings, names, agents: [agent], scenario, readyAudio: !['speech', 'first-minute-new'].includes(scenario), richText })
@@ -981,6 +981,32 @@ async function checkSettings(T, agent) {
 }
 
 /** Meeting notes in Markdown: what it can hold, links that open outside, code to copy, and nothing that loads or runs. */
+// A call's notes in cards: the lead, then a card for each section with its kind, the times in them as chips, and who took each item
+// first under To do; a column more as the window has room, and nothing out of the window at 420.
+async function checkNotesCards(T, agent) {
+  for (const [width, columns] of [[420, 1], [1024, 2], [1600, 3]]) {
+    const ui = await open(T, agent, 'meeting-notes', width)
+    await ui.click('.workspace-nav button', 'Meetings')
+    await ui.click('.meeting-row', 'Open call: Acme renewal')
+    await ui.wait("document.querySelectorAll('.notes-section').length===4")
+    assert.equal(await ui.evaluate("document.querySelector('.notes-lead').textContent"), 'The team agreed on two plans and on who sends what.', 'the lead, with no title over it (the page has the call’s name)')
+    assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.notes-section')].map(s=>[s.dataset.kind,s.querySelector('.notes-heading').textContent])"), [['marked', 'Marked'], ['decided', 'Decided'], ['todo', 'To do'], ['open', 'Open questions']])
+    assert.equal(await ui.evaluate("document.querySelectorAll('.notes-section .md-time').length"), 6, 'every time they cite is a chip')
+    assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.notes-section .md-time')].map(t=>t.textContent)"), ['2:14', '12:38', '18:40', '21:05', '22:11', '9:30'])
+    assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.notes-section[data-kind=todo] li > strong:first-child')].map(s=>s.textContent)"), ['You', 'Marta'], 'who took each item, first')
+    assert.equal(await ui.evaluate("document.querySelector('.notes-section[data-kind=todo] li').textContent.includes('Send the pricing table to Marta by Friday.')"), true, 'and what they took')
+    assert.equal(await ui.evaluate("[...document.querySelectorAll('.notes-section')].every(s=>getComputedStyle(s).marginBottom==='0px')"), true, 'no space under a card but the grid’s')
+    const tops = await ui.evaluate("[...document.querySelectorAll('.notes-section')].map(s=>Math.round(s.getBoundingClientRect().top))")
+    assert.equal(new Set(tops.slice(0, 3)).size === 1 ? 3 : new Set(tops.slice(0, 2)).size === 1 ? 2 : 1, columns, 'columns by the room the notes have')
+    await ui.fitsWidth()
+    if (width === 1024) await ui.capture('notes-cards')
+    // The text of the notes is what is shared and exported, as it was written.
+    assert.deepEqual(ui.errors, [])
+    ui.window.destroy()
+  }
+  console.log('Notes in cards: the lead, a card for each section by kind, the times as chips, who took each item first, one to three columns, and nothing out of the window passed.')
+}
+
 async function checkRichText(T, agent) {
   const samples = require('./rich-text-fixtures.cjs')
   for (const width of [420, 960]) {
@@ -990,7 +1016,7 @@ async function checkRichText(T, agent) {
     const md = "document.querySelector('.meeting-detail .call-detail-content .md')"
     const all = selector => '[...' + md + '.querySelectorAll(' + JSON.stringify(selector) + ')]'
     await ui.wait('!!' + md + "?.querySelector('table')")
-    assert.equal(await ui.evaluate(md + ".querySelector('h4').textContent"), 'Release review')
+    assert.equal(await ui.evaluate("document.querySelector('.meeting-detail .notes-heading').textContent"), 'Release review')
     assert.equal(await ui.evaluate(md + ".querySelector('ol').start"), 3)
     assert.deepEqual(await ui.evaluate(all('input[type=checkbox]') + '.map(box=>({checked:box.checked,disabled:box.disabled}))'), [{ checked: true, disabled: true }, { checked: false, disabled: true }])
     assert.equal(await ui.evaluate(all('blockquote') + '.length'), 1)
@@ -1028,6 +1054,7 @@ app.whenReady().then(async () => {
     await checkMeetings(T, agent)
     await checkProblems(T, agent)
     await checkNoisyCall(T, agent)
+    await checkNotesCards(T, agent)
     await checkRichText(T, agent)
     await checkSettings(T, agent)
     await checkNoAgents(T, agent)
