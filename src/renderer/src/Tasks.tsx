@@ -10,6 +10,7 @@ import { Menu } from './Menu'
 import { PointMenu, type Point } from './PointMenu'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { RequestCard } from './RequestCard'
+import { StateMark, type MarkKind } from './StateMark'
 import { clock, currentPlan, lastTurnKey, PlanCard, Thread, turnStart, useHistory } from './TaskThread'
 import { TerminalView } from './TerminalView'
 
@@ -137,6 +138,9 @@ function useRemoteTasks(): DeviceTasks[] {
 // ---- How the list is organized: by project, then by what the work is about, then by where each task stands ----
 
 /** It finished (or stopped by an error) and the person has not had it on screen since. */
+/** How a task's mark shows it: what needs you first (it asks, or it stopped with a reply to give), then what it does. A
+ *  scheduled job between its runs rests: it is not done. */
+const markOf = (task: TaskView): MarkKind => (needsYou(task) ? 'waiting' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'failed' : task.state === 'stopped' ? 'stopped' : task.schedule ? 'resting' : 'done')
 const isFresh = (task: TaskView): boolean => task.fresh === true && !needsYou(task) && task.state !== 'working' && task.state !== 'waiting'
 /** Where a task stands, in the order a subject lists them: it needs you, it works, it finished and you have not opened it, it is done. */
 const standing = (task: TaskView): number => (needsYou(task) ? 0 : task.state === 'working' ? 1 : isFresh(task) ? 2 : 3)
@@ -879,7 +883,7 @@ function TaskRow({ task, now, old, selected, withFolder, dragging, onSelect, onT
       }}
     >
       <button className={`task-row ${selected ? 'selected' : ''} ${onTakeOver ? 'with-action' : ''}`} data-state={task.state} data-needs={stoppedHere ? 'you' : undefined} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
-        <span className="task-dot" aria-hidden="true" />
+        <StateMark kind={markOf(task)} />
         <span className="task-copy">
           <strong>{task.title}</strong>
           <span>
@@ -1460,7 +1464,7 @@ function RemoteRow({ task, now, selected, onSelect }: { task: RemoteTask; now: n
   const detail = task.state === 'waiting' ? 'waiting for you' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : `done · ${ago(task.updatedAt, now)}`
   return (
     <button className={`task-row ${selected ? 'selected' : ''}`} role="listitem" data-state={task.state} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
-      <span className="task-dot" aria-hidden="true" />
+      <StateMark kind={task.state === 'idle' ? 'done' : task.state} />
       <span className="task-copy">
         <strong>{task.title}</strong>
         <span>{task.agent} · {task.terminal ? 'terminal' : task.folder} · {detail}</span>

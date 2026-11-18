@@ -338,6 +338,8 @@ export interface TogleApi {
   isMaximized(): Promise<boolean>
   /** The window was maximized, or given back its size (by its button, a double click on its bar, or the system). */
   onMaximized(cb: (maximized: boolean) => void): Unsubscribe
+  /** Whether the window is hidden in the tray or minimized: told at once, then whenever that changes. */
+  onAway(cb: (away: boolean) => void): Unsubscribe
   /** Closes Togle; during a call it asks first (onConfirmClose), unless `confirmed`. */
   close(confirmed?: boolean): void
   /** The window shows an error instead of the app: it can't ask before closing. */

@@ -53,6 +53,13 @@ async function run() {
   assert.equal(bar.isFocusable(), false)
   // Windows reports always-on-top only once a window is shown. The native bar UI check verifies it.
   assert.equal(main.isVisible(), false); assert.equal(bar.isVisible(), false)
+  // Hidden, its page holds every animation still (it is never throttled); back on screen, they move again.
+  await wait(() => js("document.documentElement.hasAttribute('data-away')"))
+  const seen = main.isVisible
+  main.isVisible = () => true; main.emit('show')
+  await wait(() => js("!document.documentElement.hasAttribute('data-away')"))
+  main.isVisible = seen; main.emit('hide')
+  await wait(() => js("document.documentElement.hasAttribute('data-away')"))
   assert.equal(item('Show voice bar').checked, true)
   main.close(); assert.equal(main.isDestroyed(), false, 'Closing keeps the app and shortcut alive')
   icon.emit('click'); assert.equal(opened, 1, 'Tray click reopens the main window')

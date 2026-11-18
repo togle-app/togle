@@ -98,7 +98,9 @@ export function Shell() {
       api.onMicrophone(setMicrophone),
       api.onConfirmClose((warning) => setConfirmClose(warning)),
       // From a notice or the tray: Togle opens on the task that waits.
-      api.onShowTask((key) => { setTaskFocus((previous) => ({ key, seq: previous.seq + 1 })); setView('agents') })
+      api.onShowTask((key) => { setTaskFocus((previous) => ({ key, seq: previous.seq + 1 })); setView('agents') }),
+      // Hidden or minimized, nothing on the page moves (design.css).
+      api.onAway((away) => document.documentElement.toggleAttribute('data-away', away))
     ]
     return () => { for (const stop of subs) stop() }
   }, [])

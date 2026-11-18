@@ -7,6 +7,11 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
   return () => ipcRenderer.off(channel, listener)
 }
 
+// Whether the window is hidden or minimized, as main last said. Main says it first when the page has loaded, before the page
+// listens: a page that listens later is told at once.
+let away = false
+ipcRenderer.on('window:away', (_event, value) => { away = value === true })
+
 const api: TogleApi = {
   microphoneStatus: () => ipcRenderer.invoke('microphone:status'),
   updateStatus: () => ipcRenderer.invoke('updates:status'),
@@ -199,6 +204,7 @@ const api: TogleApi = {
   maximize: () => ipcRenderer.send('window:maximize'),
   isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
   onMaximized: cb => subscribe('window:maximized', maximized => cb(maximized === true)),
+  onAway: cb => { cb(away); return subscribe('window:away', value => cb(value === true)) },
   close: (confirmed) => ipcRenderer.send('window:close', confirmed),
   pageFailed: () => ipcRenderer.send('window:page-failed'),
   onConfirmClose: (cb) => subscribe<{ call?: boolean; tasks?: unknown; goesOn?: unknown } | undefined>('window:confirm-close', warning => cb({

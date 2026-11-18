@@ -794,6 +794,11 @@ function createWindow(): void {
   // The window's own buttons show maximize or restore, as it is: it is also maximized by a double click on its bar, or by the system.
   win.on('maximize', () => send('window:maximized', true))
   win.on('unmaximize', () => send('window:maximized', false))
+  // Hidden in the tray or minimized, its page holds its animations still: it is never throttled (for dictation and calls), so
+  // a turning mark would go on drawing where nobody sees it.
+  const away = (): void => send('window:away', !win?.isVisible() || !!win?.isMinimized())
+  for (const event of ['show', 'hide', 'minimize', 'restore'] as const) win.on(event as 'show', away)
+  win.webContents.on('did-finish-load', away)
   win.webContents.setWindowOpenHandler(({ url }) => {
     const target = externalUrl(url)
     if (target) void shell.openExternal(target)
