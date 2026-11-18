@@ -33,7 +33,7 @@ import { Attention } from './runners/attention'
 import type { RunnerHub } from './runners/hub'
 import type { Backend } from './runners/types'
 import type { GiveCall, GiveResult, StartRequest, TaskBoxOpen, TaskView } from '@shared/runner'
-import { CallAgentStore, agentKeysFrom, callKey, callMessage } from './call-agents'
+import { CallAgentStore, agentKeysFrom, callKey, callMessage, callWaitingMessage } from './call-agents'
 import type { TodoFile } from './todo'
 import { registerTodo } from './todo-register'
 import { registerRunners } from './runners/register'
@@ -1491,15 +1491,25 @@ function registerIpc(): void {
     // A call going on is written as it is now: what is waiting to be saved is saved first, and what was said since is in the file.
     if (live) await callFile.flush().catch(() => undefined)
     const stored = await getCallSession(call)
-    if (!stored) throw new Error(live ? 'Nothing has been said in this call yet.' : 'This call is no longer available.')
-    const said = live ? ongoing.callState().transcript : stored.transcript
-    const record = said.length ? { ...stored, transcript: said } : stored
-    if (!record.transcript.length && !record.summary) throw new Error('Nothing has been said in this call yet.')
-    const folder = path.join(app.getPath('userData'), SHARED_CALLS)
-    await fs.mkdir(folder, { recursive: true })
-    const file = path.join(folder, call + '.md')
-    await fs.writeFile(file, callForAgent(record), { encoding: 'utf8', mode: 0o600 })
-    const message = callMessage(words, file, live)
+    // The call that starts next has its key before it starts, and has nothing saved.
+    const upcoming = call === currentCallKey && !ongoing.isListening && !stored
+    if (!stored && !live && !upcoming) throw new Error('This call is no longer available.')
+    const said = live ? ongoing.callState().transcript : stored?.transcript ?? []
+    const record = stored ? (said.length ? { ...stored, transcript: said } : stored) : undefined
+    const hasWords = !!record && (record.transcript.length > 0 || !!record.summary)
+    let message: string
+    if (record && hasWords) {
+      const folder = path.join(app.getPath('userData'), SHARED_CALLS)
+      await fs.mkdir(folder, { recursive: true })
+      const file = path.join(folder, call + '.md')
+      await fs.writeFile(file, callForAgent(record), { encoding: 'utf8', mode: 0o600 })
+      message = callMessage(words, file, live)
+    } else {
+      // Nothing to read yet: running tasks have nothing to be told, but a new agent can start now, with the person's words, and be
+      // connected: the call is sent to it (Send, Ask) once there is something in it.
+      if (tasks.length || !start || !(live || upcoming)) throw new Error('Nothing has been said in this call yet.')
+      message = callWaitingMessage(words, live)
+    }
     const results: GiveResult[] = []
     for (const key of tasks) {
       try { await runners.send(key, message); results.push({ key, ok: true }) }
@@ -1515,7 +1525,7 @@ function registerIpc(): void {
     if (ok.length) {
       const connected = callAgentStore.get(call).keys
       if (given.connect) await callAgentStore.set(call, [...connected, ...ok.filter(key => !connected.includes(key))])
-      await callAgentStore.sentTo(call, ok)
+      if (hasWords) await callAgentStore.sentTo(call, ok)
     }
     return results
   })

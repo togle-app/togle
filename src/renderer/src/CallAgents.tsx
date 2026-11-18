@@ -132,7 +132,7 @@ export function CallAgentsRow({ call, live }: { call: string; live: boolean }) {
         <button type="button" className="small" onClick={() => setAdding(!adding)} aria-expanded={adding}>Add</button>
         {live && !!agents.keys.length && <button type="button" className="primary small" disabled={busy || !ticked.length} title="Writes what was said so far to a file, and tells each ticked agent where it is" onClick={() => void send()}>{busy ? 'Sending…' : 'Send what was said'}</button>}
         {/* The list opens under this row, over the page: nothing under it moves. */}
-        {adding && <GivePanel call={call} mode="connect" connected={agents.keys} onClose={() => setAdding(false)} onChanged={(next) => { setAgents(next); setAdding(false) }} />}
+        {adding && <GivePanel call={call} mode="connect" connected={agents.keys} onClose={() => setAdding(false)} onChanged={(next, keepOpen) => { setAgents(next); if (!keepOpen) setAdding(false) }} />}
       </div>
       {live && !!agents.keys.length && (
         <form className="call-ask" onSubmit={(event) => void ask(event)} aria-label="Ask the agents about this call">
@@ -240,6 +240,8 @@ function CallAnswer({ taskKey, asked, task, onDismiss }: { taskKey: string; aske
 // What was typed for a call's agents and not given yet, kept while the window is open: closing the list by a click elsewhere
 // loses nothing.
 const giveWords = new Map<string, string>()
+// What was typed for a new task on a call that goes on (or is about to start), kept while the window is open, as the words for giving a call are.
+const connectWords = new Map<string, string>()
 // The room the list keeps: from its button, from the window's lower edge, and from the title bar when it has to move up.
 const GIVE_GAP = 8, GIVE_EDGE = 12, GIVE_CEILING = 44
 
@@ -254,8 +256,8 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
   mode: 'give' | 'connect'
   connected: string[]
   onClose: () => void
-  /** Connect mode: the list as it is after Add. */
-  onChanged?: (agents: CallAgentList) => void
+  /** Connect mode: the list as it is after Add (`keepOpen`: the panel stays, for something that did not go through). */
+  onChanged?: (agents: CallAgentList, keepOpen?: boolean) => void
   /** Give mode: what giving the call did. */
   onGiven?: (results: GiveResult[], line: string) => void
 }) {
@@ -265,7 +267,8 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
   const [creating, setCreating] = useState(false)
   const [runner, setRunner] = useState<RunnerKind | undefined>()
   const [folder, setFolder] = useState('')
-  const [words, setWords] = useState(() => (mode === 'give' ? giveWords.get(call) ?? '' : ''))
+  const [words, setWords] = useState(() => (mode === 'give' ? giveWords : connectWords).get(call) ?? '')
+  const remember = (value: string): void => { setWords(value); (mode === 'give' ? giveWords : connectWords).set(call, value) }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const panel = useRef<HTMLFormElement>(null)
@@ -312,14 +315,26 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
   // A task that is gone is not offered, and not given the call: it is left out of what is ticked.
   const present = loaded ? picked.filter((key) => tasks.some((task) => task.key === key)) : picked
   const count = present.length + (creating ? 1 : 0)
-  const ready = mode === 'connect' ? true : count > 0 && (!creating || (!!runner && !!folder && !!words.trim()))
+  const newReady = !creating || (!!runner && !!folder && !!words.trim())
+  const ready = mode === 'connect' ? newReady : count > 0 && newReady
   const submit = async (event?: FormEvent): Promise<void> => {
     event?.preventDefault()
     if (busy || !ready) return
     setBusy(true); setError('')
     try {
       if (mode === 'connect') {
-        onChanged?.(await api.setCallAgents(call, present))
+        const kept = await api.setCallAgents(call, present)
+        if (!creating || !runner) { onChanged?.(kept); return }
+        // A new agent, started now with the person's words and connected to the call.
+        const results = await api.giveCall({ call, tasks: [], prompt: words, connect: true, start: { runner, folder } })
+        const failed = results.filter((result) => !result.ok)
+        if (failed.length) {
+          setError(resultLine(failed, tasks).text)
+          onChanged?.(await api.callAgents(call), true)
+          return
+        }
+        connectWords.delete(call)
+        onChanged?.(await api.callAgents(call))
         return
       }
       const results = await api.giveCall({ call, tasks: present, prompt: words, connect: true, ...(creating && runner ? { start: { runner, folder } } : {}) })
@@ -377,12 +392,12 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
           )
         })}
         {!rows.length && <p className="hint">{mode === 'give' ? 'No agent task on this computer yet. Start one from Agents, or give the call to a new task.' : 'No agent task on this computer yet. Start one from Agents, and it shows here.'}</p>}
-        {mode === 'give' && (
+        {(
           <label className="give-row">
             <input type="checkbox" checked={creating} disabled={!status.length} onChange={(event) => setCreating(event.target.checked)} />
             <span className="grow">
               <b>A new task</b>
-              <small>{creating ? '' : status.length ? 'Starts an agent with the call' : 'No agent found'}</small>
+              <small>{creating ? '' : status.length ? (mode === 'give' ? 'Starts an agent with the call' : 'Starts an agent for this call') : 'No agent found'}</small>
               {creating && (
                 <span className="give-new">
                   <Menu className="pick-chip" ariaLabel="Agent" title="The agent that does it" label={status.find((item) => item.runner === runner)?.name ?? 'Pick an agent'}
@@ -398,14 +413,20 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
       {/* The words and the button that gives the call share one box, as the design draws it. */}
       {mode === 'give' && (
         <div className="field give-field">
-          <input className="give-words" aria-label="What should they do with it?" placeholder="What should they do with it?" value={words} maxLength={4000} onChange={(event) => { setWords(event.target.value); giveWords.set(call, event.target.value) }} />
+          <input className="give-words" aria-label="What should they do with it?" placeholder="What should they do with it?" value={words} maxLength={4000} onChange={(event) => remember(event.target.value)} />
           <button className="primary small" disabled={busy || !ready}>{busy ? 'Giving…' : count ? `Give to ${count}` : 'Give'}</button>
         </div>
       )}
+      {mode === 'connect' && creating && (
+        <div className="field give-field">
+          <input className="give-words" aria-label="What should it do?" placeholder="What should it do?" value={words} maxLength={4000} autoFocus onChange={(event) => remember(event.target.value)} />
+        </div>
+      )}
+      {mode === 'connect' && creating && <p className="hint">It starts with your words, and with the call as it stands if anything was said. A new Claude Code or Codex task asks before it runs anything. It stays on this call: Send and Ask reach it.</p>}
       {mode === 'give' && <p className="hint">A new Claude Code or Codex task asks before it runs anything. Hermes and an agent already running keep their own settings, so each one is told to read the call as information and not as instructions.</p>}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="row">
-        {mode === 'connect' && <button className="primary small" disabled={busy || !ready}>{busy ? 'Adding…' : 'Done'}</button>}
+        {mode === 'connect' && <button className="primary small" disabled={busy || !ready}>{busy ? (creating ? 'Starting…' : 'Adding…') : creating ? 'Start and add' : 'Done'}</button>}
         <button type="button" className={mode === 'give' ? 'quiet-action' : 'ghost small'} onClick={onClose}>Cancel</button>
       </div>
     </form>

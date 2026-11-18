@@ -260,6 +260,52 @@ async function checkCall(T, agent) {
   assert.deepEqual((await ui.calls('setCallAgents')).at(-1)[1], [], 'taken off the call')
   assert.equal(await ui.evaluate("!!document.querySelector('.call-agents .primary')"), false, 'no one is on the call: nothing to send')
 
+  // A new agent on the fly: the panel that adds agents also starts one, with the person's words, and it stays on the call.
+  await ui.evaluate("window.togleUITest.agentsFound(true)")
+  await ui.click('.call-agents button', 'Add')
+  await ui.wait("document.querySelectorAll('.give-row').length>=2")
+  const addButton = "document.querySelector('.give-panel .primary')"
+  assert.equal(await ui.evaluate(addButton + ".textContent"), 'Done', 'adding a running task is what it was')
+  const newRow = "[...document.querySelectorAll('.give-row')].find(r=>r.textContent.includes('A new task'))"
+  await ui.evaluate(newRow + ".querySelector('input').click()")
+  await ui.wait("!!document.querySelector('.give-new')")
+  assert.deepEqual(await texts(ui, '.give-new button'), ['Claude Code', 'website'], 'the agent and the folder, as the task box has them')
+  assert.equal(await ui.evaluate(addButton + ".textContent"), 'Start and add')
+  assert.equal(await ui.evaluate(addButton + ".disabled"), true, 'a new task needs words')
+  await ui.fill('.give-words', 'Keep the action items')
+  assert.equal(await ui.evaluate(addButton + ".disabled"), false)
+  // The words stay when the panel is closed and opened again.
+  await ui.click('.give-panel button', 'Cancel')
+  await ui.wait("!document.querySelector('.give-panel')")
+  await ui.click('.call-agents button', 'Add')
+  await ui.wait("document.querySelectorAll('.give-row').length>=2")
+  await ui.evaluate(newRow + ".querySelector('input').click()")
+  await ui.wait("!!document.querySelector('.give-words')")
+  assert.equal(await ui.evaluate("document.querySelector('.give-words').value"), 'Keep the action items', 'what was typed for it is kept')
+  // One that cannot start says why, and the panel stays with its words.
+  await ui.evaluate("window.togleUITest.giveFails('claude:', 'Claude Code is not signed in.')")
+  await ui.click('.give-panel .primary', 'Start and add')
+  await ui.wait("!!document.querySelector('.give-panel .error')")
+  assert.ok((await ui.evaluate("document.querySelector('.give-panel .error').textContent")).includes('Claude Code is not signed in.'))
+  assert.equal(await ui.evaluate("document.querySelector('.give-words').value"), 'Keep the action items', 'nothing is lost')
+  await ui.evaluate("window.togleUITest.giveFails('claude:', '')")
+  await ui.click('.give-panel .primary', 'Start and add')
+  await ui.wait("!document.querySelector('.give-panel')")
+  await ui.wait("document.querySelectorAll('.agent-chip').length===1")
+  assert.deepEqual((await ui.calls('giveCall')).at(-1)[0], { call: onCall[0], tasks: [], prompt: 'Keep the action items', connect: true, start: { runner: 'claude', folder: 'C:\\work\\website' } }, 'started with the person’s words, and kept on the call')
+  assert.equal(await ui.evaluate("document.querySelectorAll('.call-agents .primary').length"), 1, 'it is on the call: Send is there again')
+  // Opened once more, the words are empty: they went into the task.
+  await ui.click('.call-agents button', 'Add')
+  await ui.wait("document.querySelectorAll('.give-row').length>=2")
+  await ui.evaluate(newRow + ".querySelector('input').click()")
+  await ui.wait("!!document.querySelector('.give-words')")
+  assert.equal(await ui.evaluate("document.querySelector('.give-words').value"), '', 'what was typed went into the task')
+  await ui.click('.give-panel button', 'Cancel')
+  await ui.wait("!document.querySelector('.give-panel')")
+  // Taken off the call again, for what follows.
+  await ui.click('.agent-chip button', 'Take this agent off the call')
+  await ui.wait("document.querySelectorAll('.agent-chip').length===0")
+
   // From another place, Meetings in the rail (with the call's dot) leads back to the call.
   await ui.click('.workspace-nav button', 'To-do')
   await ui.wait("!!document.querySelector('.todo')")

@@ -215,7 +215,11 @@ module.exports = function install(fixture) {
   api.giveCall = async request => {
     record('giveCall', [request])
     const results = request.tasks.map(key => (fixture.giveFails?.[key] ? { key, ok: false, problem: fixture.giveFails[key] } : { key, ok: true }))
-    if (request.start) results.push({ key: request.start.runner + ':newcall', ok: true, title: request.prompt.slice(0, 40) })
+    // A new task that cannot start is a failure under "<agent>:", as main reports it (giveFails('claude:', why) makes one).
+    if (request.start) {
+      const startKey = request.start.runner + ':'
+      results.push(fixture.giveFails?.[startKey] ? { key: startKey, ok: false, problem: fixture.giveFails[startKey] } : { key: request.start.runner + ':newcall', ok: true, title: request.prompt.slice(0, 40) })
+    }
     const list = callAgentLists.get(request.call) ?? { keys: [], sent: {} }
     if (request.connect) list.keys = [...new Set([...list.keys, ...results.filter(result => result.ok).map(result => result.key)])]
     for (const result of results) if (result.ok && list.keys.includes(result.key)) list.sent[result.key] = Date.now()
@@ -312,7 +316,8 @@ module.exports = function install(fixture) {
   const addedAgents = []
   // Agents Togle finds by itself that were taken off its lists (Remove): listed as removed, so that they can be added back.
   const removedKnown = new Set()
-  const knownAgents = () => (['tasks', 'confirm-names'].includes(fixture.scenario) ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []).map(agent => removedKnown.has(agent.runner) ? { runner: agent.runner, name: agent.name, installed: false, removed: true } : agent)
+  // (`fixture.agentsFound`: a scenario that has none by default, given them: a call with an agent to start for it.)
+  const knownAgents = () => (['tasks', 'confirm-names'].includes(fixture.scenario) || fixture.agentsFound ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []).map(agent => removedKnown.has(agent.runner) ? { runner: agent.runner, name: agent.name, installed: false, removed: true } : agent)
   api.runnerStatus = async () => [...knownAgents(), ...clone(addedAgents)]
   // The main process tells how it runs from the command: one for ACP is talked to, any other runs in a terminal (here: with acp in it, and no {task}).
   api.addCodingAgent = async (name, command) => { record('addCodingAgent', [name, command]); const acp = !command.includes('{task}') && /(^|[^a-z])acp([^a-z]|$)/i.test(command); addedAgents.push({ runner: (acp ? 'acp-' : 'term-') + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, installed: true, added: true }); return api.runnerStatus() }
@@ -563,6 +568,8 @@ module.exports = function install(fixture) {
     setTask: (key, props) => { const found = runnerFind(key); Object.assign(found, clone(props)); if (found.fresh && found.key === onScreen) found.fresh = false; runnerChanged() },
     // A task that cannot be sent a call: what giving it the call answers.
     giveFails: (key, problem) => { fixture.giveFails = { ...(fixture.giveFails ?? {}), [key]: problem } },
+    // Agents found on this computer, in a scenario that has none by default (Claude Code and Codex).
+    agentsFound: on => { fixture.agentsFound = on },
     // What the window is told of Claude Code's connection to Togle, changed by hand.
     failNextTask: () => { failTask = true },
     microphone: status => { microphone = clone(status); microphoneChanged() },
