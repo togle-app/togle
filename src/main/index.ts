@@ -39,7 +39,7 @@ import { registerTodo } from './todo-register'
 import { registerRunners } from './runners/register'
 import { registerReach } from './reach/register'
 import type { Reach } from './reach/reach'
-import { StoredFresh, StoredRecords, StoredTitles } from './runners/titles'
+import { StoredFresh, StoredGroups, StoredRecords, StoredTitles } from './runners/titles'
 import { MICROPHONE_PRODUCT, microphonePage } from '@shared/microphone-link'
 import { readNoiseReport, shouldSuggest } from '@shared/microphone'
 import { TogleTray } from './tray'
@@ -1761,7 +1761,8 @@ if (process.argv.includes('--togle-hook')) {
     registerIpc()
     const runnerTitles = new StoredTitles()
     const runnerRecords = new StoredRecords()
-    await Promise.all([runnerTitles.load(), runnerRecords.load(), freshTasks.load(), callAgentStore.load()])
+    const runnerGroups = new StoredGroups()
+    await Promise.all([runnerTitles.load(), runnerRecords.load(), runnerGroups.load(), freshTasks.load(), callAgentStore.load()])
     // A test run can stand in for the agents with programs of its own. A packaged Togle never looks.
     const standIns = !app.isPackaged && process.env.TOGLE_TEST_RUNNERS ? await (require(process.env.TOGLE_TEST_RUNNERS) as { backends(): Promise<Backend[]> }).backends() : undefined
     todo = registerTodo({
@@ -1782,6 +1783,7 @@ if (process.argv.includes('--togle-hook')) {
       titles: runnerTitles,
       records: runnerRecords,
       fresh: freshTasks,
+      groups: runnerGroups,
       changed: () => { refreshNotices(); reach?.tasksChanged() },
       pickFolder: async () => {
         const chosen = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, { properties: ['openDirectory'] }) : await dialog.showOpenDialog({ properties: ['openDirectory'] })

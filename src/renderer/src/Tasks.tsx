@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, type LogEntry, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
 import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
 import { useReach } from './Devices'
@@ -6,6 +6,9 @@ import { openSettings } from './open-settings'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, WaitLine } from './kept'
+import { Menu } from './Menu'
+import { PointMenu, type Point } from './PointMenu'
+import { applyGroupChange, madeKey, NO_GROUPS, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { RequestCard } from './RequestCard'
 import { clock, currentPlan, lastTurnKey, PlanCard, Thread, turnStart, useHistory } from './TaskThread'
 import { TerminalView } from './TerminalView'
@@ -149,11 +152,13 @@ const projectKey = (folder: string): string => {
 /** The folder a folder is in ("C:\work" for "C:\work\website"): where a project is, to know it by. */
 const parentOf = (folder: string): string => folder.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '')
 /** A scheduled job's row is the job; work outside any project is Everyday; the rest is in a project, its folder. */
-const kindOf = (task: TaskView): GroupKind => (task.schedule ? 'scheduled' : task.outsideProject || !task.folder ? 'everyday' : 'project')
+const kindOf = (task: TaskView): 'scheduled' | 'everyday' | 'project' => (task.schedule ? 'scheduled' : task.outsideProject || !task.folder ? 'everyday' : 'project')
+/** The group Togle puts a task in by itself, by its key (task-groups.ts). */
+const ownGroup = (task: TaskView): string => (kindOf(task) === 'project' ? `project:${projectKey(task.folder)}` : kindOf(task))
 
 /**
- * The colors of a project's mark. None is amber, indigo, green or red: those say how a task stands. A project keeps its
- * color: it is worked out from its folder, so it is the same each time and in each place, with nothing kept.
+ * The colors of a group's mark. None is amber, indigo, green or red: those say how a task stands. A group keeps its color:
+ * a project's is worked out from its folder, a made group's from its id (so a new name keeps it), with nothing kept.
  */
 const MARK_COLORS = ['#f29ac6', '#c3a3ff', '#6ec5ef', '#b6d86c', '#a7b0c2']
 function markColor(key: string): string {
@@ -161,16 +166,10 @@ function markColor(key: string): string {
   for (let at = 0; at < key.length; at++) hash = (hash * 31 + key.charCodeAt(at)) >>> 0
   return MARK_COLORS[hash % MARK_COLORS.length]
 }
-/** The letter on a project's mark: the first letter or digit of its name. */
+/** The letter on a group's mark: the first letter or digit of its name. */
 const markLetter = (name: string): string => (name.match(/[\p{L}\p{N}]/u)?.[0] ?? '?').toLocaleUpperCase()
 
-/** A project's mark, the same on its group in the list and on its tasks: its letter on its color. */
-function ProjectMark({ folder, size = 'big' }: { folder: string; size?: 'big' | 'small' }) {
-  const name = baseName(folder)
-  return <span className={`project-mark ${size}`} style={{ background: markColor(projectKey(folder)) }} data-letter={markLetter(name)} aria-hidden="true" />
-}
-
-type GroupKind = 'scheduled' | 'everyday' | 'project'
+type GroupKind = 'made' | 'scheduled' | 'everyday' | 'project'
 interface TaskGroup {
   key: string
   kind: GroupKind
@@ -178,61 +177,143 @@ interface TaskGroup {
   /** A project's folder, and the folder it is in, to know it by; none for the other kinds. */
   folder: string
   where: string
-  /** Its tasks with no subject yet: one just started, or all of them when no AI plan gives subjects. */
+  /** Its tasks with no subject: one just started, one the person dropped on the group, or all of them with no AI plan. */
   loose: TaskView[]
   subjects: { name: string; tasks: TaskView[] }[]
   counts: { waiting: number; working: number; fresh: number }
+  /** A group of Togle's own that the person gave a name: its own name can be given back. */
+  renamed: boolean
 }
 
-function groupOf(key: string, kind: GroupKind, name: string, folder: string, tasks: TaskView[]): TaskGroup {
+/** A group's mark, the same on the group in the list and on its tasks: a letter on its color, a clock, or a house. */
+function GroupMark({ group, size = 'big' }: { group: Pick<TaskGroup, 'kind' | 'key' | 'name'>; size?: 'big' | 'small' }) {
+  if (group.kind === 'scheduled' || group.kind === 'everyday') {
+    return (
+      <span className={`project-mark ${size} ${group.kind}`} aria-hidden="true">
+        <Icon name={group.kind === 'scheduled' ? 'clock' : 'home'} size={size === 'big' ? 14 : 10} />
+      </span>
+    )
+  }
+  return <span className={`project-mark ${size}`} style={{ background: markColor(group.key) }} data-letter={markLetter(group.name)} aria-hidden="true" />
+}
+
+function groupOf(base: Omit<TaskGroup, 'loose' | 'subjects' | 'counts'>, tasks: TaskView[], placed: TaskGroups['placed']): TaskGroup {
   // Scheduled jobs keep the order of their names: a job's row stays where it is as it runs.
-  const order = kind === 'scheduled' ? (a: TaskView, b: TaskView): number => byName(a.title, b.title) || a.key.localeCompare(b.key) : inOrder
+  const order = base.kind === 'scheduled' ? (a: TaskView, b: TaskView): number => byName(a.title, b.title) || a.key.localeCompare(b.key) : inOrder
+  // A task the person moved has the subject they dropped it on, or none: a subject Togle gives it later does not move it.
+  const subjectOf = (task: TaskView): string => (base.kind === 'scheduled' ? '' : task.key in placed ? placed[task.key].subject ?? '' : task.subject?.trim() ?? '')
   const subjects = new Map<string, TaskView[]>()
   for (const task of tasks) {
-    const subject = kind === 'scheduled' ? '' : task.subject?.trim()
+    const subject = subjectOf(task)
     if (subject) subjects.set(subject, [...(subjects.get(subject) ?? []), task])
   }
   return {
-    key,
-    kind,
-    name,
-    folder,
-    where: folder ? parentOf(folder) : '',
-    loose: tasks.filter((task) => kind === 'scheduled' || !task.subject?.trim()).sort(order),
+    ...base,
+    loose: tasks.filter((task) => !subjectOf(task)).sort(order),
     subjects: [...subjects.entries()].sort(([a], [b]) => byName(a, b)).map(([subject, list]) => ({ name: subject, tasks: list.sort(order) })),
     counts: { waiting: tasks.filter(needsYou).length, working: tasks.filter((task) => task.state === 'working').length, fresh: tasks.filter(isFresh).length }
   }
 }
 
 /**
- * The tasks in groups, each in a place of its own that does not change: scheduled jobs first, then work outside any project
- * (Everyday), then one group for each project, A to Z by its folder's name (two folders of one name are told apart by the
- * folder they are in). Inside a group, by subject (A to Z), each subject's tasks in the order of where they stand; tasks with
+ * The tasks in groups, each in a place of its own that does not change: the groups the person made, in the order they made
+ * them (`withMade`: also the empty ones); scheduled jobs; work outside any project (Everyday); then one group for each project,
+ * A to Z by its name (two folders of one name are told apart by the folder they are in). A task the person moved is in the
+ * group they put it in. Inside a group, by subject (A to Z), each subject's tasks in the order of where they stand; tasks with
  * no subject come first. Nothing here depends on when a task last changed, except among the ones that are done.
  */
-function groupTasks(list: TaskView[]): TaskGroup[] {
-  const groups: TaskGroup[] = []
-  const scheduled = list.filter((task) => kindOf(task) === 'scheduled')
-  const everyday = list.filter((task) => kindOf(task) === 'everyday')
-  if (scheduled.length) groups.push(groupOf('scheduled', 'scheduled', 'Scheduled', '', scheduled))
-  if (everyday.length) groups.push(groupOf('everyday', 'everyday', 'Everyday', '', everyday))
-  const projects = new Map<string, { folder: string; tasks: TaskView[] }>()
-  for (const task of list.filter((item) => kindOf(item) === 'project')) {
-    const key = projectKey(task.folder)
-    const group = projects.get(key) ?? { folder: task.folder, tasks: [] }
-    group.tasks.push(task)
-    projects.set(key, group)
+function groupTasks(list: TaskView[], arrangement: TaskGroups, withMade: boolean): TaskGroup[] {
+  const made = new Set(arrangement.made.map((group) => madeKey(group.id)))
+  const keyOf = (task: TaskView): string => {
+    const placed = arrangement.placed[task.key]?.group
+    return placed && placed !== 'scheduled' && (!placed.startsWith('made:') || made.has(placed)) ? placed : ownGroup(task)
   }
-  const named = [...projects.entries()].map(([key, group]) => ({ key, folder: group.folder, name: baseName(group.folder), tasks: group.tasks }))
-  for (const group of named) {
-    if (named.filter((other) => other.name.toLocaleLowerCase() === group.name.toLocaleLowerCase()).length > 1) {
-      group.name = `${baseName(parentOf(group.folder)) || parentOf(group.folder)}/${group.name}`
+  const byGroup = new Map<string, TaskView[]>()
+  for (const task of list) byGroup.set(keyOf(task), [...(byGroup.get(keyOf(task)) ?? []), task])
+  const named = (key: string, own: string): { name: string; renamed: boolean } => ({ name: arrangement.names[key] ?? own, renamed: key in arrangement.names })
+  const groups: TaskGroup[] = []
+  for (const group of arrangement.made) {
+    const tasks = byGroup.get(madeKey(group.id)) ?? []
+    if (tasks.length || withMade) groups.push(groupOf({ key: madeKey(group.id), kind: 'made', name: group.name, renamed: false, folder: '', where: '' }, tasks, arrangement.placed))
+  }
+  for (const kind of ['scheduled', 'everyday'] as const) {
+    const tasks = byGroup.get(kind) ?? []
+    if (tasks.length) groups.push(groupOf({ key: kind, kind, ...named(kind, kind === 'scheduled' ? 'Scheduled' : 'Everyday'), folder: '', where: '' }, tasks, arrangement.placed))
+  }
+  const projects = [...byGroup.entries()]
+    .filter(([key]) => key.startsWith('project:'))
+    .map(([key, tasks]) => {
+      const folder = tasks.find((task) => ownGroup(task) === key)?.folder ?? key.slice('project:'.length)
+      return { key, folder, own: baseName(folder), tasks }
+    })
+  for (const project of projects) {
+    if (projects.filter((other) => other.own.toLocaleLowerCase() === project.own.toLocaleLowerCase()).length > 1) {
+      project.own = `${baseName(parentOf(project.folder)) || parentOf(project.folder)}/${project.own}`
     }
   }
-  named.sort((a, b) => byName(a.name, b.name) || a.key.localeCompare(b.key))
-  for (const group of named) groups.push(groupOf(group.key, 'project', group.name, group.folder, group.tasks))
+  projects
+    .map((project) => ({ ...project, ...named(project.key, project.own) }))
+    .sort((a, b) => byName(a.name, b.name) || a.key.localeCompare(b.key))
+    .forEach((project) => groups.push(groupOf({ key: project.key, kind: 'project', name: project.name, renamed: project.renamed, folder: project.folder, where: parentOf(project.folder) }, project.tasks, arrangement.placed)))
   return groups
 }
+
+/** The person's own arrangement (task-groups.ts): what main last sent, read again behind it, with the changes not yet kept laid over it, so a change shows at once. */
+const KEPT_GROUPS = 'agents.groups'
+function useArrangement(): [TaskGroups, (change: GroupChange) => void] {
+  const [fromMain, setFromMain] = useState<TaskGroups>(() => keptAnswer<TaskGroups>(KEPT_GROUPS) ?? NO_GROUPS)
+  const [pending, setPending] = useState<GroupChange[]>([])
+  useEffect(() => {
+    let live = true
+    void api.taskGroups().then((groups) => {
+      keepAnswer(KEPT_GROUPS, groups)
+      if (live) setFromMain(groups)
+    }, () => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+  const change = useCallback((next: GroupChange) => {
+    setPending((was) => [...was, next])
+    const settle = (): void => setPending((was) => was.filter((item) => item !== next))
+    void api.changeTaskGroups(next).then((groups) => {
+      keepAnswer(KEPT_GROUPS, groups)
+      setFromMain(groups)
+      settle()
+    }, settle)
+  }, [])
+  return [pending.reduce(applyGroupChange, fromMain), change]
+}
+
+/** The groups folded, kept in the page between runs, as the view picked for each task is. */
+const FOLDED = 'togle.foldedgroups'
+function useFolded(): [Set<string>, (key: string) => void] {
+  const [folded, setFolded] = useState<Set<string>>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(FOLDED) ?? '[]') as unknown
+      return new Set(Array.isArray(stored) ? stored.filter((key): key is string => typeof key === 'string') : [])
+    } catch {
+      return new Set()
+    }
+  })
+  const toggle = useCallback((key: string) => {
+    setFolded((was) => {
+      const next = new Set(was)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      try {
+        localStorage.setItem(FOLDED, JSON.stringify([...next].slice(-200)))
+      } catch {
+        // Not kept: it opens unfolded next time.
+      }
+      return next
+    })
+  }, [])
+  return [folded, toggle]
+}
+
+/** What a dragged task carries: its key. */
+const DRAG = 'application/x-togle-task'
 
 /** What waits, works and is new in a group: numbers in the colors of the dots that say it, and the words for a screen reader. */
 function Counts({ counts }: { counts: TaskGroup['counts'] }) {
@@ -259,6 +340,14 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   const [lookingFor, setLookingFor] = useState<string>()
   const [error, setError] = useState('')
   const [loaded, setLoaded] = useState(() => keptAnswer(KEPT_TASKS) !== undefined)
+  // The person's own arrangement of the list, and what they are doing to it: a group folded, a task dragged (and where it is
+  // over), a group being named, a row's menu.
+  const [arrangement, changeGroups] = useArrangement()
+  const [folded, toggleFold] = useFolded()
+  const [dragging, setDragging] = useState<string>()
+  const [dropAt, setDropAt] = useState<string>()
+  const [renaming, setRenaming] = useState<string>()
+  const [rowMenu, setRowMenu] = useState<{ at: Point; key: string } | null>(null)
   const [now, setNow] = useState(Date.now())
   const [showEarlier, setShowEarlier] = useState(false)
   // Take over pressed on a row: the task opens with the question that confirms it.
@@ -386,10 +475,63 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
 
   const installed = status.filter((s) => s.installed)
   // In the list: what waits for you or works, what finished within a day, and what finished that you have not opened (that
-  // never folds away unseen). Older tasks fold under Earlier. Both are organized the same way (groupTasks).
+  // never folds away unseen). Older tasks fold under Earlier. Both are organized the same way (groupTasks), with the person's
+  // own arrangement over Togle's: the groups they made, the names they gave, the tasks they moved.
   const recent = (task: TaskView): boolean => needsYou(task) || task.state === 'working' || isFresh(task) || now - task.updatedAt < RECENT_MS
-  const shown = groupTasks(tasks.filter(recent))
+  const shown = groupTasks(tasks.filter(recent), arrangement, true)
   const earlier = tasks.filter((task) => !recent(task))
+  const earlierGroups = groupTasks(earlier, arrangement, false)
+  // Which group each task is in, as the list shows it: a task's header shows the same, and a row names its folder when its
+  // group is not its folder's.
+  const placeOf = new Map<string, TaskGroup>()
+  for (const group of [...shown, ...earlierGroups]) for (const task of [...group.loose, ...group.subjects.flatMap((subject) => subject.tasks)]) placeOf.set(task.key, group)
+  // A task dropped on a group (or on a subject in one) is moved there; dropped back where Togle puts it, the move is undone.
+  const dropTask = (key: string, group: string, subject?: string): void => {
+    const task = tasks.find((item) => item.key === key)
+    if (!task || group === 'scheduled') return
+    if (group === ownGroup(task) && (subject ?? '') === (task.subject?.trim() ?? '')) changeGroups({ kind: 'put-back', task: key })
+    else changeGroups({ kind: 'place', task: key, group, ...(subject ? { subject } : {}) })
+  }
+  // A group and a subject take a dropped task (not Scheduled: only scheduled jobs are there).
+  const dropOn = (group: string, subject?: string) => {
+    const at = `${group}|${subject ?? ''}`
+    return group === 'scheduled'
+      ? {}
+      : {
+          onDragOver: (event: ReactDragEvent) => {
+            if (!dragging) return
+            event.preventDefault()
+            event.stopPropagation()
+            event.dataTransfer.dropEffect = 'move'
+            if (dropAt !== at) setDropAt(at)
+          },
+          onDragLeave: (event: ReactDragEvent) => {
+            if (!(event.currentTarget as Node).contains(event.relatedTarget as Node)) setDropAt((was) => (was === at ? undefined : was))
+          },
+          onDrop: (event: ReactDragEvent) => {
+            event.preventDefault()
+            event.stopPropagation()
+            const key = event.dataTransfer.getData(DRAG) || dragging
+            setDropAt(undefined)
+            setDragging(undefined)
+            if (key) dropTask(key, group, subject)
+          }
+        }
+  }
+  // The name typed for a group, kept once, however the box closes (Enter, Escape or a click elsewhere).
+  const finishRename = (group: TaskGroup, typed: string): void => {
+    if (renaming !== group.key) return
+    setRenaming(undefined)
+    const name = typed.trim()
+    if (name && name !== group.name) changeGroups({ kind: 'rename', group: group.key, name })
+  }
+  // A new group, named by the person straight away.
+  const newGroup = (task?: string): void => {
+    const id = `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    changeGroups({ kind: 'make', id, name: 'New group' })
+    if (task) changeGroups({ kind: 'place', task, group: madeKey(id) })
+    setRenaming(madeKey(id))
+  }
   const row = (task: TaskView, old = false): ReactNode => (
     <TaskRow
       key={task.key}
@@ -397,44 +539,99 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
       now={now}
       old={old}
       selected={task.key === selected}
+      withFolder={kindOf(task) === 'project' && placeOf.get(task.key)?.key !== ownGroup(task)}
+      dragging={dragging === task.key}
       onSelect={() => setSelected(task.key)}
       onTakeOver={takesOver(task) ? () => { setTakingOver(task.key); setSelected(task.key) } : undefined}
+      onDragStart={(event) => {
+        event.dataTransfer.setData(DRAG, task.key)
+        event.dataTransfer.effectAllowed = 'move'
+        setDragging(task.key)
+      }}
+      onDragEnd={() => {
+        setDragging(undefined)
+        setDropAt(undefined)
+      }}
+      onMenu={(at) => setRowMenu({ at, key: task.key })}
     />
   )
-  // A project with its subjects, each subject a heading over its tasks; a project's tasks with no subject come first, with no heading.
-  // A group is a box: its mark (a project's letter on its color; a clock for scheduled jobs, a house for Everyday), its name,
-  // where a project's folder is, and what waits, works and is new in it; then its tasks, by subject.
-  const projectList = (groups: TaskGroup[], old: boolean): ReactNode =>
-    groups.map((group) => (
-      <section key={group.key} className={`task-project ${group.kind}`} aria-label={group.name}>
+  // A group is a box. Its head folds it (a folded box keeps its counts and still takes a dropped task) and has its own menu
+  // beside: Rename, Togle's own name back, Delete a group the person made. Its mark (a letter on its color; a clock for
+  // scheduled jobs, a house for Everyday), its name, where a project's folder is, and what waits, works and is new in it.
+  const groupBox = (group: TaskGroup, old: boolean): ReactNode => {
+    const isFolded = folded.has(group.key)
+    const hasOpen = isFolded && [...group.loose, ...group.subjects.flatMap((subject) => subject.tasks)].some((task) => task.key === selected)
+    const menu = [
+      { label: 'Rename', onSelect: () => setRenaming(group.key) },
+      ...(group.renamed ? [{ label: 'Use Togle’s name', onSelect: () => changeGroups({ kind: 'rename', group: group.key, name: '' }) }] : []),
+      ...(group.kind === 'made' ? [{ label: 'Delete group', danger: true, onSelect: () => changeGroups({ kind: 'remove', group: group.key }) }] : [])
+    ]
+    return (
+      <section key={group.key} className={`task-project ${group.kind}${isFolded ? ' folded' : ''}${dropAt === `${group.key}|` ? ' drop' : ''}${hasOpen ? ' has-open' : ''}`} aria-label={group.name} {...dropOn(group.key)}>
         <div className="task-project-head">
-          {group.kind === 'project' ? (
-            <ProjectMark folder={group.folder} />
+          {renaming === group.key ? (
+            <span className="group-renaming">
+              <GroupMark group={group} />
+              <input
+                className="group-rename"
+                aria-label={`A name for ${group.name}`}
+                defaultValue={group.name}
+                maxLength={60}
+                autoFocus
+                onFocus={(event) => event.currentTarget.select()}
+                // Enter keeps the name, Escape keeps the one it had, and a click elsewhere keeps what was typed.
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') finishRename(group, event.currentTarget.value)
+                  else if (event.key === 'Escape') finishRename(group, group.name)
+                }}
+                onBlur={(event) => finishRename(group, event.currentTarget.value)}
+              />
+            </span>
           ) : (
-            <span className={`project-mark big ${group.kind}`} aria-hidden="true">
-              <Icon name={group.kind === 'scheduled' ? 'clock' : 'home'} size={14} />
-            </span>
-          )}
-          <span className="task-project-title">
-            <span className="task-project-name">{group.name}</span>
-            {/* Under the name, so that the name has all the width: where it is, and what waits, works and is new in it. */}
-            <span className="task-project-sub">
-              <span className="task-project-where" title={group.folder || undefined}>
-                {group.kind === 'project' ? group.where : group.kind === 'scheduled' ? 'Jobs that run by themselves' : 'Not in a project'}
+            <button type="button" className="group-fold" aria-expanded={!isFolded} onClick={() => toggleFold(group.key)}>
+              <span className="fold-chevron" aria-hidden="true"><Icon name="chevron" size={12} /></span>
+              <GroupMark group={group} />
+              <span className="task-project-title">
+                <span className="task-project-name">{group.name}</span>
+                {/* Under the name, so that the name has all the width: where it is, and what waits, works and is new in it. */}
+                <span className="task-project-sub">
+                  <span className="task-project-where" title={group.folder || undefined}>
+                    {group.kind === 'project' ? group.where : group.kind === 'scheduled' ? 'Jobs that run by themselves' : group.kind === 'everyday' ? 'Not in a project' : 'Your group'}
+                  </span>
+                  {!old && <Counts counts={group.counts} />}
+                </span>
               </span>
-              {!old && <Counts counts={group.counts} />}
-            </span>
-          </span>
+            </button>
+          )}
+          {!old && renaming !== group.key && <Menu className="group-more" label={<Icon name="more" size={14} />} ariaLabel={`Change ${group.name}`} title="Rename" align="right" items={menu} />}
         </div>
-        {!!group.loose.length && <div className="task-list" role="list">{group.loose.map((task) => row(task, old))}</div>}
-        {group.subjects.map((subject) => (
-          <div key={subject.name} className="task-subject" role="group" aria-label={subject.name}>
-            <span className="task-subject-name">{subject.name}</span>
-            <div className="task-list" role="list">{subject.tasks.map((task) => row(task, old))}</div>
-          </div>
-        ))}
+        {!isFolded && (
+          <>
+            {!!group.loose.length && <div className="task-list" role="list">{group.loose.map((task) => row(task, old))}</div>}
+            {group.subjects.map((subject) => (
+              <div key={subject.name} className={`task-subject${dropAt === `${group.key}|${subject.name}` ? ' drop' : ''}`} role="group" aria-label={subject.name} {...dropOn(group.key, subject.name)}>
+                <span className="task-subject-name">{subject.name}</span>
+                <div className="task-list" role="list">{subject.tasks.map((task) => row(task, old))}</div>
+              </div>
+            ))}
+            {group.kind === 'made' && !group.loose.length && !group.subjects.length && <p className="group-empty">Drag a task here, or right-click one and pick Move to.</p>}
+          </>
+        )}
       </section>
-    ))
+    )
+  }
+  const projectList = (groups: TaskGroup[], old: boolean): ReactNode => groups.map((group) => groupBox(group, old))
+  // A row's own menu (right-click, or the menu key): move it to another group, or a new one, or put it back where Togle puts it.
+  const menuTask = rowMenu ? tasks.find((task) => task.key === rowMenu.key) : undefined
+  const menuItems = menuTask
+    ? [
+        ...shown
+          .filter((group) => group.kind !== 'scheduled' && group.key !== placeOf.get(menuTask.key)?.key)
+          .map((group) => ({ label: `Move to ${group.name}`, onSelect: () => dropTask(menuTask.key, group.key) })),
+        { label: 'Move to a new group', onSelect: () => newGroup(menuTask.key) },
+        ...(menuTask.key in arrangement.placed ? [{ label: 'Put back where Togle puts it', onSelect: () => changeGroups({ kind: 'put-back', task: menuTask.key }) }] : [])
+      ]
+    : []
   // The task on screen, told to main: one that finished is not new once it has been seen here.
   const onScreen = detail?.task.key ?? null
   useEffect(() => {
@@ -452,10 +649,16 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
         <WaitLine waiting={!loaded} label="Reading the tasks" />
         <div className="tasks-head">
           <span className="tasks-label">This computer</span>
-          <button className="primary small" disabled={!installed.length} onClick={() => void api.openTaskBox({}).catch((caught) => setError(errorText(caught)))}>
-            New task
-          </button>
+          <span className="tasks-head-actions">
+            <button className="ghost small icon-only" aria-label="New group" title="New group: a box of your own, to drag tasks into" onClick={() => newGroup()}>
+              <Icon name="folderPlus" size={15} />
+            </button>
+            <button className="primary small" disabled={!installed.length} onClick={() => void api.openTaskBox({}).catch((caught) => setError(errorText(caught)))}>
+              New task
+            </button>
+          </span>
         </div>
+        {rowMenu && menuTask && <PointMenu at={rowMenu.at} label={`Move ${menuTask.title}`} items={menuItems} onClose={() => setRowMenu(null)} />}
         {loaded && !installed.length && (status.some((agent) => agent.removed) ? <p className="empty">No agent is on Togle’s lists. Add one back in Settings.</p> : <NoAgents />)}
         {!!shown.length && <div className="task-groups">{projectList(shown, false)}</div>}
         {!!earlier.length && (
@@ -463,7 +666,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             <button className="link task-earlier-toggle" aria-expanded={showEarlier} onClick={() => setShowEarlier(!showEarlier)}>
               Earlier · {earlier.length} task{earlier.length === 1 ? '' : 's'}
             </button>
-            {showEarlier && <div className="task-groups">{projectList(groupTasks(earlier), true)}</div>}
+            {showEarlier && <div className="task-groups">{projectList(earlierGroups, true)}</div>}
           </div>
         )}
         {loaded && !!installed.length && !tasks.length && <p className="empty">No tasks yet. Start one, or let an agent run in a terminal and it shows here.</p>}
@@ -532,6 +735,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             onHandBack={() => act(async () => setHandedBack({ key: detail.task.key, ...(await api.handBackRunnerTask(detail.task.key)) }))}
             handedBack={handedBack?.key === detail.task.key ? handedBack : undefined}
             logRead={logRead}
+            place={placeOf.get(detail.task.key)}
           />
         ) : selected && (!loaded || lookingFor === selected) ? (
           <div className="tasks-empty tasks-opening">
@@ -579,7 +783,23 @@ function NoAgents() {
 /** A session that runs in its own terminal, which Take over can move into Togle: Claude Code's only. */
 const takesOver = (task: TaskView): boolean => !task.mine && !!task.pid && task.runner === 'claude'
 
-function TaskRow({ task, now, old, selected, onSelect, onTakeOver }: { task: TaskView; now: number; old: boolean; selected: boolean; onSelect: () => void; onTakeOver?: () => void }) {
+interface RowProps {
+  task: TaskView
+  now: number
+  old: boolean
+  selected: boolean
+  /** Its group is not its folder's (the person moved it): the row names its folder. */
+  withFolder: boolean
+  dragging: boolean
+  onSelect: () => void
+  onTakeOver?: () => void
+  onDragStart: (event: ReactDragEvent) => void
+  onDragEnd: () => void
+  /** Its own menu, where it was right-clicked (or its menu key pressed). */
+  onMenu: (at: Point) => void
+}
+
+function TaskRow({ task, now, old, selected, withFolder, dragging, onSelect, onTakeOver, onDragStart, onDragEnd, onMenu }: RowProps) {
   const stoppedHere = needsYou(task) && task.state !== 'waiting'
   const elsewhere = !task.mine && !!task.pid
   // One line, as the design has it: the agent, where it works, and how it stands. A task in a terminal says so. Stopped
@@ -587,11 +807,23 @@ function TaskRow({ task, now, old, selected, onSelect, onTakeOver }: { task: Tas
   const detail = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : task.screen ? 'stopped · open it to go on' : 'stopped · reply to go on') : task.state === 'waiting' ? (task.waitingFor && !task.pending.length ? 'waiting on its screen' : 'waiting') : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `done · ${ago(task.updatedAt, now)}` : 'done'
   // A scheduled job's row is the job: its schedule, when it runs next (or that it runs now), and its last run when that failed.
   const job = task.schedule ? [agentOf(task), task.state === 'failed' ? 'last run failed' : '', task.schedule, task.state === 'working' ? 'running now' : task.nextRun ? `next ${nextTime(task.nextRun, now)}` : ''].filter(Boolean).join(' · ') : ''
-  // Its project is the heading over it, so the line leaves out the folder.
-  const line = job || (elsewhere ? `${agentOf(task)} · terminal` : [agentOf(task), detail].filter(Boolean).join(' · '))
+  // Its project is the heading over it, so the line leaves out the folder, unless the person moved it to another group.
+  const line = job || (elsewhere ? `${agentOf(task)} · terminal` : [agentOf(task), withFolder ? baseName(task.folder) : '', detail].filter(Boolean).join(' · '))
   const fresh = isFresh(task)
   return (
-    <div className="task-item" role="listitem">
+    <div
+      className={`task-item${dragging ? ' dragging' : ''}`}
+      role="listitem"
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        const box = event.currentTarget.getBoundingClientRect()
+        // From the menu key there is no pointer: the menu opens by the row.
+        onMenu(event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : { x: box.left + 24, y: box.bottom - 4 })
+      }}
+    >
       <button className={`task-row ${selected ? 'selected' : ''} ${onTakeOver ? 'with-action' : ''}`} data-state={task.state} data-needs={stoppedHere ? 'you' : undefined} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
         <span className="task-dot" aria-hidden="true" />
         <span className="task-copy">
@@ -696,6 +928,8 @@ interface PanelProps {
   handedBack?: { command: string; folder: string }
   /** Whether Togle's own log of the task has been read (a task it does not run has none). */
   logRead: boolean
+  /** The group the list shows it in: the header shows the same. */
+  place?: TaskGroup
 }
 
 /**
@@ -715,7 +949,7 @@ function usePressed(task: TaskView): [string | undefined, (name: string, work: (
   return [pressed, press]
 }
 
-function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack, logRead }: PanelProps) {
+function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack, logRead, place }: PanelProps) {
   const { task, log } = detail
   const talkKey = useHotkeys().find((key) => key.id === 'dictate')?.keys || 'F9'
   // A task whose agent has a screen Togle can show is seen in two views; any other task has the one it has.
@@ -894,7 +1128,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onStop, onEndCom
             <span className="task-where" title={task.folder}>
               {' · '}{agentOf(task)}{' · '}
               {/* Its project's mark, as on its group in the list. */}
-              {kindOf(task) === 'project' ? <><ProjectMark folder={task.folder} size="small" />{baseName(task.folder)}</> : kindOf(task) === 'scheduled' ? 'Scheduled' : 'Everyday'}
+              {place ? <><GroupMark group={place} size="small" />{place.name}</> : kindOf(task) === 'project' ? baseName(task.folder) : kindOf(task) === 'scheduled' ? 'Scheduled' : 'Everyday'}
             </span>
           </h2>
         </div>

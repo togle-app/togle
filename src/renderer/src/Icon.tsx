@@ -140,6 +140,8 @@ const SHAPES = {
   ),
   // Work in no project: a house.
   home: <path d="M3 11 12 4l9 7M5 10v10h5v-6h4v6h5V10" />,
+  // A new group of tasks: a folder with a plus.
+  folderPlus: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10v6M9 13h6" />,
   // The agent market: a shop's front.
   store: (
     <>

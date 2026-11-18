@@ -8,6 +8,7 @@ import { ClaudeBackend } from './claude'
 import { CodexBackend } from './codex'
 import { HermesBackend } from './hermes'
 import { RunnerHub, type FreshStore, type RecordStore, type TitleStore } from './hub'
+import { NO_GROUPS, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { widenSearchPath } from './search-path'
 import { TerminalBackend, type TerminalChunk } from './terminal'
 import type { Backend } from './types'
@@ -39,6 +40,8 @@ export interface RunnerDeps {
   records?: RecordStore
   /** Which tasks finished since the person last looked at them. */
   fresh?: FreshStore
+  /** The person's own arrangement of the list: groups they made, names they gave, tasks they moved. */
+  groups?: { get(): TaskGroups; change(change: GroupChange): TaskGroups }
   /** Something in the tasks changed, told to the main process as it is told to the window. */
   changed?: () => void
   /** Asks the person for a folder; null when they close the dialog. */
@@ -117,6 +120,8 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   handle('runners:detail', (key) => hub.detail(word(key, 'The task')))
   handle('runners:history', (key, all) => hub.history(word(key, 'The task'), all === true))
   handle('runners:step', (key, more) => hub.step(word(key, 'The task'), word(more, 'The step').slice(0, 300)))
+  handle('runners:groups', () => deps.groups?.get() ?? NO_GROUPS)
+  handle('runners:groups-change', (change) => (deps.groups ? deps.groups.change(change as GroupChange) : NO_GROUPS))
   handle('runners:start', (request) => {
     const given = (request ?? {}) as Record<string, unknown>
     const runner = given.runner as RunnerKind

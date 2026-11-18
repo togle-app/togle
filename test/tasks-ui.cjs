@@ -1547,12 +1547,87 @@ async function checkGroups(T, agent) {
   ui.window.destroy()
 }
 
+// The person's own arrangement: a group made (named straight away, there while empty), a task dragged into it (its row then
+// names its folder, its header names the group, a subject given later does not move it), a group folded (its counts stay, it
+// still takes a dropped task, it stays folded when Agents is opened again), a group of Togle's renamed and given its own name
+// back, a task put back from its own menu, a made group deleted (its task goes back). Every change reaches main.
+async function checkArrange(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  const pause = (ms) => ui.evaluate('new Promise(r=>setTimeout(r,' + ms + '))')
+  const box = (name) => "[...document.querySelectorAll('.task-groups .task-project')].find(p=>p.querySelector('.task-project-name')?.textContent===" + JSON.stringify(name) + ')'
+  const titles = (within) => ui.evaluate('[...' + within + ".querySelectorAll('.task-row strong')].map(e=>e.textContent)")
+  const lineOf = (title) => ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.querySelector('strong').textContent===" + JSON.stringify(title) + ").querySelector('.task-copy > span').textContent")
+  const name = async (words) => {
+    await ui.wait("!!document.querySelector('.group-rename')")
+    await ui.evaluate("(()=>{const input=document.querySelector('.group-rename');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input," + JSON.stringify(words) + ");input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))})()")
+    await ui.wait("!document.querySelector('.group-rename')")
+  }
+  // A task dragged and dropped, as the page sees a drag (a real drag is tried in the layout harness).
+  const drag = (title, target) => ui.evaluate("(async()=>{const item=[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent===" + JSON.stringify(title) + ");const to=" + target + ";const data=new DataTransfer();item.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:data}));await new Promise(r=>setTimeout(r,60));to.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:data}));await new Promise(r=>setTimeout(r,30));to.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data}));item.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:data}));return true})()")
+  const menuOf = async (group, item) => {
+    await ui.evaluate(box(group) + ".querySelector('button.group-more').click()")
+    await ui.wait("!!document.querySelector('.menu-overlay')")
+    await ui.click('.menu-overlay [role^=menuitem]', item)
+  }
+  // A group of your own: named at once, first in the list, there while empty.
+  await ui.evaluate("document.querySelector('[aria-label=\"New group\"]').click()")
+  await name('Launch week')
+  assert.deepEqual(await texts(ui, '.task-groups .task-project-name'), ['Launch week', 'api-server', 'notes', 'website'], 'a group of your own comes first')
+  assert.match(await ui.evaluate(box('Launch week') + ".querySelector('.group-empty').textContent"), /^Drag a task here/, 'empty, it says how to fill it')
+  // A task dragged into it.
+  await drag('Fix the login redirect', box('Launch week'))
+  await ui.wait(box('Launch week') + ".querySelectorAll('.task-row').length===1")
+  assert.equal(await lineOf('Fix the login redirect'), 'Claude Code · website · done', 'out of its folder\'s group, its row names its folder')
+  await ui.evaluate("window.togleUITest.setTask('claude:s3',{subject:'Login'})")
+  await pause(250)
+  assert.deepEqual(await titles(box('Launch week')), ['Fix the login redirect'], 'a subject given later does not move it')
+  await ui.task('Fix the login redirect')
+  await ui.wait("document.querySelector('.task-where')?.textContent.includes('Launch week')")
+  // A group folded: its rows go, its counts stay, it still takes a dropped task, and it stays folded.
+  await ui.evaluate(box('website') + ".querySelector('.group-fold').click()")
+  await ui.wait(box('website') + ".querySelectorAll('.task-row').length===0")
+  assert.equal(await ui.evaluate(box('website') + ".querySelector('.group-fold').getAttribute('aria-expanded')"), 'false')
+  assert.equal(await ui.evaluate(box('website') + ".querySelector('.group-counts').getAttribute('aria-label')"), '1 waiting, 1 working', 'folded, it still says what waits and works')
+  await drag('Add the status column', box('website'))
+  await ui.wait(box('website') + "?.querySelector('.group-counts')?.getAttribute('aria-label')==='2 waiting, 1 working'")
+  assert.equal(await ui.evaluate("!!" + box('api-server')), false, 'its own group, empty now, is gone')
+  await ui.click('.workspace-nav button', 'Meetings')
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait('!!' + box('website'))
+  assert.equal(await ui.evaluate(box('website') + ".querySelector('.group-fold').getAttribute('aria-expanded')"), 'false', 'opened again, it is still folded')
+  await ui.evaluate(box('website') + ".querySelector('.group-fold').click()")
+  await ui.wait(box('website') + ".querySelectorAll('.task-row').length===3")
+  assert.equal(await lineOf('Add the status column'), 'Codex · api-server · waiting', 'moved, it names its folder')
+  // A group of Togle's renamed, then given its own name back.
+  await menuOf('website', 'Rename')
+  await name('Website')
+  assert.equal(await ui.evaluate(box('Website') + ".querySelector('.project-mark').dataset.letter"), 'W')
+  await menuOf('Website', 'Use Togle’s name')
+  await ui.wait('!!' + box('website'))
+  // Put back from the task's own menu: back where Togle puts it.
+  await ui.evaluate("[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent==='Add the status column').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:200,clientY:300}))")
+  await ui.wait("!!document.querySelector('.call-menu')")
+  assert.ok((await texts(ui, '.call-menu [role=menuitem]')).includes('Move to Launch week'), 'its menu moves it to another group')
+  await ui.click('.call-menu [role=menuitem]', 'Put back where Togle puts it')
+  await ui.wait('!!' + box('api-server'))
+  // A made group deleted: its task goes back.
+  await menuOf('Launch week', 'Delete group')
+  await ui.wait('!' + box('Launch week'))
+  assert.ok((await titles(box('website'))).includes('Fix the login redirect'), 'its task is back in its folder\'s group')
+  assert.deepEqual((await ui.calls('changeTaskGroups')).map((call) => call.args[0].kind), ['make', 'rename', 'place', 'place', 'rename', 'rename', 'put-back', 'remove'], 'each change reached main')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 app.whenReady().then(async () => {
   try {
     const T = await import(pathToFileURL(path.join(__dirname, '.build/togle.mjs')).href)
     const store = new T.AgentStore(async () => '')
     await store.load()
     const agent = store.list()[0]
+    await checkArrange(T, agent)
     await checkGroups(T, agent)
     await checkTasks(T, agent)
     await checkNarrow(T, agent)

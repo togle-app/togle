@@ -1,11 +1,13 @@
 // What Togle remembers of its tasks between runs: the names it gave them ("Port the settings screen"), which tasks it
 // started, for the agents that cannot list their own sessions, and which finished since the person last looked at them.
 import { readJson, writeJson } from '../storage'
+import { applyGroupChange, cleanGroups, NO_GROUPS, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import type { FreshStore, RecordStore, TaskRecord, TitleStore } from './hub'
 
 const TITLES = 'runner-titles.json'
 const RECORDS = 'runner-tasks.json'
 const FRESH = 'runner-fresh.json'
+const GROUPS = 'runner-groups.json'
 const KEEP = 500
 
 /** Writes a file a moment after the last change, not once for each. */
@@ -61,6 +63,35 @@ export class StoredRecords implements RecordStore {
   add(record: TaskRecord): void {
     this.records = [...this.records.filter((r) => !(r.runner === record.runner && r.id === record.id)), record].slice(-KEEP)
     this.later.ask()
+  }
+}
+
+/** The person's own arrangement of the Agents list (task-groups.ts): the groups they made, the names they gave, the tasks they moved. */
+export class StoredGroups {
+  private groups: TaskGroups = NO_GROUPS
+  private readonly later: Later
+
+  /** `file`: where it is kept (a test gives none). */
+  constructor(private readonly file: string | null = GROUPS) {
+    this.later = new Later(() => (file ? writeJson(file, this.groups) : Promise.resolve()))
+  }
+
+  async load(): Promise<void> {
+    if (this.file) this.groups = cleanGroups(await readJson<unknown>(this.file, NO_GROUPS))
+  }
+
+  get(): TaskGroups {
+    return this.groups
+  }
+
+  /** A change the person made, kept: the arrangement as it is now comes back (unchanged when the change did not fit). */
+  change(change: GroupChange): TaskGroups {
+    const next = applyGroupChange(this.groups, change)
+    if (next !== this.groups) {
+      this.groups = next
+      this.later.ask()
+    }
+    return this.groups
   }
 }
 

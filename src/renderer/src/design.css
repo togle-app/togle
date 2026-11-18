@@ -262,13 +262,31 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .tasks-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 14px 7px 14px 15px; border-right: 1px solid var(--line); }
 .tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .task-list { display: flex; flex-direction: column; gap: 6px; }
-/* The list in groups, each a box with what it holds: scheduled jobs, work in no project (Everyday), one box per project. A
-   project is known by its mark (its letter on a color of its own, never one a state uses), its name and the folder it is in;
-   the numbers say what waits, works and is new in it, in the colors of the dots. Its tasks are its contents: they have no box
-   of their own until the pointer is on one or it is open. Nothing to press on a heading: it only says where things are. */
+/* The list in groups, each a box with what it holds: groups the person made, scheduled jobs, work in no project (Everyday),
+   one box per project. A group is known by its mark (a letter on a color of its own, never one a state uses), its name and,
+   for a project, the folder it is in; the numbers say what waits, works and is new in it, in the colors of the dots. Its
+   tasks are its contents: they have no box of their own until the pointer is on one or it is open. The head folds the box,
+   and its menu (beside it, on the pointer or the keys) renames it. A box lights up where a dragged task would go. */
+.tasks-head-actions { display: flex; align-items: center; gap: 4px; }
+.tasks-head-actions .icon-only { display: inline-grid; place-items: center; width: 28px; height: 26px; padding: 0; }
 .task-groups { display: flex; flex-direction: column; gap: 12px; }
 .task-project { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--raised) 55%, transparent); }
-.task-project-head { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 9px; min-width: 0; padding: 3px 4px 7px; }
+.task-project.drop { border-color: var(--togle); background: color-mix(in srgb, var(--togle-soft) 60%, transparent); }
+.task-project.has-open { border-color: var(--ink); }
+.task-project-head { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.group-fold, .group-renaming { display: grid; flex: 1 1 auto; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; column-gap: 8px; min-width: 0; height: auto; padding: 3px 4px 7px 2px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; }
+.group-renaming { grid-template-columns: auto minmax(0, 1fr); padding-left: 22px; }
+.group-fold:hover:not(:disabled) { background: none; }
+.group-fold:focus-visible { outline: 2px solid var(--togle); outline-offset: -2px; }
+.fold-chevron { display: inline-grid; place-items: center; width: 14px; color: var(--muted); transition: transform 0.15s; }
+.task-project.folded .fold-chevron { transform: rotate(-90deg); }
+.group-rename { min-width: 0; height: 30px; padding: 3px 8px; font-size: 13.5px; font-weight: 650; }
+.task-project-head button.group-more { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border-color: transparent; background: none; color: var(--muted); opacity: 0; }
+.task-project:hover button.group-more, .task-project:focus-within button.group-more, button.group-more.open { opacity: 1; }
+.group-empty { margin: 0; padding: 6px 8px 8px; color: var(--muted); font-size: 12px; }
+.task-subject.drop { border-radius: 8px; box-shadow: inset 0 0 0 1px var(--togle); }
+.task-item.dragging { opacity: 0.45; }
+@media (prefers-reduced-motion: reduce) { .fold-chevron { transition: none; } }
 .task-project-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; line-height: 1.3; }
 .task-project-name { overflow: hidden; color: var(--ink); font-size: 13.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .task-project-sub { display: flex; align-items: center; gap: 6px; min-width: 0; }

@@ -254,6 +254,10 @@ export interface TogleApi {
   taskSessionShown(key: string | null): void
   /** The task the window has on screen (Agents, with the task open), or none: a task that finished is not new once seen. */
   taskOnScreen(key: string | null): void
+  /** The person's own arrangement of the Agents list: groups they made, names they gave, tasks they moved. */
+  taskGroups(): Promise<import('./task-groups').TaskGroups>
+  /** A change to it, kept: the arrangement as it is now comes back. */
+  changeTaskGroups(change: import('./task-groups').GroupChange): Promise<import('./task-groups').TaskGroups>
   /** What the small strip shows while a call is written down and Togle's window is closed. Null when it is put away. */
   onCallStrip(cb: (state: import('./call-strip').CallStripState | null) => void): Unsubscribe
   /** A button of that strip. */
