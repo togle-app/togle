@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { TaskNotice } from '@shared/runner'
 import { Icon } from './Icon'
+import { StateMark } from './StateMark'
 
 const api = window.togle
 
@@ -64,7 +65,7 @@ export function TaskNoticeSurface() {
     <div className="task-notice-frame">
       <div ref={card} className="task-notice" role="alertdialog" aria-label={`${notice.title}. ${notice.where} ${notice.says}`} data-kind={notice.kind}>
         <div className="task-notice-head">
-          <span className="task-notice-dot" aria-hidden="true" />
+          <StateMark kind={notice.kind === 'done' ? 'done' : notice.kind === 'failed' ? 'failed' : 'waiting'} still />
           <strong>{notice.title}</strong>
           {notice.danger && <span className="task-danger" title={notice.danger}>Dangerous</span>}
         </div>

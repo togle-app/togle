@@ -138,6 +138,8 @@ function useRemoteTasks(): DeviceTasks[] {
 // ---- How the list is organized: by project, then by what the work is about, then by where each task stands ----
 
 /** It finished (or stopped by an error) and the person has not had it on screen since. */
+/** The mark in a chip that says how a task stands, the same as its words (what needs you is said by the panel itself). */
+const chipMark = (state: TaskView['state'], schedule?: string): MarkKind => (state === 'idle' ? (schedule ? 'resting' : 'done') : state)
 /** How a task's mark shows it: what needs you first (it asks, or it stopped with a reply to give), then what it does. A
  *  scheduled job between its runs rests: it is not done. */
 const markOf = (task: TaskView): MarkKind => (needsYou(task) ? 'waiting' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'failed' : task.state === 'stopped' ? 'stopped' : task.schedule ? 'resting' : 'done')
@@ -1221,7 +1223,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
         </div>
       </header>
       <div className="task-status">
-        <span className="state-chip" data-state={task.signedOut ? 'failed' : task.state}>{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
+        <span className="state-chip" data-state={task.signedOut ? 'failed' : task.state}><StateMark kind={task.signedOut ? 'failed' : chipMark(task.state, task.schedule)} still />{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
         <span className="task-agent-name">{agentOf(task)}</span>
         {changed > 0 && <span className="hint">{`${changed} ${changed === 1 ? 'file' : 'files'} changed`}</span>}
         {twoViews && (
@@ -1504,7 +1506,7 @@ function RemotePanel({ device, task, now, onBack, act }: { device: DeviceTasks; 
         </div>
       </header>
       <div className="task-status">
-        <span className="state-chip" data-state={task.state}>{STATE_WORDS[task.state]}</span>
+        <span className="state-chip" data-state={task.state}><StateMark kind={chipMark(task.state)} still />{STATE_WORDS[task.state]}</span>
         <span className="task-agent-name">{task.agent}</span>
         {!running && <span className="hint">{ago(task.updatedAt, now)}</span>}
       </div>

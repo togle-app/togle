@@ -5,6 +5,7 @@ import type { TodoItem, TodoList } from '@shared/todo'
 import type { CallOffer, TodoOffer } from '@shared/call-todo'
 import { meetingTitle } from './MeetingsPage'
 import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED } from './kept'
+import { StateMark, type MarkKind } from './StateMark'
 
 const api = window.togle
 
@@ -15,6 +16,9 @@ const REFRESH_MS = 4_000
 
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
+
+/** A chip's tone as the mark in it. */
+const TONE_MARK: Record<'work' | 'wait' | 'done' | 'fail' | 'gone', MarkKind> = { work: 'working', wait: 'waiting', done: 'done', fail: 'failed', gone: 'stopped' }
 
 /** What the task an item was given to is doing, as a short chip. */
 function chipOf(task: TaskView | undefined): { text: string; tone: 'work' | 'wait' | 'done' | 'fail' | 'gone' } {
@@ -230,6 +234,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
           )}
           {chip && (
             <button className={`todo-chip ${chip.tone}`} title="Open the task" disabled={!task} onClick={() => task && onOpenTask(task.key)}>
+              {task && <StateMark kind={TONE_MARK[chip.tone]} still />}
               {chip.text}
             </button>
           )}
@@ -271,7 +276,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
               return (
                 // What can be allowed here shows whole (`allows`): on a narrow window its line breaks, where any other is shortened.
                 <div key={task.key} className={`todo-row need ${fits ? 'allows' : ''}`} role="listitem" data-state="waiting">
-                  <span className="todo-dot" aria-hidden="true" />
+                  <StateMark kind="waiting" still />
                   <span className="todo-grow">
                     <b>{task.title}</b>
                     <small className="todo-line">
