@@ -449,6 +449,21 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .rail-tip time { color: var(--muted); font-size: 11px; }
 .rail-tip span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .rail-tick::after { transition: none; } }
+/* Quote and reply (Quote.tsx): the Quote button over a part of one message the person has selected, the bar over the reply box that
+   holds the part being answered, and that part drawn over the reply in the card of what was said (one line, so the pinned card
+   stays three lines: the quote's line and two of the reply; opened, all of it). */
+.quote-float { position: absolute; z-index: 6; height: 28px; padding: 0 12px; transform: translate(-50%, calc(-100% - 8px)); border: 1px solid var(--line); border-radius: 999px; background: var(--surface); box-shadow: 0 8px 20px -10px var(--shadow); color: var(--ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.quote-float.below { transform: translate(-50%, 8px); }
+.quote-float:hover:not(:disabled) { border-color: var(--muted); background: var(--surface); }
+.quote-bar { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 6px; padding: 6px 4px 6px 10px; border-left: 3px solid var(--togle); border-radius: 4px 8px 8px 4px; background: var(--togle-soft); }
+.quote-bar-words { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; font-size: 12px; line-height: 1.4; }
+.quote-bar-words b { color: var(--togle); font-size: 11px; font-weight: 650; }
+.quote-bar-words span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--ink); overflow-wrap: anywhere; }
+.quote-bar-remove { flex: none; align-self: flex-start; width: 24px; height: 24px; padding: 0; border-color: transparent; background: none; color: var(--muted); font-size: 16px; line-height: 1; }
+.quote-bar-remove:hover:not(:disabled) { background: none; color: var(--ink); }
+.you-quote { display: block; margin: 0 0 2px; padding: 0 0 0 8px; overflow: hidden; border-left: 2px solid color-mix(in srgb, var(--togle) 60%, transparent); color: var(--muted); font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.task-you.whole .you-quote, .held-words .you-quote { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
+.held-words .you-quote { margin-bottom: 3px; }
 /* A turn: what was said, then what the agent did and said. */
 .turn { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 /* A day, where the conversation goes over one. */

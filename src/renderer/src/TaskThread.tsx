@@ -1,7 +1,9 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { LogEntry, PlanItem, StepDetail, TaskHistory, TaskState, TaskView } from '@shared/runner'
 import { Icon, type IconName } from './Icon'
+import { splitQuote } from '@shared/quote'
 import { Markdown } from './Markdown'
+import { QuoteBlock } from './Quote'
 import { PictureOver } from './Rows'
 
 const api = window.togle
@@ -606,7 +608,7 @@ function Fold({ clauses, label, live = false, ticker, fresh, children }: { claus
 /** Something the agent said, as it wrote it. */
 function Said({ entry, fresh }: { entry: LogEntry; fresh?: boolean }): ReactNode {
   return (
-    <div className={fresh ? 'task-agent fresh' : 'task-agent'}>
+    <div className={fresh ? 'task-agent fresh' : 'task-agent'} data-quotable="">
       <Markdown text={entry.text} />
     </div>
   )
@@ -767,6 +769,8 @@ function YouCard({ entry, at, fresh, pinned, taskKey }: { entry: LogEntry; at?: 
   const [whole, setWhole] = useState(false)
   const pictures = entry.images ?? []
   const words = youWords(entry)
+  // A reply that quotes a part of a message is drawn as that part over the reply.
+  const quoted = splitQuote(words)
   useLayoutEffect(() => {
     const el = box.current
     if (!el || whole) return
@@ -786,8 +790,9 @@ function YouCard({ entry, at, fresh, pinned, taskKey }: { entry: LogEntry; at?: 
         {at !== undefined && <When at={at} />}
       </div>
       {(words || !pictures.length) && (
-        <div ref={box} className={`task-you${long && !whole ? ' clamped' : ''}${whole ? ' whole' : ''}`}>
-          {words}
+        <div ref={box} className={`task-you${long && !whole ? ' clamped' : ''}${whole ? ' whole' : ''}`} data-quotable="">
+          {quoted && <QuoteBlock text={quoted.quote} />}
+          {quoted ? quoted.reply : words}
         </div>
       )}
       {!!pictures.length && (
@@ -853,7 +858,9 @@ export function promptsOf(entries: readonly LogEntry[]): Prompt[] {
   const prompts: Prompt[] = []
   for (const turn of turnsOf(entries.filter((entry) => !isPlan(entry)))) {
     if (!turn.you) continue
-    const text = youWords(turn.you).replace(/\s+/g, ' ').trim() || (turn.you.images?.length ? 'A picture' : '')
+    // A question that quotes a part of a message is named by what was answered, not by the part quoted.
+    const said = youWords(turn.you)
+    const text = (splitQuote(said)?.reply ?? said).replace(/\s+/g, ' ').trim() || (turn.you.images?.length ? 'A picture' : '')
     if (text) prompts.push({ key: turn.key, text, ...(realTime(turn.you.at) ? { at: turn.you.at } : {}) })
   }
   return prompts

@@ -1765,6 +1765,134 @@ async function checkRail(T, agent) {
   ui.window.destroy()
 }
 
+// Quote and reply: a part of one message selected in the conversation (a real mouse drag here) has a Quote button over it once the
+// mouse is let go; pressed, the part is over the reply box, and the reply goes with it as one line that starts with a word, and
+// draws as a quote over the reply. Not over two messages, not with a question the agent asks, and never with a command.
+async function checkQuote(T, agent) {
+  const ui = await open(T, agent, 1024)
+  const cdp = ui.window.webContents.debugger
+  cdp.attach('1.3')
+  await cdp.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+  await ui.click('.workspace-nav button', 'Agents')
+  const answer = 'Here is how I read it.\n\n- First, the table keeps two plans.\n- Second, the prices come from one place.\n- Third, the page reads the same on a phone and on a desk.\n\nThen I changed the markup and ran the checks.'
+  const log = (count) => Array.from({ length: count }, (_, n) => [
+    { id: 1 + n * 3, at: Date.now() - 3_600_000 + n * 60_000, kind: 'you', text: ['Rebuild the pricing page.', 'Add a yearly price.'][n % 2] },
+    { id: 2 + n * 3, at: Date.now() - 3_600_000 + n * 60_000 + 5_000, kind: 'command', text: 'npm test', status: 'finished' },
+    { id: 3 + n * 3, at: Date.now() - 3_600_000 + n * 60_000 + 9_000, kind: 'agent', text: answer }
+  ]).flat()
+  const set = (props) => ui.evaluate('window.togleUITest.setTask("claude:s2",' + JSON.stringify(props) + ')')
+  await set({ log: log(2), state: 'idle' })
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("document.querySelectorAll('.task-agent').length===2")
+  // Where some words are on the screen (the first message that has them), and a selection of exactly them made as a person makes one.
+  const rect = (scope, words, nth = 0) => ui.evaluate("(()=>{const root=[...document.querySelectorAll(" + JSON.stringify(scope) + ")][" + nth + "];const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node;while(node=walker.nextNode()){const i=node.data.indexOf(" + JSON.stringify(words) + ");if(i>=0){const r=document.createRange();r.setStart(node,i);r.setEnd(node,i+" + words.length + ");const b=r.getBoundingClientRect();return [b.left,b.top,b.right,b.bottom]}}return null})()")
+  const mouse = (type, x, y, extra = {}) => cdp.sendCommand('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, ...extra })
+  const drag = async (words, scope = '.task-agent') => {
+    const [l, t, r, b] = await rect(scope, words)
+    await mouse('mousePressed', l + 1, (t + b) / 2)
+    for (let n = 1; n <= 6; n++) await mouse('mouseMoved', l + 1 + ((r - l - 2) * n) / 6, (t + b) / 2, { clickCount: 0 })
+    return () => mouse('mouseReleased', r - 1, (t + b) / 2)
+  }
+  const pick = (scope, words, nth = 0) => ui.evaluate("(()=>{const root=[...document.querySelectorAll(" + JSON.stringify(scope) + ")][" + nth + "];const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let node;while(node=walker.nextNode()){const i=node.data.indexOf(" + JSON.stringify(words) + ");if(i>=0){const r=document.createRange();r.setStart(node,i);r.setEnd(node,i+" + words.length + ");const s=getSelection();s.removeAllRanges();s.addRange(r);return true}}return false})()")
+  const float = "document.querySelector('.quote-float')"
+  const sent = async () => (await ui.calls('sendToRunnerTask')).map((call) => call.args)
+  const words = 'the prices come from one place'
+  // The button is not there while the mouse is down, and is there, over the words, when it is let go.
+  await ui.evaluate("document.querySelector('.task-log.thread').scrollTop=0")
+  await ui.paint()
+  const letGo = await drag(words)
+  await ui.paint()
+  assert.equal(await ui.evaluate("!!" + float), false, 'no button while the selection is being made')
+  assert.equal(await ui.evaluate("getSelection().toString()"), words, 'the drag selected the words')
+  await letGo()
+  await ui.wait("!!" + float)
+  assert.deepEqual(await ui.evaluate("(()=>{const f=" + float + ".getBoundingClientRect(),w=document.querySelector('.thread-place').getBoundingClientRect();return [f.left>=w.left,f.right<=w.right,f.bottom<=" + (await rect('.task-agent', words))[1] + "+1]})()"), [true, true, true], 'over the words, inside the conversation')
+  assert.equal(await ui.evaluate(float + ".textContent"), 'Quote')
+  // Pressed with the mouse: the words are over the reply box, the selection is let go and the keys are in the reply box.
+  const at = await ui.evaluate("(()=>{const b=" + float + ".getBoundingClientRect();return [b.left+b.width/2,b.top+b.height/2]})()")
+  await mouse('mousePressed', at[0], at[1]); await mouse('mouseReleased', at[0], at[1])
+  await ui.wait("!!document.querySelector('.quote-bar')")
+  assert.equal(await ui.evaluate("document.querySelector('.quote-bar-words span').textContent"), words)
+  assert.equal(await ui.evaluate("getSelection().toString()"), '', 'the selection is let go')
+  assert.equal(await ui.evaluate("document.activeElement.tagName+':'+document.activeElement.getAttribute('aria-label')"), 'TEXTAREA:Reply to the agent')
+  assert.equal(await ui.evaluate("!!" + float), false)
+  // The reply, typed and sent with Enter: one line that starts with a word, the quote then the answer.
+  await ui.window.webContents.insertText('Make the second plan cheaper.')
+  await ui.wait("document.querySelector('.task-reply textarea').value==='Make the second plan cheaper.'")
+  for (const type of ['keyDown', 'keyUp']) await cdp.sendCommand('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) })
+  await ui.wait("document.querySelectorAll('.you-row').length===3")
+  assert.deepEqual(await sent(), [['claude:s2', 'Replying to “the prices come from one place”: Make the second plan cheaper.']])
+  assert.equal(await ui.evaluate("!!document.querySelector('.quote-bar')"), false, 'a quote goes with one reply')
+  assert.deepEqual(await ui.evaluate("(()=>{const row=[...document.querySelectorAll('.you-row')].at(-1);const q=row.querySelector('.you-quote');return [q?.textContent,row.querySelector('.task-you').lastChild.textContent,q?.scrollWidth<=q?.clientWidth+400]})()"), [words, 'Make the second plan cheaper.', true], 'the card draws the quote over the reply')
+  // It takes the conversation to its end, wherever it was read.
+  await ui.wait("(()=>{const l=document.querySelector('.task-log.thread');return l.scrollHeight-l.scrollTop-l.clientHeight<=2})()")
+  // The next reply has none.
+  await ui.fill('.task-reply textarea', 'And the table?')
+  await ui.evaluate("document.querySelector('.task-reply textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
+  await ui.wait("document.querySelectorAll('.you-row').length===4")
+  assert.equal((await sent()).at(-1)[1], 'And the table?', 'a reply with no quote is sent as it is typed')
+  // Not over two messages, not in the reply box.
+  await ui.evaluate("document.querySelector('.task-log.thread').scrollTop=0")
+  await ui.paint()
+  await ui.evaluate("(()=>{const a=document.querySelectorAll('.task-agent')[0].querySelector('p:last-child').firstChild,b=document.querySelectorAll('.task-you')[1].firstChild;const r=document.createRange();r.setStart(a,5);r.setEnd(b,6);const s=getSelection();s.removeAllRanges();s.addRange(r)})()")
+  await ui.paint(); await ui.paint()
+  assert.equal(await ui.evaluate("!!" + float), false, 'no button over a selection that runs over two messages')
+  // A word is a quote too, and the button goes with the selection.
+  await pick('.task-agent', 'markup')
+  await ui.wait("!!" + float)
+  await ui.evaluate("getSelection().removeAllRanges()")
+  await ui.wait("!" + float)
+  // A part picked, then another: the button follows; a quote picked is replaced by the next one.
+  await pick('.task-agent', 'the page reads the same')
+  await ui.wait("!!" + float)
+  await ui.evaluate(float + ".click()")
+  await ui.wait("document.querySelector('.quote-bar-words span')?.textContent==='the page reads the same'")
+  await pick('.task-agent', 'two plans')
+  await ui.wait("!!" + float)
+  await ui.evaluate(float + ".click()")
+  await ui.wait("document.querySelector('.quote-bar-words span')?.textContent==='two plans'")
+  // A command goes alone and the quote waits; Esc lets go of it, and so does the cross.
+  await ui.fill('.task-reply textarea', '/compact')
+  await ui.evaluate("document.querySelector('.task-reply textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
+  await ui.wait("document.querySelectorAll('.you-row').length===5")
+  assert.equal((await sent()).at(-1)[1], '/compact', 'a command is sent as it is typed, with no quote')
+  assert.equal(await ui.evaluate("document.querySelector('.quote-bar-words span')?.textContent"), 'two plans', 'and the quote waits for a reply of words')
+  await ui.evaluate("document.querySelector('.task-reply textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))")
+  await ui.wait("!document.querySelector('.quote-bar')")
+  await pick('.task-agent', 'two plans')
+  await ui.wait("!!" + float)
+  await ui.evaluate(float + ".click()")
+  await ui.wait("!!document.querySelector('.quote-bar')")
+  await ui.click('.quote-bar button', 'Remove the quote')
+  await ui.wait("!document.querySelector('.quote-bar')")
+  // While the agent works on its own screen, what is sent waits to go in, and the waiting card draws the quote as well.
+  await set({ screen: true, state: 'working', held: [], log: log(2) })
+  await ui.wait("!!document.querySelector('.view-switch')")
+  await ui.click('.view-switch button', 'Chat')
+  await ui.wait("!!document.querySelector('.task-reply textarea')")
+  await pick('.task-agent', 'the prices come from one place')
+  await ui.wait("!!" + float)
+  await ui.evaluate(float + ".click()")
+  await ui.fill('.task-reply textarea', 'Why those?')
+  await ui.evaluate("document.querySelector('.task-reply textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
+  await ui.wait("!!document.querySelector('.held-reply .you-quote')")
+  assert.deepEqual(await ui.evaluate("[document.querySelector('.held-reply .you-quote').textContent,document.querySelector('.held-reply .held-words p').lastChild.textContent]"), ['the prices come from one place', 'Why those?'])
+  // A question the agent asks is answered as it asks for it: no quote goes with the answer, and none is offered over it.
+  await set({ held: [], screen: false, state: 'waiting', pending: [{ id: 'q1', kind: 'question', questions: [{ id: '0', text: 'Which plan first?', options: ['Starter', 'Team'], free: true, secret: false }], offersAlways: false }] })
+  await ui.wait("!!document.querySelector('.task-request')")
+  await pick('.task-agent', 'the prices come from one place')
+  await ui.paint(); await ui.paint()
+  assert.equal(await ui.evaluate("!!" + float), false, 'no button while the agent asks')
+  assert.equal(await ui.evaluate("!!document.querySelector('.quote-bar')"), false)
+  // Another task has no quote of this one's.
+  await set({ pending: [], state: 'idle' })
+  await ui.task('Fix the login redirect')
+  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Fix the login redirect'")
+  assert.equal(await ui.evaluate("!!document.querySelector('.quote-bar')"), false)
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 // The window's bar and rail: Togle's mark beside its name, the three buttons of a window (minimize, maximize or restore as the
 // window is, close), and each place's icon beside its name on a wide window, alone in a narrow one.
 async function checkWindowBar(T, agent) {
@@ -1941,6 +2069,7 @@ app.whenReady().then(async () => {
     await checkPaste(T, agent)
     await checkPictures(T, agent)
     await checkRail(T, agent)
+    await checkQuote(T, agent)
     await checkArrange(T, agent)
     await checkGroups(T, agent)
     await checkTasks(T, agent)

@@ -9,6 +9,8 @@ import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, WaitLine } from './
 import { Menu } from './Menu'
 import { PointMenu, type Point } from './PointMenu'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
+import { withQuote, splitQuote } from '@shared/quote'
+import { QuoteBar, QuoteBlock, QuoteFloat, useQuoteSpot } from './Quote'
 import { RequestCard } from './RequestCard'
 import { StateMark, type MarkKind } from './StateMark'
 import { clock, currentPlan, lastTurnKey, PlanCard, promptsOf, Thread, turnStart, useHistory } from './TaskThread'
@@ -1016,6 +1018,10 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
   // The agent's own screen is on screen: no card over it and no reply box, because what it asks is answered on it.
   const sessionShown = task.terminal && (!task.screen || view === 'session')
   const [text, setText] = useState('')
+  // A part of a message the person is answering (Quote over a selection): it goes with their next reply, and with no other.
+  const [quoted, setQuoted] = useState<string | null>(null)
+  const thread = useRef<HTMLDivElement>(null)
+  const replyText = useRef<HTMLTextAreaElement>(null)
   // Stop, and the presses that open or move the task's screen: each says what it does until the task changes.
   const [pressed, press] = usePressed(task)
   const [confirmTakeOver, setConfirmTakeOver] = useState(takeOverAsked)
@@ -1095,9 +1101,19 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
   }, [toEnd, webShown])
   // A question the agent asks is answered from the reply box; anything else typed there goes to the task.
   const question = task.pending.find((request) => request.kind === 'question')
+  // What is typed while the agent asks a question answers it, as the agent asks for it: a quote is not part of that.
+  useEffect(() => { if (question) setQuoted(null) }, [question])
   const say = (message: string): void => {
+    // What the person sends is the newest thing in the conversation, and it shows, wherever they were reading (a reply that
+    // quotes a part of an older message is sent from there).
+    stick.current = true
+    toEnd()
     if (question) onReply(question.id, message)
-    else onSend(message)
+    // A command of the agent's own (it starts with / or !) goes alone, and the quote waits for a reply that is words.
+    else if (quoted && !/^[/!]/.test(message)) {
+      onSend(withQuote(quoted, message))
+      setQuoted(null)
+    } else onSend(message)
     setText('')
   }
   const send = (event: FormEvent): void => {
@@ -1113,6 +1129,13 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
   const closedSession = task.mine && !!task.screen && view === 'session' && !task.terminal
   const cardsView = !sessionShown && !closedSession
   const answers = task.mine && cardsView
+  // The part of one message the person has selected in the conversation, for a Quote button over it.
+  const spot = useQuoteSpot(thread, answers && !question)
+  const quote = (words: string): void => {
+    setQuoted(words)
+    window.getSelection()?.removeAllRanges()
+    replyText.current?.focus()
+  }
   // An agent that can only be written to on its screen takes words when its turn has ended (Codex takes them while it works too):
   // what is sent while it works waits, and goes in then. The box takes words all the while.
   const holdsReply = !!task.screen && task.runner !== 'codex' && (task.state === 'working' || task.state === 'waiting' || !!task.waitingFor) && !task.pending.some((request) => request.kind === 'question')
@@ -1172,6 +1195,11 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
         event.preventDefault()
         const message = text.trim()
         if (message) say(message)
+      } else if (event.key === 'Escape' && quoted) {
+        // Esc lets go of the quote, as it closes the list of commands.
+        event.preventDefault()
+        event.stopPropagation()
+        setQuoted(null)
       }
       return
     }
@@ -1310,7 +1338,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
       ) : (
       <>
       {/* The conversation has the room between the task's lines and the reply box, which is at the foot of the pane. */}
-      <div className="thread-place">
+      <div className="thread-place" ref={thread}>
         <WaitLine waiting={readingConversation} label="Reading the conversation" words="Reading the conversation…" />
         <div
           className={`task-log thread${railShown ? ' has-rail' : ''}`}
@@ -1334,6 +1362,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
           {/* That it works, and for how long this turn has run: when no step of it runs, which has its own clock. */}
           {task.state === 'working' && !stepRuns && <NowLine since={newTurn ? turnStart(shown) : undefined} />}
         </div>
+        {spot && <QuoteFloat spot={spot} onQuote={() => quote(spot.text)} />}
         {railShown && <ThreadRail key={task.key} prompts={prompts} log={logBox} onEarlier={history?.more && !all ? showEarlierTurns : undefined} onLeaveEnd={() => { stick.current = false }} />}
         {away && (
           <button
@@ -1374,7 +1403,10 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
       {task.mine && held.length > 0 && (
         <div className="held-reply" role="status" aria-label="Waiting to go in">
           <div className="held-words">
-            {held.map((words, index) => <p key={index}>{words}</p>)}
+            {held.map((words, index) => {
+              const split = splitQuote(words)
+              return <p key={index}>{split && <QuoteBlock text={split.quote} />}{split ? split.reply : words}</p>
+            })}
           </div>
           <div className="held-foot">
             <span className={task.heldNote ? 'held-line bad' : 'held-line'}>{heldLine}</span>
@@ -1405,12 +1437,13 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onStop, 
                   ))}
             </div>
           )}
+          {quoted && !question && <QuoteBar quote={quoted} onRemove={() => { setQuoted(null); replyText.current?.focus() }} />}
           <form className="task-reply" onSubmit={send}>
             {/* A box that grows with what is typed: Enter sends, Shift+Enter starts a new line. A password is one line, and not shown. */}
             {question?.questions?.[0]?.secret ? (
               <input value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" type="password" />
             ) : (
-              <textarea rows={1} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" aria-autocomplete="list" aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
+              <textarea ref={replyText} rows={1} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" aria-autocomplete="list" aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
             )}
             <button className={text.trim() ? 'reply-send primary' : 'reply-send'} disabled={!text.trim()} aria-label={holdsReply ? 'Send when it finishes' : 'Send'} title={holdsReply ? `It goes in when ${agentOf(task)} finishes` : undefined}>
               <Icon name="send" size={14} />
