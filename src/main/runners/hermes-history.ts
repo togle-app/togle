@@ -2,6 +2,7 @@
 // object, with the session's messages) made into the same entries the window shows for any task. The export holds every row,
 // including ones that were compacted away or are Hermes's own notes to itself: only the live conversation is drawn.
 import type { LogEntry, PlanItem } from '@shared/runner'
+import { tidyPlan } from '@shared/plan-items'
 import { list, rec, text } from './jsonrpc'
 
 const WORDS_MOST = 20_000
@@ -52,11 +53,14 @@ function callsOf(value: unknown): unknown[] {
 }
 
 /** Hermes's checklist as a list of things, each done, being done or still to do. What was called off is left out. */
+/** A checklist as the agent gave it, without what was called off, and kept short: what was finished long ago goes (shared/plan-items.ts). */
 function planOf(todos: unknown): PlanItem[] {
-  return list(todos)
-    .map(rec)
-    .filter((item) => text(item.content).trim() && text(item.status) !== 'cancelled')
-    .map((item): PlanItem => ({ text: text(item.content).trim().slice(0, NAME_MOST), state: text(item.status) === 'completed' ? 'done' : text(item.status) === 'in_progress' ? 'doing' : 'todo' }))
+  return tidyPlan(
+    list(todos)
+      .map(rec)
+      .filter((item) => text(item.content).trim() && text(item.status) !== 'cancelled')
+      .map((item): PlanItem => ({ text: text(item.content).trim().slice(0, NAME_MOST), state: text(item.status) === 'completed' ? 'done' : text(item.status) === 'in_progress' ? 'doing' : 'todo' }))
+  )
 }
 
 const planWords = (plan: PlanItem[]): string => `${plan.filter((item) => item.state === 'done').length} of ${plan.length} done`
@@ -141,6 +145,7 @@ export function hermesEntries(session: unknown, details?: Map<string, string>): 
           if (what) wait({ id: own, at, kind: 'step', step: 'web', text: what.slice(0, NAME_MOST) })
         } else if (PLANS.has(name)) {
           // The list as it was given; its row then says how it stands in all.
+          // The list as it was given.
           const plan = planOf(given.todos)
           const before = last()
           const entry: LogEntry = before?.kind === 'step' && before.step === 'plan' ? before : { id: own, at, kind: 'step', step: 'plan', text: '' }

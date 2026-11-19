@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import type { LogEntry, PlanItem, StepDetail, TaskHistory, TaskState, TaskView } from '@shared/runner'
 import { Icon, type IconName } from './Icon'
 import { splitQuote } from '@shared/quote'
+import { tidyPlan } from '@shared/plan-items'
 import { Markdown } from './Markdown'
 import { QuoteBlock } from './Quote'
 import { PictureOver } from './Rows'
@@ -966,7 +967,8 @@ export function currentPlan(entries: readonly LogEntry[]): PlanItem[] | undefine
   for (let at = entries.length - 1; at >= 0; at--) {
     const entry = entries[at]
     if (entry.kind === 'you') return undefined
-    if (isPlan(entry) && entry.plan?.length) return entry.plan
+    // Kept short here too, for a list that was long when it was read.
+    if (isPlan(entry) && entry.plan?.length) return tidyPlan(entry.plan)
   }
   return undefined
 }

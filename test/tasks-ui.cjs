@@ -1519,9 +1519,10 @@ async function checkAgentMarks(T, agent) {
   ui.window.destroy()
 }
 
-// The agent's checklist does not grow with its list, as Claude Code's does not: it is a window on the item being done and those around
-// it, the rest counted ("… 19 done", "… 16 to do"), and "Show all" opens the whole list, which scrolls in a height of its own, at its
-// bottom where the latest items are, until the person scrolls up in it. Folded, it names the item being done.
+// The agent's checklist does not grow with its list, as Claude Code's does not: the card is given a list kept short (the latest finished
+// things and what is still open: shared/plan-items.ts), and shows a window on the item being done and those around it, the rest counted
+// ("… 3 done", "… 4 to do"); "Show all" opens the whole list, which scrolls in a height of its own, at its bottom where the latest items
+// are, until the person scrolls up in it. Folded, it names the item being done.
 async function checkPlanWindow(T, agent) {
   const ui = await open(T, agent, 1180)
   await ui.evaluate("localStorage.setItem('togle.taskviews', JSON.stringify({ 'claude:s2': 'cards' }))")
@@ -1531,65 +1532,65 @@ async function checkPlanWindow(T, agent) {
   const items = (count, doingAt = count - 3) => Array.from({ length: count }, (_, n) => ({ text: 'Step ' + (n + 1) + ' of the plan', state: n < doingAt ? 'done' : n === doingAt ? 'doing' : 'todo' }))
   const log = (list) => [{ id: 1, at: Date.now() - 60000, kind: 'you', text: 'Do the whole plan.' }, { id: 2, at: Date.now() - 50000, kind: 'step', step: 'plan', text: 'plan', plan: list }]
   const set = (list) => ui.evaluate('window.togleUITest.setTask("claude:s2", { state: "working", log: ' + JSON.stringify(log(list)) + ' })')
-  const total = (n) => ui.wait("document.querySelector('.task-plan .plan-count')?.textContent.includes(' of " + n + " done')")
+  const counted = (done, all) => ui.wait("document.querySelector('.task-plan .plan-count')?.textContent.replace(/\\s+/g,' ').trim()==='" + done + " of " + all + " done'")
   const rows = () => ui.evaluate("[...document.querySelectorAll('.task-plan li:not(.plan-gap)')].map(li=>li.querySelector('.plan-text').textContent.replace('Step ','').replace(' of the plan',''))")
   const gaps = () => texts(ui, '.task-plan .plan-gap')
   const height = () => ui.evaluate("Math.round(document.querySelector('.task-plan').getBoundingClientRect().height)")
   const place = () => ui.evaluate("(()=>{const list=document.querySelector('.plan-items');return {top:Math.round(list.scrollTop),max:list.scrollHeight-list.clientHeight,height:Math.round(list.getBoundingClientRect().height)}})()")
-  await set(items(24))
+  // A session of days: 103 things, 100 of them finished, is the latest eight finished and the three that are open. The card says so.
+  await set(items(103, 100))
   await ui.task('Rebuild the pricing page')
-  await total(24)
-  // A window: the item being done (22), the one before it, and the rest of the window; what is before it is counted.
-  assert.deepEqual(await rows(), ['20', '21', '22', '23', '24'])
-  assert.deepEqual(await gaps(), ['… 19 done'])
-  assert.equal(await ui.evaluate("document.querySelector('.task-plan li[data-state=doing] .plan-text').textContent"), 'Step 22 of the plan')
+  await counted(8, 11)
+  assert.deepEqual(await rows(), ['99', '100', '101', '102', '103'], 'a window on the item being done (101), the one before it, and the rest of the window')
+  assert.deepEqual(await gaps(), ['… 6 done'])
+  assert.equal(await ui.evaluate("document.querySelector('.task-plan li[data-state=doing] .plan-text').textContent"), 'Step 101 of the plan')
   const compact = await height()
   assert.ok(compact < 200, 'a small card: ' + compact)
-  // Longer, it is no taller; the window follows the item being done.
-  await set(items(60))
-  await total(60)
-  assert.equal(await height(), compact, 'sixty items take the room twenty-four did')
-  assert.deepEqual(await rows(), ['56', '57', '58', '59', '60'])
-  assert.deepEqual(await gaps(), ['… 55 done'])
-  // The item being done near the start: the items after it show, and what is left is counted.
-  await set(items(24, 3))
-  await total(24)
-  assert.deepEqual(await rows(), ['3', '4', '5', '6', '7'])
-  assert.deepEqual(await gaps(), ['… 2 done', '… 17 to do'])
+  // Three hundred is the same list, and the same card.
+  await set(items(300, 297))
+  await counted(8, 11)
+  assert.equal(await height(), compact, 'three hundred things take the room a hundred did')
+  assert.deepEqual(await rows(), ['296', '297', '298', '299', '300'])
+  // The item being done near the start of a list of open things: those after it show, and what is left is counted at each end.
+  await set(items(12, 4))
+  await counted(4, 12)
+  assert.deepEqual(await rows(), ['4', '5', '6', '7', '8'])
+  assert.deepEqual(await gaps(), ['… 3 done', '… 4 to do'])
   assert.ok(Math.abs((await height()) - compact) <= 24, 'with a count at each end it is a line taller, no more: ' + (await height()) + ' against ' + compact)
-  // All of it done: the last ones, and it is folded to its count.
+  // All of it done: the latest eight, folded to its count.
   await set(items(24, 99))
-  await total(24)
+  await counted(8, 8)
   assert.equal(await ui.evaluate("document.querySelector('.plan-head').getAttribute('aria-expanded')"), 'false', 'all done, it folds to its count')
-  await set(items(24))
-  await total(24)
   // The whole list, from "Show all": its own scroll, in a height of its own, at its bottom.
-  assert.deepEqual(await texts(ui, '.task-plan .plan-more'), ['Show all 24'])
+  await set(items(34, 3))
+  await counted(3, 34)
+  const windowed = await height()
+  assert.deepEqual(await texts(ui, '.task-plan .plan-more'), ['Show all 34'])
   await ui.evaluate("document.querySelector('.plan-more').click()")
-  await ui.wait("document.querySelectorAll('.task-plan li:not(.plan-gap)').length===24")
+  await ui.wait("document.querySelectorAll('.task-plan li:not(.plan-gap)').length===34")
   let at = await place()
   assert.ok(at.max > 20 && at.height <= 0.4 * 850 + 2, 'it scrolls in a height of its own, not the whole list: ' + JSON.stringify(at))
   assert.ok(Math.abs(at.top - at.max) <= 1, 'at its bottom, where the latest items are: ' + JSON.stringify(at))
   // Items come: it stays at the bottom; the person scrolls up in it: they do not take them back down.
-  await set(items(27))
-  await total(27)
+  await set(items(37, 3))
+  await counted(3, 37)
   at = await place()
   assert.ok(Math.abs(at.top - at.max) <= 1, 'with new items it is still at the bottom: ' + JSON.stringify(at))
   await ui.evaluate("(()=>{const list=document.querySelector('.plan-items');list.scrollTop=0;list.dispatchEvent(new Event('scroll'))})()")
   await ui.paint()
-  await set(items(30))
-  await total(30)
+  await set(items(40, 3))
+  await counted(3, 40)
   at = await place()
   assert.equal(at.top, 0, 'scrolled up, it stays where they put it: ' + JSON.stringify(at))
   // Show fewer: the window again, as small as before.
   assert.deepEqual(await texts(ui, '.task-plan .plan-more'), ['Show fewer'])
   await ui.evaluate("document.querySelector('.plan-more').click()")
   await ui.wait("document.querySelectorAll('.task-plan li:not(.plan-gap)').length===5")
-  assert.equal(await height(), compact, 'the window is as small as it was')
+  assert.equal(await height(), windowed, 'the window is as small as it was')
   // Folded, it names the item being done.
   await ui.evaluate("document.querySelector('.plan-head').click()")
   await ui.wait("!document.querySelector('.plan-items')")
-  assert.equal(await ui.evaluate("document.querySelector('.plan-head .plan-now').textContent"), 'Step 28 of the plan', 'folded, it says what is being done')
+  assert.equal(await ui.evaluate("document.querySelector('.plan-head .plan-now').textContent"), 'Step 4 of the plan', 'folded, it says what is being done')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }

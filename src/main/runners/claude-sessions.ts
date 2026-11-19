@@ -6,6 +6,7 @@ import { createReadStream, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { LogEntry, PlanItem, StepKind, TaskHistory } from '@shared/runner'
+import { tidyPlan } from '@shared/plan-items'
 import { lastTurns } from './history-turns'
 
 /**
@@ -439,6 +440,11 @@ interface Waiting {
   subject?: string
 }
 
+/** A thing on the checklist, and (once finished) which finished thing it was: later ones are kept when the list is tidied. */
+interface ListedTask extends PlanItem {
+  finished?: number
+}
+
 /** What is read of a session so far: its entries, and how far into its file. */
 export interface Conversation {
   entries: LogEntry[]
@@ -446,8 +452,10 @@ export interface Conversation {
   tools: Map<string, Waiting>
   /** Where what a step holds is in the file (what a command printed, its thinking), by the key the step is opened with. */
   places: Map<string, Place>
-  /** Its checklist as it stands, by the number Claude Code gave each thing on it. */
-  tasks: Map<string, PlanItem>
+  /** Its checklist as it stands, by the number Claude Code gave each thing on it. Tidied as it grows (see planned). */
+  tasks: Map<string, ListedTask>
+  /** How many things on it were finished, in all: the order in which they were. */
+  finishedCount: number
   next: number
   /** Where in the file the next line starts. */
   offset: number
@@ -455,7 +463,7 @@ export interface Conversation {
   cut: boolean
 }
 
-export const newConversation = (): Conversation => ({ entries: [], tools: new Map(), places: new Map(), tasks: new Map(), next: 1, offset: 0, cut: false })
+export const newConversation = (): Conversation => ({ entries: [], tools: new Map(), places: new Map(), tasks: new Map(), finishedCount: 0, next: 1, offset: 0, cut: false })
 
 function push(state: Conversation, kind: LogEntry['kind'], text: string, at: number, more: Partial<LogEntry> = {}): LogEntry {
   const entry: LogEntry = { id: state.next++, at, kind, text, ...more }
@@ -506,9 +514,16 @@ function read(state: Conversation, file: string, at: number): void {
   } else step(state, 'read', file, at, { paths: [file] })
 }
 
-/** The checklist as it stands now, as a step. Changes one after another are one step that holds the last of them. */
+/**
+ * The checklist as it stands now, as a step. Changes one after another are one step that holds the last of them. A session that goes on
+ * for days adds to its checklist and finishes things on it and rarely clears it (a thousand things, in every step that shows it): only
+ * the latest finished things are kept, and every one still to do (shared/plan-items.ts). What goes is forgotten here too.
+ */
 function planned(state: Conversation, at: number): void {
-  const plan = [...state.tasks.values()].map((item) => ({ ...item }))
+  const listed = [...state.tasks.entries()]
+  const kept = new Set(tidyPlan(listed.map(([, item]) => item), (item, index) => item.finished ?? index))
+  if (kept.size < listed.length) state.tasks = new Map(listed.filter(([, item]) => kept.has(item)))
+  const plan = [...state.tasks.values()].map(({ text, state: how }) => ({ text, state: how }))
   if (!plan.length) return
   const text = `${plan.filter((item) => item.state === 'done').length} of ${plan.length} done`
   const last = lastOf(state)
@@ -571,7 +586,10 @@ function called(state: Conversation, block: Json, at: number): void {
     const to = str(input.status)
     if (to === 'deleted') state.tasks.delete(String(input.taskId))
     else if (item) {
-      if (to === 'completed') item.state = 'done'
+      if (to === 'completed') {
+        if (item.state !== 'done') item.finished = ++state.finishedCount
+        item.state = 'done'
+      }
       else if (to === 'in_progress') item.state = 'doing'
       else if (to === 'pending') item.state = 'todo'
       if (str(input.subject)) item.text = str(input.subject).slice(0, NAME_MOST)

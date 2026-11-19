@@ -183,6 +183,36 @@ test('what else it did: files read, searches, the web, helpers, other tools and 
   assert.equal(history.entries.some((entry) => entry.more), false, 'none of these has anything to open')
 })
 
+test('a checklist that has grown for days is kept short: the latest finished things and every one still open, in every step that shows it', async () => {
+  const { PLAN_DONE_KEPT, PLAN_OPEN_KEPT } = T
+  const lines = [line(asked(11, 'Keep working through the backlog.'))]
+  let second = 1
+  // Three hundred things, each put on the checklist, started and finished with other work in between; the last eight are left
+  // (four being done, four to do).
+  for (let n = 1; n <= 300; n++) {
+    lines.push(line(said(11, [call('c' + n, 'TaskCreate', { subject: 'Thing ' + n, description: 'x', activeForm: 'Doing' })], { timestamp: at(second++) })))
+    lines.push(line(answer(11, 'c' + n, 'Task #' + n + ' created successfully: Thing ' + n, second++, { toolUseResult: { task: { id: String(n), subject: 'Thing ' + n, description: 'x' } } })))
+    if (n > 292) {
+      if (n <= 296) lines.push(line(said(11, [call('s' + n, 'TaskUpdate', { taskId: String(n), status: 'in_progress' })], { timestamp: at(second++) })))
+      continue
+    }
+    lines.push(line(said(11, [call('s' + n, 'TaskUpdate', { taskId: String(n), status: 'in_progress' })], { timestamp: at(second++) })))
+    lines.push(line(said(11, [call('r' + n, 'Read', { file_path: 'src/file' + n + '.ts' })], { timestamp: at(second++) })))
+    lines.push(line(said(11, [call('u' + n, 'TaskUpdate', { taskId: String(n), status: 'completed' })], { timestamp: at(second++) })))
+    lines.push(line(said(11, [call('g' + n, 'Grep', { pattern: 'thing' + n, path: 'src' })], { timestamp: at(second++) })))
+  }
+  write(11, lines.join(''))
+  const history = await claudeConversation(id(11))
+  const plans = history.entries.filter((entry) => entry.step === 'plan')
+  assert.ok(plans.length > 100, 'a step of its own for each change between other work: ' + plans.length)
+  assert.ok(plans.every((entry) => entry.plan.length <= PLAN_DONE_KEPT + PLAN_OPEN_KEPT), 'no step holds more than the most that is kept: ' + Math.max(...plans.map((entry) => entry.plan.length)))
+  const last = plans.at(-1)
+  assert.deepEqual(last.plan.map((entry) => entry.text), [...Array.from({ length: PLAN_DONE_KEPT }, (_, n) => 'Thing ' + (285 + n)), ...Array.from({ length: 8 }, (_, n) => 'Thing ' + (293 + n))], 'the latest finished, then everything still open')
+  assert.deepEqual(last.plan.map((entry) => entry.state), [...Array(PLAN_DONE_KEPT).fill('done'), 'doing', 'doing', 'doing', 'doing', 'todo', 'todo', 'todo', 'todo'])
+  assert.equal(last.text, PLAN_DONE_KEPT + ' of 16 done', 'its words count what is on it')
+  assert.ok(JSON.stringify(history).length < 700_000, 'what is sent to the window does not grow with the days: ' + JSON.stringify(history).length)
+})
+
 test('thinking: its time is told, thoughts in a row are one, and a short one with no words is not told', async () => {
   const thinks = (uuid, words, ms, seconds) => said(10, [{ type: 'thinking', thinking: words, signature: 'x' }], { uuid, timestamp: at(seconds), ...(ms === undefined ? {} : { thinkingDurationMs: ms }) })
   write(10,
