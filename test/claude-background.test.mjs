@@ -597,6 +597,77 @@ test('Stop on a closed screen opens it out of sight and presses Esc once it take
   }
 })
 
+// A prompt as Claude Code 2.1.328 edits it (tried on a prompt of three lines): Ctrl+A goes to the start of its line, Ctrl+K takes the rest of the line
+// away, and Backspace takes the character before the cursor away (at the start of a line, the break before it, which joins it to the line above).
+const editedBy = (prompt, keys) => {
+  const lines = prompt.split('\n')
+  let row = lines.length - 1
+  let col = lines[row].length
+  for (const key of keys) {
+    if (key === '\x01') col = 0
+    else if (key === '\x0b') lines[row] = lines[row].slice(0, col)
+    else if (key === '\x7f') {
+      if (col > 0) { lines[row] = lines[row].slice(0, col - 1) + lines[row].slice(col); col-- }
+      else if (row > 0) { col = lines[row - 1].length; lines[row - 1] += lines[row]; lines.splice(row, 1); row-- }
+    }
+  }
+  return lines.join('\n')
+}
+
+test('the keys that empty the prompt after the queue was given back empty it: one message, several, with lines of their own, long ones; and do nothing more to an empty one', () => {
+  for (const words of [['one'], ['first queued', 'second queued'], ['a\nb\nc', 'd'], ['x'.repeat(300)], ['x'.repeat(100) + '\n' + 'y'.repeat(100), 'z']]) {
+    assert.equal(editedBy(words.join('\n'), T.clearKeys(words)), '', JSON.stringify(words).slice(0, 50))
+  }
+  assert.equal(editedBy('', T.clearKeys(['one'])), '', 'an empty prompt stays empty')
+  // Ctrl+C and Esc would stop the turn that is running: neither is among the keys.
+  assert.equal(/[\x03\x1b]/.test(T.clearKeys(['one', 'two'])), false)
+})
+
+test('Take back presses the Up arrow once on a screen that was closed, once it takes keys, and empties the prompt a line at a time, without stopping the turn', { timeout: 60_000 }, async () => {
+  // The stand-in loses what a screen is given in its first 1.2 seconds, as Claude Code does; the keys wait for 2 s.
+  const { backend, home } = claude({ env: { FAKE_CLAUDE_READY_MS: '1200' } })
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'long', title: 'Take back' })
+    const jobId = task.screen.job
+    await until(() => task.state === 'working', 'the turn to be at work')
+    await task.screen.hide()
+    assert.equal(task.terminal, undefined)
+    const words = ['first queued', 'second queued\nwith two lines']
+    await task.takeBackQueue(words)
+    assert.ok(task.terminal, 'its screen was opened out of sight')
+    const keys = T.clearKeys(words)
+    const count = (key) => keys.split(key).length - 1
+    await until(() => job(home, jobId).kills === count('\x0b'), 'the prompt to be emptied')
+    const seen = job(home, jobId)
+    assert.equal(seen.ups, 1, 'the Up arrow was pressed once, and taken')
+    assert.equal(seen.homes, count('\x01'))
+    assert.equal(seen.backspaces, count('\x7f'))
+    assert.equal(seen.escapes, undefined, 'no Esc')
+    assert.equal(task.state, 'working', 'the turn goes on')
+    assert.equal(alive(seen.pid), true)
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Take back presses nothing while a question or a permission waits on the screen: the arrow would move its choice', { timeout: 60_000 }, async () => {
+  const { backend, home } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Waiting' })
+    const jobId = task.screen.job
+    await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
+    type(task, 'run a')
+    await until(() => task.pending.length === 1, 'the request')
+    await assert.rejects(task.takeBackQueue(['one']), /waits for you on its screen/)
+    await sleep(300)
+    assert.equal(job(home, jobId).ups, undefined, 'no key was pressed')
+    assert.equal(job(home, jobId).kills, undefined)
+    task.answer(task.pending[0].id, 'allow-once')
+  } finally {
+    await backend.close()
+  }
+})
+
 test('Stop pressed twice presses Esc once, and presses none for a session that is not at work: two Esc close together open the rewind menu, which takes the next words', { timeout: 60_000 }, async () => {
   const { backend, home, text } = claude()
   try {

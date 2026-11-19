@@ -149,6 +149,8 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   handle('runners:send', (key, text) => hub.sendOrHold(word(key, 'The task'), typeof text === 'string' ? text : ''))
   // An interrupt: what the agent does is stopped and these words go in as soon as it has stopped (what was queued waits for the end of that turn).
   handle('runners:interrupt', (key, text) => hub.interrupt(word(key, 'The task'), typeof text === 'string' ? text : ''))
+  // What waits in the agent's own queue, given back to change: the words, in the order they were queued.
+  handle('runners:take-back', (key) => hub.takeBack(word(key, 'The task')))
   handle('runners:held', (key, action, index) => hub.held(word(key, 'The task'), action === 'send' ? 'send' : action === 'interrupt' ? 'interrupt' : 'drop', typeof index === 'number' && Number.isInteger(index) && index >= 0 ? index : undefined))
   handle('runners:picture', async (key, picture) => {
     const found = await hub.picture(word(key, 'The task'), word(picture, 'The picture').slice(0, 200))

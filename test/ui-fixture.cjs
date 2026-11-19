@@ -418,6 +418,14 @@ module.exports = function install(fixture) {
     if (takesNoWords(found)) { found.held = [...(found.held ?? []), text]; delete found.heldNote; delete found.heldPaused; runnerChanged(); return }
     found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged()
   }
+  // What waits in the agent's own queue (a task given `history.queued`), given back as main does it: its screen's Up arrow and an emptied prompt.
+  // The words come back in the order they were queued, and the queue is empty.
+  api.takeBackRunnerQueue = async key => {
+    record('takeBackRunnerQueue', [key]); const found = runnerFind(key)
+    const words = found.history?.queued ?? []
+    if (found.history) { found.history = { ...found.history }; delete found.history.queued }
+    runnerChanged(); return clone(words)
+  }
   api.heldRunnerReply = async (key, action, index) => {
     record('heldRunnerReply', index === undefined ? [key, action] : [key, action, index]); const found = runnerFind(key)
     if (action === 'drop') {

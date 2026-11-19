@@ -2800,6 +2800,23 @@ async function checkSentTicks(T, agent) {
   await ui.evaluate('window.togleUITest.setTask("claude:t1", ' + JSON.stringify({ state: 'working', history: { entries: [...before, { id: 300, at: Date.now() + 1000, kind: 'you', text: 'Add a dark mode' }, { id: 301, at: Date.now() + 2000, kind: 'you', text: 'Second try' }], queued: ['Also the footer'] } }) + ')')
   await ui.wait("!!document.querySelector('.held-row .ticks')")
   assert.equal(await ui.evaluate("document.querySelector('.held-row .ticks').getAttribute('data-state')"), 'delivered', 'two grey ticks: the agent has it, and takes it in as it goes')
+  // Take back: all that waits in Claude Code's own queue comes back to the box, in the order it was queued, behind what was typed there; the queue is
+  // empty then (Claude Code's Up arrow gives the queue back, and the prompt is emptied: main does that). Not offered for a task with no screen of its own
+  // (the one above has none), and not for what Togle holds, which has an Edit and a cross of its own.
+  assert.deepEqual(await texts(ui, '.held-foot button'), [], 'no Take back for a task with no screen of its own')
+  const queuing = [{ id: 1, at: Date.now() - 600_000, kind: 'you', text: 'Rebuild the pricing page.' }]
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:t3', runner: 'claude', title: 'Queue task', folder: 'C:\\work\\notes', state: 'working', screen: true, terminal: false, mine: true, line: 'Queue task', history: { entries: queuing, queued: ['Also the footer', 'And a dark mode'] } }) + ', "")')
+  await ui.task('Queue task')
+  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Queue task'")
+  if (await ui.evaluate("!document.querySelector('.task-reply textarea')")) await ui.click('.view-switch button', 'Chat')
+  await ui.wait("document.querySelectorAll('.held-row').length===2")
+  assert.deepEqual(await texts(ui, '.held-foot button'), ['Take back'], 'one button for the agent\u2019s own queue')
+  await ui.fill('.task-reply textarea', 'Typed before')
+  await ui.click('.held-foot button', 'Take back')
+  await ui.wait("document.querySelectorAll('.held-row').length===0")
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), 'Typed before\n\nAlso the footer\nAnd a dark mode', 'the words are in the box, in the order they were queued')
+  assert.deepEqual((await ui.calls('takeBackRunnerQueue')).map((call) => call.args), [['claude:t3']], 'main was asked once')
+  assert.equal(await ui.evaluate("document.activeElement === document.querySelector('.task-reply textarea')"), true, 'and the keys are in the box')
   // What Togle holds for an agent that cannot take it yet (a question waits on its screen): a clock, in the same card, and not a card in the conversation.
   const asked = [{ id: 1, at: Date.now() - 600_000, kind: 'you', text: 'Rebuild the pricing page.' }]
   await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:t2', runner: 'claude', title: 'Held task', folder: 'C:\\work\\notes', state: 'waiting', screen: true, terminal: false, mine: true, waitingFor: 'an answer', line: 'Held task', history: { entries: asked } }) + ', "")')
@@ -3063,7 +3080,8 @@ async function checkReplyDock(T, agent) {
   assert.deepEqual(await texts(ui, '.held-text'), ['Also the header, please.', 'And the footer.'], 'what the agent has queued, in the order typed')
   assert.equal(await ui.evaluate("document.querySelector('.held-reply .held-count').textContent"), '2')
   assert.equal(await ui.evaluate("document.querySelector('.held-foot .held-line').textContent"), 'Claude Code takes these in as it works.')
-  assert.equal(await ui.evaluate("document.querySelectorAll('.held-reply button').length"), 0, 'it is the agent\'s queue: no button of Togle\'s on it')
+  // It is the agent's queue: no Edit and no cross of Togle's on a message (Claude Code gives back all of it or none), only Take back for all of it.
+  assert.deepEqual(await texts(ui, '.held-reply button'), ['Take back'], 'it is the agent\'s queue: one button, for all of it')
   assert.equal(await ui.evaluate("!!document.querySelector('.you-row .task-you') && [...document.querySelectorAll('.task-you')].some(e=>e.textContent==='Also the header, please.')"), false, 'and it is not in the conversation until the agent takes it in')
   // Sent from here while it only works: typed at once (its own queue takes it, as on its screen), and Togle holds nothing of it.
   assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').placeholder"), 'Reply, or hold F9 and talk', 'it takes words now: no "when it finishes"')

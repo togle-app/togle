@@ -121,6 +121,9 @@ class FakeTask extends T.TaskBase {
     // As the real Claude Code and Hermes tasks say: their screens take a line typed while they only work. The stand-in named hermes here
     // models an agent written to on its screen that does not (it holds words while it works), which no real agent of Togle's is now.
     this.takesWordsWhileWorking = runner === 'claude'
+    // As the real Claude Code task has it: its own queue can be given back (the Up arrow on its screen). Codex and Hermes have no such queue.
+    this.taken = []
+    if (runner === 'claude') this.takeBackQueue = async (words) => { this.taken.push([...words]) }
   }
   async send(text) {
     this.sent.push(text)
@@ -341,6 +344,45 @@ test('Claude Code takes words while it works, its own queue holding them: they a
     await new Promise((resolve) => setTimeout(resolve, 1_900))
     assert.deepEqual(task.sent.at(-1), 'and add a test', 'it goes in once it works again')
     assert.equal((await hub.list()).find((t) => t.key === view.key).held, undefined)
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+})
+
+test('Take back gives Claude Code’s own queue back, in the order it was queued, once its screen was told what it held; what the turn took in meanwhile is not among the words', async () => {
+  const claude = new FakeBackend('claude', { screens: true })
+  const record = { entries: [{ id: 1, at: 1, kind: 'you', text: 'Fix it' }], queued: ['Also the footer', 'And a test'] }
+  claude.history = async () => ({ entries: record.entries.map((entry) => ({ ...entry })), queued: [...record.queued] })
+  const { hub } = hubOf([claude])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix it' })
+    const task = claude.started[0]
+    // The queue is given back: its record says it is empty a moment after the key.
+    task.takeBackQueue = async (words) => { task.taken.push([...words]); record.queued = [] }
+    assert.deepEqual(await hub.takeBack(view.key), ['Also the footer', 'And a test'])
+    assert.deepEqual(task.taken, [['Also the footer', 'And a test']], 'the screen was told what the queue held')
+    // Nothing is queued: nothing is pressed.
+    assert.deepEqual(await hub.takeBack(view.key), [])
+    assert.equal(task.taken.length, 1)
+    // The turn took one message in before the key came: it is in the conversation now, and not among the words taken back.
+    record.queued = ['One', 'Two']
+    task.takeBackQueue = async (words) => { task.taken.push([...words]); record.queued = []; record.entries.push({ id: 2, at: 2, kind: 'you', text: 'One' }) }
+    assert.deepEqual(await hub.takeBack(view.key), ['Two'])
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+})
+
+test('Take back is for an agent with a queue of its own: Codex has none, and says so', async () => {
+  const codex = new FakeBackend('codex')
+  const { hub } = hubOf([codex])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'codex', folder, prompt: 'Write the notes' })
+    await assert.rejects(hub.takeBack(view.key), /Codex has no queue of its own to take back/)
   } finally {
     await hub.dispose()
     rmSync(folder, { recursive: true, force: true })

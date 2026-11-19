@@ -854,6 +854,11 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
               })
               return sent
             }}
+            onTakeBack={async () => {
+              let words: string[] = []
+              await act(async () => { words = await api.takeBackRunnerQueue(detail.task.key) })
+              return words
+            }}
             onStop={() => act(() => api.stopRunnerTask(detail.task.key))}
             onEndCommands={() => act(() => api.endRunnerCommands(detail.task.key))}
             onOpen={() => act(() => api.openRunnerTask(detail.task.key))}
@@ -1060,6 +1065,8 @@ interface PanelProps {
   onHeld: (action: 'send' | 'drop' | 'interrupt', index?: number) => Promise<void>
   /** Stops what the agent does and sends these words as soon as it has: true when they went in. */
   onInterrupt: (text: string) => Promise<boolean>
+  /** Takes what waits in the agent's own queue back out of it: the words, in the order they were queued (none when it could not). */
+  onTakeBack: () => Promise<string[]>
   onStop: () => Promise<void>
   onEndCommands: () => Promise<void>
   onOpen: () => Promise<void>
@@ -1095,7 +1102,7 @@ function usePressed(task: TaskView): [string | undefined, (name: string, work: (
   return [pressed, press]
 }
 
-function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterrupt, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack, logRead, place }: PanelProps) {
+function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterrupt, onTakeBack, onStop, onEndCommands, onOpen, view, onView, onTakeOver, takeOverAsked, onHandBack, handedBack, logRead, place }: PanelProps) {
   const { task, log } = detail
   const talkKey = useHotkeys().find((key) => key.id === 'dictate')?.keys || 'F9'
   // A task whose agent has a screen Togle can show is seen in two views; any other task has the one it has.
@@ -1395,6 +1402,22 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   // Claude Code starts what it holds as its next turns, as Esc does on its screen.
   const inQueue = running ? history?.queued ?? [] : []
   const queueLength = inQueue.length + held.length
+  // What is in the agent's own queue (Claude Code's) can be taken back to change: all of it comes back to the box, as the Up arrow brings it back to
+  // the prompt on its screen. What Togle holds has its own Edit and cross, a message at a time.
+  // (Not while it waits on its screen for a question or a permission: the arrow would move that choice.)
+  const canTakeBack = task.mine && task.runner === 'claude' && !!task.screen && inQueue.length > 0 && task.state !== 'waiting' && !task.waitingFor && task.pending.length === 0
+  const takeBack = async (): Promise<void> => {
+    const words = await onTakeBack()
+    if (!words.length) return
+    const back = words.join('\n')
+    setText(text.trim() ? `${text.trimEnd()}\n\n${back}` : back)
+    replyText.current?.focus()
+  }
+  const takeBackButton = canTakeBack && (
+    <button type="button" className="small" disabled={!!pressed} onClick={press('take-back', takeBack)} title="Takes what is queued back to the box, to change it and send it again">
+      {pressed === 'take-back' ? 'Taking back…' : 'Take back'}
+    </button>
+  )
   const heldWaitsForYou = !!task.heldPaused || task.state === 'stopped' || task.state === 'failed'
   const heldLine = task.heldNote ? `It did not go in: ${task.heldNote}` : heldWaitsForYou ? 'Not sent: the task stopped.' : `Goes in when ${agentOf(task)} finishes this turn.`
   useEffect(() => {
@@ -1727,10 +1750,14 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                           ? <button type="button" className="small" disabled={!!pressed} onClick={press('held-send', () => onHeld('send'))}>{pressed === 'held-send' ? 'Sending…' : 'Send now'}</button>
                           : <button type="button" className="small" disabled={!!pressed} onClick={press('held-interrupt', () => onHeld('interrupt'))} title={`Stops what ${agentOf(task)} is doing and sends what is queued now`}>{pressed === 'held-interrupt' ? 'Interrupting…' : 'Interrupt and send'}</button>}
                         {held.length > 1 && <button type="button" className="ghost small" onClick={() => void onHeld('drop')}>Remove all</button>}
+                        {takeBackButton}
                       </span>
                     </>
                   ) : (
-                    <span className="held-line">{agentOf(task)} takes {inQueue.length === 1 ? 'it' : 'these'} in as it works.</span>
+                    <>
+                      <span className="held-line">{agentOf(task)} takes {inQueue.length === 1 ? 'it' : 'these'} in as it works.</span>
+                      {takeBackButton && <span className="held-actions">{takeBackButton}</span>}
+                    </>
                   )}
                 </div>
               </div>

@@ -217,6 +217,11 @@ export interface TogleApi {
    * or taken back, all of it or the one message at `index`.
    */
   heldRunnerReply(key: string, action: 'send' | 'drop' | 'interrupt', index?: number): Promise<void>
+  /**
+   * What waits in an agent's own queue (words typed while it works), given back to change: all of it comes out of the queue and its screen's
+   * prompt is emptied, and the words come back in the order they were queued. Claude Code only; any other says it has no queue of its own.
+   */
+  takeBackRunnerQueue(key: string): Promise<string[]>
   /** A picture in a task's conversation, by the key it came with, as a data: address; null when it is no longer kept. */
   runnerPicture(key: string, picture: string): Promise<string | null>
   /** Allows or refuses one command or edit a task waits to do. Allowing is once only. */

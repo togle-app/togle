@@ -133,6 +133,7 @@ const api: TogleApi = {
   sendToRunnerTask: (key, text) => ipcRenderer.invoke('runners:send', key, text),
   interruptRunnerTask: (key, text) => ipcRenderer.invoke('runners:interrupt', key, text),
   heldRunnerReply: (key, action, index) => ipcRenderer.invoke('runners:held', key, action, index),
+  takeBackRunnerQueue: key => ipcRenderer.invoke('runners:take-back', key),
   runnerPicture: (key, picture) => ipcRenderer.invoke('runners:picture', key, picture),
   answerRunnerTask: (key, requestId, decision) => ipcRenderer.invoke('runners:answer', key, requestId, decision),
   replyRunnerTask: (key, requestId, text) => ipcRenderer.invoke('runners:reply', key, requestId, text),

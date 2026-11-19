@@ -98,6 +98,8 @@ const HELD_MOST = 20
 const HELD_SETTLE_MS = 1_500
 /** How long an interrupt waits for the agent to stop before it says it did not (Stop is asked, and an agent may take a moment to show it). */
 const STOP_WAIT_MS = 8_000
+/** How long the agent's record is given to say that its queue was taken back (Claude Code writes it within a moment of the key). */
+const TAKE_BACK_WAIT_MS = 3_000
 
 const LOG_LIMIT = 400
 const keyOf = (runner: RunnerKind, id: string): string => `${runner}:${id}`
@@ -442,6 +444,34 @@ export class RunnerHub {
     }
     if (this.takesNoWords(owned)) throw new Error(`${this.nameOf(owned.handle.runner)} is still working. It goes in when it finishes.`)
     await this.deliverHeld(owned, true)
+  }
+
+  /**
+   * Takes back what waits in an agent's own queue (words typed on its screen, or sent from Chat, while it works), to change it: its screen gives
+   * all of it back to its prompt and the prompt is emptied (`takeBackQueue`: all of the queue or none, as the Up arrow does it), and the words are
+   * returned in the order they were queued, for the person to change in the reply box. Words the turn took in before the key came are in its
+   * conversation by then, and are not among them. Where the agent's record has not yet said the queue is empty (it is written within a moment),
+   * the words are returned all the same: a word twice is better than one lost, and the queue card shows what is left.
+   */
+  async takeBack(key: string): Promise<string[]> {
+    const owned = this.mine(key)
+    const { handle } = owned
+    if (!handle.takeBackQueue) throw new Error(`${this.nameOf(handle.runner)} has no queue of its own to take back.`)
+    const before = await this.history(key, false)
+    const queued = before?.queued ?? []
+    if (!queued.length) return []
+    await handle.takeBackQueue(queued)
+    let after = before
+    for (let waited = 0; waited < TAKE_BACK_WAIT_MS; waited += 150) {
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      after = await this.history(key, false)
+      if (!after?.queued?.length) break
+    }
+    const there = new Set((before?.entries ?? []).filter((entry) => entry.kind === 'you').map((entry) => entry.text))
+    const takenIn = new Set((after?.entries ?? []).filter((entry) => entry.kind === 'you' && !there.has(entry.text)).map((entry) => entry.text))
+    this.touch(owned)
+    this.fresh()
+    return queued.filter((words) => !takenIn.has(words))
   }
 
   /** Whether a task's agent is at work or asks something: what an interrupt would stop. */

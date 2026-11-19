@@ -108,6 +108,12 @@ export interface TaskHandle {
    * answer it). Without this, words sent while it works wait in Togle until its turn has ended.
    */
   readonly takesWordsWhileWorking?: boolean
+  /**
+   * Gives what waits in its agent's own queue (words typed while it works) back to the person: it comes out of the queue and its prompt is
+   * left empty, so that the words are Chat's to change and send again. All of the queue or none, as Claude Code's Up arrow does it: `words` are
+   * what the queue holds, in the order it was typed. Left out by an agent that has no queue of its own.
+   */
+  takeBackQueue?(words: readonly string[]): Promise<void>
   /** What the task started that still runs in the background, when its agent tells (Claude Code's shells). */
   readonly shells?: readonly BackgroundShell[]
   /** The commands and models its agent told it has for this task, so far. Left out by an agent that tells none. */

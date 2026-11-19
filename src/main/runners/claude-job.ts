@@ -162,6 +162,31 @@ const ESC_AFTER_MS = 2_000
 /** How soon after one Esc another may be pressed: two within the window of a double press open Claude Code's rewind menu (measured: 0.3 s apart). */
 const ESC_APART_MS = 2_000
 
+/**
+ * Taking back Claude Code's queue (measured on 2.1.328): the Up arrow on its screen gives all of what is queued back to its prompt (a
+ * `popAll` line in the session's file for each message), one message to a line; Enter there would queue them again as one message. A prompt of
+ * several lines is emptied from its end, a line at a time: Ctrl+A (to the start of the line), Ctrl+K (to its end) and Backspace (the line break
+ * before it) take one line away (tried on a prompt of three lines; Ctrl+U alone takes only the last line, and Esc or Ctrl+C would stop the turn
+ * that is running). More of them than there are lines do nothing to an empty prompt, and a line that wraps is taken in as many steps as it has rows.
+ */
+const UP_KEY = '\x1b[A'
+const ONE_LINE_BACK = '\x01\x0b\x7f'
+/** How long Claude Code is given to put the queue in its prompt, before the prompt is emptied. */
+const POP_MS = 450
+/** A screen's width, as least as it is in Togle's window, to count the rows a long line takes (more than are needed is harmless). */
+const NARROWEST_COLUMNS = 40
+
+/**
+ * The keys that empty the prompt after the Up arrow gave it `words` (one message to a line, and as many lines as each has of its own; a long
+ * line wraps into several rows): a line at a time from the end, one step more than there are rows, and then one to empty what the last step
+ * left (a first line has no break before it for the Backspace). Steps past an empty prompt do nothing.
+ */
+export function clearKeys(words: readonly string[]): string {
+  const all = words.join('\n')
+  const steps = all.split('\n').length + Math.ceil(all.length / NARROWEST_COLUMNS) + 2
+  return ONE_LINE_BACK.repeat(steps) + '\x01\x0b'
+}
+
 const NOTICED_ELSEWHERE = /opened in another window/i
 
 export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
@@ -478,6 +503,25 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     }
     screen.write('\x1b')
     this.escapedAt = Date.now()
+    this.lastActive = Date.now()
+    this.context.look()
+  }
+
+  /**
+   * Gives the queue back, as the Up arrow does on the screen in a terminal: all that was typed while the session works comes out of its queue
+   * into its prompt, and the prompt is emptied again, so that the words (`words`, in the order they were queued) are the person's to change in
+   * Chat. The screen is opened out of sight when it is closed, and the keys wait until it takes them. Nothing is pressed for a session that is
+   * over. See UP_KEY for what was measured.
+   */
+  async takeBackQueue(words: readonly string[]): Promise<void> {
+    if (this.over) throw new Error('That task is over.')
+    // Over a question or a permission on its screen the arrow would move its choice: nothing is pressed until that is answered.
+    if (this.state === 'waiting' || this.waitingFor) throw new Error('It waits for you on its screen. Take the queue back when that is answered.')
+    const screen = await this.screenForKeys(ESC_AFTER_MS)
+    if (!screen) throw new Error(this.closed ?? 'Its screen could not be opened.')
+    screen.write(UP_KEY)
+    await new Promise((resolve) => setTimeout(resolve, POP_MS))
+    screen.write(clearKeys(words))
     this.lastActive = Date.now()
     this.context.look()
   }
