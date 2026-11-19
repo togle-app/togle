@@ -174,6 +174,14 @@ function screen() {
   process.stdout.write(`HERMES SCREEN ${resume ?? name}\r\n`)
   title('✓')
   if (resume !== undefined) process.stdout.write(`RESUMED ${row.id}\r\n`)
+  // FAKE_HERMES_RESUME_BUSY: the session was in the middle of a turn when this screen opened (it began on another screen, or before this one was
+  // closed): the screen says so by its title at once, and the turn ends a moment later.
+  if (resume !== undefined && process.env.FAKE_HERMES_RESUME_BUSY) {
+    busy = true
+    title('⏳')
+    process.stdout.write('resumed mid-turn\r\n')
+    setTimeout(() => end('mid done'), 2500)
+  }
   if (words) setTimeout(() => turn(words), 300)
   let line = ''
   if (process.stdin.isTTY) process.stdin.setRawMode(true)

@@ -460,22 +460,28 @@ class HermesTask extends TaskBase implements ScreenSide {
    * refused (see `submit`).
    */
   async send(words: string): Promise<void> {
-    if (this.state === 'waiting' || this.waitingFor) throw new Error('It waits for you on its screen. Reply when that is answered.')
-    const working = this.state === 'working'
+    const asks = (): boolean => this.state === 'waiting' || !!this.waitingFor
+    if (asks()) throw new Error('It waits for you on its screen. Reply when that is answered.')
     refuseCommand(words)
-    if (!this.screenTask) await this.show()
+    const opened = !this.screenTask
+    if (opened) await this.show()
     const screen = this.screenTask
     if (!screen) throw new Error(this.closed ?? 'Its screen could not be opened.')
-    if (working) {
-      // A screen at work does not go quiet, and no turn begins that its title could show: it is typed on once it has drawn (a screen
-      // just opened loads the session first, for some seconds), and the turn goes on.
-      await screen.drawn(this.context.loadMs, Math.max(25_000, this.context.loadMs))
+    // A screen just opened loads the session before it takes words, for some seconds, and says by its window title what the session does:
+    // it may work, as the turn began before (on another screen, or before this one was closed: a task whose screen is closed rests as idle
+    // here). It is given time for both, and the title is read after. A screen at work does not go quiet, so it is not waited on to settle.
+    if (opened || this.state === 'working') await screen.drawn(this.context.loadMs, Math.max(25_000, this.context.loadMs))
+    if (asks()) throw new Error('It waits for you on its screen. Reply when that is answered.')
+    if (this.state !== 'working') {
+      // A screen that was just opened prints with long pauses: it is given a longer quiet than a program that draws at once.
+      await screen.settled(1_500, 20_000)
+      if (asks()) throw new Error('It waits for you on its screen. Reply when that is answered.')
+    }
+    if (this.state === 'working') {
+      // No turn begins that its title could show: the words steer the turn that works, and it goes on.
       await screen.submit(words)
       return
     }
-    // A screen that was just opened loads the session before it takes words, with long pauses between what it prints: it is given
-    // a longer quiet than a program that draws at once.
-    await screen.settled(1_500, 20_000)
     const before = this.busyMarks
     await screen.submit(words)
     // At work from now: the idle screen that shows first is not the end of this turn.

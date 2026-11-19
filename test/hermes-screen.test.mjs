@@ -55,6 +55,7 @@ function hermes(options = {}) {
     told: (chunk) => chunks.push(chunk),
     findMs: 80,
     cacheMs: 0,
+    loadMs: 200,
     ...(options.backend ?? {})
   })
   const text = (task) => strip(chunks.filter((chunk) => chunk.key === `hermes:${task.id}`).map((chunk) => chunk.data).join('')).replace(/\s+/g, ' ')
@@ -266,6 +267,23 @@ test('a reply sent while the turn works is typed at once and steers it, as a lin
     const asking = await backend.start({ folder: scratch(), prompt: 'ask' })
     await until(() => asking.state === 'waiting', 'the second task to wait')
     await assert.rejects(() => asking.send('y'), /waits for you on its screen/, 'a line typed then would answer its question')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a reply sent to a task whose screen was closed while its turn went on is typed to that turn: the screen that opens says it works', { timeout: 30_000 }, async () => {
+  const backend = hermes({ env: { FAKE_HERMES_RESUME_BUSY: '1' } })
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'say ok' })
+    const events = watch(task)
+    await until(() => events.some((e) => e.type === 'turn-ended') && task.screen.job.startsWith('local-'), 'the first turn to end, and its session to be found')
+    await task.screen.hide()
+    assert.equal(task.state, 'idle', 'a task whose screen is closed rests as idle: what the session does is not told')
+    // The screen that opens finds the session in the middle of a turn: the words steer it, and Hermes is not told it did not take them.
+    await task.send('while it works')
+    await until(() => backend.text(task).includes('steering: while it works'), 'the words to reach the turn')
+    await until(() => backend.text(task).includes('mid done + while it works'), 'the answer to take them in')
   } finally {
     await backend.close()
   }
