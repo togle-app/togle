@@ -81,6 +81,25 @@ const holdOver = (ui, title, target) => ui.evaluate("(async()=>{const item=[...d
 const letGo = (ui, title) => ui.evaluate("[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent===" + JSON.stringify(title) + ").dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:window.__held}))")
 // A task in the Agents list dragged and dropped on what `target` finds, as the page sees a drag (a real drag is tried in the layout harness).
 const dragOnto = (ui, title, target) => ui.evaluate("(async()=>{const item=[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent===" + JSON.stringify(title) + ");const to=" + target + ";const data=new DataTransfer();item.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:data}));await new Promise(r=>setTimeout(r,60));to.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:data}));await new Promise(r=>setTimeout(r,30));to.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data}));item.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:data}));return true})()")
+// A right-click on what `target` (an expression) finds, as real input: the debugger's mouse events go through the page's own
+// input handling, which is what makes the contextmenu event, with the pointer where it was pressed.
+const debuggerOf = (ui) => { const debug = ui.window.webContents.debugger; if (!debug.isAttached()) debug.attach('1.3'); return debug }
+const rightClick = async (ui, target) => {
+  const debug = debuggerOf(ui)
+  const at = await ui.evaluate("(()=>{const r=" + target + ".getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()")
+  await debug.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y })
+  await debug.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: 'right', buttons: 2, clickCount: 1 })
+  await debug.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'right', buttons: 0, clickCount: 1 })
+}
+// The menu key pressed with `target` focused: the page gets a contextmenu event with no pointer.
+const menuKey = async (ui, target) => {
+  const debug = debuggerOf(ui)
+  await debug.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+  await ui.evaluate(target + '.focus()')
+  const key = { key: 'ContextMenu', code: 'ContextMenu', windowsVirtualKeyCode: 93, nativeVirtualKeyCode: 93 }
+  await debug.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key })
+  await debug.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...key })
+}
 // A choice of Settings (a microphone, a language, where tasks open): its button opens Togle's own list, and a choice in
 // the list is pressed by its words. The button is brought into view first: a list does not open from a button out of sight.
 const choiceButton = label => "document.querySelector(" + JSON.stringify('[data-choice=' + JSON.stringify(label) + ']') + ")"
@@ -2260,10 +2279,15 @@ async function checkArrange(T, agent) {
     await ui.wait("!document.querySelector('.group-rename')")
   }
   const drag = (title, target) => dragOnto(ui, title, target)
-  const menuOf = async (group, item) => {
-    await ui.evaluate(box(group) + ".querySelector('button.group-more').click()")
-    await ui.wait("!!document.querySelector('.menu-overlay')")
-    await ui.click('.menu-overlay [role^=menuitem]', item)
+  // A group's menu is a right-click on its head, as real input (no button beside the head), and the menu key with the head focused.
+  const menuOf = async (group, item, viaKey = false) => {
+    assert.equal(await ui.evaluate(box(group) + ".querySelectorAll('.task-project-head button').length"), 1, 'the head is the one button that folds it: no menu button beside it')
+    if (viaKey) await menuKey(ui, box(group) + ".querySelector('.group-fold')")
+    else await rightClick(ui, box(group) + ".querySelector('.task-project-head')")
+    await ui.wait("!!document.querySelector('.call-menu')")
+    assert.ok(!(await ui.evaluate("!!document.querySelector('.group-more')")), 'there is no ⋯ button anywhere')
+    await ui.click('.call-menu [role=menuitem]', item)
+    await ui.wait("!document.querySelector('.call-menu')")
   }
   // A group of your own: named at once, first in the list, there while empty.
   await ui.evaluate("document.querySelector('[aria-label=\"New group\"]').click()")
@@ -2308,7 +2332,7 @@ async function checkArrange(T, agent) {
   await menuOf('website', 'Rename')
   await name('Website')
   assert.equal(await ui.evaluate(box('Website') + ".querySelector('.project-mark').dataset.letter"), 'W')
-  await menuOf('Website', 'Use Togle’s name')
+  await menuOf('Website', 'Use Togle’s name', true)
   await ui.wait('!!' + box('website'))
   // Put back from the task's own menu: back where Togle puts it.
   await ui.evaluate("[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent==='Add the status column').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:200,clientY:300}))")

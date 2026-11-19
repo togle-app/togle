@@ -66,14 +66,6 @@ const SHAPES = {
       <path d="M9.6 9.2a2.5 2.5 0 0 1 4.8.9c0 1.6-2.4 2.2-2.4 2.2M12 15.2h.01" />
     </>
   ),
-  // More things to do with it: three dots.
-  more: (
-    <>
-      <circle cx="5" cy="12" r="1" />
-      <circle cx="12" cy="12" r="1" />
-      <circle cx="19" cy="12" r="1" />
-    </>
-  ),
   // The to-do list: a box with a tick in it.
   todo: (
     <>

@@ -273,22 +273,15 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-project.drop { border-color: var(--togle); background: color-mix(in srgb, var(--togle-soft) 60%, transparent); }
 .task-project.has-open { border-color: var(--ink); }
 .task-project-head { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
-/* The head's arrow, mark, name with where it is, and its counts on one center line. The menu shares the counts' place: while
-   the pointer or the keys are on the head it shows and they fade, so the name keeps the width the menu would take. (Not after
-   a click: the head keeps the focus, and the counts would stay hidden.) */
+/* The head's arrow, mark, name with where it is, and its counts on one center line. Its menu is a right-click (or the menu key). */
 .group-fold, .group-renaming { display: grid; flex: 1 1 auto; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; column-gap: 8px; min-width: 0; height: auto; padding: 5px 4px 5px 2px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; }
-.task-project-head:has(> .menu-anchor) > .group-fold { grid-template-columns: auto auto minmax(0, 1fr) minmax(26px, auto); }
-.task-project-head > .menu-anchor { position: absolute; top: 50%; right: 0; transform: translateY(-50%); }
 .group-fold > .group-counts { justify-self: end; }
-.task-project-head:hover .group-counts, .task-project-head:has(:focus-visible) .group-counts, .task-project-head:has(.group-more.open) .group-counts { opacity: 0; }
 .group-renaming { grid-template-columns: auto minmax(0, 1fr); padding-left: 22px; }
 .group-fold:hover:not(:disabled) { background: none; }
 .group-fold:focus-visible { outline: 2px solid var(--togle); outline-offset: -2px; }
 .fold-chevron { display: inline-grid; place-items: center; width: 14px; color: var(--muted); transition: transform 0.15s; }
 .task-project.folded .fold-chevron { transform: rotate(-90deg); }
 .group-rename { min-width: 0; height: 30px; padding: 3px 8px; font-size: 13.5px; font-weight: 650; }
-.task-project-head button.group-more { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border-color: transparent; background: none; color: var(--muted); opacity: 0; }
-.task-project-head:hover button.group-more, .task-project-head:has(:focus-visible) button.group-more, button.group-more.open { opacity: 1; }
 .group-empty { margin: 0; padding: 6px 8px 8px; color: var(--muted); font-size: 12px; }
 .task-subject.drop { border-radius: 8px; box-shadow: inset 0 0 0 1px var(--togle); }
 .task-item.dragging { opacity: 0.45; }

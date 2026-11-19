@@ -6,7 +6,6 @@ import { openSettings } from './open-settings'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, useKeptState, WaitLine } from './kept'
-import { Menu } from './Menu'
 import { PointMenu, type Point } from './PointMenu'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { withQuote, splitQuote } from '@shared/quote'
@@ -390,6 +389,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   const [sprung, setSprung] = useState<Set<string>>(() => new Set())
   const [renaming, setRenaming] = useState<string>()
   const [rowMenu, setRowMenu] = useState<{ at: Point; key: string } | null>(null)
+  const [groupMenu, setGroupMenu] = useState<{ at: Point; key: string } | null>(null)
   const [now, setNow] = useState(Date.now())
   const [showEarlier, setShowEarlier] = useKeptState('agents.earlier', false)
   const listBox = useRef<HTMLElement>(null)
@@ -606,21 +606,25 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
     />
   )
   // A group is a box. Its head folds it (a folded box keeps its counts and still takes a dropped task) and has its own menu
-  // beside: Rename, Togle's own name back, Delete a group the person made. Its mark (a letter on its color; a clock for
-  // scheduled jobs, a house for Everyday), its name, where a project's folder is, and what waits, works and is new in it.
+  // on a right-click (or the menu key): Rename, Togle's own name back, Delete a group the person made. Its mark (a letter on
+  // its color; a clock for scheduled jobs, a house for Everyday), its name, where a project's folder is, and what waits, works
+  // and is new in it.
   // A subject heading in it folds the same way: it says how many tasks it holds and, folded, what waits, works and is new
   // in them; it still takes a dropped task, and it shows when the task open is in it. Its tasks hang from it on a line.
   const groupBox = (group: TaskGroup, old: boolean): ReactNode => {
     const isFolded = folded.has(group.key) && !sprung.has(spot(group.key))
     const hasOpen = isFolded && [...group.loose, ...group.subjects.flatMap((subject) => subject.tasks)].some((task) => task.key === selected)
-    const menu = [
-      { label: 'Rename', onSelect: () => setRenaming(group.key) },
-      ...(group.renamed ? [{ label: 'Use Togle’s name', onSelect: () => changeGroups({ kind: 'rename', group: group.key, name: '' }) }] : []),
-      ...(group.kind === 'made' ? [{ label: 'Delete group', danger: true, onSelect: () => changeGroups({ kind: 'remove', group: group.key }) }] : [])
-    ]
     return (
       <section key={group.key} className={`task-project ${group.kind}${isFolded ? ' folded' : ''}${dropAt?.group === group.key && !dropAt.subject ? ' drop' : ''}${hasOpen ? ' has-open' : ''}`} aria-label={group.name} {...dropOn(group.key)}>
-        <div className="task-project-head">
+        <div
+          className="task-project-head"
+          onContextMenu={old || renaming === group.key ? undefined : (event) => {
+            event.preventDefault()
+            const box = event.currentTarget.getBoundingClientRect()
+            // From the menu key there is no pointer: the menu opens by the head.
+            setGroupMenu({ key: group.key, at: event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : { x: box.left + 24, y: box.bottom - 4 } })
+          }}
+        >
           {renaming === group.key ? (
             <span className="group-renaming">
               <GroupMark group={group} />
@@ -640,7 +644,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
               />
             </span>
           ) : (
-            // The counts fade while the pointer is on the head, for its menu: their words are on all of it.
+            // The counts' words are on all of the head (its title); its menu is a right-click.
             <button type="button" className="group-fold" aria-expanded={!isFolded} title={old ? undefined : countWords(group.counts) || undefined} onClick={() => toggleFold(group.key)}>
               <span className="fold-chevron" aria-hidden="true"><Icon name="chevron" size={12} /></span>
               <GroupMark group={group} />
@@ -656,7 +660,6 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
               {!old && <Counts counts={group.counts} />}
             </button>
           )}
-          {!old && renaming !== group.key && <Menu className="group-more" label={<Icon name="more" size={14} />} ariaLabel={`Change ${group.name}`} title="Rename" align="right" items={menu} />}
         </div>
         {!isFolded && (
           <>
@@ -684,6 +687,15 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
     )
   }
   const projectList = (groups: TaskGroup[], old: boolean): ReactNode => groups.map((group) => groupBox(group, old))
+  // A group head's own menu (right-click, or the menu key): rename it, take Togle's own name back, delete one the person made.
+  const menuGroup = groupMenu ? shown.find((group) => group.key === groupMenu.key) : undefined
+  const groupItems = menuGroup
+    ? [
+        { label: 'Rename', onSelect: () => setRenaming(menuGroup.key) },
+        ...(menuGroup.renamed ? [{ label: 'Use Togle’s name', onSelect: () => changeGroups({ kind: 'rename', group: menuGroup.key, name: '' }) }] : []),
+        ...(menuGroup.kind === 'made' ? [{ label: 'Delete group', danger: true, onSelect: () => changeGroups({ kind: 'remove', group: menuGroup.key }) }] : [])
+      ]
+    : []
   // A row's own menu (right-click, or the menu key): move it to another group, or a new one, or put it back where Togle puts it.
   const menuTask = rowMenu ? tasks.find((task) => task.key === rowMenu.key) : undefined
   const menuItems = menuTask
@@ -722,6 +734,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
           </span>
         </div>
         {rowMenu && menuTask && <PointMenu at={rowMenu.at} label={`Move ${menuTask.title}`} items={menuItems} onClose={() => setRowMenu(null)} />}
+        {groupMenu && menuGroup && <PointMenu at={groupMenu.at} label={`Change ${menuGroup.name}`} items={groupItems} onClose={() => setGroupMenu(null)} />}
         {loaded && !installed.length && (status.some((agent) => agent.removed) ? <p className="empty">No agent is on Togle’s lists. Add one back in Settings.</p> : <NoAgents />)}
         {!!shown.length && <div className="task-groups">{projectList(shown, false)}</div>}
         {!!earlier.length && (
