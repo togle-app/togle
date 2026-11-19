@@ -16,6 +16,11 @@
 // - `hermes chat --tui --query=<words> -c <name> --create-if-missing` starts a session named <name> with the words as its
 //   first turn; `hermes --tui --resume <id or name>` opens one again. `hermes sessions list` lists them (its Workspace column
 //   is the folder's name only), `rename` names one, `delete` removes one.
+// - Each session has a source, and `sessions list --source <name>` lists one source only: `cli` (also called `local`) for a session
+//   started with `hermes chat`, which is what Togle starts, `tui` for `hermes --tui` typed in a terminal, `desktop` for the Hermes
+//   Desktop app, and others for its messaging platforms and its scheduled jobs (`cron`). Togle lists the first three, so that the
+//   sessions the person has in the Desktop app are among its tasks (they were not, while it asked for `cli` and `local` only). A
+//   session that never got a message is in the list as well, with no words: it is left out here, as the Desktop app leaves it out.
 // - Hermes tells Togle nothing else while a screen holds a session: what it asks is answered on the screen, and Togle says
 //   that it waits there. Once the screen is closed Togle knows nothing of what the session does.
 import { execFile, spawn } from 'node:child_process'
@@ -77,6 +82,15 @@ export interface StoredRow {
   updatedAt: number
 }
 
+/**
+ * The sources of the sessions a person opens on a screen, as `hermes sessions list --source` names them: a terminal (`cli`, called
+ * `local` by an older Hermes: the two list the same sessions), the terminal screen (`tui`) and the Desktop app (`desktop`). Its
+ * messaging platforms and its scheduled jobs (`cron`) are not tasks of the person's, so they are not asked for.
+ */
+const SCREEN_SOURCES = ['local', 'cli', 'tui', 'desktop'] as const
+/** Where a session Togle starts with `hermes chat` is kept. */
+const STARTED_SOURCES = ['local', 'cli'] as const
+
 const UNITS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }
 
 /** "just now", "4h ago", "6d ago" or a date, as a time. */
@@ -118,7 +132,9 @@ export function parseSessionList(output: string, now = Date.now()): StoredRow[] 
     const place = workspace > 0 ? cells.slice(workspace, active).join('').trim() : ''
     // With titles, a column of its own holds the start of the first message.
     const said = preview > 0 && /^\s*Title\b/.test(header) ? cells.slice(preview, active).join('').trim() : ''
-    found.push({ id: key, title: cells.slice(0, firstEnds).join('').trim(), ...(said && said !== '—' ? { preview: said } : {}), workspace: place === '—' ? '' : place, updatedAt: ageOf(cells.slice(active, ageEnds).join(''), now) })
+    // A dash is how the list says a session has no title (or, with no titles, no first message): none.
+    const first = cells.slice(0, firstEnds).join('').trim()
+    found.push({ id: key, title: first === '—' ? '' : first, ...(said && said !== '—' ? { preview: said } : {}), workspace: place === '—' ? '' : place, updatedAt: ageOf(cells.slice(active, ageEnds).join(''), now) })
   }
   return found
 }
@@ -561,11 +577,14 @@ export class HermesBackend implements Backend {
 
   // ---- What Hermes lists ----
 
-  /** The sessions Hermes keeps that came from a terminal or a screen (not its messaging platforms or its scheduled jobs). */
-  private async stored(): Promise<StoredRow[]> {
+  /**
+   * The sessions Hermes keeps that came from a terminal or a screen (not its messaging platforms or its scheduled jobs): one list
+   * is asked for each source (see `SCREEN_SOURCES`), at the same time, and the sessions are put together, newest first.
+   */
+  private async stored(sources: readonly string[] = SCREEN_SOURCES): Promise<StoredRow[]> {
     const command = await this.command()
     const env = this.options.env ?? process.env
-    const asked = await Promise.all(['local', 'cli'].map((source) => exec(command[0], [...command.slice(1), 'sessions', 'list', '--source', source, '--limit', '60'], { env })))
+    const asked = await Promise.all(sources.map((source) => exec(command[0], [...command.slice(1), 'sessions', 'list', '--source', source, '--limit', '60'], { env })))
     const seen = new Set<string>()
     return asked
       .flatMap((out) => (out.ok ? parseSessionList(out.out) : []))
@@ -603,6 +622,8 @@ export class HermesBackend implements Backend {
     const found: TaskInfo[] = this.cache.rows
       // A session that a task of Togle's runs is that task, and not a second row.
       .filter((row) => !mine.has(row.id))
+      // One that never got a message has no words (no title, no start of a first message): there is nothing in it to open.
+      .filter((row) => !!row.title || !!row.preview)
       .map((row): TaskInfo => {
         const title = row.title || row.workspace || 'Hermes task'
         const asked = row.preview ? askedLine(row.preview, title) : undefined
@@ -659,7 +680,8 @@ export class HermesBackend implements Backend {
   private async locate(task: HermesTask): Promise<void> {
     if (!task.id || task.real) return
     // Not asked by folder: a session whose first turn failed (its model did not answer) is in the list with no folder at all.
-    const rows = await this.stored().catch(() => [] as StoredRow[])
+    // Only where a session Togle starts is kept (`hermes chat`), so that this costs two of Hermes's programs and not four.
+    const rows = await this.stored(STARTED_SOURCES).catch(() => [] as StoredRow[])
     const row = rows.find((candidate) => candidate.title.startsWith(task.id as string))
     if (!row) return
     const command = await this.command()

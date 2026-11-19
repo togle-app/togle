@@ -2,7 +2,7 @@
 //   hermes --version
 //   hermes chat --tui --query=<words> --in <dir> -c <name> --create-if-missing     a new session, with its first words
 //   hermes --tui --resume <id or name>                                               an old one
-//   hermes sessions list [--source local|cli] [--limit N] [--workspace NAME]
+//   hermes sessions list [--source local|cli|tui|desktop|cron|...] [--limit N] [--workspace NAME]   one source at a time, as Hermes does
 //   hermes sessions rename <id> <title>       hermes sessions delete --yes <id>
 // The sessions are kept in FAKE_HERMES_HOME/sessions.json; a test may write rows there before it starts. A screen sets its
 // window title the way Hermes's does: `<marker> <session> · <model> · <folder>`, with ⏳ while it works, ⚠ while it waits on

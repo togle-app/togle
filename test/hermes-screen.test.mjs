@@ -87,6 +87,9 @@ test('the list Hermes prints is read by where its columns start, whatever its ro
   assert.equal(rows[3].updatedAt, Date.parse('2026-08-26'))
   assert.deepEqual(T.parseSessionList('No sessions found.'), [])
   assert.deepEqual(T.parseSessionList(''), [])
+  // A dash in the first column says the session has no title (or no first message): the row has none, and does not read "—".
+  const dashed = ['Title                        Workspace          Last Active   ID', '─'.repeat(100), '—                            probe              3d ago        local-zzz', 'A title                      —                  1h ago        local-yyy'].join('\n')
+  assert.deepEqual(T.parseSessionList(dashed, now).map((row) => [row.id, row.title, row.workspace]), [['local-zzz', '', 'probe'], ['local-yyy', 'A title', '']])
 })
 
 test('the list is read in each of the four tables Hermes prints, and an emoji in a title moves no column', () => {
@@ -416,21 +419,32 @@ test('two quick opens of one session make one task and one screen', { timeout: 3
 
 // ---- What Hermes lists ----
 
-test('the list is Hermes\u2019s own, from terminals and screens and not from its other platforms, newest first', { timeout: 30_000 }, async () => {
+test('the list is Hermes\u2019s own, from terminals, screens and its Desktop app and not from its other platforms, newest first', { timeout: 30_000 }, async () => {
   const home = scratch()
   const now = Date.now()
   seed(home, [
     { id: 'local-a', title: 'From a screen', workspace: 'site', source: 'local', updatedAt: now - 3_600_000 },
     { id: '20261026_173644_da0707', title: 'From the classic terminal', workspace: '', source: 'cli', updatedAt: now - 5 * 86_400_000 },
-    { id: 'cron_1', title: 'A scheduled job', workspace: '', source: 'cron', updatedAt: now - 60_000 }
+    // What the person has in the Desktop app, and what they typed after `hermes --tui` in a terminal: both are theirs.
+    { id: '20260914_102214_8c87f4', title: 'From the Desktop app', workspace: '', source: 'desktop', updatedAt: now - 2 * 3_600_000 },
+    { id: 'local-tui', title: 'From hermes --tui', workspace: 'site', source: 'tui', updatedAt: now - 30 * 60_000 },
+    // A session that never got a message has no words: nothing to open.
+    { id: 'local-empty', title: '', workspace: 'site', source: 'tui', updatedAt: now - 10 * 60_000 },
+    { id: 'cron_1', title: 'A scheduled job', workspace: '', source: 'cron', updatedAt: now - 60_000 },
+    { id: 'telegram_1', title: 'From a chat app', workspace: '', source: 'telegram', updatedAt: now - 120_000 }
   ])
   const backend = hermes({ home })
   try {
     const rows = await backend.list()
-    assert.deepEqual(rows.map((row) => row.id), ['local-a', '20261026_173644_da0707'], 'the scheduled job is not a task of the person\u2019s')
-    assert.deepEqual(rows.map((row) => row.title), ['From a screen', 'From the classic terminal'])
+    assert.deepEqual(rows.map((row) => row.id), ['local-tui', 'local-a', '20260914_102214_8c87f4', '20261026_173644_da0707'], 'the scheduled job and the chat app are not tasks of the person\u2019s, and an empty session has nothing to open')
+    assert.deepEqual(rows.map((row) => row.title), ['From hermes --tui', 'From a screen', 'From the Desktop app', 'From the classic terminal'])
     assert.ok(rows.every((row) => row.runner === 'hermes' && row.state === 'idle' && !row.job))
-    assert.ok(Math.abs(rows[0].updatedAt - (now - 3_600_000)) < 120_000)
+    assert.ok(Math.abs(rows[1].updatedAt - (now - 3_600_000)) < 120_000)
+    // A session of the Desktop app opens like any other: by its id, on Hermes's own screen.
+    const opened = await backend.resume('20260914_102214_8c87f4')
+    assert.equal(opened.title, 'From the Desktop app')
+    await until(() => backend.started().length === 1, 'its screen to start')
+    assert.deepEqual(backend.started()[0], ['--tui', '--resume', '20260914_102214_8c87f4'], 'it is resumed by the id Hermes gave it')
   } finally {
     await backend.close()
   }
