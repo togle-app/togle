@@ -1824,7 +1824,7 @@ async function checkPanes(T, agent) {
   await ui.wait("document.querySelectorAll('.workspace-nav button').length>0&&innerWidth===700", 'the narrow window again')
   await ui.click('.workspace-nav button', 'Agents')
   await ui.wait("!!document.querySelector('.tasks')", 'Agents')
-  if (await ui.evaluate("!!document.querySelector('.tasks.has-detail')")) await ui.click('.tasks-back')
+  if (await ui.evaluate("!!document.querySelector('.tasks.has-detail')")) await ui.evaluate("[...document.querySelectorAll('.tasks-back')].find(e=>e.getClientRects().length).click()")
   await ui.wait("!document.querySelector('.tasks.has-detail')", 'the list')
   assert.equal(await ui.evaluate("document.querySelector('.tasks-list').getClientRects().length>0"), true, 'at 700px a list that was hidden in a wide window is shown')
   ui.window.setContentSize(500, 850)
