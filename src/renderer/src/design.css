@@ -71,7 +71,7 @@
     color-scheme: light;
   }
   /* The call's avatars: a voice's pastel is for the dark window; on this one its letter is the color taken toward the text. */
-  :root:not([data-hud]) .live-line::before { color: color-mix(in srgb, var(--avatar) 42%, var(--ink)); }
+  :root:not([data-hud]) .call-turn::before { color: color-mix(in srgb, var(--avatar) 42%, var(--ink)); }
 }
 
 body {
@@ -883,11 +883,14 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .notes-section .md blockquote { margin: 8px 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--kind); color: var(--muted); }
 .md-time { display: inline-block; margin: 0 1px 0 4px; padding: 0 6px; border-radius: 6px; background: var(--raised); color: var(--muted); font: 500 11px/18px var(--font-mono); font-variant-numeric: tabular-nums; vertical-align: 1px; white-space: nowrap; }
 .notes-foot { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
-.history-transcript-line { display: grid; grid-template-columns: 4.4rem minmax(0, 1fr); gap: 0 0.6rem; align-items: start; padding: 5px 8px; border: 0; border-radius: 8px; }
-.history-transcript-line .who { flex: none; min-width: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
-.history-transcript-line .who-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.history-transcript-line time { display: block; color: var(--muted); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
-.history-transcript-line p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A saved call's transcript: its turns (see .call-turn) in one card, as the notes' sections are cards, and a line of time where each 5 minutes
+   into the call begin. */
+.transcript { display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--raised) 40%, transparent); }
+.history-transcript-line p { white-space: pre-wrap; }
+.transcript-time { display: flex; align-items: center; gap: 10px; margin: 8px 12px 4px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.transcript-time::before, .transcript-time::after { content: ''; height: 1px; background: var(--line); }
+.transcript-time::before { flex: 0 0 10px; }
+.transcript-time::after { flex: 1; }
 .history-more { display: block; margin: 12px auto; }
 /* A call's own menu, from a right click on it: rename it or delete it. */
 .call-menu { position: fixed; z-index: 1000; min-width: 170px; padding: 5px; }
@@ -949,23 +952,35 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .person-chip.naming input { width: 140px; padding: 2px 6px; border-radius: 999px; font-size: 12px; }
 /* A long call has thousands of lines. As blocks, not flex items, they are laid out faster when the page opens on one;
    the ones out of sight are not laid out at all until they scroll into view. */
-.live-lines { flex: 1; min-height: 140px; padding: 0; overflow: auto; }
+.live-lines { flex: 1; min-height: 140px; padding: 6px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--raised) 40%, transparent); }
 .live-lines > * + * { margin-top: 2px; }
-/* Nothing said yet: one calm card, not a line of text. */
-.live-lines > .hint { margin: 0; padding: 22px 18px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; }
-/* One line said, like a chat: an avatar (the voice's first letter on its own color), who said it and when, and the words under them;
-   a marked one stands out. */
-.live-line { --avatar: var(--muted); display: grid; grid-template-columns: 28px minmax(0, max-content) minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; align-items: baseline; padding: 8px 10px; border-radius: 10px; font-size: 14px; content-visibility: auto; contain-intrinsic-size: auto 62px; }
-.live-line:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
-.live-line::before { content: attr(data-initial); grid-column: 1; grid-row: 1 / span 2; align-self: start; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--avatar) 20%, transparent); color: var(--avatar); font-size: 12px; font-weight: 700; line-height: 1; }
-.live-line .who { grid-column: 2; grid-row: 1; max-width: 14rem; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.live-line.me .who { color: var(--togle); }
-.live-line time { grid-column: 3; grid-row: 1; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.live-line p { grid-column: 2 / -1; grid-row: 2; margin: 2px 0 0; line-height: 1.5; overflow-wrap: anywhere; }
-.live-line.marked { background: var(--togle-soft); }
-.live-line.partial { opacity: 0.65; }
-.live-line.partial p { font-style: italic; }
+/* Nothing said yet: a calm line in the card, not a line of text on the page. */
+.live-lines > .hint { margin: 0; padding: 26px 18px; text-align: center; }
+.live-lines:has(> .hint:only-child) { display: grid; place-content: center; }
+/* One turn of a call, live or saved, drawn the same way: an avatar (the voice's first letter on its own color), who said it and when, and
+   the words under them. A marked one stands out. A voice that goes on has no head of its own: its words sit under its last ones and its
+   time shows under the pointer. */
+.call-turn { --avatar: var(--muted); position: relative; display: grid; grid-template-columns: 32px minmax(0, max-content) minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 12px; align-items: baseline; padding: 9px 12px; border-radius: 10px; font-size: 14px; content-visibility: auto; contain-intrinsic-size: auto 64px; }
+.call-turn:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.call-turn::before { content: attr(data-initial); grid-column: 1; grid-row: 1 / span 2; align-self: start; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: color-mix(in srgb, var(--avatar) 18%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--avatar) 30%, transparent); color: var(--avatar); font-size: 13px; font-weight: 700; line-height: 1; }
+.call-turn .who { grid-column: 2; grid-row: 1; min-width: 0; max-width: 14rem; color: var(--ink); font-size: 14px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call-turn.me .who { color: var(--togle); }
+.call-turn time { grid-column: 3; grid-row: 1; color: var(--muted); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.call-turn p { grid-column: 2 / -1; grid-row: 2; margin: 3px 0 0; line-height: 1.55; overflow-wrap: anywhere; }
+.call-turn.continues { padding-top: 1px; padding-bottom: 1px; contain-intrinsic-size: auto 28px; }
+.call-turn.continues::before { height: 0; visibility: hidden; }
+.call-turn.continues .who { display: none; }
+.call-turn.continues p { grid-row: 1; margin-top: 0; }
+.call-turn.continues time { position: absolute; top: 5px; left: 12px; width: 32px; font-size: 10px; text-align: center; opacity: 0; }
+.call-turn.continues:hover time, .call-turn.continues:focus-within time { opacity: 1; }
+.call-turn.marked { background: var(--togle-soft); box-shadow: inset 3px 0 0 var(--togle); }
 .marked-tag { margin-left: 6px; vertical-align: 1px; }
+/* A live caption is not final yet: lighter, in italics, with dots that fill in while the words come. */
+.live-line.partial { opacity: 0.7; }
+.live-line.partial p { font-style: italic; }
+.live-line.partial p::after { content: ''; display: inline-block; width: 1.3em; height: 0.3em; margin-left: 0.4em; vertical-align: 0.05em; background: radial-gradient(circle at 0.15em 50%, currentColor 0.11em, transparent 0.12em) 0 0 / 0.45em 100% repeat-x; animation: typing 1.4s steps(4, end) infinite; }
+@keyframes typing { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 -1px 0 0); } }
+@media (prefers-reduced-motion: reduce) { .live-line.partial p::after { animation: none; } }
 
 /* Who spoke?, its own stage after a call: who is confirmed, then each voice to confirm. */
 .confirm-names { display: flex; flex-direction: column; gap: 11px; margin: 0; padding: 0; border: 0; background: none; font-size: 13px; }

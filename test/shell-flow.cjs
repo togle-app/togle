@@ -164,6 +164,10 @@ async function checkCall(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.live-line.me').style.getPropertyValue('--avatar')"), 'var(--togle)', 'yours is Togle’s color')
   assert.ok(new Set(await ui.evaluate("[...document.querySelectorAll('.live-line.them')].map(line=>line.style.getPropertyValue('--avatar'))")).size >= 2, 'other voices have colors of their own')
   assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.live-line'),'::before').content"), '"D"', 'the avatar is drawn from the letter')
+  assert.equal(await ui.evaluate("document.querySelectorAll('.live-line.continues').length"), 0, 'four voices in turn: each line has a head of its own')
+  // The words are in a card of their own, and the rows are the call's turns (not the Chat view's own turn, which is another class).
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('.live-lines > .live-line')].every(line=>line.classList.contains('call-turn')&&!line.classList.contains('turn'))"), true)
+  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.live-lines')).borderTopWidth"), '1px', 'in a card')
   assert.deepEqual(await texts(ui, '.live-people .person-chip'), ['You', 'Dario', 'Marta?', 'Voice 4'])
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.live-people .person-chip')].map(c=>c.classList.contains('guess'))"), [false, false, true, false], 'only the guess looks like one')
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.live-people .person-chip')].map(c=>c.classList.contains('ok'))"), [true, true, false, false], 'confirmed ones are green, as the design has them')
@@ -189,6 +193,11 @@ async function checkCall(T, agent) {
   await ui.emit('onPartialTranscript', { segmentId: 'p1', speaker: 'them', text: 'a late caption', at: later })
   await ui.wait("!document.querySelector('.live-line.partial')&&[...document.querySelectorAll('.live-line p')].some(p=>p.textContent==='And one more thing.')")
   assert.ok(!(await ui.evaluate('document.body.textContent.includes("a late caption")')))
+  // The same voice again a few seconds later goes on from its last line: no avatar, name or time of its own (the time shows under the
+  // pointer), and its words sit right under the last ones.
+  await ui.emit('onTranscript', { id: 'l6', speaker: 'them', voiceId: 'voice:1', voiceName: 'Dario', voiceNamedBy: 'user', text: 'It can wait a week.', at: later + 5000, end: later + 5800 })
+  await ui.wait("document.querySelector('.live-line:last-child')?.textContent.includes('It can wait a week.')")
+  assert.deepEqual(await ui.evaluate("(()=>{const rows=[...document.querySelectorAll('.live-line')];const last=rows.at(-1),before=rows.at(-2);const box=e=>e.getBoundingClientRect();return [last.classList.contains('continues'),before.classList.contains('continues'),getComputedStyle(last.querySelector('.who')).display,getComputedStyle(last,'::before').height,getComputedStyle(last.querySelector('time')).opacity,box(last).top-box(before).bottom<4]})()"), [true, false, 'none', '0px', '0', true], 'a voice that goes on has no head of its own')
 
   // A name is given or confirmed with a click on the voice.
   await ui.click('.live-people .person-chip', 'Voice 4')
@@ -348,6 +357,13 @@ async function checkCall(T, agent) {
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.meeting-detail [role=tab]')].map(tab=>tab.textContent)"), ['Notes', 'Transcript'])
   await ui.click('.meeting-detail [role=tab]', 'Transcript')
   await ui.wait("[...document.querySelectorAll('.meeting-detail .history-transcript-line')].some(line=>line.textContent.includes('staging logs'))")
+  // The saved transcript draws the turns as the live call did: an avatar, who and when, the words; a voice that goes on has no head of
+  // its own, and the moment that was marked stands out.
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.meeting-detail .history-transcript-line')].map(line=>[line.dataset.initial,line.classList.contains('call-turn'),line.classList.contains('continues'),line.classList.contains('marked')])"),
+    [['D', true, false, false], ['M', true, false, false], ['I', true, false, false], ['Y', true, false, true], ['D', true, false, false], ['D', true, true, false]])
+  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.meeting-detail .history-transcript-line'),'::before').content"), '"D"', 'the avatar is drawn from the letter')
+  assert.equal(await ui.evaluate("document.querySelector('.meeting-detail .history-transcript-line.marked .marked-tag')?.textContent"), 'Marked')
+  assert.equal(await ui.evaluate("!!document.querySelector('.meeting-detail .transcript')&&getComputedStyle(document.querySelector('.meeting-detail .transcript')).borderTopWidth"), '1px', 'in a card')
   await ui.capture('after-call')
   await ui.click('.workspace-nav button', 'Meetings')
   await ui.wait("document.querySelectorAll('.meetings .meeting-row').length===2")

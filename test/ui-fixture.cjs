@@ -139,7 +139,7 @@ module.exports = function install(fixture) {
   const capture = () => {
     if (!currentInfo || fixture.settings.assist.rememberCalls === false) return
     const previous = sessions.find(session => session.id === currentKey)
-    const value = { version: 1, ...currentInfo, title: previous?.customTitle ? previous.title : currentInfo.meeting?.title || previous?.title || 'Untitled call', frameSession: currentKey, updatedAt: Date.now(), brief: '', group: false, transcript: clone(transcript), suggestions: [], notes: '', callAnswers: [], summary: previous?.summary || '', learning: previous?.learning || { state: 'not-reviewed', pending: empty(), changes: [] } }
+    const value = { version: 1, ...currentInfo, marks: [...flags.marks], title: previous?.customTitle ? previous.title : currentInfo.meeting?.title || previous?.title || 'Untitled call', frameSession: currentKey, updatedAt: Date.now(), brief: '', group: false, transcript: clone(transcript), suggestions: [], notes: '', callAnswers: [], summary: previous?.summary || '', learning: previous?.learning || { state: 'not-reviewed', pending: empty(), changes: [] } }
     sessions = [...sessions.filter(session => session.id !== currentKey), value]
     emit('onCallSessions', { id: currentKey })
   }

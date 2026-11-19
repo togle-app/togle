@@ -596,10 +596,6 @@ details.knowledge-item { display: block; }
 .transcript-tools { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0; }
 .transcript-tools input { flex: 1; min-width: 140px; }
 .transcript-tools button { font-size: 11px; }
-.history-transcript-line { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
-.history-transcript-line .who { flex: 0 0 48px; color: var(--accent); font-size: 11px; }
-.history-transcript-line time { display: block; color: var(--faint); font-size: 10px; }
-.history-transcript-line p { flex: 1; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .history-suggestion { padding: 5px 0 14px; border-bottom: 1px solid var(--border); }
 .history-more { display: block; margin: 16px auto; }
 .monitor-picker-backdrop { position: absolute; inset: 40px 0 0; z-index: 80; display: flex; align-items: flex-start; justify-content: center; padding: 16px; background: #080b10dc; overflow: auto; }
