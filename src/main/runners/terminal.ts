@@ -10,6 +10,7 @@ import { TASK_WORDS, type RunnerKind, type TaskInfo } from '@shared/runner'
 import { commandWords, exists, forCmd, whereIs } from './acp'
 import { endTree } from './process-tree'
 import { TaskBase } from './task-base'
+import { safeCut, TerminalModes } from './terminal-modes'
 import type { Backend, Detected, StartOptions, TaskHandle, TerminalSide } from './types'
 
 /** Part of what a terminal printed, as the window is sent it: `at` is where it starts among all the terminal printed. */
@@ -202,6 +203,8 @@ export class TerminalTask extends TaskBase implements TerminalSide {
   protected releases = false
   private output = ''
   private printed = 0
+  // The modes the program had set where what is kept begins (what went before it is not kept, and the program sets them once).
+  private readonly modesBefore = new TerminalModes()
   // Printed and not sent to the window yet, and where that starts.
   private unsent = ''
   private unsentAt = 0
@@ -253,7 +256,13 @@ export class TerminalTask extends TaskBase implements TerminalSide {
 
   private printedMore(data: string): void {
     this.lastPrinted = Date.now()
-    this.output = (this.output + data).slice(-KEEP)
+    const all = this.output + data
+    if (all.length > KEEP) {
+      // What goes is read for the modes it set, and the cut is not made inside a sequence.
+      const cut = safeCut(all, all.length - KEEP)
+      this.modesBefore.feed(all.slice(0, cut))
+      this.output = all.slice(cut)
+    } else this.output = all
     if (!this.unsent) this.unsentAt = this.printed
     this.printed += data.length
     this.unsent += data
@@ -298,8 +307,13 @@ export class TerminalTask extends TaskBase implements TerminalSide {
     }
   }
 
+  /**
+   * What it printed, for a window that opens the screen: the last part (see KEEP), preceded by the modes the program had set where that
+   * part begins, so that the screen asks of the window what it asked at its start (the other screen, the mouse, bracketed paste).
+   */
   read(): { text: string; end: number } {
-    return { text: this.output, end: this.printed }
+    const gone = this.printed > this.output.length
+    return { text: (gone ? this.modesBefore.restore() : '') + this.output, end: this.printed }
   }
 
   write(data: string): void {

@@ -180,6 +180,69 @@ test('a terminal task ended or let go leaves nothing behind, and does not wait f
   }
 })
 
+// Claude Code draws on the other screen and asks for the mouse once, when it starts. A window that opens its screen later is sent only
+// the last part of what it printed (the last 512 KB), so the modes are told to it again, as the program had them where that part begins:
+// else the wheel would scroll nothing until the program set them again (a key made it).
+test('the modes a program set on its terminal are told again to a window that opens the screen later', () => {
+  const modes = new T.TerminalModes()
+  // As Claude Code's own screen starts: win32 input mode (not kept), focus reports, bracketed paste, the other screen, the mouse.
+  modes.feed('\x1b[?9001h\x1b[?1004h\x1b[?25l\x1b[2J\x1b[?2004h\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?25h')
+  assert.equal(modes.restore(), '\x1b[?1049h\x1b[?1004h\x1b[?2004h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h', 'the other screen first, then the rest as they were set; cursor and win32 modes are not kept')
+  modes.feed('\x1b[?1000l\x1b[?1002;1003l')
+  assert.equal(modes.restore(), '\x1b[?1049h\x1b[?1004h\x1b[?2004h\x1b[?1006h', 'a mode the program cleared is not told again')
+  modes.feed('\x1b[?1049l')
+  assert.equal(modes.restore(), '\x1b[?1004h\x1b[?2004h\x1b[?1006h', 'back on the first screen, the other is not asked for')
+  // Several modes in one sequence; one that arrives in two parts; the last mouse mode set is the last told.
+  const more = new T.TerminalModes()
+  more.feed('\x1b[?1000;1006h\x1b[?10')
+  more.feed('49h\x1b[?1003h\x1b[?1000h')
+  assert.equal(more.restore(), '\x1b[?1049h\x1b[?1006h\x1b[?1003h\x1b[?1000h')
+  // A reset, full or soft, clears them.
+  more.feed('\x1bc')
+  assert.equal(more.restore(), '')
+  more.feed('\x1b[?2004h\x1b[!p')
+  assert.equal(more.restore(), '')
+  more.feed('plain words, ESC alone \x1b')
+  more.feed('and more')
+  assert.equal(more.restore(), '', 'words, and an escape that begins nothing, set nothing')
+})
+
+test('what is cut from the start of a long print is not cut inside a sequence', () => {
+  const text = 'abc\x1b[?1049hdef\x1b]0;a title\x07ghi\x1bcjk'
+  assert.equal(T.safeCut(text, 5), 11, 'a cut inside a mode sequence goes on to its end')
+  assert.equal(T.safeCut(text, 3), 3, 'a cut just before one leaves it whole')
+  assert.equal(T.safeCut(text, 11), 11, 'a cut just after one is where it is')
+  assert.equal(T.safeCut(text, 16), 26, 'a cut inside a window title goes on to its end')
+  assert.equal(T.safeCut(text, 30), 31, 'a cut between ESC and the letter of a reset goes on past it')
+  assert.equal(T.safeCut('plain words only', 6), 6, 'words are cut where asked')
+})
+
+test('a terminal task sends a window that opens late the modes its program set, ahead of the last part of what it printed', () => {
+  const pty = { pid: 1, onData: (listen) => { pty.print = listen }, onExit() {}, write() {}, resize() {}, kill() {} }
+  const task = new T.TerminalTask('term-fake', 'modes', 'Modes', scratch(), 'Fake', pty, undefined, () => {}, () => {})
+  let printedInAll = 0
+  const print = (data) => { printedInAll += data.length; pty.print(data) }
+  print('\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[?2004h')
+  print('the first screen\r\n')
+  assert.equal(task.read().text, '\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[?2004hthe first screen\r\n', 'all of it kept: sent as it was, nothing told twice')
+  for (let n = 0; n < 30; n++) print('x'.repeat(20_000) + '\r\n')
+  const late = task.read()
+  assert.ok(!late.text.includes('the first screen'), 'the start is no longer kept')
+  assert.ok(late.text.startsWith('\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[?2004h'), 'but what the program set there is told again, first: ' + JSON.stringify(late.text.slice(0, 60)))
+  assert.ok(late.text.length <= 512 * 1024 + 64, 'the last 512 KB and the modes')
+  assert.equal(late.end, printedInAll, 'where it ends is all it printed, however much is kept')
+  // The program leaves the other screen: where the kept part begins it was still on it, and the part kept says it left.
+  print('\x1b[?1049l\x1b[?1000l' + 'y'.repeat(20_000) + '\r\n')
+  assert.ok(task.read().text.includes('\x1b[?1049l'), 'the leaving is in what is kept')
+  // Cut inside a sequence: what is kept does not start with its tail.
+  const cutting = { pid: 2, onData: (listen) => { cutting.print = listen }, onExit() {}, write() {}, resize() {}, kill() {} }
+  const other = new T.TerminalTask('term-fake', 'cut', 'Cut', scratch(), 'Fake', cutting, undefined, () => {}, () => {})
+  cutting.print('\x1b[?1049h' + 'z'.repeat(512 * 1024 - 3))
+  const cut = other.read().text
+  assert.equal(cut.slice(0, 8), '\x1b[?1049h', 'the mode is told')
+  assert.equal(cut.slice(8, 12), 'zzzz', 'and the part kept does not start with the tail of the sequence the cut fell in: ' + JSON.stringify(cut.slice(0, 24)))
+})
+
 test('the words of a command started through cmd.exe are taken out with the flag that held them', () => {
   assert.deepEqual(T.withoutTaskWords(['--message', '{task}']), [])
   assert.deepEqual(T.withoutTaskWords(['-p', '{task}', '--verbose']), ['--verbose'])
