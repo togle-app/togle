@@ -193,8 +193,14 @@ test('the window can ask for the list through its messages, and a bad message is
     handlers.get('todo:show-file')()
     assert.deepEqual(revealed, [file])
     await todo.watch()
-    writeFileSync(file, '- [ ] From an editor\n')
-    await until(() => sent.some(([channel]) => channel === 'todo:changed'), 'the window to be told')
+    // A watcher is not always ready the moment it is made (on a Mac's file events a change made at once can be missed, or come late): the file is
+    // written again, with one more line each time that is not an item, until the window is told.
+    const told = () => sent.some(([channel]) => channel === 'todo:changed')
+    for (let attempt = 0; attempt < 12 && !told(); attempt++) {
+      writeFileSync(file, '- [ ] From an editor\n' + 'a note\n'.repeat(attempt))
+      await until(told, 'the window to be told', 500).catch(() => undefined)
+    }
+    await until(told, 'the window to be told')
   } finally {
     todo.dispose()
   }

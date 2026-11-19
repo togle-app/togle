@@ -526,6 +526,8 @@ test('a screen that cannot open says why, and the task goes on', { timeout: 40_0
   const { backend, home } = claude()
   try {
     const task = await backend.start({ folder: scratch(), prompt: '', title: 'Settings gone' })
+    // The screen is connected before the session is ended: a screen that connects after it brings the session back (on a slow runner it did).
+    await connected(task)
     await task.endCommands()
     // The session was given a settings file, and a stopped one reads it once more when it comes back.
     rmSync(job(home, task.screen.job).settings, { force: true })
