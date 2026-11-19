@@ -13,15 +13,23 @@ import { ResizeHandle } from './ResizeHandle'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { withQuote, splitQuote } from '@shared/quote'
 import { splitPictures } from '@shared/pasted-pictures'
+import { placeSent, SENT_GIVE_UP_MS, tailDelivery, type SentMessage } from '@shared/sent-messages'
 import { QuoteBar, QuoteBlock, QuoteFloat, useQuoteSpot } from './Quote'
 import { RequestCard } from './RequestCard'
 import { PictureChips, pastedPictures, pathWords, useAttached } from './ReplyPictures'
 import { StateMark, type MarkKind } from './StateMark'
-import { clock, currentPlan, lastTurnKey, PlanCard, promptsOf, Thread, turnStart, useHistory } from './TaskThread'
+import { clock, currentPlan, lastTurnKey, PlanCard, promptsOf, Thread, turnStart, useHistory, type Sending } from './TaskThread'
+import { Ticks } from './Ticks'
 import { ThreadRail } from './ThreadRail'
 import { TerminalView } from './TerminalView'
 
 const api = window.togle
+
+// Nothing sent yet, nothing queued: one list each, so that a state that is back to it is not kept.
+const NO_SENT: SentMessage[] = []
+const NO_WORDS: string[] = []
+/** The next id of a message sent from here (they are told apart by it; the thread draws them with the same number below 0). */
+let sentCounter = 1
 
 // An agent that is not working says Idle, not Done: its session is still open and takes the next message.
 const STATE_WORDS: Record<TaskView['state'], string> = { working: 'Working', waiting: 'Waiting for you', idle: 'Idle', stopped: 'Stopped', failed: 'Stopped by an error' }
@@ -831,7 +839,13 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             onBack={() => setSelected(undefined)}
             onAnswer={(requestId, decision) => act(() => api.answerRunnerTask(detail.task.key, requestId, decision))}
             onReply={(requestId, text) => act(() => api.replyRunnerTask(detail.task.key, requestId, text))}
-            onSend={(text) => act(() => api.sendToRunnerTask(detail.task.key, text))}
+            onSend={async (text) => {
+              let failed: string | null = null
+              await act(async () => {
+                try { await api.sendToRunnerTask(detail.task.key, text) } catch (caught) { failed = errorText(caught); throw caught }
+              })
+              return failed
+            }}
             onHeld={(action, index) => act(() => api.heldRunnerReply(detail.task.key, action, index))}
             onInterrupt={async (text) => {
               let sent = true
@@ -1040,7 +1054,8 @@ interface PanelProps {
   onBack: () => void
   onAnswer: (requestId: string, decision: 'allow-once' | 'allow-always' | 'refuse') => void
   onReply: (requestId: string, text: string) => void
-  onSend: (text: string) => void
+  /** Sends words to the agent: null when they went in, else why they did not. */
+  onSend: (text: string) => Promise<string | null>
   /** What waits to go in from Chat: sent now, sent now with the agent stopped first, or taken back (all of it, or one message). */
   onHeld: (action: 'send' | 'drop' | 'interrupt', index?: number) => Promise<void>
   /** Stops what the agent does and sends these words as soon as it has: true when they went in. */
@@ -1127,6 +1142,46 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   // Until the agent's record is read (the first time), nothing is shown rather than Togle's own log for a moment: the record is
   // what stays. With no record to read, Togle's own log is the conversation.
   const shown = history ? history.entries : historyLoaded ? log : []
+  // What the person just sent from here: drawn at the end of the conversation the moment it is sent (the agent's record has it a moment later),
+  // with the ticks of how far it got, until the agent's record, its own queue or what Togle holds for it has it (shared/sent-messages.ts).
+  const [sent, setSent] = useKeptState<SentMessage[]>(`sent:${task.key}`, NO_SENT)
+  const held = task.held ?? NO_WORDS
+  const queuedByAgent = history?.queued ?? NO_WORDS
+  const placed = placeSent(sent, shown, queuedByAgent, held)
+  const [sentClock, setSentClock] = useState(0)
+  useEffect(() => {
+    if (!sent.length) return
+    const timer = setInterval(() => setSentClock((count) => count + 1), 15_000)
+    return () => clearInterval(timer)
+  }, [sent.length])
+  // A message is done with once the conversation has it. One seen in a queue that is then nowhere was taken back, not lost. One the agent
+  // never showed (it was taken in somewhere the window cannot see) is let go of once the task has been still for a while.
+  useEffect(() => {
+    if (!webShown) return
+    const now = Date.now()
+    setSent((was) => {
+      const next: SentMessage[] = []
+      placeSent(was, shown, queuedByAgent, held).forEach(({ message, place }) => {
+        if (place === 'thread') return
+        if (place === 'queued' || place === 'held') {
+          next.push(message.seen === place ? message : { ...message, seen: place })
+          return
+        }
+        if (message.seen) return
+        if (message.state === 'sent' && !running && now - message.at > SENT_GIVE_UP_MS) return
+        next.push(message)
+      })
+      return next.length === was.length && next.every((one, at) => one === was[at]) ? was : next
+    })
+  }, [webShown, shown, queuedByAgent, held, running, sentClock, setSent])
+  const tailMessages = placed.filter((one) => one.place === 'tail').map((one) => one.message)
+  const sending = new Map<number, Sending>()
+  const tailEntries: LogEntry[] = tailMessages.map((message) => {
+    sending.set(-message.id, { delivery: tailDelivery(message), ...(message.error ? { error: message.error } : {}), ...(message.state === 'failed' ? { retry: () => resend(message.id), forget: () => forgetSent(message.id) } : {}) })
+    return { id: -message.id, at: message.at, kind: 'you', text: message.text }
+  })
+  // The conversation with those messages at its end (they have ids of their own, below 0: never the agent's).
+  const withSent = tailEntries.length ? [...shown, ...tailEntries] : shown
   const readingConversation = webShown && (!historyLoaded || (!history && !logRead))
   // Of the turns shown only, so a count is not given for a conversation that has older turns left out.
   const changed = history?.more && !all ? 0 : changedFiles(shown)
@@ -1141,6 +1196,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   }, [])
   // Also when a step ends where it stands, and when the task starts or stops working: the line that says what it does now comes and goes.
   const lastShown = shown[shown.length - 1]
+  const tailKey = tailEntries.map((entry) => `${entry.id}`).join(',')
   // "Show earlier" brings turns in above what is in view, and what is in view stays where it is: the first part of the
   // conversation, and where it was in the window, are kept until the earlier turns are in.
   const kept = useRef<{ part: Element; top: number } | null>(null)
@@ -1161,9 +1217,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
       if (kept.current.part.isConnected) box.scrollTop += kept.current.part.getBoundingClientRect().top - kept.current.top
       kept.current = null
     } else if (stick.current) toEnd()
-  }, [shown.length, lastShown?.id, lastShown?.status, task.pending.length, task.state, toEnd, historyLoaded])
-  // The questions asked, from the same entries the thread draws: a rail beside the conversation from the third on.
-  const prompts = useMemo(() => promptsOf(shown), [shown])
+  }, [shown.length, lastShown?.id, lastShown?.status, tailKey, task.pending.length, task.state, toEnd, historyLoaded])
+  // The questions asked, from the same entries the thread draws (with the messages just sent): a rail beside the conversation from the third on.
+  const prompts = useMemo(() => promptsOf(withSent), [withSent])
   const railShown = prompts.length >= 3
   // The turn that was the last one when the task last stood still. A reply makes the task work at once and the agent's
   // record has the reply a moment later: until then that turn is drawn as over, and the clock waits for the new turn.
@@ -1177,7 +1233,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   // entry not among them comes in with a little motion, once. A reading of its own draws all it has at once, still.
   const reading = `${history ? 'record' : 'log'}${all ? ' all' : ''}`
   const drawn = useRef<{ reading: string; ids: Set<number> } | null>(null)
-  const known = drawn.current?.reading === reading ? drawn.current.ids : null
+  // What a message just sent is when the agent's record has it comes in without the motion: it was drawn already.
+  const matchedIds = placed.flatMap((one) => (one.entry ? [one.entry.id] : []))
+  const known = drawn.current?.reading === reading ? (matchedIds.length ? new Set([...drawn.current.ids, ...matchedIds]) : drawn.current.ids) : null
   useEffect(() => {
     if (!historyLoaded && !shown.length) return
     const ids = drawn.current?.reading === reading ? drawn.current.ids : new Set<number>()
@@ -1229,6 +1287,30 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
     const paths = pictures.map((picture) => pathWords(picture.path)).join(' ')
     return message ? `${message} ${paths}` : `${pictures.length === 1 ? 'Picture' : 'Pictures'}: ${paths}`
   }
+  /** A message just sent is drawn at the end of the conversation, with how far it got; a command of the agent's own is not a message and has no card. */
+  const newSent = (body: string): SentMessage => ({ id: sentCounter++, text: body, at: Date.now(), after: shown.reduce((most, entry) => Math.max(most, entry.id), 0), state: 'sending' })
+  const settle = (one: SentMessage, failed: string | null): SentMessage =>
+    failed === null ? { id: one.id, text: one.text, at: one.at, after: one.after, state: 'sent', ...(one.seen ? { seen: one.seen } : {}) } : { ...one, state: 'failed', error: failed }
+  const goSend = async (id: number, body: string): Promise<void> => {
+    const failed = await onSend(body)
+    setSent((was) => was.map((one) => (one.id === id ? settle(one, failed) : one)))
+  }
+  const sendTracked = (body: string): void => {
+    if (/^[/!]/.test(body)) {
+      void onSend(body)
+      return
+    }
+    const message = newSent(body)
+    setSent((was) => [...was, message])
+    void goSend(message.id, body)
+  }
+  const resend = (id: number): void => {
+    const message = sent.find((one) => one.id === id)
+    if (!message) return
+    setSent((was) => was.map((one) => (one.id === id ? { id: one.id, text: one.text, at: one.at, after: one.after, state: 'sending' } : one)))
+    void goSend(id, message.text)
+  }
+  const forgetSent = (id: number): void => setSent((was) => was.filter((one) => one.id !== id))
   const say = (message: string): void => {
     // What the person sends is the newest thing in the conversation, and it shows, wherever they were reading (a reply that
     // quotes a part of an older message is sent from there).
@@ -1238,9 +1320,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
     if (question) onReply(question.id, full)
     // A command of the agent's own (it starts with / or !) goes alone, and the quote waits for a reply that is words.
     else if (quoted && !/^[/!]/.test(message)) {
-      onSend(withQuote(quoted, full))
+      sendTracked(withQuote(quoted, full))
       setQuoted(null)
-    } else onSend(full)
+    } else sendTracked(full)
     setText('')
     if (takesPictures(message)) clearPictures()
   }
@@ -1265,10 +1347,15 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
     setInterrupting(true)
     const full = goes(message)
     const said = withIt && quoted ? withQuote(quoted, full) : full
+    // The message is drawn at once, as any is, while the agent is stopped (that takes a moment); if it could not go in, the words stay in the box
+    // and the card is let go of.
+    const card = /^[/!]/.test(said) ? undefined : newSent(said)
+    if (card) setSent((was) => [...was, card])
     // A Claude Code task is stopped as Esc stops it on its screen: what it had queued starts as its next turns, and these words come after.
-    const sent = await onInterrupt(said)
+    const went = await onInterrupt(said)
     setInterrupting(false)
-    if (!sent) return
+    if (card) setSent((was) => (went ? was.map((one) => (one.id === card.id ? settle(one, null) : one)) : was.filter((one) => one.id !== card.id)))
+    if (!went) return
     setText('')
     if (withIt) setQuoted(null)
     if (takesPictures(message)) clearPictures()
@@ -1281,6 +1368,13 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const closedSession = task.mine && !!task.screen && view === 'session' && !task.terminal
   const cardsView = !sessionShown && !closedSession
   const answers = task.mine && cardsView
+  // The views of a task stay in the page once they have been shown (see .task-views): the one that is not shown is out of sight, in the same place and at the
+  // same size, so that what it holds (what is scrolled, opened or selected, what is typed) is there when the person comes back. A view is drawn the first
+  // time it is shown, not before. The agent's screen is let go of when it is closed: another one that opens starts afresh.
+  const mounted = useRef({ terminal: false, chat: false })
+  if (!task.terminal) mounted.current.terminal = false
+  else if (sessionShown) mounted.current.terminal = true
+  if (webShown) mounted.current.chat = true
   // The part of one message the person has selected in the conversation, for a Quote button over it.
   const spot = useQuoteSpot(thread, answers && !question)
   const quote = (words: string): void => {
@@ -1296,8 +1390,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const takesWhileWorking = (task.runner === 'claude' || task.runner === 'hermes') && task.state === 'working' && !task.waitingFor && task.pending.length === 0
   const holdsReply = !!task.screen && task.runner !== 'codex' && !takesWhileWorking && (task.state === 'working' || task.state === 'waiting' || !!task.waitingFor) && !task.pending.some((request) => request.kind === 'question')
   const replyHint = holdsReply ? `Reply: it goes in when ${agentOf(task)} finishes` : 'Reply, or hold ' + talkKey + ' and talk'
-  // What waits to go in, and why it has not: it goes in by itself when the turn ends, unless the task stopped or it did not go in.
-  const held = task.held ?? []
+  // What waits to go in, and why it has not: it goes in by itself when the turn ends, unless the task stopped or it did not go in (`held`, above).
   // What the agent has in its own queue and has not taken in (it is the queue its screen shows: typed there or sent from here). Stop does not end it:
   // Claude Code starts what it holds as its next turns, as Esc does on its screen.
   const inQueue = running ? history?.queued ?? [] : []
@@ -1482,11 +1575,18 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
         </div>
       )}
 
-      {sessionShown ? (
-        // The agent's own screen, with no card over it and no reply box: what it asks is answered on it, and a notice still comes.
-        <TerminalPanel task={task} ending={pressed === 'end'} onEnd={press('end', onEndCommands)} />
-      ) : closedSession ? (
-        <>
+      {/* The two views of a task stay in the page once they have been shown, one of them out of sight (in the same place, at the same size):
+          what is in them (what is opened, where each is scrolled to, what is selected, what is typed) is all still there when the person
+          comes back to it. Only a screen that was closed is let go of: a new one starts afresh. */}
+      <div className="task-views">
+      {mounted.current.terminal && (
+        <div className={`task-view${sessionShown ? '' : ' away'}`} inert={!sessionShown} aria-hidden={!sessionShown}>
+          {/* The agent's own screen, with no card over it and no reply box: what it asks is answered on it, and a notice still comes. */}
+          <TerminalPanel task={task} ending={pressed === 'end'} onEnd={press('end', onEndCommands)} active={!!sessionShown} />
+        </div>
+      )}
+      {closedSession && (
+        <div className="task-view">
           {/* Terminal is picked and its screen is closed: what waits is answered here, or on the screen once it is opened. */}
           {task.pending.map((request) => (
             <RequestCard key={request.id} request={request} onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
@@ -1500,9 +1600,10 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
               {pressed === 'open' ? 'Opening…' : 'Open the screen'}
             </button>
           </div>
-        </>
-      ) : (
-      <>
+        </div>
+      )}
+      {mounted.current.chat && (
+      <div className={`task-view${webShown ? '' : ' away'}`} inert={!webShown} aria-hidden={!webShown}>
       {/* The conversation, and over its foot what is asked of the person: a card for what the agent asks, its checklist, what is queued and the
           reply box. They are in the conversation, as the agent's own screen has its prompt in it, and the conversation scrolls under them. */}
       <div className="thread-place" ref={thread} style={{ '--dock-h': dockShown ? `${dockHeight + DOCK_FOOT}px` : '0px' } as CSSProperties}>
@@ -1524,10 +1625,11 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
           }}
         >
           {history?.more && !all && <button type="button" className="link task-earlier-turns" onClick={showEarlierTurns}>Show earlier</button>}
-          {shown.length === 0 && !readingConversation && task.mine && <p className="hint">{task.screen ? 'Nothing said yet. Pick Terminal to see its screen.' : 'Nothing yet.'}</p>}
-          {shown.length === 0 && !readingConversation && !task.mine && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
-          {/* The whole conversation, in order: a turn that is over as what was asked, a line for the work and the answer; the turn going on in the open. */}
-          <Thread entries={shown} state={task.state} settled={settledTurn.current} taskKey={task.key} known={known} stepsRun={running || task.commandsRunning} />
+          {withSent.length === 0 && !readingConversation && task.mine && <p className="hint">{task.screen ? 'Nothing said yet. Pick Terminal to see its screen.' : 'Nothing yet.'}</p>}
+          {withSent.length === 0 && !readingConversation && !task.mine && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
+          {/* The whole conversation, in order: a turn that is over as what was asked, a line for the work and the answer; the turn going on in the open.
+              A message just sent is at its end at once, with its ticks. */}
+          <Thread entries={withSent} state={task.state} settled={settledTurn.current} taskKey={task.key} known={known} stepsRun={running || task.commandsRunning} sending={sending} />
           {/* That it works, and for how long this turn has run: when no step of it runs, which has its own clock. */}
           {task.state === 'working' && !stepRuns && <NowLine since={newTurn ? turnStart(shown) : undefined} />}
         </div>
@@ -1567,7 +1669,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
             {task.mine && task.screen && !task.terminal && task.screenClosed && <p className="hint">{task.screenClosed}</p>}
 
             {/* The agent's own checklist for the turn at hand, on top of the reply box. */}
-            {plan && <PlanCard key={`${task.key} ${lastTurnKey(shown) ?? ''}`} plan={plan} />}
+            {plan && <PlanCard key={`${task.key} ${lastTurnKey(shown) ?? ''}`} keep={`${task.key} ${lastTurnKey(shown) ?? ''}`} plan={plan} />}
 
             {/* What waits to go in: in the agent's own queue (typed on its screen, or sent from here: one queue, as its screen shows it, which
                 takes it in as it works) and, for an agent that takes words only when its turn has ended, what Togle holds for it, as it will
@@ -1585,6 +1687,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                     return (
                       <li key={`queued-${index}`} className="held-row">
                         <span className="held-text">{split && <QuoteBlock text={split.quote} />}{said.words}{!!said.files.length && <span className="held-pictures">{said.words ? ' · ' : ''}{said.files.length === 1 ? 'a picture' : `${said.files.length} pictures`}</span>}</span>
+                        {/* The agent has it, and takes it in as it works. */}
+                        <Ticks state="delivered" />
                       </li>
                     )
                   })}
@@ -1595,6 +1699,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                     return (
                       <li key={index} className="held-row">
                         <span className="held-text">{split && <QuoteBlock text={split.quote} />}{said.words}{!!said.files.length && <span className="held-pictures">{said.words ? ' · ' : ''}{said.files.length === 1 ? 'a picture' : `${said.files.length} pictures`}</span>}</span>
+                        {/* Togle holds it: the agent does not have it yet. */}
+                        <Ticks state="sending" title={`Waiting: it goes in when ${agentOf(task)} can take it`} />
                         <span className="held-row-actions">
                           {/* Back in the box to change, when the box is empty. */}
                           {!text && (
@@ -1682,8 +1788,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
           </div>
         )}
       </div>
-      </>
+      </div>
       )}
+      </div>
     </div>
   )
 }
@@ -1692,7 +1799,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
  * A task whose agent has no ACP: it runs in a terminal of Togle's own, which the person reads and types into. Togle cannot
  * see what it asks, so the terminal is where it is answered. Words its command had no place for wait to be typed in.
  */
-function TerminalPanel({ task, ending, onEnd }: { task: TaskView; ending: boolean; onEnd: () => void }) {
+function TerminalPanel({ task, ending, onEnd, active }: { task: TaskView; ending: boolean; onEnd: () => void; active: boolean }) {
   const running = task.state === 'working' || task.state === 'waiting'
   return (
     <div className="task-terminal">
@@ -1717,7 +1824,7 @@ function TerminalPanel({ task, ending, onEnd }: { task: TaskView; ending: boolea
           </button>
         </div>
       )}
-      <TerminalView taskKey={task.key} screenId={task.screenId} guard={task.screen ? task.runner : undefined} />
+      <TerminalView taskKey={task.key} screenId={task.screenId} guard={task.screen ? task.runner : undefined} active={active} />
     </div>
   )
 }

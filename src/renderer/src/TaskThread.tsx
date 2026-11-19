@@ -4,9 +4,12 @@ import { Icon, type IconName } from './Icon'
 import { splitQuote } from '@shared/quote'
 import { tidyPlan } from '@shared/plan-items'
 import { splitPictures } from '@shared/pasted-pictures'
+import type { Delivery } from '@shared/sent-messages'
+import { useKeptState } from './kept'
 import { Markdown } from './Markdown'
 import { QuoteBlock } from './Quote'
 import { PictureOver } from './Rows'
+import { Ticks } from './Ticks'
 
 const api = window.togle
 
@@ -36,7 +39,8 @@ function keepReading(key: string, history: TaskHistory | null): void {
  * what is shown.
  */
 export function useHistory(task: Pick<TaskView, 'key' | 'state' | 'updatedAt' | 'runner'>, on: boolean): { history: TaskHistory | null; loaded: boolean; all: boolean; showAll: () => void } {
-  const [all, setAll] = useState(false)
+  // Earlier turns, once asked for, stay in view when the person leaves the task and comes back.
+  const [all, setAll] = useKeptState(`open:all:${task.key}`, false)
   const reading = `${task.key}${all ? ' all' : ''}`
   const [read, setRead] = useState<{ reading: string; history: TaskHistory | null } | null>(() => (readBefore.has(reading) ? { reading, history: readBefore.get(reading) ?? null } : null))
   // Not while it waits for you: nothing is being said then.
@@ -332,7 +336,7 @@ function DiffBox({ taskKey, more, file }: { taskKey: string; more: string; file:
 
 /** One file of a change, a row that opens to how it changed. A change that failed changed nothing, and opens to nothing. */
 function FileRow({ entry, file, index, taskKey }: { entry: LogEntry; file: string; index: number; taskKey: string }): ReactNode {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useKeptState(`open:file:${taskKey}:${entry.id}:${file}`, false)
   const failed = entry.status === 'failed'
   const opens = !!entry.more && !failed
   const line = (
@@ -444,7 +448,7 @@ function StepRow({ entry, taskKey }: { entry: LogEntry; taskKey: string }): Reac
   const stopped = entry.status === 'running' && !mayRun
   const look = lookOf(entry, running)
   const opens = entry.kind === 'command' || entry.step === 'code' || (entry.kind === 'step' && entry.step === 'think' && !!entry.more)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useKeptState(`open:step:${taskKey}:${entry.id}`, false)
   const ticking = running && realTime(entry.at)
   const now = useNow(ticking)
   // (A thought says how long it took in its words.)
@@ -588,8 +592,9 @@ function sentenceOf(rows: readonly LogEntry[], live: boolean, brief = false): Cl
  * they do. While it is the work going on, the line says what it does now and `ticker` (the newest row) shows under it, so that
  * the conversation does not grow with every step.
  */
-function Fold({ clauses, label, live = false, ticker, fresh, children }: { clauses: Clause[]; label?: string; live?: boolean; ticker?: ReactNode; fresh?: boolean; children: ReactNode }): ReactNode {
-  const [open, setOpen] = useState(false)
+function Fold({ keep, clauses, label, live = false, ticker, fresh, children }: { keep: string; clauses: Clause[]; label?: string; live?: boolean; ticker?: ReactNode; fresh?: boolean; children: ReactNode }): ReactNode {
+  // Opened or closed as the person left it, when they come back to the task (`keep` says which fold of which task).
+  const [open, setOpen] = useKeptState(`open:fold:${keep}`, false)
   return (
     <div className={`task-steps${open ? ' open' : ''}${fresh ? ' fresh' : ''}`}>
       <button type="button" className="fold-line" aria-expanded={open} onClick={() => setOpen((was) => !was)}>
@@ -666,6 +671,7 @@ function RunView({ run, taskKey, live, fresh, flat = false }: { run: LogEntry[];
   const shown = current?.kind === 'files' && (current.paths?.length ?? 0) > 1 ? { ...current, paths: current.paths?.slice(-1) } : current
   return (
     <Fold
+      keep={`${taskKey}:run-${run[0].id}`}
       clauses={sentenceOf(run, live)}
       live={live}
       fresh={fresh}
@@ -788,10 +794,11 @@ function Picture({ taskKey, picture, index, pasted }: { taskKey: string; picture
  * ones before scroll away with their turns. A long one shows its first lines, fading out, and opens to all of it (and then it
  * scrolls away like the rest).
  */
-function YouCard({ entry, at, fresh, pinned, taskKey }: { entry: LogEntry; at?: number; fresh?: boolean; pinned: boolean; taskKey: string }): ReactNode {
+function YouCard({ entry, at, fresh, pinned, taskKey, sending }: { entry: LogEntry; at?: number; fresh?: boolean; pinned: boolean; taskKey: string; sending?: Sending }): ReactNode {
   const box = useRef<HTMLDivElement>(null)
   const [long, setLong] = useState(false)
-  const [whole, setWhole] = useState(false)
+  // "Show all" on a long message stays pressed when the person leaves the task and comes back.
+  const [whole, setWhole] = useKeptState(`open:you:${taskKey}:${entry.id}`, false)
   const pictures = entry.images ?? []
   const files = youFiles(entry)
   const words = youWords(entry)
@@ -810,10 +817,13 @@ function YouCard({ entry, at, fresh, pinned, taskKey }: { entry: LogEntry; at?: 
     return () => watch.disconnect()
   }, [entry.text, whole])
   return (
-    <div className={`you-row${pinned && !whole ? ' pinned' : ''}${fresh ? ' fresh' : ''}`}>
+    <div className={`you-row${pinned && !whole ? ' pinned' : ''}${fresh ? ' fresh' : ''}`} data-delivery={sending?.delivery ?? 'taken'}>
       <div className="you-head">
         <span className="you-label">You</span>
         {at !== undefined && <When at={at} />}
+        {/* Every message of the person's has its ticks: two in the accent when the agent took it in (all that its record holds), and while a
+            message just sent is on its way, how far it got. */}
+        <Ticks state={sending?.delivery ?? 'taken'} />
       </div>
       {(words || !(pictures.length || files.length)) && (
         <div ref={box} className={`task-you${long && !whole ? ' clamped' : ''}${whole ? ' whole' : ''}`} data-quotable="">
@@ -826,6 +836,13 @@ function YouCard({ entry, at, fresh, pinned, taskKey }: { entry: LogEntry; at?: 
           {pictures.map((picture, index) => <Picture key={picture} taskKey={taskKey} picture={picture} index={index} />)}
           {files.map((file, index) => <Picture key={file} taskKey={taskKey} picture={file} index={pictures.length + index} pasted />)}
         </div>
+      )}
+      {sending?.delivery === 'failed' && (
+        <p className="sent-failed" role="alert">
+          <span>Not sent.{sending.error ? ` ${sending.error}` : ''}</span>
+          {sending.retry && <button type="button" className="link" onClick={sending.retry}>Try again</button>}
+          {sending.forget && <button type="button" className="link" onClick={sending.forget}>Remove</button>}
+        </p>
       )}
       {(long || whole) && (
         <button type="button" className="link you-more" aria-expanded={whole} onClick={() => setWhole((was) => !was)}>
@@ -845,6 +862,14 @@ interface Turn {
   key: number
   you?: LogEntry
   rest: LogEntry[]
+}
+
+/** A message the person just sent that the conversation draws before the agent's record has it: how far it got, and what to do when it did not go in. */
+export interface Sending {
+  delivery: Delivery
+  error?: string
+  retry?: () => void
+  forget?: () => void
 }
 
 /** A conversation as its turns: each starts with what the person said (the first may start with the agent). */
@@ -913,7 +938,7 @@ export function promptsOf(entries: readonly LogEntry[]): Prompt[] {
  * again. `known` is the entries drawn before: one that is not among them comes in with a little motion, once. (Null at first:
  * what was there when the task opened does not move.)
  */
-export function Thread({ entries, state, settled, taskKey, known = null, stepsRun = state === 'working' || state === 'waiting' }: { entries: LogEntry[]; state: TaskState; settled?: number; taskKey: string; known?: ReadonlySet<number> | null; stepsRun?: boolean }) {
+export function Thread({ entries, state, settled, taskKey, known = null, stepsRun = state === 'working' || state === 'waiting', sending }: { entries: LogEntry[]; state: TaskState; settled?: number; taskKey: string; known?: ReadonlySet<number> | null; stepsRun?: boolean; sending?: ReadonlyMap<number, Sending> }) {
   const now = Date.now()
   const turns = turnsOf(entries.filter((entry) => !isPlan(entry)))
   const isNew = (id: number): boolean => !!known && !known.has(id)
@@ -960,7 +985,7 @@ export function Thread({ entries, state, settled, taskKey, known = null, stepsRu
       else {
         const workParts = partsOf(work)
         inside.push(
-          <Fold key={`work-${work[0].id}`} label={time ? `Worked for ${time}` : undefined} clauses={sentenceOf(work, false, true)} fresh={isNew(work[0].id)}>
+          <Fold key={`work-${work[0].id}`} keep={`${taskKey}:work-${work[0].id}`} label={time ? `Worked for ${time}` : undefined} clauses={sentenceOf(work, false, true)} fresh={isNew(work[0].id)}>
             <PartsView parts={workParts} taskKey={taskKey} live={false} isNew={() => false} flat={workParts.filter((part) => part.run).length <= 1} />
           </Fold>
         )
@@ -971,7 +996,7 @@ export function Thread({ entries, state, settled, taskKey, known = null, stepsRu
       const early = parts.slice(0, Math.max(0, parts.length - PARTS_SHOWN))
       if (early.length) {
         inside.push(
-          <Fold key={`early-${turn.key}`} label="Earlier in this turn" clauses={sentenceOf(early.flatMap((part) => part.run ?? []), false)}>
+          <Fold key={`early-${turn.key}`} keep={`${taskKey}:early-${turn.key}`} label="Earlier in this turn" clauses={sentenceOf(early.flatMap((part) => part.run ?? []), false)}>
             <PartsView parts={early} taskKey={taskKey} live={false} isNew={() => false} />
           </Fold>
         )
@@ -984,7 +1009,7 @@ export function Thread({ entries, state, settled, taskKey, known = null, stepsRu
     }
     blocks.push(
       <div key={turn.key} className="turn" data-turn={turn.key}>
-        {turn.you && <YouCard entry={turn.you} at={asked} fresh={isNew(turn.you.id)} pinned={last} taskKey={taskKey} />}
+        {turn.you && <YouCard entry={turn.you} at={asked} fresh={isNew(turn.you.id)} pinned={last} taskKey={taskKey} sending={sending?.get(turn.you.id)} />}
         {inside}
       </div>
     )
@@ -1013,9 +1038,10 @@ export function currentPlan(entries: readonly LogEntry[]): PlanItem[] | undefine
  * being done is brought into view when it changes (with none being done, the next one to do; with all done, the last), and where the
  * person scrolled to stays until then.
  */
-export function PlanCard({ plan }: { plan: PlanItem[] }): ReactNode {
+export function PlanCard({ plan, keep }: { plan: PlanItem[]; keep: string }): ReactNode {
   const done = plan.filter((item) => item.state === 'done').length
-  const [open, setOpen] = useState<boolean | undefined>(undefined)
+  // Opened or folded as the person left it (`keep`: which task, which turn); undefined until they press.
+  const [open, setOpen] = useKeptState<boolean | undefined>(`open:plan:${keep}`, undefined)
   const shown = open ?? done < plan.length
   const now = plan.find((item) => item.state === 'doing')
   const items = useRef<HTMLUListElement>(null)

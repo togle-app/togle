@@ -47,7 +47,7 @@
  * The light window: the same parts on a light palette, when the person chose Light in Settings (or System, and the system is light;
  * Togle sets what the page is told, so this media query follows the choice). Every text color keeps 4.5:1 or more on what it sits
  * on, and a symbol 3:1. What floats over other apps (the voice bar, the notices, the call strip: index.html's data-hud) keeps the dark
- * palette, as does the agents' own screen (Terminal), which draws for the dark window it started on.
+ * palette. The agents' own screen (Terminal) follows the theme too: TerminalView.tsx colors it, in the same two palettes.
  */
 @media (prefers-color-scheme: light) {
   :root:not([data-hud]) {
@@ -457,6 +457,11 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .wait-words { position: absolute; top: 50%; left: 50%; z-index: 6; margin: 0; transform: translate(-50%, -50%); color: var(--muted); font-size: 12px; white-space: nowrap; pointer-events: none; animation: wait-in 0.3s ease-out; }
 @media (prefers-reduced-motion: reduce) { .wait-line, .wait-words { animation: none; } .wait-line::before { width: 100%; opacity: 0.55; animation: none; } }
 .task-panel { display: flex; flex-direction: column; flex: 1; gap: 12px; min-height: 0; }
+/* The views of a task (Chat, the agent's screen) stay in the page once shown. The one that is not shown is out of sight in the same place
+   at the same size (not display: none, which forgets where a box was scrolled to), takes no pointer and no key. */
+.task-views { position: relative; display: flex; flex-direction: column; flex: 1; gap: 12px; min-height: 0; }
+.task-view { display: flex; flex-direction: column; flex: 1 1 0; gap: 12px; min-height: 0; }
+.task-view.away { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
 /* The task's name, then its buttons. Where the window is too narrow for both (a second button shows after Stop), the
    buttons go under the name, at the line's end, and the name keeps its line. */
 .task-header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
@@ -575,6 +580,18 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .you-row .you-more { align-self: flex-start; margin: 0; padding: 0; color: var(--togle); font-size: 11px; }
 .you-row .you-more:hover { color: var(--ink); }
 .said-at { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* How far a message the person sent has got, as a chat app says it: a clock, one tick, two grey ticks, two in the accent, a red mark. */
+.ticks { display: inline-flex; flex: none; align-items: center; color: var(--muted); }
+.ticks svg { width: 16px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ticks[data-state='sending'] svg, .ticks[data-state='failed'] svg { width: 12px; height: 12px; }
+.ticks[data-state='taken'] { color: var(--togle); }
+.ticks[data-state='failed'] { color: var(--danger); }
+.you-head .ticks { margin-left: auto; align-self: center; }
+.held-row .ticks { align-self: center; margin-left: 2px; }
+.you-row[data-delivery='failed'] { border-color: color-mix(in srgb, var(--danger) 50%, var(--line)); border-left-color: var(--danger); }
+.sent-failed { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 2px 0 0; color: var(--danger); font-size: 12px; line-height: 1.4; }
+.sent-failed button { margin: 0; padding: 0; color: var(--togle); font-size: 12px; }
+.sent-failed button:hover { color: var(--ink); }
 /* What the agent said is plain words on the place, as the design draws a conversation. */
 .task-agent { max-width: 100%; padding: 0; overflow-wrap: anywhere; }
 .task-agent > :first-child { margin-top: 0; }

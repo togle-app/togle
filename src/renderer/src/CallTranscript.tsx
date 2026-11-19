@@ -1,7 +1,8 @@
-import { memo, useMemo, useState, type ReactNode } from 'react'
+import { memo, useMemo, type ReactNode } from 'react'
 import type { CallSession } from '@shared/types'
 import { speakerLabel } from '@shared/meeting'
 import { continuations, markedTurnIds, speechTurns } from '@shared/speakers'
+import { useKeptState } from './kept'
 import { colorOf, initialOf } from './voices'
 
 const LINES_PER_PAGE = 100
@@ -29,7 +30,8 @@ export const CallTranscript = memo(function CallTranscript({ record }: { record:
   const turns = useMemo(() => speechTurns(record.transcript), [record.transcript])
   const marked = useMemo(() => markedTurnIds(record), [record])
   const joins = useMemo(() => continuations(turns), [turns])
-  const [shown, setShown] = useState(LINES_PER_PAGE)
+  // The lines asked for with "Show more" stay shown when the window goes to another place and back to this call.
+  const [shown, setShown] = useKeptState(`transcript.shown:${record.id}`, LINES_PER_PAGE)
   const clock = useMemo(() => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }), [])
   if (!turns.length) return <p className="hint">No transcript was saved for this call.</p>
   const rows: ReactNode[] = []

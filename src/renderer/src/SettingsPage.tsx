@@ -22,7 +22,7 @@ import { VocabularyEditor } from './DictationVocabulary'
 import { Devices, SignIn, useReach } from './Devices'
 import { useRememberedVoices } from './VoiceMemory'
 import type { SettingsPart } from './open-settings'
-import { AGENTS_FOUND, keepAnswer, keptAnswer } from './kept'
+import { AGENTS_FOUND, keepAnswer, keptAnswer, useKeptState } from './kept'
 
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -135,7 +135,7 @@ function Appearance({ settings, save }: { settings: Settings; save: (patch: Sett
   return (
     <Section id="settings-appearance" title="Appearance">
       <Row label={false} name="Theme">
-        <span className="segmented view-switch" role="radiogroup" aria-label="Theme" title="Light or dark, or whichever your system has. What floats over other apps (the voice bar and the notices) stays dark, and so does an agent’s own screen in Terminal.">
+        <span className="segmented view-switch" role="radiogroup" aria-label="Theme" title="Light or dark, or whichever your system has. An agent’s own screen in Terminal follows it. What floats over other apps (the voice bar and the notices) stays dark.">
           {THEME_CHOICES.map((name) => {
             const on = theme === name
             return <button key={name} type="button" role="radio" aria-checked={on} className={on ? 'on' : ''} onClick={() => { if (!on) void save({ appearance: { theme: name } }) }}>{THEME_WORDS[name]}</button>
@@ -275,7 +275,8 @@ function RecentDictations({ accountId }: { accountId: string }) {
 
 /** Names and terms Togle spells right, and phrases that stand for a longer text: how many, and a way to change them. */
 function NamesAndTerms({ accountId }: { accountId: string }) {
-  const [open, setOpen] = useState(false)
+  // A row that is open stays open when the window goes to another place and back to Settings.
+  const [open, setOpen] = useKeptState('settings.names.open', false)
   // The count read last shows at once while it is read again (see kept.tsx).
   const [count, setCount] = useState<number | undefined>(() => keptAnswer<number>(`vocabulary.${accountId}`))
   useEffect(() => {
@@ -330,7 +331,7 @@ function Meetings({ settings, save }: { settings: Settings; save: (patch: Settin
 /** Whose voices Togle knows from one call to the next: nobody's, until the person turns it on. */
 function RememberedVoices({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
   const { people, error: loadError } = useRememberedVoices()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useKeptState('settings.voices.open', false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   return (

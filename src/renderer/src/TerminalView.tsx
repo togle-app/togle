@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { caughtOnEnter, CLEAR_LINE, isLeftArrow, leftLeaves, LEFT_NOTE, noteFor, promptIsEmpty, TypedLine } from '@shared/screen-guard'
@@ -28,8 +28,50 @@ const isDim = (term: Terminal, row: number, column: number): boolean => {
   return !!buffer.getLine(buffer.viewportY + row)?.getCell(column)?.isDim()
 }
 
+/**
+ * How the agent's screen is coloured: in the window's own colors, in the theme the window has (Appearance in Settings: Light, Dark, or the
+ * system's), so that the screen sits in the window as one piece. What an agent draws in the terminal's own colors (its text and its background,
+ * the sixteen named colors) follows the theme the moment it changes. What it draws in colors of its own (Claude Code's, in its dark theme) does not,
+ * so on a light screen the terminal keeps every letter readable: a color too close to the background is moved away from it (`minimumContrastRatio`).
+ */
+const DARK: ITheme = { background: '#0f1217', foreground: '#e6e8ee', cursor: '#e6e8ee', selectionBackground: '#3b4a6b' }
+const LIGHT: ITheme = {
+  background: '#eef0f5',
+  foreground: '#161a24',
+  cursor: '#161a24',
+  cursorAccent: '#eef0f5',
+  selectionBackground: '#c5ccf8',
+  selectionInactiveBackground: '#d9dcf5',
+  scrollbarSliderBackground: 'rgba(22, 26, 36, 0.22)',
+  scrollbarSliderHoverBackground: 'rgba(22, 26, 36, 0.36)',
+  scrollbarSliderActiveBackground: 'rgba(22, 26, 36, 0.5)',
+  // The sixteen named colors on a light screen: every one has 4.5:1 or more on its background (the usual ones are for a dark screen).
+  black: '#161a24',
+  red: '#b92d2d',
+  green: '#08735c',
+  yellow: '#8a5604',
+  blue: '#2f43c9',
+  magenta: '#a02ca0',
+  cyan: '#0a7083',
+  white: '#586076',
+  brightBlack: '#5f6781',
+  brightRed: '#c03333',
+  brightGreen: '#0a7a62',
+  brightYellow: '#8f5a05',
+  brightBlue: '#4350cf',
+  brightMagenta: '#b03db0',
+  brightCyan: '#087489',
+  brightWhite: '#0b0e15'
+}
+/** The least contrast a letter keeps with its background on a light screen (WCAG's 4.5:1 for text); a dark screen is left as the agent drew it. */
+const LIGHT_CONTRAST = 4.5
+const LIGHT_WINDOW = '(prefers-color-scheme: light)'
+
 // The terminals shown here before: what they printed then had its questions to the terminal answered.
 const shownBefore = new Set<string>()
+// How many lines above its foot a screen was scrolled when the person left it (a plain terminal, which keeps its lines: a program that draws
+// its own screen, as Claude Code and Codex do, keeps its own place, and what it drew is drawn again whole).
+const scrolledUp = new Map<string, number>()
 
 /**
  * The terminal a task runs in, inside Togle: what the agent prints, and the person's keys sent to it, as in any terminal.
@@ -39,8 +81,16 @@ const shownBefore = new Set<string>()
  * `guard` names the agent whose own screen this is (Claude Code, Codex, Hermes): /resume and /exit are not run on it. When Enter is
  * pressed with one of them on the line (see screen-guard.ts), Enter is not sent, the line is emptied, and a note says what to do.
  */
-export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; screenId?: string; guard?: string }) {
+export function TerminalView({ taskKey, screenId, guard, active = true }: { taskKey: string; screenId?: string; guard?: string; active?: boolean }) {
   const host = useRef<HTMLDivElement>(null)
+  // The screen stays in the page while the person is in the other view (Chat) of the task: it goes on reading what the agent prints, and is where it
+  // was left when they are back. `active` says it is the one in view: its keys go to it again.
+  const screen = useRef<Terminal | null>(null)
+  const inView = useRef(active)
+  inView.current = active
+  useEffect(() => {
+    if (active) screen.current?.focus()
+  }, [active])
   const [note, setNote] = useState<{ title: string; body: string } | null>(null)
   // Until what the screen printed so far has come: a quiet sign that it is on its way, instead of a black screen.
   const [drawn, setDrawn] = useState(false)
@@ -54,13 +104,22 @@ export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; sc
   useEffect(() => {
     const element = host.current
     if (!element) return
+    // The window's theme, now and when it changes: the screen is painted again at once, with no new screen and nothing typed.
+    const windowTheme = window.matchMedia(LIGHT_WINDOW)
     const term = new Terminal({
       fontFamily: "'Cascadia Mono', Consolas, ui-monospace, monospace",
       fontSize: 13,
       cursorBlink: true,
       scrollback: 5000,
-      theme: { background: '#0f1217', foreground: '#e6e8ee', cursor: '#e6e8ee', selectionBackground: '#3b4a6b' }
+      theme: windowTheme.matches ? LIGHT : DARK,
+      minimumContrastRatio: windowTheme.matches ? LIGHT_CONTRAST : 1
     })
+    const recolor = (): void => {
+      term.options.theme = windowTheme.matches ? LIGHT : DARK
+      term.options.minimumContrastRatio = windowTheme.matches ? LIGHT_CONTRAST : 1
+    }
+    windowTheme.addEventListener('change', recolor)
+    screen.current = term
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(element)
@@ -92,6 +151,9 @@ export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; sc
         replaying = again
         term.write(printed.text, () => {
           replaying = false
+          // Back on a screen that was read higher up: it goes back to where it was read.
+          const up = scrolledUp.get(shown)
+          if (alive && up && term.buffer.active.type === 'normal') term.scrollToLine(Math.max(0, term.buffer.active.baseY - up))
         })
         end = printed.end
         for (const chunk of early.splice(0)) write(chunk.at, chunk.data)
@@ -170,13 +232,19 @@ export function TerminalView({ taskKey, screenId, guard }: { taskKey: string; sc
     const observer = new ResizeObserver(() => size())
     observer.observe(element)
     size()
-    term.focus()
+    if (inView.current) term.focus()
     return () => {
       alive = false
       stop()
+      windowTheme.removeEventListener('change', recolor)
       element.removeEventListener('paste', pasted, true)
       typed.dispose()
       observer.disconnect()
+      if (screen.current === term) screen.current = null
+      const buffer = term.buffer.active
+      const up = buffer.type === 'normal' ? buffer.baseY - buffer.viewportY : 0
+      if (up > 0) scrolledUp.set(shown, up)
+      else scrolledUp.delete(shown)
       term.dispose()
     }
   }, [taskKey, screenId, guard])

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import type { SettingsPatch } from '@shared/api'
 import type { AuthStatus, Settings as SettingsData, SttStatus } from '@shared/types'
 import { needsYou } from '@shared/runner'
@@ -38,6 +38,13 @@ function placeBefore(): View {
     return 'todo'
   }
 }
+/**
+ * Where each place was scrolled to when the window left it. The window shows one place at a time, so a place drawn again is where it was left:
+ * what it keeps itself (what is open, what is typed) comes back from kept.tsx, and how far it was scrolled from here.
+ */
+const placeScrolls = new Map<View, number>()
+/** What the person does with a place once it is shown: they take over its scrolling from the moment they do any of it. */
+const TAKES_OVER = ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const
 const PLACES: { id: View; label: string; icon: string; title: string }[] = [
   { id: 'todo', label: 'To-do', icon: 'todo', title: 'What needs you today' },
   { id: 'agents', label: 'Agents', icon: 'tasks', title: 'Every agent task on this computer' },
@@ -71,6 +78,30 @@ export function Shell() {
     } catch {
       /* kept for this run only */
     }
+  }, [view])
+  // A place is shown scrolled to where it was left. One that reads before it has its whole length (a list that fills in) is gone back to as it
+  // grows, for a couple of seconds or until the person scrolls it themselves; what it holds while that goes on is not taken for a place left.
+  const content = useRef<HTMLElement>(null)
+  const restoring = useRef(false)
+  useLayoutEffect(() => {
+    const box = content.current
+    if (!box) return
+    const want = placeScrolls.get(view) ?? 0
+    box.scrollTop = want
+    if (want <= 0 || box.scrollTop >= want - 1) return
+    restoring.current = true
+    let tries = 0
+    const stop = (): void => {
+      restoring.current = false
+      clearInterval(timer)
+      for (const name of TAKES_OVER) box.removeEventListener(name, stop)
+    }
+    const timer = setInterval(() => {
+      box.scrollTop = want
+      if (box.scrollTop >= want - 1 || ++tries > 25) stop()
+    }, 80)
+    for (const name of TAKES_OVER) box.addEventListener(name, stop, { passive: true })
+    return stop
   }, [view])
 
   // Settings as main last sent them, with the changes asked for and not saved yet laid over them: a switch moves when it is
@@ -225,7 +256,7 @@ export function Shell() {
           collapsed={iconsOnly}
           onCollapsed={(icons) => setPanes({ nav: icons ? NAV_ICONS : NAV_DEFAULT })}
         />
-        <main className="shell-content">
+        <main className="shell-content" ref={content} onScroll={(event) => { if (!restoring.current) placeScrolls.set(view, event.currentTarget.scrollTop) }}>
           {confirmClose && (
             <div className="notice ask" role="alert" aria-label="Confirm quit Togle">
               <span>{quitQuestion(confirmClose)}</span>

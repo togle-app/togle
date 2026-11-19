@@ -17,7 +17,7 @@ app.setPath('userData', data)
 process.env.TOGLE_TEST_USER_DATA = data
 app.on('window-all-closed', () => {})
 let checkpoint = 'startup'
-const timeout = setTimeout(() => { console.error('Tasks UI checks timed out at ' + checkpoint); app.exit(1) }, 120000)
+const timeout = setTimeout(() => { console.error('Tasks UI checks timed out at ' + checkpoint); app.exit(1) }, 240000)
 
 async function open(T, agent, width, surface, extra = {}) {
   checkpoint = 'opening at ' + width + 'px'
@@ -457,20 +457,20 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal .task-banner')"), false, 'the screen the person knows needs no words about itself')
   assert.deepEqual(await texts(ui, '.view-switch button'), ['Chat', 'Terminal'], 'two views of the task, picked with a switch')
   assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Terminal', 'Terminal is the view tasks open in')
-  assert.equal(await ui.evaluate("!!document.querySelector('.task-reply')"), false, 'the terminal has no reply box: it is answered on the screen')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-view:not(.away) .task-reply')"), false, 'the terminal has no reply box: it is answered on the screen')
   assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'nothing to stop: it is idle')
   assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Idle')
   assert.equal(await ui.evaluate("document.querySelector('.task-row[aria-current=\"true\"]').textContent.includes('Take over')"), false, 'no Take over once it is here')
   await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'r7', kind: 'command', command: 'npm run migrate', raw: 'npm run migrate', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
   await ui.wait("document.querySelector('.state-chip')?.textContent==='Waiting for you'")
-  assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false, 'no card over a screen that asks on its own: it is answered there')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-view:not(.away) .task-request')"), false, 'no card over a screen that asks on its own: it is answered there')
   assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'it waits, and the header has no Stop in Terminal either: it is stopped on the screen, with Esc')
   await ui.capture('tasks-screen')
   // Chat: the card for what it asks, in the same task, and a reply box that takes words all the while: what is sent while it
   // asks or works waits, as a card of its own, and goes in when its turn ends.
   await ui.click('.view-switch button', 'Chat')
   await ui.wait("!!document.querySelector('.task-request')")
-  assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal')"), false, 'Web does not show the screen')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-view:not(.away) .task-terminal')"), false, 'Web does not show the screen')
   assert.deepEqual(await texts(ui, '.task-request button'), ['Allow once', 'Refuse'], 'the same card as anywhere')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request .hint')"), false, 'it says nothing of a screen to answer on')
   assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').disabled"), false, 'it takes words while the agent asks')
@@ -512,7 +512,7 @@ async function checkTasks(T, agent) {
   // The view is picked for the task: back to Terminal, and the screen is there.
   await ui.click('.view-switch button', 'Terminal')
   await ui.wait("!!document.querySelector('.task-terminal')")
-  assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false)
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-view:not(.away) .task-request')"), false)
   // Hand back closes the screen here and gives the line that opens it in the person's own terminal. The task goes on.
   await ui.click('.task-actions button', 'Hand back')
   await ui.wait("!!document.querySelector('.handed-back')")
@@ -636,7 +636,7 @@ async function checkTasks(T, agent) {
   await ui.click('.view-switch button', 'Chat')
   await ui.wait("!!document.querySelector('.task-panel .task-banner')")
   assert.equal(await ui.evaluate("document.querySelector('.task-panel .task-banner span').textContent"), 'It waits on its screen: approval or an answer.')
-  assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false, 'Togle has no card for what Hermes asks')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-view:not(.away) .task-request')"), false, 'Togle has no card for what Hermes asks')
   assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Chat')
   await ui.click('.task-panel .task-banner button', 'Open the terminal')
   await ui.wait("!!document.querySelector('.task-terminal')")
@@ -1628,14 +1628,38 @@ async function checkTheme(T, agent) {
       assert.deepEqual([seen.bg, seen.surface, seen.scheme, seen.hud], ['#0f1115', '#171b23', 'dark', true], surface + ' floats over other apps and stays dark in a light window')
       floating.window.destroy()
     }
-    // The agent's own screen stays dark in the light window (it drew for the dark one it started on).
+    // The agent's own screen is in the window's theme: light in a light window, dark in a dark one, and painted again the moment the theme
+    // changes, with the same screen (nothing opened again, nothing typed). What the agent drew in the terminal's own colors follows; what it drew
+    // in colors of its own stays readable (a letter close to the background is moved away from it).
     await main.click('.workspace-nav button', 'Agents')
     await main.wait("document.querySelectorAll('.task-row').length===5")
-    await main.evaluate("window.togleUITest.terminalTask({ key: 'term-aider:th1', runner: 'term-aider', agent: 'Aider', title: 'Rename the module', folder: 'C:\\\\work\\\\api-server', words: 'x' }, 'Aider v0.99\\r\\nready> ')")
+    await main.evaluate("window.togleUITest.terminalTask({ key: 'term-aider:th1', runner: 'term-aider', agent: 'Aider', title: 'Rename the module', folder: 'C:\\\\work\\\\api-server', words: 'x' }, 'Aider v0.99\\r\\n\\x1b[38;2;255;255;255mwhite on whatever the screen is\\x1b[0m\\r\\n\\x1b[33mnamed yellow\\x1b[0m \\x1b[37mnamed white\\x1b[0m\\r\\nready> ')")
     await main.task('Rename the module')
-    await main.wait("document.querySelector('.terminal-view')?.textContent.includes('Aider v0.99')")
-    const dark = await main.evaluate("(()=>{const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle=getComputedStyle(document.querySelector('.terminal-view .xterm-viewport')||document.querySelector('.terminal-view')).backgroundColor;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return d[0]+d[1]+d[2]})()")
-    assert.ok(dark < 150, 'the agent\'s screen is dark in a light window: ' + dark)
+    await main.wait("document.querySelector('.terminal-view')?.textContent.includes('named yellow')")
+    const look = () => main.evaluate(`(() => {
+      const paint = (css) => { const c = document.createElement('canvas'); c.width = c.height = 1; const x = c.getContext('2d'); x.fillStyle = css; x.fillRect(0, 0, 1, 1); const d = x.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2]] }
+      const box = document.querySelector('.terminal-view')
+      const view = box.querySelector('.xterm-scrollable-element') || box
+      const letter = (words) => { const span = [...box.querySelectorAll('.xterm-rows span')].find((s) => s.textContent.includes(words)); return span ? paint(getComputedStyle(span).color) : null }
+      return { screen: paint(getComputedStyle(view).backgroundColor), box: paint(getComputedStyle(box).backgroundColor), text: paint(getComputedStyle(box.querySelector('.xterm-rows')).color), white: letter('white on whatever'), yellow: letter('named yellow'), named: letter('named white') }
+    })()`)
+    const light = (c) => c[0] + c[1] + c[2] > 600
+    // A color's contrast with the screen, as WCAG measures it.
+    const luminance = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
+    const contrast = (a, b) => { const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05) }
+    let seen = await look()
+    assert.deepEqual(seen.screen, seen.box, 'the screen is one piece with the window around it, in a light window: ' + JSON.stringify(seen))
+    assert.ok(light(seen.screen), 'the agent\'s screen is light in a light window: ' + seen.screen)
+    assert.ok(contrast(seen.text, seen.screen) >= 7, 'its text is dark on it: ' + JSON.stringify(seen))
+    for (const [name, color] of [['white that an agent drew in a color of its own', seen.white], ['named yellow', seen.yellow], ['named white', seen.named]]) assert.ok(color && contrast(color, seen.screen) >= 4.4, name + ' is readable on it: ' + JSON.stringify(seen))
+    // The theme changes while the screen is open: it is painted again as the dark one, and back.
+    nativeTheme.themeSource = 'dark'
+    await main.wait("(()=>{const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle=getComputedStyle(document.querySelector('.terminal-view .xterm-scrollable-element')).backgroundColor;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return d[0]+d[1]+d[2]<150})()")
+    seen = await look()
+    assert.ok(!light(seen.screen) && contrast(seen.text, seen.screen) >= 7, 'the screen is dark in a dark window, with light text: ' + JSON.stringify(seen))
+    assert.equal(await main.evaluate("document.querySelector('.terminal-view')?.textContent.includes('named yellow')"), true, 'it is the same screen')
+    nativeTheme.themeSource = 'light'
+    await main.wait("(()=>{const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle=getComputedStyle(document.querySelector('.terminal-view .xterm-scrollable-element')).backgroundColor;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return d[0]+d[1]+d[2]>600})()")
     assert.deepEqual(main.errors, [], 'no errors in the console')
     main.window.destroy()
   } finally {
@@ -2605,6 +2629,192 @@ async function checkKept(T, agent) {
   ui.window.destroy()
 }
 
+// What the person left in a task is there again after a look at the task's other view (Chat and the agent's screen), another task, or another
+// place: what is opened, where the conversation and the screen are scrolled to, what is typed. Nothing in it starts over. (A menu or a list of
+// choices that was open is shut: it is a pop-up, not a part of the page.)
+async function checkViewsKept(T, agent) {
+  const ui = await open(T, agent, 1180)
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  const asked = 'This is a long request that goes over more than three lines so that the card clamps and offers Show all. '.repeat(6)
+  const entries = []
+  let id = 1
+  for (let n = 1; n <= 8; n++) {
+    const at = Date.now() - (9 - n) * 11 * 60_000
+    entries.push({ id: id++, at, kind: 'you', text: n === 3 ? asked : 'Question number ' + n })
+    for (const command of ['npm test', 'npm run lint', 'git status']) entries.push({ id: id++, at: at + 5000, kind: 'command', text: command, status: 'finished', took: 3000 })
+    entries.push({ id: id++, at: at + 40000, kind: 'agent', text: 'Answer number ' + n + '.\n\nIt has a second paragraph so that the turn has some height.' })
+  }
+  entries.push({ id: id++, at: Date.now() - 20_000, kind: 'step', step: 'plan', text: '2 of 4 done', plan: [{ text: 'Read it', state: 'done' }, { text: 'Change it', state: 'done' }, { text: 'Test it', state: 'doing' }, { text: 'Ship it', state: 'todo' }] })
+  const screen = Array.from({ length: 300 }, (_, n) => 'line ' + (n + 1) + ' of what the agent printed on its screen').join('\r\n') + '\r\n> '
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:v1', runner: 'claude', title: 'Views kept', folder: 'C:\\work\\notes', state: 'idle', screen: true, terminal: true, mine: true, line: 'Views kept', history: { entries } }) + ', ' + JSON.stringify(screen) + ')')
+  await ui.task('Views kept')
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const view = async (name) => { await ui.click('.view-switch button', name); await ui.paint() }
+  // What shows of the page, as a person would tell it.
+  const measure = () => ui.evaluate(`(() => {
+    const log = document.querySelector('.task-log')
+    const top = document.querySelector('.task-terminal .xterm-rows > div')
+    return {
+      scroll: log ? Math.round(log.scrollTop) : null,
+      folds: document.querySelectorAll('.task-steps.open').length,
+      asked: document.querySelectorAll('.you-more[aria-expanded="true"]').length,
+      plan: document.querySelector('.plan-head')?.getAttribute('aria-expanded') ?? null,
+      reply: document.querySelector('.task-reply textarea')?.value ?? null,
+      screen: top ? top.textContent.slice(0, 22) : null
+    }
+  })()`)
+  // Chat: two folds opened, the long request shown whole, the checklist folded, words typed, the conversation read higher up.
+  await view('Chat')
+  await ui.wait("document.querySelectorAll('.turn').length>=8")
+  await ui.evaluate("[...document.querySelectorAll('.fold-line')].slice(0,2).forEach(f=>f.click())")
+  await ui.evaluate("document.querySelector('.you-more').click()")
+  await ui.evaluate("document.querySelector('.plan-head').click()")
+  await ui.fill('.task-reply textarea', 'A draft that should still be here')
+  await ui.paint()
+  await ui.evaluate("(()=>{const l=document.querySelector('.task-log');l.scrollTop=Math.round(l.scrollHeight*0.35);l.dispatchEvent(new Event('scroll',{bubbles:true}))})()")
+  await ui.paint(); await sleep(300)
+  // Terminal: the screen read higher up, with real turns of the wheel (Electron's sign: positive scrolls up).
+  await view('Terminal')
+  await ui.wait("!!document.querySelector('.task-terminal .xterm-rows')")
+  await sleep(700)
+  const over = await ui.evaluate("(()=>{const r=document.querySelector('.terminal-view').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()")
+  for (let n = 0; n < 6; n++) { ui.window.webContents.sendInputEvent({ type: 'mouseWheel', x: over.x, y: over.y, deltaX: 0, deltaY: 400, canScroll: true }); await sleep(80) }
+  await sleep(300)
+  await view('Chat')
+  const left = await measure()
+  assert.ok(left.scroll > 100, 'the conversation was read to ' + left.scroll)
+  assert.equal(left.folds, 2, 'two folds are open')
+  assert.equal(left.asked, 1, 'the long request is shown whole')
+  assert.equal(left.plan, 'false', 'the checklist is folded')
+  assert.equal(left.reply, 'A draft that should still be here')
+  assert.ok(left.screen && !left.screen.startsWith('line 2' + '8') && /^line \d+ /.test(left.screen), 'the screen was read higher up: ' + left.screen)
+  // (The screen is drawn when it is first shown: after another task or place it is looked at on its own, below.)
+  const same = async (what, withScreen = false) => {
+    const now = await measure()
+    const shown = (state) => ({ ...state, scroll: Math.round(state.scroll / 4), screen: withScreen ? state.screen : null })
+    assert.deepEqual(shown(now), shown(left), what)
+  }
+  // The other view and back: both are still there, one out of sight, so nothing in either starts over (and a key goes to the one in view only).
+  await view('Terminal')
+  assert.equal(await ui.evaluate("document.querySelector('.task-view.away')?.hasAttribute('inert')"), true, 'the view out of sight takes no key or pointer')
+  assert.equal(await ui.evaluate("document.querySelectorAll('.task-terminal .xterm-rows').length"), 1, 'the screen was not drawn a second time')
+  await view('Chat')
+  await same('Chat is as it was after a look at the screen, and the screen is where it was', true)
+  // Another task and back.
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Rebuild the pricing page'")
+  await ui.task('Views kept')
+  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Views kept'")
+  await sleep(500)
+  await same('the task is as it was after another task was shown')
+  // Another place and back.
+  await ui.click('.workspace-nav button', 'Meetings')
+  await ui.wait("!document.querySelector('.tasks')")
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.turn').length>=8")
+  await sleep(800)
+  await same('the task is as it was after another place was shown')
+  // The screen is read to where it was, in either way back.
+  await view('Terminal')
+  await ui.wait("!!document.querySelector('.task-terminal .xterm-rows')")
+  await sleep(900)
+  assert.equal((await measure()).screen, left.screen, 'the screen is where it was left, after another place was shown')
+  await view('Chat')
+  // Settings: a row that was open is open, and the page is scrolled as it was (the window is low, so that it scrolls).
+  ui.window.setContentSize(1180, 420)
+  await ui.wait('innerHeight===420')
+  await ui.click('.workspace-nav button', 'Settings')
+  await ui.wait("!!document.querySelector('.settings-one')")
+  await ui.click('.settings-one button.choice', 'None')
+  await ui.paint()
+  const rowOpen = "[...document.querySelectorAll('.settings-one button.choice[aria-expanded=true]')].map(b=>b.textContent.trim()).join('|')"
+  assert.equal(await ui.evaluate(rowOpen), 'None', 'Names and terms is open')
+  await ui.evaluate("(()=>{const m=document.querySelector('.shell-content');m.scrollTop=Math.round((m.scrollHeight-m.clientHeight)*0.6);m.dispatchEvent(new Event('scroll'))})()")
+  await ui.paint(); await sleep(200)
+  const settingsTo = await ui.evaluate("document.querySelector('.shell-content').scrollTop")
+  assert.ok(settingsTo > 20, 'Settings was scrolled to ' + settingsTo)
+  await ui.click('.workspace-nav button', 'Meetings')
+  await ui.wait("!document.querySelector('.settings-one')")
+  await ui.click('.workspace-nav button', 'Settings')
+  await ui.wait("!!document.querySelector('.settings-one')")
+  await sleep(500)
+  assert.equal(await ui.evaluate(rowOpen), 'None', 'the row is still open')
+  assert.ok(Math.abs((await ui.evaluate("document.querySelector('.shell-content').scrollTop")) - settingsTo) <= 2, 'Settings is scrolled as it was')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
+// A message sent from Chat is on the screen the moment it is sent, as a chat app draws it, with ticks that say how far it got: a clock while it is
+// being sent, one tick when the agent was told, two grey ticks when the agent has it in its queue, two in the accent when it took it in; a red mark
+// and a way to try again when it could not be sent. What Togle holds for an agent that cannot take it yet is in the Queued card with a clock.
+async function checkSentTicks(T, agent) {
+  const ui = await open(T, agent, 1180)
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const before = [{ id: 1, at: Date.now() - 600_000, kind: 'you', text: 'Rebuild the pricing page.' }, { id: 2, at: Date.now() - 590_000, kind: 'agent', text: 'Done. The page has a yearly price now.' }]
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:t1', runner: 'claude', title: 'Ticks task', folder: 'C:\\work\\notes', state: 'idle', screen: false, terminal: false, mine: true, line: 'Ticks task', history: { entries: before } }) + ', "")')
+  await ui.task('Ticks task')
+  await ui.wait("document.querySelectorAll('.you-row').length===1")
+  const cards = (words) => "[...document.querySelectorAll('.you-row')].filter(c=>c.querySelector('.task-you')?.textContent.trim()===" + JSON.stringify(words) + ")"
+  const stateOf = (words) => ui.evaluate(cards(words) + ".map(c=>c.getAttribute('data-delivery')+'/'+c.querySelector('.ticks')?.getAttribute('data-state'))")
+  const press = async (words) => { await ui.fill('.task-reply textarea', words); await ui.evaluate("document.querySelector('.task-reply textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))") }
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.you-row')].map(c=>c.getAttribute('data-delivery'))"), ['taken'], 'what the agent has taken in has its two ticks in the accent')
+  // Sent while the agent is slow to answer: the message is on screen, with a clock, before the agent has been told anything.
+  await ui.evaluate("window.togleUITest.slow('sendToRunnerTask', 1200)")
+  await press('Add a dark mode')
+  await ui.wait(cards('Add a dark mode') + ".length===1")
+  assert.deepEqual(await stateOf('Add a dark mode'), ['sending/sending'], 'a clock while it is being sent')
+  assert.equal((await ui.calls('sendToRunnerTask')).length, 0, 'it is on screen before the agent was told')
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), '', 'the box is empty again at once')
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('.you-row')].at(-1).querySelector('.task-you').textContent.trim()"), 'Add a dark mode', 'at the end of the conversation')
+  // Told: one tick, until the agent's record has it.
+  await ui.wait("document.querySelector('.you-row[data-delivery=sent]')")
+  assert.deepEqual(await stateOf('Add a dark mode'), ['sent/sent'], 'one tick when the agent was told')
+  await ui.evaluate("window.togleUITest.slow('sendToRunnerTask', 0)")
+  // The record has it: the card is the record's, with its two ticks, and there is still only one.
+  await ui.evaluate('window.togleUITest.recorded("claude:t1", ' + JSON.stringify([{ id: 300, at: Date.now() + 1000, kind: 'you', text: 'Add a dark mode' }]) + ')')
+  await ui.wait("document.querySelectorAll('.you-row[data-delivery=taken]').length===2")
+  assert.deepEqual(await stateOf('Add a dark mode'), ['taken/taken'], 'two ticks in the accent once the agent took it in, and one card')
+  // It could not be sent: a red mark with why, and Try again.
+  await ui.evaluate("window.togleUITest.failNext('sendToRunnerTask')")
+  await press('Second try')
+  await ui.wait("!!document.querySelector('.you-row[data-delivery=failed]')")
+  assert.deepEqual(await stateOf('Second try'), ['failed/failed'])
+  assert.match(await ui.evaluate("document.querySelector('.sent-failed').textContent"), /^Not sent\. It did not answer\.Try againRemove$/, 'it says why, and what can be done')
+  await ui.click('.sent-failed button', 'Try again')
+  await ui.wait("!document.querySelector('.you-row[data-delivery=failed]')")
+  await ui.wait("!!document.querySelector('.you-row[data-delivery=sent]')")
+  assert.equal((await ui.calls('sendToRunnerTask')).length, 2, 'Try again told the agent, once')
+  await ui.evaluate('window.togleUITest.recorded("claude:t1", ' + JSON.stringify([{ id: 301, at: Date.now() + 2000, kind: 'you', text: 'Second try' }]) + ')')
+  await ui.wait("document.querySelectorAll('.you-row[data-delivery=taken]').length===3")
+  // A failure that is given up on: Remove takes the card away, and the words with it.
+  await ui.evaluate("window.togleUITest.failNext('sendToRunnerTask')")
+  await press('Third try')
+  await ui.wait("!!document.querySelector('.you-row[data-delivery=failed]')")
+  await ui.click('.sent-failed button', 'Remove')
+  await ui.wait("!document.querySelector('.you-row[data-delivery=failed]')")
+  assert.equal((await stateOf('Third try')).length, 0, 'the card is gone')
+  // What the agent holds in its own queue: two grey ticks, in the Queued card.
+  await ui.evaluate('window.togleUITest.setTask("claude:t1", ' + JSON.stringify({ state: 'working', history: { entries: [...before, { id: 300, at: Date.now() + 1000, kind: 'you', text: 'Add a dark mode' }, { id: 301, at: Date.now() + 2000, kind: 'you', text: 'Second try' }], queued: ['Also the footer'] } }) + ')')
+  await ui.wait("!!document.querySelector('.held-row .ticks')")
+  assert.equal(await ui.evaluate("document.querySelector('.held-row .ticks').getAttribute('data-state')"), 'delivered', 'two grey ticks: the agent has it, and takes it in as it goes')
+  // What Togle holds for an agent that cannot take it yet (a question waits on its screen): a clock, in the same card, and not a card in the conversation.
+  const asked = [{ id: 1, at: Date.now() - 600_000, kind: 'you', text: 'Rebuild the pricing page.' }]
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:t2', runner: 'claude', title: 'Held task', folder: 'C:\\work\\notes', state: 'waiting', screen: true, terminal: false, mine: true, waitingFor: 'an answer', line: 'Held task', history: { entries: asked } }) + ', "")')
+  await ui.task('Held task')
+  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Held task'")
+  if (await ui.evaluate("!document.querySelector('.task-reply textarea')")) await ui.click('.view-switch button', 'Chat')
+  await ui.wait("!!document.querySelector('.task-reply textarea')")
+  await press('When you can')
+  await ui.wait("!!document.querySelector('.held-row .ticks')")
+  assert.equal(await ui.evaluate("document.querySelector('.held-row .ticks').getAttribute('data-state')"), 'sending', 'a clock while Togle holds it')
+  assert.equal((await stateOf('When you can')).length, 0, 'and it is in the Queued card, not in the conversation')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 // A secret an agent asks for (a password box) is never kept with the drafts: not when another place is shown and this one again, and
 // not in the box that comes after the question, which has what was typed before it.
 async function checkSecret(T, agent) {
@@ -2984,6 +3194,8 @@ app.whenReady().then(async () => {
     await go(checkQuote)
     await go(checkInterrupt)
     await go(checkKept)
+    await go(checkViewsKept)
+    await go(checkSentTicks)
     await go(checkSecret)
     await go(checkArrange)
     await go(checkGroups)
