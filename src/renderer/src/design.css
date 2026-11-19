@@ -209,7 +209,8 @@ code { font-family: var(--font-mono); font-size: 0.9em; }
 button.icon { color: var(--muted); border-radius: 6px; }
 button.icon:hover, button.icon.active { background: var(--raised); color: var(--ink); }
 
-.shell-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 136px minmax(0, 1fr); }
+/* The navigation is as wide as the person set it (--nav-width: its words, or its icons only); its edge is a handle (ResizeHandle). */
+.shell-layout { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: var(--nav-width, 136px) minmax(0, 1fr); }
 .shell-nav { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 8px; background: var(--bg); border-right: 1px solid var(--line); }
 .shell-nav > .spacer { flex: 1; }
 /* Each place has its icon beside its name, at every width; in a narrow window the icon is all there is room for. */
@@ -231,7 +232,27 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .shell-content:has(> .tasks) > .notice { margin: 14px 15px 0; }
 /* Agents is two panes side by side, each with its own room, the line between them the window's full height. */
 .shell-content:has(> .tasks) { padding: 0; scrollbar-gutter: auto; }
+/* Narrowed by hand to its icons (the person dragged it, or hid it): what a narrow window does, with the window's room as it is. */
+.shell-layout.nav-icons .shell-nav button { justify-content: center; padding: 8px 0; }
+.shell-layout.nav-icons .shell-nav button > span:not(.nav-count):not(.dot) { display: none; }
+.shell-layout.nav-icons .shell-nav .nav-count { position: absolute; top: 1px; right: 2px; padding: 0 5px; line-height: 16px; font-size: 10px; }
+.shell-layout.nav-icons .shell-nav .dot.live { position: absolute; top: 6px; right: 8px; width: 7px; height: 7px; }
+/* The edge between a pane and the next: a strip over the next pane's own room, a line that shows under the pointer or the keys, and a
+   tab that hides the pane or shows it again. */
+.resize-handle { position: absolute; top: 0; bottom: 0; z-index: 8; width: 6px; cursor: col-resize; touch-action: none; outline: none; }
+.nav-handle { left: var(--nav-width, 136px); }
+.list-handle { left: var(--list-width, clamp(15.5rem, 22vw, 22rem)); }
+.tasks.list-hidden > .list-handle { left: 0; }
+.resize-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: -1px; width: 3px; background: transparent; }
+.resize-handle:hover::before, .resize-handle.dragging::before, .resize-handle:focus-visible::before { background: var(--togle); }
+.resize-tab { position: absolute; top: 50%; left: 0; display: grid; place-items: center; width: 15px; height: 40px; margin: -20px 0 0; padding: 0; border: 1px solid var(--line); border-left: 0; border-radius: 0 9px 9px 0; background: var(--surface); color: var(--muted); cursor: pointer; opacity: 0.55; transition: opacity 0.12s; }
+.resize-handle:hover .resize-tab, .resize-handle:focus-visible .resize-tab, .resize-handle.dragging .resize-tab, .resize-tab:focus-visible { opacity: 1; }
+.resize-tab:hover:not(:disabled) { border-color: var(--line); background: var(--raised); color: var(--ink); }
+.resize-tab svg { transform: rotate(90deg); }
+.resize-handle.collapsed .resize-tab svg { transform: rotate(-90deg); }
+@media (prefers-reduced-motion: reduce) { .resize-tab { transition: none; } }
 @media (max-width: 560px) {
+  .nav-handle { display: none; }
   .shell-layout { grid-template-columns: 52px minmax(0, 1fr); }
   .shell-nav button { justify-content: center; padding: 8px 0; }
   .shell-nav button > span:not(.nav-count):not(.dot) { display: none; }
@@ -290,9 +311,13 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 /* ---- Agents: the list of tasks, and the one open beside it ---- */
 
 /* The list is as wide as the design draws it, and wider on a wide window, where its names would be cut short for no reason. */
-.tasks { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, clamp(15.5rem, 22vw, 22rem)) minmax(0, 1fr); }
+.tasks { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, var(--list-width, clamp(15.5rem, 22vw, 22rem))) minmax(0, 1fr); }
+/* Hidden, the list takes no room and the task has all of it; the handle stays at the edge to bring it back. */
+.tasks.list-hidden { grid-template-columns: minmax(0, 1fr); }
+.tasks.list-hidden > .tasks-list { display: none; }
 .tasks-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 14px 7px 14px 15px; border-right: 1px solid var(--line); }
 .tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tasks-head .tasks-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-list { display: flex; flex-direction: column; gap: 6px; }
 /* The list in groups, each a box with what it holds: groups the person made, scheduled jobs, work in no project (Everyday),
    one box per project. A group is known by its mark (a letter on a color of its own, never one a state uses), its name and,
@@ -778,6 +803,7 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .task-devices-mention p { margin: 0; color: var(--ink); font-size: 12.5px; }
 .task-devices-mention button { margin-top: 2px; }
 @media (max-width: 760px) {
+  .list-handle { display: none; }
   .tasks { grid-template-columns: minmax(0, 1fr); }
   .tasks.has-detail .tasks-list, .tasks:not(.has-detail) .tasks-detail { display: none; }
   .tasks-back { display: inline-flex; }

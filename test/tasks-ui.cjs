@@ -1638,6 +1638,123 @@ async function checkMarksLight(T, agent) {
   await checkMarks(T, agent, 'light')
 }
 
+// The navigation and the Agents list: the pointer drags the edge after each (a real drag), the keys move it, a tab on it hides the pane or
+// shows it again; the navigation narrowed past its words is its icons only; what was set is kept for the next window.
+async function checkPanes(T, agent) {
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const ui = await open(T, agent, 1180)
+  await ui.evaluate("localStorage.removeItem('togle.panes')")
+  const debug = debuggerOf(ui)
+  await debug.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  await ui.task('Rebuild the pricing page')
+  const widths = () => ui.evaluate("(()=>{const w=s=>{const e=document.querySelector(s);return e&&e.getClientRects().length?Math.round(e.getBoundingClientRect().width):0};return {nav:w('.shell-nav'),list:w('.tasks-list'),detail:w('.tasks-detail'),tasks:w('.tasks')}})()")
+  const dragEdge = async (selector, dx) => {
+    const at = await ui.evaluate("(()=>{const r=document.querySelector(" + JSON.stringify(selector) + ").getBoundingClientRect();return {x:r.left+3,y:r.top+120}})()")
+    await debug.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y })
+    await debug.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: 'left', buttons: 1, clickCount: 1 })
+    for (let step = 1; step <= 6; step++) { await debug.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x + (dx * step) / 6, y: at.y, buttons: 1 }); await wait(16) }
+    await debug.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x + dx, y: at.y, button: 'left', buttons: 0, clickCount: 1 })
+    await ui.paint()
+  }
+  const press = async (selector, key, shift = false) => {
+    await ui.evaluate("document.querySelector(" + JSON.stringify(selector) + ").focus()")
+    const codes = { ArrowLeft: 37, ArrowRight: 39, Home: 36, End: 35, Enter: 13 }
+    const event = { key, code: key, windowsVirtualKeyCode: codes[key], nativeVirtualKeyCode: codes[key], modifiers: shift ? 8 : 0 }
+    await debug.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...event })
+    await debug.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...event })
+    await ui.paint()
+  }
+  const near = (value, wanted, what) => assert.ok(Math.abs(value - wanted) <= 1, what + ': ' + value + ' is not ' + wanted)
+
+  // Each edge is a separator the keys reach, with its bounds said.
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('[role=separator]')].map(e=>[e.getAttribute('aria-label'),e.getAttribute('aria-orientation'),e.tabIndex,e.getAttribute('aria-valuemin'),e.getAttribute('aria-valuemax')])"),
+    [['Resize the navigation', 'vertical', 0, '52', '240'], ['Resize the task list', 'vertical', 0, '240', '560']])
+  const start = await widths()
+  near(start.nav, 136, 'the navigation is as wide as it was drawn')
+  assert.ok(start.list >= 248 && start.list <= 352, 'and so is the list: ' + start.list)
+
+  // The list: wider by a drag, narrowest, widest (the open task keeps room), by the keys, hidden, shown again at the width it had.
+  await dragEdge('.list-handle', 90)
+  near((await widths()).list, start.list + 90, 'dragged 90px wider')
+  assert.equal(JSON.parse(await ui.evaluate("localStorage.getItem('togle.panes')")).list, start.list + 90, 'and kept')
+  await dragEdge('.list-handle', -600)
+  near((await widths()).list, 240, 'dragged far narrower it stops at its narrowest')
+  await dragEdge('.list-handle', 2000)
+  const widest = await widths()
+  assert.ok(widest.list <= 560 && widest.detail >= 320, 'dragged far wider it stops where the task keeps its room: ' + JSON.stringify(widest))
+  await press('.list-handle', 'Home')
+  near((await widths()).list, 240, 'Home: the narrowest')
+  await press('.list-handle', 'ArrowRight')
+  near((await widths()).list, 256, 'an arrow key: 16px')
+  await press('.list-handle', 'ArrowRight', true)
+  near((await widths()).list, 320, 'with Shift: 64px')
+  await press('.list-handle', 'End')
+  assert.equal((await widths()).list, widest.list, 'End: the widest')
+  await ui.evaluate("document.querySelector('.list-handle .resize-tab').click()")
+  await ui.wait("document.querySelector('.tasks').classList.contains('list-hidden')")
+  const hidden = await widths()
+  assert.equal(hidden.list, 0, 'its tab hides the list')
+  near(hidden.detail, hidden.tasks, 'and the task has all the room')
+  assert.equal(await ui.evaluate("document.querySelector('.list-handle').getAttribute('aria-label')"), 'Resize the task list', 'the edge is still there to bring it back')
+  assert.equal(await ui.evaluate("document.querySelector('.list-handle .resize-tab').getAttribute('aria-label')"), 'Show the task list')
+  await press('.list-handle', 'Enter')
+  await ui.wait("!document.querySelector('.tasks').classList.contains('list-hidden')")
+  assert.equal((await widths()).list, widest.list, 'Enter shows it again, as wide as it was')
+  await ui.evaluate("document.querySelector('.list-handle').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))")
+  await ui.wait("document.querySelector('.tasks').classList.contains('list-hidden')")
+  await ui.evaluate("document.querySelector('.list-handle').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))")
+  await ui.wait("!document.querySelector('.tasks').classList.contains('list-hidden')")
+
+  // The navigation: wider by a drag; narrowed past its words it is its icons only (labels gone, the count and the live dot kept);
+  // from its icons a key brings the words back; its tab goes between the two.
+  await dragEdge('.nav-handle', 70)
+  near((await widths()).nav, 206, 'the navigation dragged 70px wider')
+  await dragEdge('.nav-handle', -300)
+  assert.equal((await widths()).nav, 52, 'dragged narrower than its words need, it is its icons only')
+  assert.equal(await ui.evaluate("document.querySelector('.shell-layout').classList.contains('nav-icons')&&[...document.querySelectorAll('.shell-nav button')].every(b=>[...b.querySelectorAll('span:not(.nav-count):not(.dot)')].every(s=>getComputedStyle(s).display==='none'))"), true, 'with no words')
+  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.shell-nav .nav-count')).position"), 'absolute', 'and what waits for you still shows on the icon')
+  await press('.nav-handle', 'ArrowRight')
+  assert.ok((await widths()).nav >= 96, 'from its icons an arrow key brings its words back')
+  await ui.evaluate("document.querySelector('.nav-handle .resize-tab').click()")
+  assert.equal((await widths()).nav, 52, 'its tab: to its icons')
+  await ui.evaluate("document.querySelector('.nav-handle .resize-tab').click()")
+  assert.equal((await widths()).nav, 136, 'and back to its words')
+  await dragEdge('.nav-handle', 40)
+  const kept = await widths()
+  near(kept.nav, 176, 'set for the next window')
+
+  // What was set is kept: another window opens with it, and a word of storage that is not a width is the default.
+  const next = await open(T, agent, 1180)
+  await next.click('.workspace-nav button', 'Agents')
+  await next.wait("document.querySelectorAll('.task-row').length===5")
+  const again = await next.evaluate("(()=>{const w=s=>Math.round(document.querySelector(s).getBoundingClientRect().width);return {nav:w('.shell-nav'),list:w('.tasks-list')}})()")
+  near(again.nav, 176, 'the next window has the navigation as it was set')
+  near(again.list, kept.list, 'and the list')
+  await next.evaluate("localStorage.setItem('togle.panes', JSON.stringify({ nav: 'wide', list: -5, listHidden: 'yes' }))")
+  next.window.destroy()
+  const bad = await open(T, agent, 1180)
+  await bad.click('.workspace-nav button', 'Agents')
+  await bad.wait("document.querySelectorAll('.task-row').length===5")
+  near(await bad.evaluate("Math.round(document.querySelector('.shell-nav').getBoundingClientRect().width)"), 136, 'a stored word that is not a width is the default width')
+  assert.equal(await bad.evaluate("!!document.querySelector('.tasks-list')&&document.querySelector('.tasks-list').getClientRects().length>0"), true, 'and a list that was not said to be hidden is shown')
+  await bad.evaluate("localStorage.removeItem('togle.panes')")
+  bad.window.destroy()
+  // In a window with room for one pane only there is nothing to resize: the list's edge goes first (one pane shows at a time), then the
+  // navigation's (it is its icons only).
+  ui.window.setContentSize(700, 850)
+  await ui.wait('innerWidth===700')
+  const shown = () => ui.evaluate("[...document.querySelectorAll('.resize-handle')].filter(e=>getComputedStyle(e).display!=='none').map(e=>e.getAttribute('aria-label'))")
+  assert.deepEqual(await shown(), ['Resize the navigation'], 'one pane of Agents at a time: no edge between them')
+  ui.window.setContentSize(500, 850)
+  await ui.wait('innerWidth===500')
+  assert.deepEqual(await shown(), [], 'and in the narrowest window no edge at all')
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  await ui.evaluate("localStorage.removeItem('togle.panes')")
+  ui.window.destroy()
+}
+
 // An agent signed out: its task's row is amber and says what signs it in again, here, in the task and on To-do.
 async function checkSignedOut(T, agent) {
   const ui = await open(T, agent, 1024)
@@ -2594,6 +2711,7 @@ app.whenReady().then(async () => {
     await go(checkMarks)
     await go(checkMarksLight)
     await go(checkTheme)
+    await go(checkPanes)
     await go(checkAgentMarks)
     await go(checkPlanWindow)
     await go(checkSignedOut)

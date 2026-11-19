@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { SettingsPatch } from '@shared/api'
 import type { AuthStatus, Settings as SettingsData, SttStatus } from '@shared/types'
 import { needsYou } from '@shared/runner'
@@ -6,6 +6,8 @@ import { MANAGE_USAGE_URL } from '@shared/plan'
 import { quitQuestion, type CloseWarning } from '@shared/close-warning'
 import type { TogleMicrophoneStatus } from '@shared/microphone'
 import { Icon } from './Icon'
+import { NAV_DEFAULT, NAV_ICONS, NAV_MAX, NAV_WORDS_FROM, navPx, setPanes, usePanes } from './panes'
+import { ResizeHandle } from './ResizeHandle'
 import { BrandMark, WindowButtons } from './WindowBar'
 import { FirstMinute } from './FirstMinute'
 import { LiveCall } from './LiveCall'
@@ -149,6 +151,10 @@ export function Shell() {
     return () => window.removeEventListener('keydown', keep, true)
   }, [confirmClose])
 
+  // The navigation's width (its icons only when narrowed past its words), which the person drags or hides.
+  const kept = usePanes()
+  const nav = navPx(kept)
+  const iconsOnly = nav <= NAV_ICONS
   return (
     <div className={`app shell ${call.listening ? 'in-call' : ''}`}>
       <header className="titlebar">
@@ -174,7 +180,7 @@ export function Shell() {
         </div>
       )}
 
-      <div className="shell-layout">
+      <div className={`shell-layout${iconsOnly ? ' nav-icons' : ''}`} style={{ '--nav-width': `${nav}px` } as CSSProperties}>
         <nav className="shell-nav workspace-nav" aria-label="Places">
           {PLACES.map((place) => (
             <button key={place.id} aria-label={place.label} title={place.title} aria-current={view === place.id ? 'page' : undefined} onClick={() => { if (place.id === 'meetings') { setLive(call.listening); setMeetingsHome((count) => count + 1) } setView(place.id) }}>
@@ -186,6 +192,17 @@ export function Shell() {
           <span className="spacer" />
           <button className="shell-settings" aria-label="Settings" aria-current={view === 'settings' ? 'page' : undefined} onClick={() => { setSettingsAt(undefined); setView('settings') }}><Icon name="settings" size={16} /><span>Settings</span></button>
         </nav>
+        <ResizeHandle
+          label="Resize the navigation"
+          className="nav-handle"
+          at={nav}
+          size={() => ({ width: nav, min: NAV_ICONS, max: NAV_MAX })}
+          // Narrower than its words need it goes to its icons; from its icons the keys' step is big enough to bring the words back.
+          onSize={(width) => setPanes({ nav: width < NAV_WORDS_FROM ? NAV_ICONS : Math.min(NAV_MAX, width) })}
+          step={NAV_WORDS_FROM - NAV_ICONS}
+          collapsed={iconsOnly}
+          onToggle={() => setPanes({ nav: iconsOnly ? NAV_DEFAULT : NAV_ICONS })}
+        />
         <main className="shell-content">
           {confirmClose && (
             <div className="notice ask" role="alert" aria-label="Confirm quit Togle">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, type LogEntry, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
 import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
 import { useReach } from './Devices'
@@ -7,7 +7,9 @@ import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, useKeptState, WaitLine } from './kept'
 import { AgentLead, AgentMark, agentOf } from './AgentMark'
+import { DETAIL_MIN, LIST_MAX, LIST_MIN, setPanes, usePanes } from './panes'
 import { PointMenu, type Point } from './PointMenu'
+import { ResizeHandle } from './ResizeHandle'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { withQuote, splitQuote } from '@shared/quote'
 import { QuoteBar, QuoteBlock, QuoteFloat, useQuoteSpot } from './Quote'
@@ -392,6 +394,9 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   const [now, setNow] = useState(Date.now())
   const [showEarlier, setShowEarlier] = useKeptState('agents.earlier', false)
   const listBox = useRef<HTMLElement>(null)
+  const tasksBox = useRef<HTMLDivElement>(null)
+  // How wide the list is, and whether it is hidden: what the person set by dragging its edge (panes.ts).
+  const panes = usePanes()
   useLayoutEffect(() => { if (listBox.current) listBox.current.scrollTop = listScroll }, [])
   // Take over pressed on a row: the task opens with the question that confirms it.
   const [takingOver, setTakingOver] = useState<string>()
@@ -718,7 +723,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
     : undefined
 
   return (
-    <div className={`tasks ${selected ? 'has-detail' : ''}`} aria-label="Tasks">
+    <div className={`tasks ${selected ? 'has-detail' : ''}${panes.listHidden ? ' list-hidden' : ''}`} style={panes.list === undefined ? undefined : ({ '--list-width': `${panes.list}px` } as CSSProperties)} aria-label="Tasks" ref={tasksBox}>
       <aside ref={listBox} className="tasks-list" aria-label={remote.length ? 'Agent tasks on your devices' : 'Agent tasks on this computer'} onScroll={(event) => { listScroll = event.currentTarget.scrollTop }}>
         <WaitLine waiting={!loaded} label="Reading the tasks" />
         <div className="tasks-head">
@@ -768,6 +773,20 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
           </div>
         )}
       </aside>
+      <ResizeHandle
+        label="Resize the task list"
+        className="list-handle"
+        size={() => {
+          const whole = tasksBox.current?.getBoundingClientRect().width ?? 900
+          return { width: listBox.current?.getBoundingClientRect().width ?? LIST_MIN, min: LIST_MIN, max: Math.max(LIST_MIN, Math.min(LIST_MAX, whole - DETAIL_MIN)) }
+        }}
+        onSize={(width) => {
+          const whole = tasksBox.current?.getBoundingClientRect().width ?? 900
+          setPanes({ list: Math.round(Math.min(Math.max(LIST_MIN, Math.min(LIST_MAX, whole - DETAIL_MIN)), Math.max(LIST_MIN, width))), listHidden: false })
+        }}
+        collapsed={panes.listHidden === true}
+        onToggle={() => setPanes({ listHidden: !panes.listHidden })}
+      />
       <section className="tasks-detail">
         {error && (
           <p className="error" role="alert">
