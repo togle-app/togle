@@ -352,14 +352,19 @@ test('a plan to approve is shown whole, with two answers and room for words, and
 })
 
 test('a command answered on the screen is no longer asked in Togle, once the program says it waits no more', { timeout: 40_000 }, async () => {
-  const { backend, text } = claude()
+  // The list reads what the session says 700 ms after it is asked, as it does when a slow runner starts the program late.
+  const { backend, text } = claude({ env: { FAKE_CLAUDE_AGENTS_MS: '700' } })
   try {
     const task = await backend.start({ folder: scratch(), prompt: '', title: 'Answered here' })
     const key = `claude:${task.id}`
+    // The card goes only when the list was seen to say the program waits while the card was there, and then says it waits no more. The answer
+    // is typed once the list has said the first (a fixed wait of 500 ms was too short when the list came late: the card stayed for good).
+    const seen = task.seen.bind(task)
+    let saidWaiting = false
+    task.seen = (row) => { if (row?.status === 'waiting' && task.pending.length) saidWaiting = true; return seen(row) }
     type(task, 'run c')
     await until(() => task.pending.length === 1, 'the request')
-    // The list has to say it waits first, and then that it does not.
-    await sleep(500)
+    await until(() => saidWaiting, 'the list to say the program waits')
     type(task, 'y')
     await until(() => task.pending.length === 0, 'the card to go', 15_000)
     assert.ok(text(key).includes('ran c (answered here)'))
@@ -1004,13 +1009,19 @@ test('a request that waits when the task is stopped is not answered by Togle: Es
 })
 
 test('the end of a turn is told with what the session said last, before the task is done', { timeout: 40_000 }, async () => {
-  const { backend } = claude({ backend: { said: async () => 'Added the column. The tests pass.' } })
+  // The list reads what the session says 700 ms after it is asked, as it does when a slow runner starts the program late.
+  const { backend } = claude({ env: { FAKE_CLAUDE_AGENTS_MS: '700' }, backend: { said: async () => 'Added the column. The tests pass.' } })
   try {
     const task = await backend.start({ folder: scratch(), prompt: '', title: 'Says' })
     const events = watch(task)
+    const seen = task.seen.bind(task)
+    let saidWaiting = false
+    task.seen = (row) => { if (row?.status === 'waiting' && task.pending.length) saidWaiting = true; return seen(row) }
     type(task, 'run g')
     await until(() => task.pending.length === 1, 'the request')
-    await sleep(400)
+    // Answered once the list has said the program waits: a task answered before that falls back to the state the list last gave (idle) at once,
+    // before its words are fetched (a fixed wait of 400 ms was too short when the list came late).
+    await until(() => saidWaiting, 'the list to say the program waits')
     task.answer(task.pending[0].id, 'allow-once')
     await until(() => task.state === 'idle' && events.some((event) => event.type === 'message'), 'the turn to end with its words')
     assert.deepEqual(events.filter((event) => event.type === 'message').map((event) => event.text), ['Added the column. The tests pass.'])

@@ -23,7 +23,8 @@
 // Esc on a screen, as in Claude Code 2.1.328: while a turn works it ends the turn; while a question waits it declines it; on an idle
 // prompt it does nothing, but two within 800 ms open a rewind menu ("Rewind menu") that takes what is typed next as its own until
 // another Esc closes it. A key that reaches the screen before it is ready is lost: FAKE_CLAUDE_READY_MS (default 0) is how long a
-// screen takes keys after it connected. The Esc keys the session was given are counted in its job file (`escapes`).
+// screen takes keys after it connected. The Esc keys the session was given are counted in its job file (`escapes`). FAKE_CLAUDE_AGENTS_MS
+// (default 0) makes `agents` wait before it reads the sessions, as a program that starts late on a slow runner does.
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
@@ -53,6 +54,8 @@ const [command] = argv
 if (command === '--version') out('2.1.999 (Fake Claude)')
 else if (command === '--help') out('Usage: claude [options]\n  --bg, --background   Start the session in the background')
 else if (command === 'agents') {
+  // A slow runner starts a program late, and the list reads what the sessions say only then: FAKE_CLAUDE_AGENTS_MS (default 0) is how long it waits first.
+  await sleep(Number(process.env.FAKE_CLAUDE_AGENTS_MS ?? 0))
   const rows = all().map((rec) => {
     const running = alive(rec.pid)
     return { ...(running ? { pid: rec.pid } : {}), id: rec.job, cwd: rec.cwd, kind: 'background', startedAt: rec.startedAt, sessionId: rec.sessionId, ...(rec.name ? { name: rec.name } : {}), ...(running ? { status: rec.status, state: rec.status === 'busy' ? 'working' : 'blocked', ...(rec.waitingFor && rec.status === 'waiting' ? { waitingFor: rec.waitingFor } : {}) } : { state: rec.state ?? 'stopped' }) }
