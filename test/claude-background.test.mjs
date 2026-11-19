@@ -3,7 +3,7 @@
 // on this computer; what it does is described at its top.
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
@@ -16,7 +16,9 @@ const fakeBg = path.join(import.meta.dirname, 'fake-claude-bg.mjs')
 const made = []
 const homes = []
 const scratch = () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'togle-claude-bg-'))
+  // The folder as the system names it: on a Mac the temporary folder is /var/folders/..., which is a link to /private/var/folders/..., and a program
+  // started in it says the second when it is asked where it is.
+  const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'togle-claude-bg-')))
   made.push(dir)
   return dir
 }
