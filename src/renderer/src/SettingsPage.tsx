@@ -142,6 +142,7 @@ function Appearance({ settings, save }: { settings: Settings; save: (patch: Sett
           })}
         </span>
       </Row>
+      <Toggle name="Keep Togle out of screenshots and screen sharing" title="Asks your system to leave Togle's window out of screenshots, recordings and screen sharing. Some apps may still show it. The voice bar and the notices are always left out." checked={settings.window?.keepOutOfCaptures === true} onChange={(keepOutOfCaptures) => void save({ window: { keepOutOfCaptures } })} />
     </Section>
   )
 }

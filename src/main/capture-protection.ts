@@ -117,10 +117,15 @@ export class CaptureProtection {
     this.win.setContentProtection(on)
     if (on === this.on) return
     this.on = on
-    // Windows already open (a tooltip, a dropdown list) follow at once.
     const api = load()
-    if (api) for (const hwnd of ownWindows(api)) if (excluded(api, hwnd) !== on) api.setAffinity(hwnd, on ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE)
-    this.enforce()
+    if (on) {
+      // Windows already open (a tooltip, a dropdown list) follow at once.
+      if (api) for (const hwnd of ownWindows(api)) if (!excluded(api, hwnd)) api.setAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+      this.enforce()
+    } else if (api && excluded(api, this.hwnd)) {
+      // Let go of the main window only: the voice bar, the notices and the call strip ask for their own protection, and keep it.
+      api.setAffinity(this.hwnd, WDA_NONE)
+    }
   }
 
   /** Whether captures leave the main window out right now: the affinity Windows has, not just what was asked for. */

@@ -327,8 +327,12 @@ export interface WindowSettings {
   alwaysOnTop: boolean
   /** MIN_OPACITY to 1; lower lets the call show through. */
   opacity: number
-  /** Leaves Togle out of screenshots, screen sharing and recordings, so only the person at this PC sees it. */
-  hideFromCapture: boolean
+  /**
+   * Asks the system to leave Togle's window out of screenshots, screen sharing and recordings, so that only the person at this PC sees it.
+   * Off unless the person turns it on in Settings: a screenshot taken of Togle (a report of what is wrong) showed a hole where it is. The voice
+   * bar, the notices and the call strip are always left out.
+   */
+  keepOutOfCaptures: boolean
 }
 
 export interface Settings {

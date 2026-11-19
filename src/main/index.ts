@@ -759,10 +759,10 @@ function applyWindowSettings(): void {
   if (!win || win.isDestroyed()) return
   // An ordinary window, as the design has it: it no longer floats over other apps or fades, as the call assistant's did.
   // During a call the strip is the part that stays in sight.
-  const { hideFromCapture } = getSettings().window
+  const { keepOutOfCaptures } = getSettings().window
   if (win.isAlwaysOnTop()) win.setAlwaysOnTop(false)
   win.setOpacity(1)
-  protection?.set(hideFromCapture)
+  protection?.set(keepOutOfCaptures)
 }
 
 function createWindow(): void {

@@ -242,10 +242,10 @@ export function PictureOver({ src, label, onClose }: { src: string; label: strin
 export const openedInView = (element: HTMLElement | null): void => { element?.scrollIntoView({ block: 'nearest' }) }
 
 /** An on/off setting: its row, with a switch. */
-export function Toggle({ name, note, checked, disabled, onChange }: { name: ReactNode; note?: ReactNode; checked: boolean; disabled?: boolean; onChange: (on: boolean) => void }) {
+export function Toggle({ name, note, title, checked, disabled, onChange }: { name: ReactNode; note?: ReactNode; /** The words for it where a line under it would not fit: said when the pointer is on the switch. */ title?: string; checked: boolean; disabled?: boolean; onChange: (on: boolean) => void }) {
   return (
     <Row name={name} note={note}>
-      <input type="checkbox" role="switch" className="switch" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" role="switch" className="switch" title={title} checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
     </Row>
   )
 }

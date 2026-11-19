@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Calls are heard by this PC (no sign-in includes transcription), which detects the spoken language, unless a speech
   // API is picked for them.
   transcription: { language: 'auto', me: 'local', them: 'local', openaiModel: 'gpt-transcribe', serverUrl: '', serverModel: '' },
-  window: { alwaysOnTop: true, opacity: 1, hideFromCapture: true },
+  window: { alwaysOnTop: true, opacity: 1, keepOutOfCaptures: false },
   microphone: { ...MICROPHONE_DEFAULTS },
   // Voice typing is heard by this PC too; its account ('' : the AI's own, automatically) cleans up the words.
   dictation: { speech: 'auto', accountId: '', mode: holdsByDefault() ? 'hold' : 'toggle', polish: true, showBar: true, microphoneId: '' },
@@ -180,8 +180,10 @@ export async function loadSettings(): Promise<Settings> {
   if ((current.dictation.speech as string) === 'claude') current.dictation = { ...current.dictation, speech: 'auto' }
   delete (current.claude as { auth?: unknown }).auth
   delete (current.claude as { subscriptionLanes?: unknown }).subscriptionLanes
-  // Drop settings earlier versions had (watchScreen; hideFromScreenShare, which defaulted to off and is
-  // replaced by window.hideFromCapture, on by default).
+  // Drop settings earlier versions had (watchScreen; hideFromScreenShare, which defaulted to off; and window.hideFromCapture, which
+  // was on with no switch to turn it off, so that what an earlier Togle saved was its default and not a choice: it is
+  // window.keepOutOfCaptures now, off, a switch in Settings; the old word is not a setting any more).
+  delete (current.window as { hideFromCapture?: unknown }).hideFromCapture
   for (const key of Object.keys(current)) if (!(key in DEFAULT_SETTINGS)) Reflect.deleteProperty(current, key)
   return current
 }

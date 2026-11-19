@@ -953,6 +953,11 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('#settings-appearance [role=radio]')].map(b=>b.getAttribute('aria-checked'))"), ['false', 'true', 'false'], 'dark until the person chooses')
   await ui.click('#settings-appearance [role=radio]', 'Light')
   await ui.wait("window.togleUITest.calls().some(call=>call.name==='updateSettings'&&call.args?.appearance?.theme==='light')")
+  // Togle shows in screenshots and screen sharing until the person asks otherwise: one switch, off.
+  assert.deepEqual(await texts(ui, '#settings-appearance .setting .name'), ['Theme', 'Keep Togle out of screenshots and screen sharing'])
+  assert.equal(await ui.evaluate("document.querySelector('#settings-appearance input[role=switch]').checked"), false, 'off until it is turned on')
+  await ui.evaluate("document.querySelector('#settings-appearance input[role=switch]').click()")
+  await ui.wait("window.togleUITest.calls().some(call=>call.name==='updateSettings'&&call.args?.window?.keepOutOfCaptures===true)")
   // Updates: one switch, off (an update waits for Restart to update, as it always did), and what is true of this build as a row's
   // value: with no release key Togle does not look for updates.
   assert.deepEqual(await texts(ui, '#settings-updates .setting .name'), ['Install updates when I quit', 'Update check'])
