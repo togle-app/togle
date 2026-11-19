@@ -862,6 +862,8 @@ test('a task that waits on a monitor is working, says what for, and is not put t
     const task = await backend.start({ folder: scratch(), prompt: '', title: 'Waits' })
     const pid = job(home, task.screen.job).pid
     const events = watch(task)
+    // The screen is connected before it is let go of: a screen that connects late is what restarted an ended session on a slow runner.
+    await connected(task)
     await task.screen.hide()
     await until(() => task.state === 'idle', 'the session to be idle')
     assert.deepEqual([...task.monitors], [], 'nothing is watched')
