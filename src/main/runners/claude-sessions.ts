@@ -178,6 +178,18 @@ function said(r: Json): boolean {
   return !!theirWords(textOf(r.message.content))
 }
 
+/**
+ * A message typed while Claude Code is working waits in its queue (a "queue-operation" line). When the turn takes it in, Claude Code
+ * writes it as an attachment (a "queued_command") with no message line of its own, so it is not among their messages. A finished
+ * task or another session sends the same way: those are not theirs.
+ */
+function queuedCommand(r: Json): { words: string; theirs: boolean } | null {
+  const queued = r.attachment
+  if (r.type !== 'attachment' || !isObject(queued) || queued.type !== 'queued_command') return null
+  const theirs = (queued.commandMode === undefined || queued.commandMode === 'prompt') && (!isObject(queued.origin) || queued.origin.kind === 'human')
+  return { words: theirWords(textOf(queued.prompt)), theirs }
+}
+
 /** Lines of one end of a file: whole lines only (the cut one at the edge is left out). */
 async function readEnd(file: string, size: number, from: 'head' | 'tail', bytes: number): Promise<{ lines: string[]; raw: string }> {
   const handle = await fs.open(file, 'r')
@@ -445,6 +457,12 @@ interface ListedTask extends PlanItem {
   finished?: number
 }
 
+/** Their words that wait in Claude Code's queue: the entry they are shown by, until a line says what became of them. */
+interface Queued {
+  words: string
+  entry: LogEntry
+}
+
 /** What is read of a session so far: its entries, and how far into its file. */
 export interface Conversation {
   entries: LogEntry[]
@@ -456,6 +474,8 @@ export interface Conversation {
   tasks: Map<string, ListedTask>
   /** How many things on it were finished, in all: the order in which they were. */
   finishedCount: number
+  /** What they typed while Claude Code worked, that it has not taken in yet (see feedConversation). Oldest first. */
+  queued: Queued[]
   next: number
   /** Where in the file the next line starts. */
   offset: number
@@ -463,7 +483,7 @@ export interface Conversation {
   cut: boolean
 }
 
-export const newConversation = (): Conversation => ({ entries: [], tools: new Map(), places: new Map(), tasks: new Map(), finishedCount: 0, next: 1, offset: 0, cut: false })
+export const newConversation = (): Conversation => ({ entries: [], tools: new Map(), places: new Map(), tasks: new Map(), finishedCount: 0, queued: [], next: 1, offset: 0, cut: false })
 
 function push(state: Conversation, kind: LogEntry['kind'], text: string, at: number, more: Partial<LogEntry> = {}): LogEntry {
   const entry: LogEntry = { id: state.next++, at, kind, text, ...more }
@@ -484,6 +504,20 @@ const step = (state: Conversation, kind: StepKind, text: string, at: number, mor
   push(state, 'step', text.slice(0, NAME_MOST), at, { step: kind, ...more })
 
 const lastOf = (state: Conversation): LogEntry | undefined => state.entries[state.entries.length - 1]
+
+const QUEUED_MOST = 30
+
+/** The oldest of their queued words that are these, taken out of the queue. */
+function unqueue(state: Conversation, words: string): Queued | undefined {
+  const at = words ? state.queued.findIndex((item) => item.words === words) : -1
+  return at < 0 ? undefined : state.queued.splice(at, 1)[0]
+}
+
+/** What was shown as theirs, off the conversation: it was not theirs after all, or they took it back, or its message line takes its place. */
+function withdraw(state: Conversation, item: Queued): void {
+  const at = state.entries.indexOf(item.entry)
+  if (at >= 0) state.entries.splice(at, 1)
+}
 
 /** How long it was from a call to its result, when both have a time and they are in order. */
 const spanOf = (from: number, to: number): number | undefined => (from > 0 && to >= from ? to - from : undefined)
@@ -655,17 +689,46 @@ function ended(state: Conversation, call: string, waiting: Waiting, r: Json, blo
 export function feedConversation(state: Conversation, lines: string[], places?: Place[]): void {
   lines.forEach((line, index) => {
     const r = parse(line)
-    if (!r || r.isSidechain || !isObject(r.message)) return
-    const place = places?.[index]
+    if (!r || r.isSidechain) return
     const stamp = Date.parse(str(r.timestamp))
     const at = Number.isFinite(stamp) ? stamp : 0
+    // What they type while Claude Code works waits in its queue, and is shown as soon as it is queued, where it was typed. The line that
+    // says what became of it settles it: the turn takes it in (an attachment: it stays), they take it back (it goes), a finished task or
+    // another session sent it (it goes), or it starts a turn of its own (its message line, further on, takes its place).
+    if (r.type === 'queue-operation') {
+      if (r.operation === 'enqueue') {
+        const words = theirWords(str(r.content))
+        if (words) {
+          state.queued.push({ words, entry: push(state, 'you', words.slice(0, WORDS_MOST), at) })
+          if (state.queued.length > QUEUED_MOST) state.queued.shift()
+        }
+      } else if (r.operation === 'remove' && r.reason !== 'absorbed_mid_turn') {
+        const taken = unqueue(state, theirWords(str(r.content)))
+        if (taken) withdraw(state, taken)
+      }
+      return
+    }
+    const command = queuedCommand(r)
+    if (command) {
+      const waiting = unqueue(state, command.words)
+      if (!command.theirs) {
+        if (waiting) withdraw(state, waiting)
+      } else if (command.words && !waiting) push(state, 'you', command.words.slice(0, WORDS_MOST), at)
+      return
+    }
+    if (!isObject(r.message)) return
+    const place = places?.[index]
     const content = r.message.content
     const blocks = Array.isArray(content) ? content.filter(isObject) : []
     if (r.type === 'user') {
       if (said(r)) {
+        const words = theirWords(textOf(content))
+        // Words that waited in the queue and then started this turn are shown by this line instead.
+        const waiting = unqueue(state, words)
+        if (waiting) withdraw(state, waiting)
         // The pictures in it (one pasted, a screenshot), each read again from this line when the window shows it.
         const pictures = place ? blocks.flatMap((block, position) => (isPicture(block) ? [`image:${place.offset}#${position}`] : [])) : []
-        push(state, 'you', theirWords(textOf(content)).slice(0, WORDS_MOST), at, pictures.length ? { images: pictures } : {})
+        push(state, 'you', words.slice(0, WORDS_MOST), at, pictures.length ? { images: pictures } : {})
         for (const picture of pictures) state.places.set(picture, place as Place)
         return
       }

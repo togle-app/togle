@@ -310,3 +310,46 @@ test('how a file changed is made fit to show: its lines as they are, no keys or 
   assert.equal(long.cut, true)
   assert.ok(long.text.startsWith('+line 0\n') && long.text.length <= 24000 && /\+line \d+$/.test(long.text), 'its start, cut at the end of a line')
 })
+
+// What they type while Claude Code works waits in its queue (queue-operation lines) until the turn takes it in (an attachment, never a message
+// line) or ends (it then starts a turn, and has its message line).
+const stamp = (seconds) => `2026-11-16T10:00:${String(seconds).padStart(2, '0')}.000Z`
+const enqueue = (n, content, seconds) => ({ type: 'queue-operation', operation: 'enqueue', timestamp: stamp(seconds), sessionId: id(n), content })
+const remove = (n, content, seconds, reason = 'absorbed_mid_turn') => ({ type: 'queue-operation', operation: 'remove', timestamp: stamp(seconds), sessionId: id(n), content, reason })
+const takenIn = (n, prompt, seconds, extra = {}) => ({ type: 'attachment', attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind: 'human' }, timestamp: stamp(seconds), humanTurn: true, ...extra }, sessionId: id(n), timestamp: stamp(seconds), isSidechain: false })
+const saidIn = async (n) => (await claudeConversation(id(n))).entries.map((entry) => [entry.kind, entry.text])
+
+test('what they type while Claude Code works is shown as soon as it is queued, and stays where it was typed once the turn takes it in', async () => {
+  write(14, line(asked(14, 'Rebuild the pricing page.')) + line(said(14, [{ type: 'tool_use', id: 'w1', name: 'Bash', input: { command: 'npm test' } }])) + line(enqueue(14, 'Also make the table sortable.', 3)))
+  // Queued: it is in the conversation at once, after what Claude Code was doing when they typed it.
+  assert.deepEqual(await saidIn(14), [['you', 'Rebuild the pricing page.'], ['command', 'npm test'], ['you', 'Also make the table sortable.']])
+  // The turn works on, then takes it in: still one line of theirs, where it was typed, with the work after it following.
+  appendFileSync(file(14), line(result(14, 'w1', 'ok')) + line(said(14, [{ type: 'text', text: 'Tests pass.' }])) + line(remove(14, 'Also make the table sortable.', 9)) + line(takenIn(14, 'Also make the table sortable.', 3)) + line(said(14, [{ type: 'text', text: 'Done, and the table sorts.' }])))
+  const history = await claudeConversation(id(14))
+  assert.deepEqual(history.entries.map((entry) => [entry.kind, entry.text]), [['you', 'Rebuild the pricing page.'], ['command', 'npm test'], ['you', 'Also make the table sortable.'], ['agent', 'Tests pass.'], ['agent', 'Done, and the table sorts.']])
+  assert.equal(history.entries[2].at, Date.parse(stamp(3)), 'at the time they typed it')
+  assert.equal(history.entries[1].status, 'finished', 'the command still ends where its result came')
+})
+
+test('words that started a turn of their own are shown once, by their message line; words taken back, or sent by a task or another session, are not shown', async () => {
+  // Typed while it worked; the turn ended before it took them in. They start the next turn, and that message is where they are shown.
+  write(15,
+    line(asked(15, 'Rebuild the pricing page.')) + line(enqueue(15, 'Then the footer.', 2)) + line(said(15, [{ type: 'text', text: 'Pricing page done.' }])) +
+    line({ type: 'queue-operation', operation: 'dequeue', timestamp: stamp(8), sessionId: id(15) }) + line(asked(15, 'Then the footer.')) + line(said(15, [{ type: 'text', text: 'Footer done.' }])))
+  assert.deepEqual(await saidIn(15), [['you', 'Rebuild the pricing page.'], ['agent', 'Pricing page done.'], ['you', 'Then the footer.'], ['agent', 'Footer done.']])
+  // Taken back: the words went to the prompt box again, and were not sent.
+  write(16, line(asked(16, 'Ask.')) + line(enqueue(16, 'Never mind.', 2)) + line(remove(16, 'Never mind.', 4, 'popped')) + line(said(16, [{ type: 'text', text: 'Answer.' }])))
+  assert.deepEqual(await saidIn(16), [['you', 'Ask.'], ['agent', 'Answer.']])
+  // A finished task's notice, another session's message (shown while it waited, gone once the line that takes it in tells who sent it),
+  // and a command of theirs for the shell: none is what they said.
+  const notice = '<task-notification>\n<task-id>a1</task-id>\n</task-notification>'
+  write(17,
+    line(asked(17, 'Ask.')) + line(enqueue(17, notice, 2)) + line(enqueue(17, 'From another session.', 3)) + line(remove(17, 'From another session.', 5)) +
+    line(takenIn(17, 'From another session.', 3, { origin: { kind: 'peer' }, humanTurn: undefined })) +
+    line(takenIn(17, notice, 2, { commandMode: 'task-notification', origin: { kind: 'task-notification' }, humanTurn: undefined })) +
+    line(takenIn(17, 'npm run lint', 6, { commandMode: 'bash' })) + line(said(17, [{ type: 'text', text: 'Answer.' }])))
+  assert.deepEqual(await saidIn(17), [['you', 'Ask.'], ['agent', 'Answer.']])
+  // The same words twice are two lines, and words taken in whose queueing was not seen (a file read from its end) are shown too.
+  write(18, line(enqueue(18, 'Again.', 2)) + line(enqueue(18, 'Again.', 3)) + line(remove(18, 'Again.', 5)) + line(takenIn(18, 'Again.', 2)) + line(takenIn(18, 'Again.', 3)) + line(takenIn(18, 'Late.', 6)))
+  assert.deepEqual(await saidIn(18), [['you', 'Again.'], ['you', 'Again.'], ['you', 'Late.']])
+})
