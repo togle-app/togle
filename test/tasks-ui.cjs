@@ -1640,6 +1640,33 @@ async function checkMarksLight(T, agent) {
 
 // The navigation and the Agents list: the pointer drags the edge after each (a real drag), the keys move it, a tab on it hides the pane or
 // shows it again; the navigation narrowed past its words is its icons only; what was set is kept for the next window.
+// A task whose turn ended while a command it started still runs is Done, and says what runs: in its row ("done · 1 shell running") and in its
+// status line, as Claude Code's own screen says it ("1 shell still running"), with the command; with two, the count and the commands on the pointer.
+async function checkShells(T, agent) {
+  const ui = await open(T, agent, 1180)
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  const set = (props) => ui.evaluate('window.togleUITest.setTask("claude:s2",' + JSON.stringify(props) + ')')
+  const row = "[...document.querySelectorAll('.task-row')].find(r=>r.querySelector('strong').textContent==='Rebuild the pricing page')"
+  await set({ state: 'idle', shells: [{ id: 'b0000001', label: 'npm run dev', since: Date.now() - 60_000 }] })
+  await ui.task('Rebuild the pricing page')
+  await ui.wait(row + ".textContent.includes('done · 1 shell running')", 'the row to say a shell runs')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Done', 'the task is done, not working')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .shells-hint').textContent.trim()"), '1 shell still running · npm run dev')
+  await set({ shells: [{ id: 'b0000001', label: 'npm run dev' }, { id: 'b0000002', label: 'sleep 600' }] })
+  await ui.wait("document.querySelector('.task-status .shells-hint')?.textContent.trim()==='2 shells still running'", 'the count of two')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .shells-hint').title"), 'npm run dev\nsleep 600', 'each command on the pointer')
+  assert.ok((await ui.evaluate(row + ".textContent")).includes('done · 2 shells running'))
+  // Working, it says so too; with nothing running there is no line.
+  await set({ state: 'working' })
+  await ui.wait(row + ".textContent.includes('working · 2 shells running')", 'working, with its shells')
+  await set({ state: 'idle', shells: [] })
+  await ui.wait("!document.querySelector('.task-status .shells-hint')", 'no line once nothing runs')
+  assert.equal(await ui.evaluate(row + ".textContent.includes('shell')"), false, 'and none in the row')
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 // A page that loads again (it crashed, or a key reloaded it) comes back to the place it was in, Agents with its task, and not to To-do; a
 // new window starts at To-do.
 async function checkPlaceKept(T, agent) {
@@ -2760,6 +2787,7 @@ app.whenReady().then(async () => {
     await go(checkMarks)
     await go(checkMarksLight)
     await go(checkTheme)
+    await go(checkShells)
     await go(checkPlaceKept)
     await go(checkPanes)
     await go(checkAgentMarks)

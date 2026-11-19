@@ -594,6 +594,36 @@ test('a task that has done nothing for a day is put to rest: its program ends, i
   }
 })
 
+test('a task with a command still running in the background says so, tells the window when that changes, and is not put to rest', { timeout: 60_000 }, async () => {
+  // Claude Code's own folder, apart from the stand-in's: a job's state file lists what it started.
+  const config = scratch()
+  const { backend, home } = claude({ env: { CLAUDE_CONFIG_DIR: config }, backend: { restMs: 600, written: async () => 1, every: { busy: 100, idle: 100 } } })
+  const state = (job, fan) => { mkdirSync(path.join(config, 'jobs', job), { recursive: true }); writeFileSync(path.join(config, 'jobs', job, 'state.json'), JSON.stringify({ state: 'done', tempo: 'idle', fan })) }
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Shell' })
+    const pid = job(home, task.screen.job).pid
+    const events = watch(task)
+    await task.screen.hide()
+    await sleep(300)
+    assert.deepEqual([...task.shells], [], 'nothing runs in the background')
+    // A command it started runs: said by the task and the list, and the window is told.
+    state(task.screen.job, [{ id: 'b0000001', kind: 'shell', label: 'npm run dev', startedAt: Date.now() }])
+    await until(() => task.shells.length === 1, 'the task to say what runs')
+    assert.equal(task.shells[0].label, 'npm run dev')
+    assert.ok(events.some((event) => event.type === 'shells'), 'the window is told, with no change of state')
+    assert.deepEqual((await backend.list()).find((row) => row.id === task.id)?.shells?.map((item) => item.label), ['npm run dev'], 'the list says it too')
+    // More than a quiet day (600 ms here) with the command running: its program, and the command with it, is left alone.
+    await sleep(2000)
+    assert.ok(alive(pid), 'a task with a command running is not put to rest')
+    // The command ended: nothing runs, and the quiet day counts.
+    state(task.screen.job, [])
+    await until(() => task.shells.length === 0, 'the task to say nothing runs')
+    await until(() => !alive(pid), 'the program to end once nothing ran and a day had passed')
+  } finally {
+    await backend.close()
+  }
+})
+
 test('a task that waits, was written lately, or that the person has open in their own terminal is not put to rest', { timeout: 90_000 }, async () => {
   let lately = true
   const { backend, home } = claude({ backend: { restMs: 400, written: async () => (lately ? Date.now() : 1), every: { busy: 100, idle: 100 } } })

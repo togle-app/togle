@@ -19,6 +19,7 @@ import type { StepDetail, TaskHistory, TaskInfo } from '@shared/runner'
 import { claudeChange, claudeConversation, claudeHasSession, claudeLastSaid, claudePicture, claudeSessions, claudeStep, claudeWrittenAt } from './claude-sessions'
 import { HookServer, type HookTarget } from './claude-hooks'
 import { ClaudeJob, claudeEnv, isJob, rowOf, stateOfJob, type AgentRow, type JobContext, type JobRow } from './claude-job'
+import { claudeConfigDir, withShells } from './claude-registry'
 import { oneLine } from './claude-requests'
 import { list, rec } from './jsonrpc'
 import { listProcesses } from './process-tree'
@@ -218,7 +219,8 @@ export class ClaudeBackend implements Backend {
           const command = await this.command()
           const out = await exec(command[0], [...command.slice(1), 'agents', '--json', '--all'], { env: claudeEnv(this.options.env ?? process.env) })
           if (!out.ok) throw new Error(firstLine(out.text) || 'Claude Code did not list its sessions.')
-          rows = list(JSON.parse(out.out) as unknown).map(rec).map(rowOf)
+          // What the list calls busy while only a command in the background runs is told apart by the program's own record (claude-registry.ts).
+          rows = await withShells(claudeConfigDir(this.options.env ?? process.env), list(JSON.parse(out.out) as unknown).map(rec).map(rowOf))
         }
         this.rowsAt = { at: Date.now(), rows }
         return rows
@@ -254,7 +256,8 @@ export class ClaudeBackend implements Backend {
         // A task in the background has no program of its own to take over: its screen is opened.
         ...(row.pid && !job ? { pid: row.pid } : {}),
         ...(job ? { job: row.id } : before?.job ? { job: before.job } : {}),
-        ...(row.status === 'waiting' && row.waitingFor ? { waitingFor: row.waitingFor } : {})
+        ...(row.status === 'waiting' && row.waitingFor ? { waitingFor: row.waitingFor } : {}),
+        ...(row.shells?.length ? { shells: row.shells } : {})
       })
     }
     for (const task of this.jobs.values()) {
@@ -262,7 +265,7 @@ export class ClaudeBackend implements Backend {
       // After "/clear" Claude Code keeps the task in another session: that one is this task, and not a second row.
       if (task.session() !== task.id) found.delete(task.session())
       const before = found.get(task.id)
-      found.set(task.id, { id: task.id, runner: 'claude', title: task.title || before?.title || 'Claude Code task', ...(before?.asked ? { asked: before.asked } : {}), folder: task.folder || before?.folder || '', state: task.state, updatedAt: before?.updatedAt ?? Date.now(), job: task.screen.job, ...(before?.pid ? { pid: before.pid } : {}), ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}) })
+      found.set(task.id, { id: task.id, runner: 'claude', title: task.title || before?.title || 'Claude Code task', ...(before?.asked ? { asked: before.asked } : {}), folder: task.folder || before?.folder || '', state: task.state, updatedAt: before?.updatedAt ?? Date.now(), job: task.screen.job, ...(before?.pid ? { pid: before.pid } : {}), ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}), ...(task.shells.length ? { shells: [...task.shells] } : {}) })
     }
     return [...found.values()].sort((a, b) => b.updatedAt - a.updatedAt)
   }

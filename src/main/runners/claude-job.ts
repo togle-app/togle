@@ -20,7 +20,7 @@
 // - The person's own settings apply (their permission mode, their rules): nothing is forced, so Togle hears only what
 //   Claude Code asks. A person whose Claude Code never asks sees no card.
 import type { IPty } from 'node-pty'
-import type { TaskState } from '@shared/runner'
+import type { BackgroundShell, TaskState } from '@shared/runner'
 import type { HookTarget, HookVerdict } from './claude-hooks'
 import { requestOf, verdictOf } from './claude-requests'
 import { rec, text } from './jsonrpc'
@@ -41,6 +41,8 @@ export interface AgentRow {
   name?: string
   waitingFor?: string
   startedAt?: number
+  /** The commands it started that still run in the background (claude-registry.ts adds them; the list does not tell). */
+  shells?: BackgroundShell[]
 }
 
 /** A session in the background. */
@@ -68,8 +70,9 @@ export function rowOf(told: Record<string, unknown>): AgentRow {
 
 /**
  * What a background session is doing, by its program and then its status: with a program, `busy` is working, `waiting` is
- * waiting for the person and anything else is idle (`state` says "blocked" for a session that waits for its first message,
- * and "working" a moment after an interrupt). Without a program the session is stopped: by the person (`stopped`), or
+ * waiting for the person and anything else is idle: `shell` too, the turn is over while a command it started still runs
+ * (claude-registry.ts says so; the list says busy). (`state` says "blocked" for a session that waits for its first message,
+ * and "working" a moment after an interrupt.) Without a program the session is stopped: by the person (`stopped`), or
  * because it failed.
  */
 export function stateOfJob(row: AgentRow, stopped = false): TaskState {
@@ -157,6 +160,8 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
   /** What the list last said it was. */
   private last: TaskState = 'idle'
   private settling = false
+  /** The commands it runs in the background as the list last said them, by their ids: the window is told when they change. */
+  private shellKey = ''
   private screenTask: AttachScreen | null = null
   private screens = 0
   private requests = 0
@@ -197,6 +202,11 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     return this.row?.pid ?? null
   }
 
+  /** What it started that still runs in the background. */
+  get shells(): readonly BackgroundShell[] {
+    return this.row?.shells ?? []
+  }
+
   get open(): boolean {
     return this.screenTask !== null
   }
@@ -222,6 +232,12 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
       return
     }
     this.row = row
+    // What it runs in the background changed (a command began, or ended): the window is told, though no state changed to carry it.
+    const shellKey = (row.shells ?? []).map((shell) => shell.id).join(',')
+    if (shellKey !== this.shellKey) {
+      this.shellKey = shellKey
+      this.emit({ type: 'shells' })
+    }
     if (row.sessionId && row.sessionId !== this.current) {
       // The person emptied the conversation: the program goes on in another session, and the task goes on with it.
       this.current = row.sessionId
@@ -282,10 +298,11 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
 
   /**
    * Whether it may be put to rest: its program runs and has nothing to do, no screen of Togle's is open on it, and it waits for
-   * nothing. Whether it has been quiet long enough, and whether the person has a screen of their own on it, is for the backend.
+   * nothing, and no command it started still runs (ending its program ends that too). Whether it has been quiet long enough, and
+   * whether the person has a screen of their own on it, is for the backend.
    */
   get restable(): boolean {
-    return !this.over && this.pid !== null && this.state === 'idle' && !this.screenTask && !this.pending.length && !this.waitingFor
+    return !this.over && this.pid !== null && this.state === 'idle' && !this.screenTask && !this.pending.length && !this.waitingFor && !this.shells.length
   }
 
   /** The time it started, when its row says (in milliseconds): a session that never said a word is not quiet from before it began. */

@@ -1,6 +1,6 @@
 // What the rest of the app can do with a coding agent, whichever agent it is. One backend per agent implements it:
 // see its tasks, start one, answer what it waits for, stop it, and pick it up again later.
-import type { Decision, PendingRequest, RunnerKind, StepDetail, TaskEvent, TaskHistory, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
+import type { BackgroundShell, Decision, PendingRequest, RunnerKind, StepDetail, TaskEvent, TaskHistory, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
 
 export interface StartOptions {
   /** The folder the task works in. */
@@ -102,6 +102,8 @@ export interface TaskHandle {
   readonly screen?: ScreenSide
   /** What a task waits for in its agent's own screen when Togle has no request of its own for it ("permission prompt"). */
   readonly waitingFor?: string
+  /** What the task started that still runs in the background, when its agent tells (Claude Code's shells). */
+  readonly shells?: readonly BackgroundShell[]
   /** The commands and models its agent told it has for this task, so far. Left out by an agent that tells none. */
   offers?(): TaskOffers
 }

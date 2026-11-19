@@ -313,6 +313,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .tasks.list-hidden > .tasks-list { display: none; }
 .tasks-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 14px 7px 14px 15px; border-right: 1px solid var(--line); }
 .tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.task-status .shells-hint { min-width: 0; max-width: 34rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tasks-head .tasks-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-list { display: flex; flex-direction: column; gap: 6px; }
 /* The list in groups, each a box with what it holds: groups the person made, scheduled jobs, work in no project (Everyday),

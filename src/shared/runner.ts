@@ -96,6 +96,15 @@ export function addedAgentsFrom(value: unknown): AddedAgent[] {
  */
 export type TaskState = 'working' | 'waiting' | 'idle' | 'stopped' | 'failed'
 
+/** A command a task started that still runs in the background (Claude Code calls it a shell): what it runs, and since when. */
+export interface BackgroundShell {
+  id: string
+  /** Its command, in one line. */
+  label: string
+  /** When it started, in milliseconds. */
+  since?: number
+}
+
 /** One task: an agent's session on this computer. */
 export interface TaskInfo {
   /** Its own id in its agent: a Codex thread, a Claude Code session, a Hermes session. */
@@ -117,6 +126,11 @@ export interface TaskInfo {
   pid?: number
   /** What a task running in another program waits for there ("permission prompt"). */
   waitingFor?: string
+  /**
+   * The commands the task started that still run in the background, when its agent tells (Claude Code): its turn can be over
+   * while they run, and then it is Done, not working.
+   */
+  shells?: BackgroundShell[]
   /**
    * A task that runs in the background (Claude Code's own background sessions): the id its agent opens its screen with.
    * It goes on without any window, so there is no program to take over: its screen is opened.
@@ -539,4 +553,6 @@ export type TaskEvent =
   | { type: 'cleared' }
   // The screen of a task that runs in the background was opened or closed here.
   | { type: 'screen'; shown: boolean }
+  // What the task runs in the background changed (a command began, or ended).
+  | { type: 'shells' }
   | { type: 'ended'; reason: 'closed' | 'crashed' }
