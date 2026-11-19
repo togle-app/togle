@@ -864,6 +864,14 @@ test('a task that waits on a monitor is working, says what for, and is not put t
     assert.ok(events.some((event) => event.type === 'shells'), 'the window is told')
     const listed = (await backend.list()).find((row) => row.id === task.id)
     assert.deepEqual([listed?.state, listed?.monitors?.map((item) => item.label)], ['working', ['Watch the macOS and Ubuntu CI runs']], 'the list says it too')
+    // Its turn is over, so there is no turn for Stop to end: nothing is pressed (Esc would do nothing), and the program and the monitor go on.
+    assert.equal(task.turnOver, true, 'only the monitor keeps it working')
+    assert.equal(listed?.turnOver, true, 'the list says that too')
+    await task.stop()
+    // (The stand-in records a key a moment after it is written: a key that was pressed is seen by now.)
+    await sleep(1500)
+    assert.equal(job(home, task.screen.job).escapes, undefined, 'no Esc was pressed')
+    assert.equal(task.state, 'working', 'still waiting on the monitor')
     // More than a quiet day (600 ms here) with the monitor watching: its program, and the monitor with it, is left alone.
     await sleep(2000)
     assert.ok(alive(pid), 'a task that waits on a monitor is not put to rest')
@@ -871,6 +879,35 @@ test('a task that waits on a monitor is working, says what for, and is not put t
     // The monitor is done: it waits on nothing, and is idle again.
     state(task.screen.job, [])
     await until(() => task.monitors.length === 0 && task.state === 'idle', 'the task to be idle once the monitor is done')
+    assert.equal(task.turnOver, false)
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a turn that runs while a monitor watches is stopped by Esc as any; after it only the monitor keeps the task working', { timeout: 60_000 }, async () => {
+  const config = scratch()
+  const { backend, home } = claude({ env: { CLAUDE_CONFIG_DIR: config }, backend: { restMs: 600_000, written: async () => 1, every: { busy: 100, idle: 100 } } })
+  const state = (job, fan, tempo) => { mkdirSync(path.join(config, 'jobs', job), { recursive: true }); writeFileSync(path.join(config, 'jobs', job, 'state.json'), JSON.stringify({ state: 'working', tempo, fan })) }
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Stop with a monitor' })
+    const jobId = task.screen.job
+    const pid = job(home, jobId).pid
+    await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
+    state(jobId, [{ id: 'bmon00001', kind: 'monitor', label: 'Watch the CI runs', startedAt: Date.now() }], 'active')
+    type(task, 'long')
+    await until(() => task.state === 'working' && task.monitors.length === 1 && !task.turnOver, 'a turn at work with a monitor beside it')
+    // A turn runs: Stop ends it, as it ends any (Esc on its screen), and the monitor goes on.
+    await task.stop()
+    await until(() => task.turnOver, 'the turn to end, and only the monitor to keep the task working')
+    assert.equal(job(home, jobId).escapes, 1, 'one Esc reached the session')
+    assert.equal(task.state, 'working', 'it still waits on the monitor')
+    assert.equal(alive(pid), true, 'the same program runs')
+    // Stop again, after the time two presses of Esc must be apart (2 s): no turn runs, so nothing is pressed.
+    await sleep(2300)
+    await task.stop()
+    await sleep(1500)
+    assert.equal(job(home, jobId).escapes, 1, 'no second Esc')
   } finally {
     await backend.close()
   }

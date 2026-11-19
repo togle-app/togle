@@ -1764,6 +1764,25 @@ async function checkShells(T, agent) {
   const without = await line()
   assert.deepEqual([without.files.left, without.files.right], [withShell.files.left, withShell.files.right], 'the files changed are in the same place without a shell')
   assert.ok(Math.abs(without.views.left - without.files.right - 10) <= 2, 'still right before the switch')
+  // With everything on the line (the model, what it waits on, its shells, the files changed, the switch) a narrower window wraps it to another row:
+  // nothing runs past the line or the window (the hint says only how many: a long description is on the pointer and cannot push anything).
+  const longWatch = 'Watch the macOS and Ubuntu CI runs of the newest commit on the branch with the fixes for the Mac and Linux builds, and tell me when all four jobs pass'
+  await ui.evaluate('window.togleUITest.setTask("claude:sh1", ' + JSON.stringify({ monitors: [{ id: 'bmon00001', label: longWatch }, { id: 'bmon00002', label: 'Watch the build' }], shells: [{ id: 'b0000009', label: command }] }) + ')')
+  await ui.wait("!!document.querySelector('.task-status .monitors-hint') && !!document.querySelector('.task-status .shells-hint')")
+  for (const width of [1180, 900, 700, 520]) {
+    ui.window.setContentSize(width, 800)
+    await ui.paint()
+    const fit = await ui.evaluate(`(() => {
+      const status = document.querySelector('.task-status'); const frame = status.getBoundingClientRect()
+      const parts = [...status.children].map((part) => part.getBoundingClientRect())
+      return { width: innerWidth, frame: { left: Math.round(frame.left), right: Math.round(frame.right) }, spilling: parts.filter((box) => box.right > frame.right + 1 || box.left < frame.left - 1).length, scrolls: status.scrollWidth > status.clientWidth + 1, page: document.documentElement.scrollWidth > innerWidth }
+    })()`)
+    assert.deepEqual([fit.spilling, fit.scrolls, fit.page], [0, false, false], 'at ' + width + ' wide nothing runs past the line or the window: ' + JSON.stringify(fit))
+  }
+  ui.window.setContentSize(1180, 800)
+  await ui.paint()
+  await ui.evaluate('window.togleUITest.setTask("claude:sh1", { monitors: [], shells: [] })')
+  await ui.wait("!document.querySelector('.task-status .monitors-hint') && !document.querySelector('.task-status .shells-hint')")
   // The person changes the model and the effort on the agent's own screen: its next answer says so, the task changes, and the line is read again at once.
   // A reading that tells nothing (an agent between answers, one that cannot be asked) leaves what was said.
   const reads = async () => (await ui.calls('runnerModel')).length
@@ -3084,6 +3103,24 @@ async function checkReplyDock(T, agent) {
   await ui.fill('.task-reply textarea', '')
   assert.equal(await ui.evaluate(round + ".classList.contains('stop')"), true, 'the words gone: Stop again')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-actions button')"), false, 'and no Stop in the header')
+
+  // A task that reads Working only because it waits on a monitor (its turn is over) has no turn to stop: its round button is Send, there is no Interrupt
+  // beside typed words, and no "Working…" line ticks under the conversation. It still reads Working above. With a turn running next to the monitor,
+  // it is Stop again.
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-now')"), true, 'a turn runs: the line that says it works is there')
+  await ui.evaluate('window.togleUITest.setTask("claude:s2", { monitors: [{ id: "bmon00001", label: "Watch the CI runs" }], turnOver: true })')
+  await ui.wait("!!document.querySelector('.task-reply .reply-send') && !document.querySelector('.task-reply .reply-send').classList.contains('stop')", 'no Stop while only a monitor keeps it working')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Working', 'it still reads Working')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .monitors-hint')?.textContent.trim()"), 'waiting on 1 monitor', 'and says what for')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-now')"), false, 'no "Working…" line: no turn runs')
+  await ui.fill('.task-reply textarea', 'How are the CI runs?')
+  assert.deepEqual(await ui.evaluate("[" + round + ".classList.contains('primary')," + round + ".disabled,!!document.querySelector('.reply-interrupt')]"), [true, false, false], 'words typed: Send, and no Interrupt: there is no turn to interrupt')
+  await ui.fill('.task-reply textarea', '')
+  await ui.evaluate('window.togleUITest.setTask("claude:s2", { turnOver: false })')
+  await ui.wait("document.querySelector('.task-reply .reply-send')?.classList.contains('stop')", 'Stop again once a turn runs next to the monitor')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-now')"), true, 'and the line that says it works is back')
+  await ui.evaluate('window.togleUITest.setTask("claude:s2", { monitors: [] })')
+  await ui.wait("!document.querySelector('.task-status .monitors-hint')", 'the monitor gone')
 
   // A picture pasted into the box: a chip, kept as a file, and nothing else.
   const png = Array.from(nativeImage.createFromBuffer(Buffer.alloc(80 * 60 * 4, 0x9a), { width: 80, height: 60 }).toPNG())

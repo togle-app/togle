@@ -120,6 +120,8 @@ export interface TaskHandle {
   readonly shells?: readonly BackgroundShell[]
   /** What the task watches in the background for its agent to go on with, when its agent tells (Claude Code's monitors). */
   readonly monitors?: readonly BackgroundShell[]
+  /** Working only because it waits on a monitor: its turn is over, so there is no turn to stop (Claude Code). */
+  readonly turnOver?: boolean
   /** The commands and models its agent told it has for this task, so far. Left out by an agent that tells none. */
   offers?(): TaskOffers
 }

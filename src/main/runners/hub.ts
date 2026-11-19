@@ -477,10 +477,10 @@ export class RunnerHub {
     return words
   }
 
-  /** Whether a task's agent is at work or asks something: what an interrupt would stop. */
+  /** Whether a task's agent is at work or asks something: what an interrupt would stop. One that only waits on a monitor has no turn to stop. */
   private atWork(owned: Owned): boolean {
     const { handle } = owned
-    return handle.state === 'working' || handle.state === 'waiting' || !!handle.waitingFor
+    return (handle.state === 'working' && !handle.turnOver) || handle.state === 'waiting' || !!handle.waitingFor
   }
 
   /**
@@ -1023,6 +1023,7 @@ export class RunnerHub {
       ...(handle.waitingFor ? { waitingFor: handle.waitingFor } : {}),
       ...(handle.shells?.length ? { shells: handle.shells.map((shell) => ({ ...shell })) } : {}),
       ...(handle.monitors?.length ? { monitors: handle.monitors.map((monitor) => ({ ...monitor })) } : {}),
+      ...(handle.turnOver ? { turnOver: true } : {}),
       ...(handle.screen ? { screen: true, job: handle.screen.job, ...(handle.screen.screenId ? { screenId: handle.screen.screenId } : {}), ...(handle.screen.closed ? { screenClosed: handle.screen.closed } : {}) } : {}),
       ...(owned.held?.length ? { held: [...owned.held], ...(owned.heldNote ? { heldNote: owned.heldNote } : {}), ...(owned.heldPaused ? { heldPaused: true } : {}) } : {})
     }

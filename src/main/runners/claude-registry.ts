@@ -3,8 +3,10 @@
 //   a command it started in the background still runs. `claude agents --json` calls that one `busy` too.
 // - `jobs/<job>/state.json` is a background session's job: its `tempo` ("active", or "idle" while only a shell runs) and the `fan` of what
 //   it started, the shells among them (`kind: "shell"`, the command as `label`, `startedAt`) and the monitors (`kind: "monitor"`, the
-//   description as `label`: Claude Code's Monitor tool, which says something to the session when there is something). A monitor is a
-//   command too, so the program's record calls a session that only waits on one `shell` as well; the job's `fan` is what tells them apart.
+//   description as `label`: Claude Code's Monitor tool, which says something to the session when there is something). An item leaves the
+//   `fan` when it ends. With the turn over and a monitor and a shell in it, the tempo is idle and the program's record says `shell` (seen on
+//   2.1.328); the `fan` is what tells a monitor from a shell. A session that has a monitor is busy whatever the record says: the record and
+//   the tempo only tell whether its turn is over.
 // So a task whose turn had ended, with a shell still running, was shown as working: what was typed in Chat was held for a turn that was
 // over, the notice that the turn ended never came, and nothing said what ran. And one that waited on a monitor was shown as plain Idle,
 // with nothing said of what it waited for.
@@ -52,8 +54,9 @@ export const monitorsOf = (state: Record<string, unknown> | null): BackgroundShe
  * The rows `claude agents --json` gave, with what the program's own record adds: a session that is idle while a command it started
  * runs has the status `shell` (the list said busy), and the commands that run are its `shells`. A monitor it started that still runs
  * is `monitors`, and the session is not idle then: its agent goes on by itself when the monitor says something (it said "waiting on the
- * CI runs" and ended its turn), so it stays busy, as the list says. A row is left as it was when the files cannot be read (another
- * version of Claude Code, or none of its files at hand).
+ * CI runs" and ended its turn), so it stays busy, as the list says; when its turn is over (`turnOver`) only the monitor keeps it busy,
+ * and there is no turn for Stop to end. A row is left as it was when the files cannot be read (another version of Claude Code, or
+ * none of its files at hand).
  */
 export async function withShells(home: string, rows: AgentRow[]): Promise<AgentRow[]> {
   return Promise.all(
@@ -68,8 +71,11 @@ export async function withShells(home: string, rows: AgentRow[]): Promise<AgentR
         // runs is something the agent waits on: not idle.
         const watching = monitors.length > 0 && row.status !== 'waiting'
         const quiet = !watching && row.status === 'busy' && (registry ? registry.status === 'shell' : shells.length > 0 && text(job?.tempo) === 'idle')
+        // Its turn is over when the list says idle, or the program's record says `shell` (or idle), or, with no record, the job's tempo is idle: only
+        // the monitor keeps it busy, so there is no turn to stop.
+        const over = row.status === 'idle' || (registry ? registry.status === 'shell' || registry.status === 'idle' : text(job?.tempo) === 'idle')
         if (!quiet && !watching && !shells.length && !monitors.length) return row
-        return { ...row, ...(quiet ? { status: 'shell' } : watching ? { status: 'busy' } : {}), ...(shells.length ? { shells } : {}), ...(monitors.length ? { monitors } : {}) }
+        return { ...row, ...(quiet ? { status: 'shell' } : watching ? { status: 'busy' } : {}), ...(shells.length ? { shells } : {}), ...(monitors.length ? { monitors } : {}), ...(watching && over ? { turnOver: true } : {}) }
       } catch {
         return row
       }

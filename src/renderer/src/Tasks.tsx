@@ -1144,7 +1144,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const [confirmTakeOver, setConfirmTakeOver] = useState(takeOverAsked)
   useEffect(() => { if (takeOverAsked) setConfirmTakeOver(true) }, [takeOverAsked])
   const logBox = useRef<HTMLDivElement>(null)
-  const running = task.state === 'working' || task.state === 'waiting'
+  // A turn runs, or the agent asks: what Stop and Interrupt are for. A task that reads Working only because it waits on a monitor (its turn is
+  // over, `turnOver`) has no turn to stop: Chat shows it as it shows one between turns, and what is typed goes in as a new turn.
+  const running = (task.state === 'working' && !task.turnOver) || task.state === 'waiting'
   // The conversation as its agent keeps it, also of what was said before Togle opened the task; else what happened while Togle watched.
   // Read only while Chat is what shows: the agent's screen (open, or closed with Terminal picked) needs none of it.
   const webShown = !sessionShown && !(task.mine && !!task.screen && view === 'session' && !task.terminal)
@@ -1666,9 +1668,10 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
           {withSent.length === 0 && !readingConversation && !task.mine && <p className="hint">Togle shows what happens in a task once it runs it.</p>}
           {/* The whole conversation, in order: a turn that is over as what was asked, a line for the work and the answer; the turn going on in the open.
               A message just sent is at its end at once, with its ticks. */}
-          <Thread entries={withSent} state={task.state} settled={settledTurn.current} taskKey={task.key} known={known} stepsRun={running || task.commandsRunning} sending={sending} />
-          {/* That it works, and for how long this turn has run: when no step of it runs, which has its own clock. */}
-          {task.state === 'working' && !stepRuns && <NowLine since={newTurn ? turnStart(shown) : undefined} />}
+          <Thread entries={withSent} state={task.turnOver ? 'idle' : task.state} settled={settledTurn.current} taskKey={task.key} known={known} stepsRun={running || task.commandsRunning} sending={sending} />
+          {/* That it works, and for how long this turn has run: when no step of it runs, which has its own clock. Not for a task whose turn is over
+              and that only waits on a monitor: no turn runs, and the line under its name says what it waits on. */}
+          {task.state === 'working' && !task.turnOver && !stepRuns && <NowLine since={newTurn ? turnStart(shown) : undefined} />}
         </div>
         {spot && <QuoteFloat spot={spot} onQuote={() => quote(spot.text)} />}
         {railShown && <ThreadRail key={task.key} prompts={prompts} log={logBox} onEarlier={history?.more && !all ? showEarlierTurns : undefined} onLeaveEnd={() => { stick.current = false }} />}

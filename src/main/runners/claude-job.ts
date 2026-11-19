@@ -47,6 +47,8 @@ export interface AgentRow {
   shells?: BackgroundShell[]
   /** The monitors it started that still run, which say something to it when there is something (claude-registry.ts adds them too). */
   monitors?: BackgroundShell[]
+  /** Only a monitor keeps it busy: its turn is over (the program's record or the job's tempo says so). claude-registry.ts sets it with the monitors. */
+  turnOver?: boolean
 }
 
 /** A session in the background. */
@@ -279,6 +281,14 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     return this.row?.monitors ?? []
   }
 
+  /**
+   * It is Working only because it waits on a monitor: its turn is over, so Stop has no turn to end (Esc on its screen would do nothing), the
+   * words typed go in as after any turn, and its screen is quiet. It goes on by itself when the monitor says something.
+   */
+  get turnOver(): boolean {
+    return this.state === 'working' && this.monitors.length > 0 && !!this.row?.turnOver
+  }
+
   get open(): boolean {
     return this.screenTask !== null
   }
@@ -502,8 +512,9 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     const screen = this.screenTask
     if (!screen) throw new Error(this.closed ?? 'Its screen could not be opened.')
     // A key typed before a screen takes keys is lost (an Esc 0.3 s after an attach was): a screen just opened gets `ESC_AFTER_MS` from its start.
-    // A screen at work does not go quiet, so it is not waited on to settle: it is typed on once it has drawn and had a moment.
-    const working = this.state === 'working'
+    // A screen at work does not go quiet, so it is not waited on to settle: it is typed on once it has drawn and had a moment. One that only
+    // waits on a monitor is quiet, as an idle one is.
+    const working = this.state === 'working' && !this.turnOver
     await screen.drawn(working ? undefined : ESC_AFTER_MS)
     if (!working) await screen.settled()
     await screen.submit(words)
@@ -514,14 +525,15 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
    * Stop, as Esc is on the session's screen in a terminal: the turn it is on ends (and the command it runs, if it runs one), and the
    * session goes on with what it was told. What was queued starts as the next turns: Claude Code does that on Esc, here as in a
    * terminal. The screen is opened out of sight when it is closed, and Esc is pressed once it takes keys (a key that comes before is
-   * lost). Nothing is pressed for a session that is not at work (on a prompt with words in it Esc asks to clear them), nor twice
-   * within `ESC_APART_MS` (two close together open the rewind menu on an idle prompt, which takes the next words as its own). Where
-   * the screen cannot be used, the session is ended instead (`end`), and opening it brings it back.
+   * lost). Nothing is pressed for a session that is not at work (on a prompt with words in it Esc asks to clear them), nor for one that
+   * only waits on a monitor (its turn is over: there is nothing for Esc to end, and the monitor goes on), nor twice within `ESC_APART_MS`
+   * (two close together open the rewind menu on an idle prompt, which takes the next words as its own). Where the screen cannot be
+   * used, the session is ended instead (`end`), and opening it brings it back.
    */
   async stop(): Promise<void> {
     if (this.over) return
     // What it was doing when Stop was pressed: a card of Togle's that waits counts (taking it away changes the state).
-    const atWork = this.state === 'working' || this.state === 'waiting' || !!this.waitingFor
+    const atWork = (this.state === 'working' && !this.turnOver) || this.state === 'waiting' || !!this.waitingFor
     this.cancelRequests()
     // No program runs, or it has nothing to stop.
     if (this.pid === null || !atWork) return

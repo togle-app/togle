@@ -113,7 +113,9 @@ test('a session that waits on a monitor is not idle: its turn is over, but it go
       a1b2c3d4: { tempo: 'idle', fan: [monitor('m1', 'Watch the CI runs')] },
       e5f6a7b8: { tempo: 'idle', fan: [monitor('m2', 'Watch the CI runs'), shell('b2', 'npm run dev')] },
       c9d0e1f2: { tempo: 'active', fan: [monitor('m3', 'Watch the CI runs')] },
-      d0e1f2a3: { tempo: 'idle', fan: [monitor('m4', 'Watch the CI runs', { doneAt: 1_795_060_100_000 })] }
+      d0e1f2a3: { tempo: 'idle', fan: [monitor('m4', 'Watch the CI runs', { doneAt: 1_795_060_100_000 })] },
+      f1a2b3c4: { tempo: 'idle', fan: [monitor('m6', 'Watch the CI runs')] },
+      f2b3c4d5: { tempo: 'active', fan: [monitor('m7', 'Watch the CI runs')] }
     }
   })
   const rows = await withShells(dir, [
@@ -121,9 +123,12 @@ test('a session that waits on a monitor is not idle: its turn is over, but it go
     job({ id: 'e5f6a7b8', pid: 222, sessionId: 's-2' }),
     job({ id: 'c9d0e1f2', pid: 333, sessionId: 's-3' }),
     job({ id: 'd0e1f2a3', pid: 111, sessionId: 's-4' }),
-    job({ id: 'b3c4d5e6', pid: 444, sessionId: 's-5', status: 'waiting', waitingFor: 'permission prompt' })
+    job({ id: 'b3c4d5e6', pid: 444, sessionId: 's-5', status: 'waiting', waitingFor: 'permission prompt' }),
+    job({ id: 'f1a2b3c4', pid: 555, sessionId: 's-6' }),
+    job({ id: 'f2b3c4d5', pid: 666, sessionId: 's-7' })
   ])
-  // The program's record says shell for a session that only waits on a monitor too (a monitor is a command): the job's fan tells them apart.
+  // The program's record says shell here (it does with a shell beside the monitor): the job's fan tells a monitor from a shell, and a monitor
+  // makes the session busy whatever the record says.
   assert.deepEqual([rows[0].status, rows[0].monitors?.map((item) => item.label), rows[0].shells], ['busy', ['Watch the CI runs'], undefined], 'waiting on a monitor: busy, and what for')
   assert.equal(stateOfJob(rows[0]), 'working', 'so working, not idle')
   assert.deepEqual([rows[1].status, rows[1].monitors?.length, rows[1].shells?.length], ['busy', 1, 1], 'a monitor and a shell: working, and both said')
@@ -135,6 +140,10 @@ test('a session that waits on a monitor is not idle: its turn is over, but it go
   // A list that calls the session idle (another version of Claude Code, or a stand-in) while a monitor runs: still working.
   const [idle] = await withShells(dir, [job({ status: 'idle' })])
   assert.deepEqual([idle.status, stateOfJob(idle)], ['busy', 'working'])
+  // Whether its turn is over, so that only the monitor keeps it busy and there is no turn for Stop to end: by the program's record (shell), by the list
+  // (idle), or with no record of the program, by the job's tempo (idle). A turn that runs (the record says busy, the tempo active) is not over.
+  assert.deepEqual(rows.map((row) => row.turnOver), [true, true, undefined, undefined, undefined, true, undefined], 'over for the record that says shell, the list that says idle, and the idle tempo: not for a turn at work, a finished monitor, or a question')
+  assert.equal(idle.turnOver, true, 'the list says idle: its turn is over')
 })
 
 test('Claude Code\'s own folder is where its program is told to keep it, else ~/.claude', () => {

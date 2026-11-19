@@ -141,6 +141,11 @@ export interface TaskInfo {
    */
   monitors?: BackgroundShell[]
   /**
+   * Set on a Working task whose turn is over and that only waits on its monitors: there is no turn to stop, so the window offers no
+   * Stop or Interrupt, and what is typed goes in as after any turn. It still reads Working, as it goes on by itself.
+   */
+  turnOver?: boolean
+  /**
    * A task that runs in the background (Claude Code's own background sessions): the id its agent opens its screen with.
    * It goes on without any window, so there is no program to take over: its screen is opened.
    */
