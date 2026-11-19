@@ -816,13 +816,13 @@ async function checkFirstMinute(T, agent) {
   console.log('First minute: speech recognition on one click, F9 heard, the plan signed in or skipped, what Togle found, and the steps left on To-do passed.')
 }
 
-/** Settings on one screen: Keys, Voice, Meetings, Agents, Accounts; the plan or a key instead; Togle Studio. */
+/** Settings on one screen: Keys, Voice, Meetings, Agents, Accounts, Appearance, Updates; the plan or a key instead; Togle Studio. */
 async function checkSettings(T, agent) {
   const ui = await open(T, agent, 'settings', 1024)
   await ui.click('.workspace-nav button', 'Settings')
   await ui.wait("!!document.querySelector('#settings-accounts .ai-plan')")
   // Column by column, as they are read and reached with Tab: Keys, Meetings and Accounts in the first, Voice and Agents in the second.
-  assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Meetings', 'Accounts', 'Voice', 'Agents'])
+  assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Meetings', 'Accounts', 'Voice', 'Agents', 'Appearance', 'Updates'])
   assert.deepEqual(await texts(ui, '#settings-keys .shortcut-what'), ['Talk', 'Show', 'Task'])
   assert.deepEqual(await texts(ui, '#settings-keys button.keys'), ['F9', 'F8', 'F10'])
   const names = await texts(ui, '#settings-voice .setting > .name')
