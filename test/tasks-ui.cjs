@@ -464,7 +464,7 @@ async function checkTasks(T, agent) {
   await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'r7', kind: 'command', command: 'npm run migrate', raw: 'npm run migrate', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
   await ui.wait("document.querySelector('.state-chip')?.textContent==='Waiting for you'")
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request')"), false, 'no card over a screen that asks on its own: it is answered there')
-  assert.deepEqual(await texts(ui, '.task-actions button'), ['Stop', 'Hand back'], 'it waits: Stop beside Hand back, as the design page has them')
+  assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'it waits, and the header has no Stop in Terminal either: it is stopped on the screen, with Esc')
   await ui.capture('tasks-screen')
   // Chat: the card for what it asks, in the same task, and a reply box that takes words all the while: what is sent while it
   // asks or works waits, as a card of its own, and goes in when its turn ends.
@@ -521,7 +521,7 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal')"), false, 'the screen is closed here')
   assert.equal(await ui.evaluate("document.querySelector('.screen-closed span').textContent"), 'Its screen is closed, and the task goes on.', 'and the task says it goes on')
   assert.deepEqual(await texts(ui, '.screen-closed button'), ['Open the screen'])
-  assert.deepEqual(await texts(ui, '.task-actions button'), ['Stop', 'Hand back'], 'it is still Togle\u2019s own, and it works')
+  assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'it is still Togle\u2019s own, and it works: no Stop in the header with the screen closed either (the Chat view has the round one)')
   await ui.capture('tasks-handed-back')
   await ui.click('.screen-closed button', 'Open the screen')
   await ui.wait("!!document.querySelector('.task-terminal')")
@@ -621,12 +621,11 @@ async function checkTasks(T, agent) {
     await new Promise(resolve => setTimeout(resolve, 300))
     assert.deepEqual(await sentSince(from), ['\x1b[C'])
   }
-  // Stop on a task that is the agent's own screen: the same button as on any task, and the screen stays.
-  await ui.click('.task-actions button', 'Stop')
-  await ui.wait("document.querySelector('.state-chip')?.textContent==='Stopped'")
-  assert.deepEqual((await ui.calls('stopRunnerTask')).map(call => call.args).at(-1), ['claude:s4'])
-  assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'stopped: nothing left to stop')
-  assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal')"), true, 'its screen is still open')
+  // The agent's own screen has no Stop button, working or waiting: it is stopped on the screen, with Esc (Ctrl+C in Hermes), as in any terminal.
+  // Chat has the reply box's round button for it.
+  assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'no Stop in the header of the agent’s own screen')
+  assert.equal(await ui.evaluate("![...document.querySelectorAll('.task-panel button')].some(b=>b.textContent.trim()==='Stop')"), true, 'and none anywhere on the screen’s panel')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-terminal')"), true, 'its screen is open')
 
   // Hermes asks on its own screen, so Chat has no card for it: it says it waits there, and the way to the terminal is one press. A notice
   // that opens the task takes it to the terminal itself.

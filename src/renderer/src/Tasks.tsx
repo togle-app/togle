@@ -1400,13 +1400,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
           <h2 title={task.title}>{task.title}</h2>
         </div>
         <div className="task-actions">
-          {/* In Chat, Stop is the reply box's round button (it is Send while words are typed), so the header has none. Where there is no reply
-              box (the agent's own screen, shown or closed) it stays here, then what follows from it, then Hand back. */}
-          {task.mine && running && !webShown && (
-            <button className="small" disabled={!!pressed} onClick={press('stop', onStop)} title={task.screen ? 'Ends the agent’s turn, as Esc does on its screen (Ctrl+C in Hermes).' : undefined}>
-              {pressed === 'stop' ? 'Stopping…' : 'Stop'}
-            </button>
-          )}
+          {/* No Stop in the header, in either view. In Chat it is the reply box's round button (it is Send while words are typed). In Terminal
+              the agent's own screen is shown, and it is stopped there, with Esc (Ctrl+C in Hermes), as in any terminal. */}
           {task.mine && task.commandsRunning && task.state === 'stopped' && (
             <button className="small" disabled={!!pressed} onClick={press('end', onEndCommands)} title="Stop ended the agent's turn. The command it started is still running.">
               {pressed === 'end' ? 'Ending…' : 'End the running command'}
