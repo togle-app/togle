@@ -6,7 +6,7 @@ import { MANAGE_USAGE_URL } from '@shared/plan'
 import { quitQuestion, type CloseWarning } from '@shared/close-warning'
 import type { TogleMicrophoneStatus } from '@shared/microphone'
 import { Icon } from './Icon'
-import { NAV_DEFAULT, NAV_ICONS, NAV_MAX, NAV_WORDS_FROM, navPx, setPanes, usePanes } from './panes'
+import { NAV_COLLAPSE_BELOW, NAV_DEFAULT, NAV_ICONS, NAV_MAX, NAV_WORDS_FROM, navPx, setPanes, usePanes } from './panes'
 import { ResizeHandle } from './ResizeHandle'
 import { BrandMark, WindowButtons } from './WindowBar'
 import { FirstMinute } from './FirstMinute'
@@ -196,12 +196,13 @@ export function Shell() {
           label="Resize the navigation"
           className="nav-handle"
           at={nav}
-          size={() => ({ width: nav, min: NAV_ICONS, max: NAV_MAX })}
-          // Narrower than its words need it goes to its icons; from its icons the keys' step is big enough to bring the words back.
-          onSize={(width) => setPanes({ nav: width < NAV_WORDS_FROM ? NAV_ICONS : Math.min(NAV_MAX, width) })}
+          size={() => ({ width: nav, min: NAV_WORDS_FROM, max: NAV_MAX })}
+          // Squeezed past what its words need it is its icons only, and dragged out again the words are back: it has no button for it.
+          collapseBelow={NAV_COLLAPSE_BELOW}
+          onSize={(width) => setPanes({ nav: width })}
           step={NAV_WORDS_FROM - NAV_ICONS}
           collapsed={iconsOnly}
-          onToggle={() => setPanes({ nav: iconsOnly ? NAV_DEFAULT : NAV_ICONS })}
+          onCollapsed={(icons) => setPanes({ nav: icons ? NAV_ICONS : NAV_DEFAULT })}
         />
         <main className="shell-content">
           {confirmClose && (

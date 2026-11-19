@@ -237,20 +237,16 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .shell-layout.nav-icons .shell-nav button > span:not(.nav-count):not(.dot) { display: none; }
 .shell-layout.nav-icons .shell-nav .nav-count { position: absolute; top: 1px; right: 2px; padding: 0 5px; line-height: 16px; font-size: 10px; }
 .shell-layout.nav-icons .shell-nav .dot.live { position: absolute; top: 6px; right: 8px; width: 7px; height: 7px; }
-/* The edge between a pane and the next: a strip over the next pane's own room, a line that shows under the pointer or the keys, and a
-   tab that hides the pane or shows it again. */
+/* The edge between a pane and the next: a strip over the next pane's own room and a line that shows under the pointer or the keys. A pane
+   is collapsed by squeezing it (there is no button), so the hidden list leaves a faint line to drag it out from. */
 .resize-handle { position: absolute; top: 0; bottom: 0; z-index: 8; width: 6px; cursor: col-resize; touch-action: none; outline: none; }
 .nav-handle { left: var(--nav-width, 136px); }
 .list-handle { left: var(--list-width, clamp(15.5rem, 22vw, 22rem)); }
-.tasks.list-hidden > .list-handle { left: 0; }
+/* Hidden, its edge is the 6px beside the navigation's own (not over it: the navigation could not be dragged then). */
+.tasks.list-hidden > .list-handle { left: 6px; }
 .resize-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: -1px; width: 3px; background: transparent; }
+.list-handle.collapsed::before { left: 1px; width: 2px; background: color-mix(in srgb, var(--togle) 30%, var(--line)); }
 .resize-handle:hover::before, .resize-handle.dragging::before, .resize-handle:focus-visible::before { background: var(--togle); }
-.resize-tab { position: absolute; top: 50%; left: 0; display: grid; place-items: center; width: 15px; height: 40px; margin: -20px 0 0; padding: 0; border: 1px solid var(--line); border-left: 0; border-radius: 0 9px 9px 0; background: var(--surface); color: var(--muted); cursor: pointer; opacity: 0.55; transition: opacity 0.12s; }
-.resize-handle:hover .resize-tab, .resize-handle:focus-visible .resize-tab, .resize-handle.dragging .resize-tab, .resize-tab:focus-visible { opacity: 1; }
-.resize-tab:hover:not(:disabled) { border-color: var(--line); background: var(--raised); color: var(--ink); }
-.resize-tab svg { transform: rotate(90deg); }
-.resize-handle.collapsed .resize-tab svg { transform: rotate(-90deg); }
-@media (prefers-reduced-motion: reduce) { .resize-tab { transition: none; } }
 @media (max-width: 560px) {
   .nav-handle { display: none; }
   .shell-layout { grid-template-columns: 52px minmax(0, 1fr); }

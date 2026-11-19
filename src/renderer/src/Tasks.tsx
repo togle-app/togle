@@ -7,7 +7,7 @@ import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, useKeptState, WaitLine } from './kept'
 import { AgentLead, AgentMark, agentOf } from './AgentMark'
-import { DETAIL_MIN, LIST_MAX, LIST_MIN, setPanes, usePanes } from './panes'
+import { DETAIL_MIN, LIST_COLLAPSE_BELOW, LIST_MAX, LIST_MIN, setPanes, usePanes } from './panes'
 import { PointMenu, type Point } from './PointMenu'
 import { ResizeHandle } from './ResizeHandle'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
@@ -778,14 +778,13 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
         className="list-handle"
         size={() => {
           const whole = tasksBox.current?.getBoundingClientRect().width ?? 900
-          return { width: listBox.current?.getBoundingClientRect().width ?? LIST_MIN, min: LIST_MIN, max: Math.max(LIST_MIN, Math.min(LIST_MAX, whole - DETAIL_MIN)) }
+          return { width: panes.listHidden ? 0 : listBox.current?.getBoundingClientRect().width ?? LIST_MIN, min: LIST_MIN, max: Math.max(LIST_MIN, Math.min(LIST_MAX, whole - DETAIL_MIN)) }
         }}
-        onSize={(width) => {
-          const whole = tasksBox.current?.getBoundingClientRect().width ?? 900
-          setPanes({ list: Math.round(Math.min(Math.max(LIST_MIN, Math.min(LIST_MAX, whole - DETAIL_MIN)), Math.max(LIST_MIN, width))), listHidden: false })
-        }}
+        // Squeezed narrower than its names need it hides, and dragged out again it is back: it has no button for it.
+        collapseBelow={LIST_COLLAPSE_BELOW}
+        onSize={(width) => setPanes({ list: Math.round(width), listHidden: false })}
         collapsed={panes.listHidden === true}
-        onToggle={() => setPanes({ listHidden: !panes.listHidden })}
+        onCollapsed={(hidden) => setPanes({ listHidden: hidden })}
       />
       <section className="tasks-detail">
         {error && (

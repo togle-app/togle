@@ -9,10 +9,14 @@ export const NAV_ICONS = 52
 export const NAV_MAX = 240
 /** Dragged narrower than this, the navigation goes to its icons: there is no room for a word. */
 export const NAV_WORDS_FROM = 96
+/** Squeezed narrower than this, the navigation goes to its icons, and dragged out past it the words come back. */
+export const NAV_COLLAPSE_BELOW = 76
 /** The Agents list: no narrower than its names need, no wider than this, and the open task keeps DETAIL_MIN at least. */
 export const LIST_MIN = 240
 export const LIST_MAX = 560
 export const DETAIL_MIN = 320
+/** Squeezed narrower than this, the Agents list hides, and dragged out past it it is back. */
+export const LIST_COLLAPSE_BELOW = 180
 
 export interface Panes {
   /** The navigation's width in px (NAV_ICONS is its icons only). Not set: the default. */
