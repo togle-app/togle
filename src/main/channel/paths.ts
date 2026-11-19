@@ -25,9 +25,11 @@ export const channelFolder = (dataFolder: string): string => path.join(dataFolde
  * the secret, not the name.
  */
 export function channelAddress(dataFolder: string): string {
-  const id = createHash('sha256').update(path.resolve(dataFolder)).digest('hex').slice(0, 16)
+  // Always from the whole path: a socket named by a relative path would be found only from the folder it was made in.
+  const folder = path.resolve(dataFolder)
+  const id = createHash('sha256').update(folder).digest('hex').slice(0, 16)
   if (process.platform === 'win32') return `\\\\.\\pipe\\togle-${id}`
-  const inside = path.join(channelFolder(dataFolder), 'channel.sock')
+  const inside = path.join(channelFolder(folder), 'channel.sock')
   // A socket's path has a short limit; past it the socket goes to the temporary folder, under a name made from the data folder.
   return Buffer.byteLength(inside) < 100 ? inside : path.join(os.tmpdir(), `togle-${id}.sock`)
 }

@@ -83,6 +83,9 @@ else if (command === 'agents') {
   const rec = { job, sessionId, cwd: process.cwd(), settings, args: rest, ...(name ? { name } : {}), startedAt: Date.now(), status: 'idle', first: words.join(' ') || undefined }
   fs.writeFileSync(jobFile(job), JSON.stringify(rec))
   start(rec)
+  // As the real one: it returns once the session runs. Before its program has said so, the list shows the session without a program and stopped, and a
+  // Togle that looked then (and was told by the program a moment later that it asks) would still take it for stopped until its next look.
+  for (let waited = 0; waited < 8000 && !read(job)?.pid; waited += 20) await sleep(20)
   out(`backgrounded · ${job}${name ? ` · ${name}` : ''} (${words.length ? 'working' : 'idle — send a prompt to start'})`)
   out(`  claude attach ${job}   open in this terminal`)
   if (running) out(`note: session ${running.job} is already running in the background, so this started a copy as ${job}. \`claude attach ${running.job}\` opens the original.`)

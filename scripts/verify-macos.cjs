@@ -21,11 +21,16 @@ function verifyMacPackage(bundle, arch = process.arch) {
   assert.equal(icon.readUInt32BE(4), icon.length, 'The ICNS must not be truncated.')
 
   const native = path.join(resources, 'app.asar.unpacked', 'node_modules')
+  // The helper node-pty starts every terminal through must be able to run, or no terminal opens on a Mac (and the failure ends the app).
+  const helper = path.join(native, 'node-pty', 'prebuilds', `darwin-${arch}`, 'spawn-helper')
+  assert.ok(fs.existsSync(helper), 'node-pty\'s spawn-helper is missing: ' + path.relative(bundle, helper))
+  try { fs.accessSync(helper, fs.constants.X_OK) } catch { assert.fail('node-pty\'s spawn-helper has no execute bit: ' + path.relative(bundle, helper)) }
   const binaries = [
     path.join(contents, 'MacOS', info.CFBundleExecutable),
     path.join(contents, 'Frameworks/Electron Framework.framework/Versions/A/Electron Framework'),
     path.join(native, `sherpa-onnx-darwin-${arch}`, 'sherpa-onnx.node'),
-    path.join(native, '@koromix', `koffi-darwin-${arch}`, `darwin_${arch}`, 'koffi.node')
+    path.join(native, '@koromix', `koffi-darwin-${arch}`, `darwin_${arch}`, 'koffi.node'),
+    helper
   ]
   for (const binary of binaries) {
     const architectures = execFileSync('/usr/bin/lipo', ['-archs', binary], { encoding: 'utf8' }).trim().split(/\s+/)

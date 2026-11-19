@@ -3,7 +3,7 @@
 // task shows working while the program runs, and done or stopped when it ends; the agent's questions and commands are
 // answered in its terminal.
 import { randomUUID } from 'node:crypto'
-import { promises as fs } from 'node:fs'
+import { accessSync, constants, promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { IPty } from 'node-pty'
 import { TASK_WORDS, type RunnerKind, type TaskInfo } from '@shared/runner'
@@ -162,6 +162,11 @@ function quietPipes(term: IPty): void {
 
 /** A program started in a terminal of Togle's own, 120 by 32 until the window says how big it is. `file` must be a program, not a shim. */
 export function openTerminal(pty: NodePty, file: string, args: string[], cwd: string, env: Record<string, string>): IPty {
+  // Windows says at once that a program is not there. Elsewhere node-pty starts a child that then fails on its own, and the screen would open
+  // and end with nothing said here: a program that is not there, or not one that can be run, is said before.
+  if (process.platform !== 'win32' && path.isAbsolute(file)) {
+    try { accessSync(file, constants.X_OK) } catch { throw new Error(`${path.basename(file)} is not there, or cannot be run.`) }
+  }
   const size = { name: 'xterm-256color', cols: 120, rows: 32, cwd, env }
   const term = process.platform === 'win32' ? pty.spawn(file, args.map(windowsArg).join(' '), size) : pty.spawn(file, args, size)
   quietPipes(term)

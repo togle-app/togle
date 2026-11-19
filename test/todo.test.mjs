@@ -149,7 +149,12 @@ test('a change made in an editor is told, and a closed list tells nothing more',
   const told = []
   const todo = new T.TodoFile(file, () => told.push(Date.now()))
   await todo.watch()
-  writeFileSync(file, '- [ ] One\n- [ ] Two\n')
+  // A watcher is not always ready the moment it is made (on a Mac's file events a change made at once can be missed, or come late): the file is written
+  // again, with one more line each time that is not an item, until the change is told. The items stay Two.
+  for (let attempt = 0; attempt < 12 && !told.length; attempt++) {
+    writeFileSync(file, '- [ ] One\n- [ ] Two\n' + 'a note\n'.repeat(attempt))
+    await until(() => told.length > 0, 'the change to be told', 500).catch(() => undefined)
+  }
   await until(() => told.length > 0, 'the change to be told')
   assert.equal((await todo.list()).length, 2)
   await todo.add('Three')
