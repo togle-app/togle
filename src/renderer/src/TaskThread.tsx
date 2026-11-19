@@ -3,6 +3,7 @@ import type { LogEntry, PlanItem, StepDetail, TaskHistory, TaskState, TaskView }
 import { Icon, type IconName } from './Icon'
 import { splitQuote } from '@shared/quote'
 import { tidyPlan } from '@shared/plan-items'
+import { splitPictures } from '@shared/pasted-pictures'
 import { Markdown } from './Markdown'
 import { QuoteBlock } from './Quote'
 import { PictureOver } from './Rows'
@@ -719,22 +720,40 @@ function pictureOf(taskKey: string, picture: string): Promise<string | null> {
   return found
 }
 
+/** The pictures pasted into a reply that were read so far, by file: a picture shown again is not asked for again. */
+const pastedRead = new Map<string, Promise<string | null>>()
+function pastedOf(file: string): Promise<string | null> {
+  let found = pastedRead.get(file)
+  if (!found) {
+    // One that could not be read is asked for again the next time it is shown.
+    const forget = (): null => {
+      pastedRead.delete(file)
+      return null
+    }
+    found = api.pastedPicture(file).then((src) => src ?? forget(), forget)
+    pastedRead.set(file, found)
+    while (pastedRead.size > 30) pastedRead.delete(pastedRead.keys().next().value as string)
+  }
+  return found
+}
+
 /**
  * A picture in what the person said: small in its card, in a place of its own size before it comes (nothing moves when it
- * does); pressed, it opens whole over the window. One no longer kept says so.
+ * does); pressed, it opens whole over the window. One no longer kept says so. `pasted`: `picture` is the file of one pasted into the
+ * reply box (Togle keeps it a week), not the key of one in the agent's record.
  */
-function Picture({ taskKey, picture, index }: { taskKey: string; picture: string; index: number }): ReactNode {
+function Picture({ taskKey, picture, index, pasted }: { taskKey: string; picture: string; index: number; pasted?: boolean }): ReactNode {
   const [src, setSrc] = useState<string | null | undefined>(undefined)
   const [open, setOpen] = useState(false)
   useEffect(() => {
     let live = true
-    void pictureOf(taskKey, picture).then((found) => {
+    void (pasted ? pastedOf(picture) : pictureOf(taskKey, picture)).then((found) => {
       if (live) setSrc(found)
     })
     return () => {
       live = false
     }
-  }, [taskKey, picture])
+  }, [taskKey, picture, pasted])
   const label = `Picture ${index + 1}`
   if (src === null) return <span className="you-picture gone">The picture is no longer kept</span>
   return (
@@ -769,6 +788,7 @@ function YouCard({ entry, at, fresh, pinned, taskKey }: { entry: LogEntry; at?: 
   const [long, setLong] = useState(false)
   const [whole, setWhole] = useState(false)
   const pictures = entry.images ?? []
+  const files = youFiles(entry)
   const words = youWords(entry)
   // A reply that quotes a part of a message is drawn as that part over the reply.
   const quoted = splitQuote(words)
@@ -790,15 +810,16 @@ function YouCard({ entry, at, fresh, pinned, taskKey }: { entry: LogEntry; at?: 
         <span className="you-label">You</span>
         {at !== undefined && <When at={at} />}
       </div>
-      {(words || !pictures.length) && (
+      {(words || !(pictures.length || files.length)) && (
         <div ref={box} className={`task-you${long && !whole ? ' clamped' : ''}${whole ? ' whole' : ''}`} data-quotable="">
           {quoted && <QuoteBlock text={quoted.quote} />}
           {quoted ? quoted.reply : words}
         </div>
       )}
-      {!!pictures.length && (
+      {!!(pictures.length || files.length) && (
         <div className="you-pictures">
           {pictures.map((picture, index) => <Picture key={picture} taskKey={taskKey} picture={picture} index={index} />)}
+          {files.map((file, index) => <Picture key={file} taskKey={taskKey} picture={file} index={pictures.length + index} pasted />)}
         </div>
       )}
       {(long || whole) && (
@@ -842,10 +863,16 @@ export function lastTurnKey(entries: readonly LogEntry[]): number | undefined {
 
 const isPlan = (entry: LogEntry): boolean => entry.kind === 'step' && entry.step === 'plan'
 
-/** What the person said, as words: with its pictures shown, the words that stand in for them ("[Image #1]") are not said again. */
+/**
+ * What the person said, as words: with its pictures shown, the words that stand in for them ("[Image #1]") are not said again, and nor
+ * are the paths of the pictures pasted into the reply box (those are drawn too: `youFiles`).
+ */
 export function youWords(entry: LogEntry): string {
-  return entry.images?.length ? entry.text.replace(/\[Image #\d+\]\s*/g, '').trim() : entry.text
+  return splitPictures(entry.images?.length ? entry.text.replace(/\[Image #\d+\]\s*/g, '').trim() : entry.text).words
 }
+
+/** The files of the pictures pasted into the reply box that went with what the person said. */
+export const youFiles = (entry: LogEntry): string[] => splitPictures(entry.text).files
 
 /** What the person asked in one turn, for the rail beside the conversation: the turn's key, the words, and when they were said. */
 export interface Prompt {
@@ -861,7 +888,7 @@ export function promptsOf(entries: readonly LogEntry[]): Prompt[] {
     if (!turn.you) continue
     // A question that quotes a part of a message is named by what was answered, not by the part quoted.
     const said = youWords(turn.you)
-    const text = (splitQuote(said)?.reply ?? said).replace(/\s+/g, ' ').trim() || (turn.you.images?.length ? 'A picture' : '')
+    const text = (splitQuote(said)?.reply ?? said).replace(/\s+/g, ' ').trim() || (turn.you.images?.length || youFiles(turn.you).length ? 'A picture' : '')
     if (text) prompts.push({ key: turn.key, text, ...(realTime(turn.you.at) ? { at: turn.you.at } : {}) })
   }
   return prompts

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, type LogEntry, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
 import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
 import { useReach } from './Devices'
@@ -12,8 +12,10 @@ import { PointMenu, type Point } from './PointMenu'
 import { ResizeHandle } from './ResizeHandle'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { withQuote, splitQuote } from '@shared/quote'
+import { splitPictures } from '@shared/pasted-pictures'
 import { QuoteBar, QuoteBlock, QuoteFloat, useQuoteSpot } from './Quote'
 import { RequestCard } from './RequestCard'
+import { PictureChips, pastedPictures, pathWords, useAttached } from './ReplyPictures'
 import { StateMark, type MarkKind } from './StateMark'
 import { clock, currentPlan, lastTurnKey, PlanCard, promptsOf, Thread, turnStart, useHistory } from './TaskThread'
 import { ThreadRail } from './ThreadRail'
@@ -24,6 +26,8 @@ const api = window.togle
 const STATE_WORDS: Record<TaskView['state'], string> = { working: 'Working', waiting: 'Waiting for you', idle: 'Done', stopped: 'Stopped', failed: 'Stopped by an error' }
 // How often the list is asked for again: what runs in a terminal of its own sends no message when it changes.
 const REFRESH_MS = 4_000
+// The space under the reply part that floats over the foot of the conversation, in px (its `bottom` in the stylesheet): the conversation keeps room for it.
+const DOCK_FOOT = 12
 // What finished within a day stays in the list; older tasks fold under Earlier.
 const RECENT_MS = 24 * 3600_000
 // The task looked at last, for when the screen is opened again.
@@ -1095,6 +1099,20 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const [quoted, setQuoted] = useKeptState<string | null>(`quote:${task.key}`, null)
   const thread = useRef<HTMLDivElement>(null)
   const replyText = useRef<HTMLTextAreaElement>(null)
+  // Pictures pasted into the reply box go with the words, as files (ReplyPictures.tsx).
+  const { pictures, attach, again: attachAgain, remove: removePicture, clear: clearPictures } = useAttached(task.key)
+  const [pasteNote, setPasteNote] = useState<string | null>(null)
+  useEffect(() => setPasteNote(null), [task.key])
+  const pasteIn = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
+    const files = pastedPictures(event.clipboardData)
+    if (!files.length) return
+    event.preventDefault()
+    setPasteNote(null)
+    void attach(files).then(setPasteNote)
+  }
+  // The reply part floats over the foot of the conversation (.task-dock): the conversation keeps room for it at its end.
+  const dock = useRef<HTMLDivElement>(null)
+  const [dockHeight, setDockHeight] = useState(0)
   // Stop, and the presses that open or move the task's screen: each says what it does until the task changes.
   const [pressed, press] = usePressed(task)
   const [confirmTakeOver, setConfirmTakeOver] = useState(takeOverAsked)
@@ -1170,6 +1188,24 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const stepRuns = shown.slice(turnBegan + 1).some((entry) => entry.status === 'running')
   // The agent's own checklist for the turn at hand, by the reply box.
   const plan = currentPlan(shown)
+  const dockShown = task.mine || task.pending.length > 0 || !!plan
+  useLayoutEffect(() => {
+    const element = dock.current
+    if (!element) {
+      setDockHeight(0)
+      return
+    }
+    const measure = (): void => setDockHeight(Math.ceil(element.getBoundingClientRect().height))
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const watch = new ResizeObserver(measure)
+    watch.observe(element)
+    return () => watch.disconnect()
+  }, [dockShown, webShown])
+  // What makes the dock taller or shorter (a line more in the box, a card, a picture) moves the end of the conversation: if it was at the end, it stays there.
+  useLayoutEffect(() => {
+    if (stick.current) toEnd()
+  }, [dockHeight, toEnd])
   // And when its place gets shorter or taller: a card for what the agent asks, more lines in the reply box, the window.
   useEffect(() => {
     const box = logBox.current
@@ -1184,40 +1220,55 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const question = task.pending.find((request) => request.kind === 'question')
   // What is typed while the agent asks a question answers it, as the agent asks for it: a quote is not part of that.
   useEffect(() => { if (question) setQuoted(null) }, [question])
+  // What goes with the words: the path of each picture in the box, as a terminal takes a file dropped on it. A command of the agent's own
+  // (it starts with / or !) goes alone. Pictures only start with a word, so that a path that begins with "/" is not taken for a command.
+  const takesPictures = (message: string): boolean => pictures.length > 0 && !/^[/!]/.test(message)
+  const goes = (message: string): string => {
+    if (!takesPictures(message)) return message
+    const paths = pictures.map((picture) => pathWords(picture.path)).join(' ')
+    return message ? `${message} ${paths}` : `${pictures.length === 1 ? 'Picture' : 'Pictures'}: ${paths}`
+  }
   const say = (message: string): void => {
     // What the person sends is the newest thing in the conversation, and it shows, wherever they were reading (a reply that
     // quotes a part of an older message is sent from there).
     stick.current = true
     toEnd()
-    if (question) onReply(question.id, message)
+    const full = goes(message)
+    if (question) onReply(question.id, full)
     // A command of the agent's own (it starts with / or !) goes alone, and the quote waits for a reply that is words.
     else if (quoted && !/^[/!]/.test(message)) {
-      onSend(withQuote(quoted, message))
+      onSend(withQuote(quoted, full))
       setQuoted(null)
-    } else onSend(message)
+    } else onSend(full)
     setText('')
+    if (takesPictures(message)) clearPictures()
   }
   const send = (event: FormEvent): void => {
     event.preventDefault()
     const message = text.trim()
-    if (message) say(message)
+    if (message || pictures.length) say(message)
   }
   // Interrupt: stop what the agent does and send these words as soon as it has stopped. They stay in the box until they have
   // gone in, and stay if they could not. (What is queued waits for the end of the turn they start.)
   const [interrupting, setInterrupting] = useState(false)
-  const interruptible = running && !question && !!text.trim()
+  // Something to send: words or a picture. While the agent works and there is nothing to send, the round button is Stop.
+  const sendable = !!text.trim() || pictures.length > 0
+  const stopsHere = task.mine && running && !sendable
+  const interruptible = running && !question && sendable
   const interrupt = async (): Promise<void> => {
     const message = text.trim()
-    if (!message || interrupting || !interruptible) return
+    if ((!message && !pictures.length) || interrupting || !interruptible) return
     const withIt = !!quoted && !/^[/!]/.test(message)
     stick.current = true
     toEnd()
     setInterrupting(true)
-    const sent = await onInterrupt(withIt && quoted ? withQuote(quoted, message) : message)
+    const full = goes(message)
+    const sent = await onInterrupt(withIt && quoted ? withQuote(quoted, full) : full)
     setInterrupting(false)
     if (!sent) return
     setText('')
     if (withIt) setQuoted(null)
+    if (takesPictures(message)) clearPictures()
   }
   // The agent's own commands, listed over the reply box while a "/" and the start of a name are typed, and its models
   // after "/model ". What the agent offers is asked when the task opens, and again when a "/" starts the reply.
@@ -1296,7 +1347,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
       } else if (event.key === 'Enter' && !event.shiftKey && event.currentTarget instanceof HTMLTextAreaElement) {
         event.preventDefault()
         const message = text.trim()
-        if (message) say(message)
+        if (message || pictures.length) say(message)
       } else if (event.key === 'Escape' && quoted) {
         // Esc lets go of the quote, as it closes the list of commands.
         event.preventDefault()
@@ -1338,8 +1389,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
           <h2 title={task.title}>{task.title}</h2>
         </div>
         <div className="task-actions">
-          {/* Stop, then what follows from it, then Hand back, as the design page has them in a header. */}
-          {task.mine && running && (
+          {/* In Chat, Stop is the reply box's round button (it is Send while words are typed), so the header has none. Where there is no reply
+              box (the agent's own screen, shown or closed) it stays here, then what follows from it, then Hand back. */}
+          {task.mine && running && !webShown && (
             <button className="small" disabled={!!pressed} onClick={press('stop', onStop)} title={task.screen ? 'Ends the agent’s turn, as Esc does on its screen (Ctrl+C in Hermes).' : undefined}>
               {pressed === 'stop' ? 'Stopping…' : 'Stop'}
             </button>
@@ -1445,8 +1497,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
         </>
       ) : (
       <>
-      {/* The conversation has the room between the task's lines and the reply box, which is at the foot of the pane. */}
-      <div className="thread-place" ref={thread}>
+      {/* The conversation, and over its foot what is asked of the person: a card for what the agent asks, its checklist, what is queued and the
+          reply box. They are in the conversation, as the agent's own screen has its prompt in it, and the conversation scrolls under them. */}
+      <div className="thread-place" ref={thread} style={{ '--dock-h': dockShown ? `${dockHeight + DOCK_FOOT}px` : '0px' } as CSSProperties}>
         <WaitLine waiting={readingConversation} label="Reading the conversation" words="Reading the conversation…" />
         <div
           className={`task-log thread${railShown ? ' has-rail' : ''}`}
@@ -1489,105 +1542,123 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
             Latest
           </button>
         )}
-      </div>
 
-      {task.pending.map((request) => (
-        <RequestCard key={request.id} request={request} onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
-      ))}
+        {dockShown && (
+          <div className="task-dock" ref={dock}>
+            {task.pending.map((request) => (
+              <RequestCard key={request.id} request={request} onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
+            ))}
 
-      {/* An agent that asks on its own screen (Hermes) has no card here: it says so, and the session is one press away. */}
-      {task.mine && task.screen && task.waitingFor && !task.pending.length && (
-        <div className="task-banner" role="note">
-          <span>It waits on its screen: {task.waitingFor}.</span>
-          <button className="primary small" onClick={() => onView('session')}>
-            Open the terminal
-          </button>
-        </div>
-      )}
-      {task.mine && task.screen && !task.terminal && task.screenClosed && <p className="hint">{task.screenClosed}</p>}
+            {/* An agent that asks on its own screen (Hermes) has no card here: it says so, and the session is one press away. */}
+            {task.mine && task.screen && task.waitingFor && !task.pending.length && (
+              <div className="task-banner" role="note">
+                <span>It waits on its screen: {task.waitingFor}.</span>
+                <button className="primary small" onClick={() => onView('session')}>
+                  Open the terminal
+                </button>
+              </div>
+            )}
+            {task.mine && task.screen && !task.terminal && task.screenClosed && <p className="hint">{task.screenClosed}</p>}
 
-      {/* The agent's own checklist for the turn at hand, on top of the reply box. */}
-      {plan && <PlanCard key={`${task.key} ${lastTurnKey(shown) ?? ''}`} plan={plan} />}
+            {/* The agent's own checklist for the turn at hand, on top of the reply box. */}
+            {plan && <PlanCard key={`${task.key} ${lastTurnKey(shown) ?? ''}`} plan={plan} />}
 
-      {/* What was sent while the agent worked, waiting for its turn to end: as it will be said, with when it goes in. */}
-      {task.mine && held.length > 0 && (
-        <div className="held-reply" role="status" aria-label="Queued messages">
-          <div className="held-head">
-            <span className="held-title">Queued</span>
-            <span className="held-count" aria-label={`${held.length} ${held.length === 1 ? 'message' : 'messages'}`}>{held.length}</span>
-          </div>
-          <ol className="held-words">
-            {held.map((words, index) => {
-              const split = splitQuote(words)
-              return (
-                <li key={index} className="held-row">
-                  <span className="held-text">{split && <QuoteBlock text={split.quote} />}{split ? split.reply : words}</span>
-                  <span className="held-row-actions">
-                    {/* Back in the box to change, when the box is empty. */}
-                    {!text && (
-                      <button type="button" className="ghost small held-edit" aria-label={`Edit queued message ${index + 1}`} title="Put it back in the box to change it" onClick={() => {
-                        if (split) { setQuoted(split.quote); setText(split.reply) } else setText(words)
-                        void onHeld('drop', index)
-                        replyText.current?.focus()
-                      }}>Edit</button>
-                    )}
-                    <button type="button" className="ghost small held-remove" aria-label={`Remove queued message ${index + 1}`} title="Take it back" onClick={() => void onHeld('drop', index)}>×</button>
+            {/* What was sent while the agent worked, waiting for its turn to end: as it will be said, with when it goes in. */}
+            {task.mine && held.length > 0 && (
+              <div className="held-reply" role="status" aria-label="Queued messages">
+                <div className="held-head">
+                  <span className="held-title">Queued</span>
+                  <span className="held-count" aria-label={`${held.length} ${held.length === 1 ? 'message' : 'messages'}`}>{held.length}</span>
+                </div>
+                <ol className="held-words">
+                  {held.map((words, index) => {
+                    const split = splitQuote(words)
+                    // The pictures that went with it are said as a count: they come back as chips when it is put back in the box.
+                    const said = splitPictures(split ? split.reply : words)
+                    return (
+                      <li key={index} className="held-row">
+                        <span className="held-text">{split && <QuoteBlock text={split.quote} />}{said.words}{!!said.files.length && <span className="held-pictures">{said.words ? ' · ' : ''}{said.files.length === 1 ? 'a picture' : `${said.files.length} pictures`}</span>}</span>
+                        <span className="held-row-actions">
+                          {/* Back in the box to change, when the box is empty. */}
+                          {!text && (
+                            <button type="button" className="ghost small held-edit" aria-label={`Edit queued message ${index + 1}`} title="Put it back in the box to change it" onClick={() => {
+                              if (split) setQuoted(split.quote)
+                              setText(said.words)
+                              for (const file of said.files) void attachAgain(file)
+                              void onHeld('drop', index)
+                              replyText.current?.focus()
+                            }}>Edit</button>
+                          )}
+                          <button type="button" className="ghost small held-remove" aria-label={`Remove queued message ${index + 1}`} title="Take it back" onClick={() => void onHeld('drop', index)}>×</button>
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ol>
+                <div className="held-foot">
+                  <span className={task.heldNote ? 'held-line bad' : 'held-line'}>{heldLine}</span>
+                  <span className="held-actions">
+                    {heldWaitsForYou
+                      ? <button type="button" className="small" disabled={!!pressed} onClick={press('held-send', () => onHeld('send'))}>{pressed === 'held-send' ? 'Sending…' : 'Send now'}</button>
+                      : <button type="button" className="small" disabled={!!pressed} onClick={press('held-interrupt', () => onHeld('interrupt'))} title={`Stops what ${agentOf(task)} is doing and sends what is queued now`}>{pressed === 'held-interrupt' ? 'Interrupting…' : 'Interrupt and send'}</button>}
+                    {held.length > 1 && <button type="button" className="ghost small" onClick={() => void onHeld('drop')}>Remove all</button>}
                   </span>
-                </li>
-              )
-            })}
-          </ol>
-          <div className="held-foot">
-            <span className={task.heldNote ? 'held-line bad' : 'held-line'}>{heldLine}</span>
-            <span className="held-actions">
-              {heldWaitsForYou
-                ? <button type="button" className="small" disabled={!!pressed} onClick={press('held-send', () => onHeld('send'))}>{pressed === 'held-send' ? 'Sending…' : 'Send now'}</button>
-                : <button type="button" className="small" disabled={!!pressed} onClick={press('held-interrupt', () => onHeld('interrupt'))} title={`Stops what ${agentOf(task)} is doing and sends what is queued now`}>{pressed === 'held-interrupt' ? 'Interrupting…' : 'Interrupt and send'}</button>}
-              {held.length > 1 && <button type="button" className="ghost small" onClick={() => void onHeld('drop')}>Remove all</button>}
-            </span>
-          </div>
-        </div>
-      )}
+                </div>
+              </div>
+            )}
 
-      {task.mine && (
-        <div className="task-reply-place" ref={replyPlace}>
-          {listed && (
-            <div className={room.under ? 'slash-list under' : 'slash-list'} style={{ maxHeight: room.height }} id="slash-list" role="listbox" aria-label={listed.kind === 'models' ? `${agentOf(task)}'s models` : `${agentOf(task)}'s commands`}>
-              {listed.kind === 'models'
-                ? listed.items.map((model, row) => (
-                    <button type="button" role="option" id={`slash-${row}`} aria-selected={row === at} className={row === at ? 'on' : ''} ref={row === at ? pickedRow : undefined} key={model.id} title={model.description || undefined} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setPicked(row)} onClick={() => choose(row)}>
-                      <b>{model.name}</b>
-                      <small>{model.description}</small>
-                    </button>
-                  ))
-                : listed.items.map((command, row) => (
-                    <button type="button" role="option" id={`slash-${row}`} aria-selected={row === at} className={row === at ? 'on' : ''} ref={row === at ? pickedRow : undefined} key={command.name} title={`/${command.name}${command.hint ? ` ${command.hint}` : ''}${command.description ? `\n${command.description}` : ''}`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setPicked(row)} onClick={() => choose(row)}>
-                      <b>/{command.name}{command.hint && <span> {command.hint}</span>}</b>
-                      <small>{command.description}</small>
-                    </button>
-                  ))}
-            </div>
-          )}
-          {quoted && !question && <QuoteBar quote={quoted} onRemove={() => { setQuoted(null); replyText.current?.focus() }} />}
-          <form className="task-reply" onSubmit={send}>
-            {/* A box that grows with what is typed: Enter sends, Shift+Enter starts a new line. A password is one line, and not shown. */}
-            {question?.questions?.[0]?.secret ? (
-              <input value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" type="password" />
-            ) : (
-              <textarea ref={replyText} rows={1} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" aria-autocomplete="list" aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
+            {task.mine && (
+              <div className="task-reply-place" ref={replyPlace}>
+                {listed && (
+                  <div className={room.under ? 'slash-list under' : 'slash-list'} style={{ maxHeight: room.height }} id="slash-list" role="listbox" aria-label={listed.kind === 'models' ? `${agentOf(task)}'s models` : `${agentOf(task)}'s commands`}>
+                    {listed.kind === 'models'
+                      ? listed.items.map((model, row) => (
+                          <button type="button" role="option" id={`slash-${row}`} aria-selected={row === at} className={row === at ? 'on' : ''} ref={row === at ? pickedRow : undefined} key={model.id} title={model.description || undefined} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setPicked(row)} onClick={() => choose(row)}>
+                            <b>{model.name}</b>
+                            <small>{model.description}</small>
+                          </button>
+                        ))
+                      : listed.items.map((command, row) => (
+                          <button type="button" role="option" id={`slash-${row}`} aria-selected={row === at} className={row === at ? 'on' : ''} ref={row === at ? pickedRow : undefined} key={command.name} title={`/${command.name}${command.hint ? ` ${command.hint}` : ''}${command.description ? `\n${command.description}` : ''}`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setPicked(row)} onClick={() => choose(row)}>
+                            <b>/{command.name}{command.hint && <span> {command.hint}</span>}</b>
+                            <small>{command.description}</small>
+                          </button>
+                        ))}
+                  </div>
+                )}
+                {quoted && !question && <QuoteBar quote={quoted} onRemove={() => { setQuoted(null); replyText.current?.focus() }} />}
+                <form className="task-reply" onSubmit={send}>
+                  {pasteNote && <p className="reply-note" role="alert">The picture was not pasted. {pasteNote}</p>}
+                  <PictureChips pictures={pictures} onRemove={(path) => { removePicture(path); replyText.current?.focus() }} />
+                  <div className="reply-row">
+                    {/* A box that grows with what is typed: Enter sends, Shift+Enter starts a new line. A password is one line, and not shown. */}
+                    {question?.questions?.[0]?.secret ? (
+                      <input value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" type="password" />
+                    ) : (
+                      <textarea ref={replyText} rows={1} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} onPaste={pasteIn} placeholder={replyHint} aria-label="Reply to the agent" aria-autocomplete="list" aria-controls={listed ? 'slash-list' : undefined} aria-activedescendant={listed ? `slash-${at}` : undefined} />
+                    )}
+                    {interruptible && (
+                      <button type="button" className="reply-interrupt small" disabled={interrupting} onClick={() => void interrupt()} title={`Stops what ${agentOf(task)} is doing and sends this now (Ctrl+Enter)`}>
+                        <Icon name="stop" size={11} />
+                        {interrupting ? 'Interrupting…' : 'Interrupt'}
+                      </button>
+                    )}
+                    {stopsHere ? (
+                      <button type="button" className="reply-send stop" disabled={!!pressed} aria-label={pressed === 'stop' ? 'Stopping' : 'Stop'} title={task.screen ? 'Stops what the agent is doing, as Esc does on its screen (Ctrl+C in Hermes)' : 'Stops what the agent is doing'} onClick={press('stop', onStop)}>
+                        {pressed === 'stop' ? <i className="row-spin" /> : <Icon name="stop" size={12} />}
+                      </button>
+                    ) : (
+                      <button className={sendable ? 'reply-send primary' : 'reply-send'} disabled={!sendable} aria-label={holdsReply ? 'Send when it finishes' : 'Send'} title={holdsReply ? `It goes in when ${agentOf(task)} finishes` : undefined}>
+                        <Icon name="send" size={14} />
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
             )}
-            {interruptible && (
-              <button type="button" className="reply-interrupt small" disabled={interrupting} onClick={() => void interrupt()} title={`Stops what ${agentOf(task)} is doing and sends this now (Ctrl+Enter)`}>
-                <Icon name="stop" size={11} />
-                {interrupting ? 'Interrupting…' : 'Interrupt'}
-              </button>
-            )}
-            <button className={text.trim() ? 'reply-send primary' : 'reply-send'} disabled={!text.trim()} aria-label={holdsReply ? 'Send when it finishes' : 'Send'} title={holdsReply ? `It goes in when ${agentOf(task)} finishes` : undefined}>
-              <Icon name="send" size={14} />
-            </button>
-          </form>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
       </>
       )}
     </div>

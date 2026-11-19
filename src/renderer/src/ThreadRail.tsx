@@ -130,7 +130,10 @@ export function ThreadRail({ prompts, log, onEarlier, onLeaveEnd }: { prompts: P
       <div className="rail-ticks" ref={ticks}>
         <div className="rail-track">
           {onEarlier && (
-            <button type="button" className="rail-tick rail-earlier" aria-label="Show earlier turns" tabIndex={-1} onClick={onEarlier} onPointerEnter={(event) => point(event.currentTarget, 'Show earlier turns')} onPointerLeave={(event) => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.rail-tick'))) setTip(null) }} onFocus={(event) => point(event.currentTarget, 'Show earlier turns')} onBlur={() => setTip(null)} />
+            <button type="button" className="rail-tick rail-earlier" aria-label="Show earlier turns" tabIndex={-1} onClick={onEarlier} onPointerEnter={(event) => point(event.currentTarget, 'Show earlier turns')} onPointerLeave={(event) => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.rail-tick'))) setTip(null) }} onFocus={(event) => point(event.currentTarget, 'Show earlier turns')} onBlur={() => setTip(null)}>
+              {/* A small chevron pointing up, drawn as a line: the tick for the turns above, and not a row of dots. */}
+              <svg viewBox="0 0 8 5" width="8" height="5" aria-hidden="true"><path d="M0.75 4.25 4 1 7.25 4.25" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </button>
           )}
           {prompts.map((prompt, index) => (
             <button

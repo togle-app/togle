@@ -33,6 +33,19 @@ test('a bitmap is kept as a PNG; what is no picture, nothing, or too big is refu
   await assert.rejects(T.savePastedPicture(new Uint8Array(26 * 1024 * 1024), 'image/png'), /too big/)
 })
 
+test('a kept picture is read back for the window by its file, and no other file is', async () => {
+  const kept = await T.savePastedPicture(PNG, 'image/png', Date.parse('2026-11-18T13:00:00Z'))
+  assert.equal(await T.readPastedPicture(kept), 'data:image/png;base64,' + Buffer.from(PNG).toString('base64'))
+  assert.equal(await T.readPastedPicture(path.join(folder, 'paste-20990101-000000.png')), null, 'one that is gone is nothing')
+  const secret = path.join(home, 'secret.png')
+  fs.writeFileSync(secret, PNG)
+  assert.equal(await T.readPastedPicture(secret), null, 'a picture elsewhere is not read')
+  assert.equal(await T.readPastedPicture(path.join(folder, '..', 'secret.png')), null, 'nor one reached from the folder')
+  fs.writeFileSync(path.join(folder, 'notes.txt'), 'x')
+  assert.equal(await T.readPastedPicture(path.join(folder, 'notes.txt')), null, 'nor a file of another name')
+  assert.equal(await T.readPastedPicture(''), null)
+})
+
 test('pictures pasted more than a week ago are deleted; newer ones and other files stay', async () => {
   const now = Date.now()
   fs.mkdirSync(folder, { recursive: true })

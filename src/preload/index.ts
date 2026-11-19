@@ -120,6 +120,7 @@ const api: TogleApi = {
   terminalWrite: (key, data) => ipcRenderer.invoke('runners:terminal-write', key, data),
   terminalResize: (key, cols, rows) => ipcRenderer.invoke('runners:terminal-resize', key, cols, rows),
   savePastedPicture: (bytes, type) => ipcRenderer.invoke('screen:paste-picture', bytes, type),
+  pastedPicture: (file) => ipcRenderer.invoke('screen:pasted-picture', file),
   typeTerminalWords: (key) => ipcRenderer.invoke('runners:terminal-words', key),
   onTerminalData: cb => subscribe('runners:terminal-data', chunk => cb(chunk as { key: string; at: number; data: string; screen?: string })),
   removeCodingAgent: (id) => ipcRenderer.invoke('runners:remove-agent', id),

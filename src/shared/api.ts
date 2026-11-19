@@ -179,6 +179,8 @@ export interface TogleApi {
    * whose path goes into the terminal for the agent to attach. The path comes back.
    */
   savePastedPicture(bytes: Uint8Array, type: string): Promise<string>
+  /** A picture kept that way, read back by its file as a data URL, to show it small where a message that went with it is; null when it is gone. */
+  pastedPicture(file: string): Promise<string | null>
   /** Types the task's words into its terminal, without Enter. */
   typeTerminalWords(key: string): Promise<void>
   /** What a terminal of Togle's own printed, as it comes: `at` is where the part starts among all it printed. */

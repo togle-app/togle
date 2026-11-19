@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from './Icon'
 
 // The parts a page of settings is made of, as Settings has them and the other pages that set something (sharing an
@@ -131,24 +132,45 @@ export function FormOver({ label, className = '', busy = false, onClose, onSubmi
   )
 }
 
+/** How far the picture is kept from the window's edge when it fits, and the zoom's steps and bounds (1 is the picture's own size). */
+const STAGE_PAD = 24
+const ZOOM_STEP = 1.25
+const ZOOM_LEAST = 0.1
+const ZOOM_MOST = 8
+
 /**
- * A picture shown whole over the dimmed window (one in a conversation, opened from its small one), as big as the window lets
- * it be. Escape, the close button, or a click beside the picture closes it, and the keys go back to what opened it; while it
- * is open they stay on its close button.
+ * A picture shown whole over the dimmed window (one in a conversation, opened from its small one; one about to be sent, opened from
+ * its chip), as big as the window lets it be. A small bar at its foot zooms it out and in (the keys + and -, and Ctrl with the wheel,
+ * do the same) and says how much it is shown at; pressing the percentage goes between fitting the window and the picture's own size,
+ * and a picture bigger than the window scrolls. Escape, the close button, or a click beside the picture closes it, and the keys go
+ * back to what opened it; while it is open they stay on its close button.
  */
 export function PictureOver({ src, label, onClose }: { src: string; label: string; onClose: () => void }) {
   const closer = useRef<HTMLButtonElement>(null)
+  const stage = useRef<HTMLDivElement>(null)
   const close = useRef(onClose)
   close.current = onClose
+  // The picture's own size and the room it has give what "fits"; `asked` is the zoom the person chose (none: it fits).
+  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null)
+  const [room, setRoom] = useState<{ width: number; height: number } | null>(null)
+  const [asked, setAsked] = useState<number | null>(null)
+  const fit = natural && room ? Math.min(1, Math.max(0.02, Math.min((room.width - 2 * STAGE_PAD) / natural.width, (room.height - 2 * STAGE_PAD) / natural.height))) : 1
+  const scale = asked ?? fit
+  // What the keys and the wheel call is the latest of this, whatever the page has been drawn as since they were set up.
+  const zoomed = useRef({ scale, set: (_to: number): void => undefined })
+  zoomed.current = { scale, set: (to: number): void => setAsked(Math.min(ZOOM_MOST, Math.max(ZOOM_LEAST, to))) }
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     if (++dialogs === 1) document.body.classList.add('has-dialog')
     closer.current?.focus({ preventScroll: true })
     const key = (event: KeyboardEvent): void => {
       if (event.key === 'Tab') { event.preventDefault(); closer.current?.focus(); return }
-      if (event.key !== 'Escape' || event.defaultPrevented) return
-      event.preventDefault()
-      close.current()
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        event.preventDefault()
+        close.current()
+      } else if (event.key === '+' || event.key === '=') zoomed.current.set(zoomed.current.scale * ZOOM_STEP)
+      else if (event.key === '-') zoomed.current.set(zoomed.current.scale / ZOOM_STEP)
+      else if (event.key === '0') setAsked(null)
     }
     document.addEventListener('keydown', key)
     return () => {
@@ -157,13 +179,59 @@ export function PictureOver({ src, label, onClose }: { src: string; label: strin
       if (opener?.isConnected) opener.focus({ preventScroll: true })
     }
   }, [])
-  return (
-    <div className="picture-backdrop" role="dialog" aria-modal="true" aria-label={label} onClick={(event) => { if (event.target === event.currentTarget) close.current() }}>
-      <img className="picture-whole" src={src} alt={label} />
+  useEffect(() => {
+    const box = stage.current
+    if (!box) return
+    const measure = (): void => setRoom({ width: box.clientWidth, height: box.clientHeight })
+    measure()
+    // Ctrl and the wheel zoom, as in a browser; the wheel alone scrolls a picture that is bigger than the window.
+    const wheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey) return
+      event.preventDefault()
+      zoomed.current.set(zoomed.current.scale * (event.deltaY < 0 ? 1.1 : 1 / 1.1))
+    }
+    box.addEventListener('wheel', wheel, { passive: false })
+    const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    watch?.observe(box)
+    return () => {
+      box.removeEventListener('wheel', wheel)
+      watch?.disconnect()
+    }
+  }, [])
+  const beside = (event: { target: EventTarget; currentTarget: EventTarget }): void => {
+    if (event.target === event.currentTarget) close.current()
+  }
+  const percent = Math.round(scale * 100)
+  // Over the whole window, whatever it was opened from: an ancestor with a filter (the reply box blurs what is under it) would make
+  // a fixed overlay as small as itself, so it is drawn on the page's body.
+  return createPortal(
+    <div className="picture-backdrop" role="dialog" aria-modal="true" aria-label={label} onClick={beside}>
+      <div className="picture-stage" ref={stage} onClick={beside}>
+        <img
+          className="picture-whole"
+          src={src}
+          alt={label}
+          draggable={false}
+          style={natural ? { width: natural.width * scale, height: natural.height * scale } : undefined}
+          onLoad={(event) => setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+        />
+      </div>
+      <div className="picture-zoom" role="group" aria-label="Zoom">
+        <button type="button" aria-label="Zoom out" title="Zoom out (-)" disabled={scale <= ZOOM_LEAST} onClick={() => zoomed.current.set(scale / ZOOM_STEP)}>
+          <Icon name="minus" size={14} />
+        </button>
+        <button type="button" className="zoom-level" aria-label={`Shown at ${percent} percent: switch between fitting the window and its own size`} title={asked === null ? 'Its own size' : 'Fit the window'} onClick={() => setAsked(asked === null ? 1 : null)}>
+          {percent}%
+        </button>
+        <button type="button" aria-label="Zoom in" title="Zoom in (+)" disabled={scale >= ZOOM_MOST} onClick={() => zoomed.current.set(scale * ZOOM_STEP)}>
+          <Icon name="plus" size={14} />
+        </button>
+      </div>
       <button ref={closer} type="button" className="icon picture-close" aria-label="Close the picture" title="Close" onClick={() => close.current()}>
         <Icon name="close" />
       </button>
-    </div>
+    </div>,
+    document.body
   )
 }
 

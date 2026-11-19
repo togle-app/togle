@@ -483,6 +483,8 @@ module.exports = function install(fixture) {
     if (!/^image\//.test(type)) throw new Error('That is not a picture Togle can paste.')
     return 'C:\\Users\\someone\\AppData\\Roaming\\Togle\\pasted\\paste-20261118-120000.png'
   }
+  // A picture kept that way, read back: a small one for any file, and none for a file named "gone" (a week has passed).
+  api.pastedPicture = async file => { record('pastedPicture', [file]); return /gone/.test(file) ? null : 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==' }
   api.typeTerminalWords = async key => { record('typeTerminalWords', [key]); delete runnerFind(key).words; runnerChanged() }
   // The window's own buttons: maximized or not, as main tells it.
   let maximized = false

@@ -44,6 +44,7 @@ const SHAPES = {
   chevron: <path d="m6 9 6 6 6-6" />,
   check: <path d="M20 6 9 17l-5-5" />,
   plus: <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
   // What the agent learned, as Hermes marks a memory update in the chat.
   sparkle: <path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z" />,
   monitor: (

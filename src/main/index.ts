@@ -103,7 +103,7 @@ import { SpeechInstaller, speechHome } from './stt/install'
 import { hearingStatus, OPENAI_MODEL, OPENAI_URL, SpeechApi } from './stt/speech-api'
 import { LocalWhisper } from './stt/whisper'
 import { keepPlace, lastPlace } from './window-place'
-import { prunePastedPictures, savePastedPicture } from './pasted-pictures'
+import { prunePastedPictures, readPastedPicture, savePastedPicture } from './pasted-pictures'
 
 const auth = new ChatGPTAuth()
 const chatgpt = new ChatGPTProvider(auth)
@@ -1642,6 +1642,11 @@ function registerIpc(): void {
   ipcMain.handle('screen:paste-picture', (event, bytes: unknown, type: unknown) => {
     if (!win || event.sender !== win.webContents) throw new Error('Only Togle\'s window pastes pictures.')
     return savePastedPicture(bytes as Uint8Array, typeof type === 'string' ? type : '')
+  })
+  // A picture kept that way, read back to be drawn small in a message that went with it. Only the window asks.
+  ipcMain.handle('screen:pasted-picture', (event, file: unknown) => {
+    if (!win || event.sender !== win.webContents) throw new Error('Only Togle\'s window reads a pasted picture.')
+    return readPastedPicture(typeof file === 'string' ? file : '')
   })
   ipcMain.on('window:page-failed', () => (pageFailed = true))
   ipcMain.on('window:close', (_e, confirmed?: boolean) => {

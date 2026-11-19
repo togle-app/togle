@@ -171,7 +171,8 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.task-agent-name').textContent"), 'Codex', 'the agent after how it stands')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request .hint')"), false, 'no folder line under the command')
   assert.ok((await ui.evaluate("document.querySelector('.task-reply textarea').placeholder")) === 'Reply, or hold F9 and talk')
-  assert.ok(await ui.evaluate("(()=>{const pane=document.querySelector('.tasks-detail').getBoundingClientRect(),box=document.querySelector('.task-reply-place').getBoundingClientRect();return Math.abs(pane.bottom-14-box.bottom)<=2})()"), 'the reply box is at the foot of the pane, however short the conversation is')
+  assert.ok(await ui.evaluate("(()=>{const pane=document.querySelector('.tasks-detail').getBoundingClientRect(),box=document.querySelector('.task-reply-place').getBoundingClientRect();return Math.abs(pane.bottom-14-12-box.bottom)<=2})()"), 'the reply box is at the foot of the conversation, over it, however short the conversation is')
+  assert.ok(await ui.evaluate("!!document.querySelector('.thread-place .task-dock .task-reply-place')"), 'the reply box is in the conversation, not a block under it')
   assert.match((await texts(ui, '.you-row .said-at'))[0], /^\d{1,2}[:.]\d\d/, 'when it was said, before the words')
   assert.deepEqual(await texts(ui, '.task-log .task-you'), ['Add a status column to the orders table.'])
   await ui.capture('tasks-request')
@@ -214,12 +215,14 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("!!document.querySelector('.task-cmd[data-status=running] .row-spin')"), true)
   assert.match(await ui.evaluate("document.querySelector('.task-cmd .row-time').textContent"), /^\d+:\d\d$/)
   assert.equal(await ui.evaluate("!!document.querySelector('.task-now')"), false)
-  assert.deepEqual(await texts(ui, '.task-actions button'), ['Stop'])
+  assert.deepEqual(await texts(ui, '.task-actions button'), [], 'no Stop button in the header: Stop is the round button of the reply box')
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply .reply-send.stop')?.getAttribute('aria-label')"), 'Stop', 'while it works and nothing is typed, Send is Stop')
   await ui.capture('tasks-working')
-  await ui.click('.task-actions button', 'Stop')
+  await ui.click('.task-reply .reply-send', 'Stop')
   await ui.wait("document.querySelector('.state-chip')?.textContent==='Stopped'")
   assert.deepEqual((await ui.calls('stopRunnerTask')).map(call => call.args), [['claude:s2']])
   assert.deepEqual(await texts(ui, '.task-actions button'), [], 'a stopped Claude Code task has no second press')
+  assert.equal(await ui.evaluate("!!document.querySelector('.reply-send.stop')"), false, 'a task that stopped has no Stop: its round button is Send again')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-now')"), false, 'nothing is said to be going on once it stopped')
   // The command it ran has no result in its record, and Claude Code stops what it runs with it: it is drawn as stopped, still.
   assert.equal(await ui.evaluate("!!document.querySelector('.row-spin')"), false, 'nothing turns once it stopped')
@@ -233,7 +236,7 @@ async function checkTasks(T, agent) {
   const oneLine = await replyHeight()
   await ui.fill('.task-reply textarea', 'one\ntwo\nthree')
   assert.ok((await replyHeight()) > oneLine + 20, 'three lines are taller than one')
-  assert.equal(await replyFoot(), 14, 'and the box is still at the foot')
+  assert.equal(await replyFoot(), 14 + 1 + 12, 'and the box is still at the foot of the conversation (the pane\'s room, the band\'s line, the dock\'s space)')
   await ui.fill('.task-reply textarea', 'Use three plans instead')
   assert.equal(await replyHeight(), oneLine)
   // Shift+Enter is a new line in the box, and Enter sends.
@@ -496,7 +499,8 @@ async function checkTasks(T, agent) {
   await ui.fill('.task-reply textarea', 'And the links')
   await ui.click('.task-reply button', 'Send when it finishes')
   await ui.wait("!!document.querySelector('.held-reply')")
-  await ui.click('.task-actions button', 'Stop')
+  assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'in Chat the header has no Stop: it is the reply box\'s round button')
+  await ui.click('.task-reply .reply-send', 'Stop')
   await ui.wait("document.querySelector('.held-line')?.textContent==='Not sent: the task stopped.'")
   assert.deepEqual(await texts(ui, '.held-actions button'), ['Send now'], 'stopped: the person sends it')
   await ui.click('.held-actions button', 'Send now')
@@ -656,8 +660,8 @@ async function checkTasks(T, agent) {
 
   // Codex: Stop ends the turn and leaves the command, and the second press ends it.
   await ui.task('Add the status column')
-  await ui.wait("[...document.querySelectorAll('.task-actions button')].some(b=>b.textContent==='Stop')")
-  await ui.click('.task-actions button', 'Stop')
+  await ui.wait("!!document.querySelector('.task-reply .reply-send.stop')")
+  await ui.click('.task-reply .reply-send', 'Stop')
   await ui.wait("[...document.querySelectorAll('.task-actions button')].some(b=>b.textContent==='End the running command')")
   await ui.click('.task-actions button', 'End the running command')
   await ui.wait("![...document.querySelectorAll('.task-actions button')].some(b=>b.textContent==='End the running command')")
@@ -1112,7 +1116,7 @@ async function checkAgentSettings(T, agent) {
   await ui.wait("!!document.querySelector('.task-row')")
   await ui.evaluate("document.querySelector('.task-row').click()")
   await ui.wait("!!document.querySelector('.task-panel > .task-header')")
-  assert.ok(await ui.evaluate("(()=>{const pane=document.querySelector('.task-panel').getBoundingClientRect();return [...document.querySelectorAll('.task-panel > .task-header, .task-panel > .task-status, .task-panel > .task-reply-place, .task-panel > .task-request, .task-panel > .task-banner')].every(part=>Math.abs(part.getBoundingClientRect().width-pane.width)<=1)})()"), 'a task is as wide as its pane on a wide window')
+  assert.ok(await ui.evaluate("(()=>{const pane=document.querySelector('.task-panel').getBoundingClientRect();return [...document.querySelectorAll('.task-panel > .task-header, .task-panel > .task-status, .task-panel .task-dock, .task-panel > .task-banner')].every(part=>Math.abs(part.getBoundingClientRect().width-pane.width)<=1)})()"), 'a task is as wide as its pane on a wide window')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -2255,6 +2259,8 @@ async function checkRail(T, agent) {
   await ui.wait("document.querySelectorAll('.rail-tick').length===4")
   assert.equal(await ui.evaluate("document.querySelector('.rail-tick').classList.contains('rail-earlier')"), true, 'the first tick is for the turns not read in')
   assert.equal(await ui.evaluate("document.querySelector('.rail-earlier').getAttribute('aria-label')"), 'Show earlier turns')
+  // Drawn as a chevron (an svg), with nothing dotted: a dotted line showed as a row of dots on a real screen.
+  assert.equal(await ui.evaluate("(()=>{const e=document.querySelector('.rail-earlier');const a=getComputedStyle(e,'::after');return [!!e.querySelector('svg path'),a.content,a.borderTopStyle].join()})()"), 'true,none,none', 'a chevron, and no dotted line')
   await ui.evaluate("document.querySelector('.rail-earlier').click()")
   await ui.wait("document.querySelectorAll('.rail-tick').length===5")
   assert.equal(await ui.evaluate("!!document.querySelector('.rail-earlier')"), false, 'once they are in, the tick is gone')
@@ -2672,6 +2678,138 @@ async function checkPaste(T, agent) {
   ui.window.destroy()
 }
 
+// The reply part is in the conversation, as Hermes has it: the box floats over its foot, which scrolls under it and keeps room for it. The
+// round button is Stop while the agent works and nothing is typed, and Send otherwise. A picture pasted into the box is a chip (the picture,
+// its name and where it is kept, and a small button at its top right that takes it out) that opens whole with a zoom, and goes with the
+// words as its path.
+async function checkReplyDock(T, agent) {
+  const ui = await open(T, agent, 1180)
+  await ui.evaluate("localStorage.setItem('togle.taskviews', JSON.stringify({ 'claude:s2': 'cards' }))")
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  const at0 = Date.now() - 3_600_000
+  const said = (n) => Array.from({ length: n }, (_, i) => 'Line ' + (i + 1) + ' of what the agent said about it.').join('\n\n')
+  const log = []
+  for (let n = 0; n < 6; n++) {
+    log.push({ id: n * 2 + 1, at: at0 + n * 600_000, kind: 'you', text: 'Question ' + (n + 1) + ' about the pricing page.' })
+    log.push({ id: n * 2 + 2, at: at0 + n * 600_000 + 30_000, kind: 'agent', text: said(7) })
+  }
+  await ui.evaluate('window.togleUITest.setTask("claude:s2", { state: "working", log: ' + JSON.stringify(log) + ' })')
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("!!document.querySelector('.thread-rail .rail-tick')")
+  const box = (selector) => ui.evaluate("(()=>{const r=document.querySelector(" + JSON.stringify(selector) + ").getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height}})()")
+  // It is in the conversation, over its foot, as wide as the words are.
+  assert.equal(await ui.evaluate("!!document.querySelector('.thread-place > .task-dock .task-reply')"), true, 'the reply box is in the conversation, not a block under it')
+  const band = await box('.thread-place'), dock = await box('.task-dock'), card = await box('.you-row')
+  assert.ok(Math.abs(dock.left - card.left) <= 1 && dock.left - band.left === 15, 'as wide as the words: ' + JSON.stringify({ dock: dock.left, card: card.left, band: band.left }))
+  assert.ok(band.bottom - dock.bottom >= 12 && band.bottom - dock.bottom <= 14, 'over the foot of the conversation: ' + (band.bottom - dock.bottom))
+  // The conversation scrolls under it, and keeps room for it at its end: the last words end above the box.
+  await ui.evaluate("(()=>{const log=document.querySelector('.task-log');log.scrollTop=log.scrollHeight;return true})()")
+  await ui.paint()
+  const lastWords = await ui.evaluate("(()=>{const last=[...document.querySelectorAll('.task-log .turn')].at(-1).getBoundingClientRect();return last.bottom})()")
+  assert.ok(lastWords <= (await box('.task-dock')).top + 1, 'the end of the conversation is above the reply box: ' + lastWords + ' against ' + (await box('.task-dock')).top)
+  const rail = await box('.thread-rail')
+  assert.ok(rail.bottom <= dock.top, 'the rail of questions stops above it: ' + rail.bottom + ' against ' + dock.top)
+  // Away from the end, the button for the latest is above it too.
+  await ui.evaluate("(()=>{const log=document.querySelector('.task-log');log.scrollTop=0;log.dispatchEvent(new Event('scroll'));return true})()")
+  await ui.wait("!!document.querySelector('.thread-jump')")
+  assert.ok((await box('.thread-jump')).bottom <= (await box('.task-dock')).top, 'Latest is above the box')
+
+  // Working, with nothing typed, the round button is Stop; with words, Send (and Interrupt beside it); the words gone, Stop again.
+  const round = "document.querySelector('.task-reply .reply-send')"
+  assert.deepEqual(await ui.evaluate("[" + round + ".classList.contains('stop')," + round + ".getAttribute('aria-label'),!!document.querySelector('.reply-interrupt')]"), [true, 'Stop', false], 'working, nothing typed: Stop')
+  await ui.fill('.task-reply textarea', 'And a yearly price?')
+  assert.deepEqual(await ui.evaluate("[" + round + ".classList.contains('stop')," + round + ".classList.contains('primary')," + round + ".disabled,!!document.querySelector('.reply-interrupt')]"), [false, true, false, true], 'working, words typed: Send, and Interrupt beside it')
+  await ui.fill('.task-reply textarea', '')
+  assert.equal(await ui.evaluate(round + ".classList.contains('stop')"), true, 'the words gone: Stop again')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-actions button')"), false, 'and no Stop in the header')
+
+  // A picture pasted into the box: a chip, kept as a file, and nothing else.
+  const png = Array.from(nativeImage.createFromBuffer(Buffer.alloc(80 * 60 * 4, 0x9a), { width: 80, height: 60 }).toPNG())
+  const paste = (parts) => ui.evaluate("(()=>{const data=new DataTransfer();" + parts + ";document.querySelector('.task-reply textarea').dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));return true})()")
+  const picture = "data.items.add(new File([new Uint8Array(" + JSON.stringify(png) + ")],'image.png',{type:'image/png'}))"
+  await paste("data.setData('text/plain','just words')")
+  assert.equal(await ui.evaluate("!!document.querySelector('.reply-chip')"), false, 'words pasted are words, not a chip')
+  await paste(picture)
+  await ui.wait("!!document.querySelector('.reply-chip img')")
+  assert.deepEqual((await ui.calls('savePastedPicture')).map((call) => call.args), [[png.length, 'image/png']], 'main keeps the picture')
+  assert.equal(await ui.evaluate("document.querySelector('.reply-chip .chip-words b').textContent"), 'paste-20261118-120000.png', 'its name')
+  assert.ok((await ui.evaluate("document.querySelector('.reply-chip .chip-words small').textContent")).startsWith('C:\\Users\\someone\\'), 'and where it is kept')
+  assert.equal(await ui.evaluate("document.querySelector('.reply-chip img').src.startsWith('data:image/png')"), true, 'with the picture itself, small')
+  const chip = await box('.reply-chip'), cross = await box('.chip-remove')
+  assert.ok(cross.right >= chip.right - 3 && cross.right <= chip.right + 9 && cross.top <= chip.top + 1 && cross.top >= chip.top - 10 && cross.width <= 20, 'a small button at the chip\'s top right: ' + JSON.stringify({ chip, cross }))
+  assert.equal(await ui.evaluate("document.querySelector('.chip-remove').getAttribute('aria-label')"), 'Remove paste-20261118-120000.png')
+  assert.deepEqual(await ui.evaluate("[" + round + ".classList.contains('stop')," + round + ".disabled]"), [false, false], 'a picture alone can be sent: Send, not Stop')
+  assert.ok((await box('.task-dock')).bottom === dock.bottom, 'the dock grows upward: its foot stays where it was')
+  // It opens whole, with a zoom: the percentage, out and in, and the keys.
+  await ui.click('.chip-open', 'paste-20261118-120000.png: open it')
+  await ui.wait("document.querySelector('.picture-backdrop .picture-whole')?.naturalWidth===80")
+  const level = () => ui.evaluate("document.querySelector('.picture-zoom .zoom-level').textContent")
+  assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Close the picture')
+  assert.equal(await level(), '100%', 'a small picture is shown at its own size')
+  await ui.click('.picture-zoom button', 'Zoom in')
+  assert.equal(await level(), '125%')
+  assert.equal(await ui.evaluate("Math.round(document.querySelector('.picture-whole').getBoundingClientRect().width)"), 100, 'it is drawn at the zoom: 80px at 125%')
+  await ui.click('.picture-zoom button', 'Zoom out')
+  await ui.click('.picture-zoom button', 'Zoom out')
+  assert.equal(await level(), '80%')
+  await ui.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'+',bubbles:true}))")
+  assert.equal(await level(), '100%', 'the + key zooms in')
+  await ui.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'-',bubbles:true}))")
+  await ui.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'0',bubbles:true}))")
+  assert.equal(await level(), '100%', 'the 0 key fits it to the window again')
+  await ui.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+  await ui.wait("!document.querySelector('.picture-backdrop')")
+  assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'paste-20261118-120000.png: open it', 'the keys go back to the chip')
+  // Sent: the picture alone goes as its path (after a word, so that a path that starts with "/" is not taken for a command), and the chip goes.
+  await ui.evaluate("document.querySelector('.task-reply textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
+  await ui.wait("!document.querySelector('.reply-chip')")
+  assert.deepEqual((await ui.calls('sendToRunnerTask')).map((call) => call.args).at(-1), ['claude:s2', 'Picture: C:\\Users\\someone\\AppData\\Roaming\\Togle\\pasted\\paste-20261118-120000.png'])
+  // With words, they go first and the path after them.
+  await paste(picture)
+  await ui.wait("!!document.querySelector('.reply-chip')")
+  await ui.fill('.task-reply textarea', 'Why is this cut?')
+  await ui.click('.task-reply .reply-send', 'Send')
+  await ui.wait("!document.querySelector('.reply-chip')")
+  assert.deepEqual((await ui.calls('sendToRunnerTask')).map((call) => call.args).at(-1), ['claude:s2', 'Why is this cut? C:\\Users\\someone\\AppData\\Roaming\\Togle\\pasted\\paste-20261118-120000.png'])
+  // What was said is drawn as its words and its picture, small, and not as a path; the rail of questions says "A picture" for the one with no words.
+  await ui.wait("[...document.querySelectorAll('.task-you')].some(e=>e.textContent==='Why is this cut?')")
+  await ui.wait("document.querySelectorAll('.you-picture img').length>=2")
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('.you-row')].some(e=>/pasted/.test(e.textContent))"), false, 'no path in a card: its picture is drawn')
+  assert.ok((await ui.calls('pastedPicture')).some((call) => call.args[0].endsWith('paste-20261118-120000.png')), 'the picture was read from the file it is kept in')
+  assert.ok((await ui.evaluate("[...document.querySelectorAll('.rail-tick')].map(t=>t.getAttribute('aria-label'))")).includes('A picture'), 'the rail names a question that was only a picture')
+  // The small button takes a picture out, and with nothing else to send the round button is Stop again.
+  await paste(picture)
+  await ui.wait("!!document.querySelector('.reply-chip')")
+  await ui.click('.chip-remove', 'Remove paste-20261118-120000.png')
+  assert.equal(await ui.evaluate("!!document.querySelector('.reply-chip')"), false)
+  assert.equal(await ui.evaluate(round + ".classList.contains('stop')"), true)
+  // A picture main could not keep: a line says so, and there is no chip.
+  await ui.evaluate("window.togleUITest.failNext('savePastedPicture')")
+  await paste(picture)
+  await ui.wait("!!document.querySelector('.reply-note')")
+  assert.equal(await ui.evaluate("document.querySelector('.reply-note').textContent"), 'The picture was not pasted. It did not answer.')
+  assert.equal(await ui.evaluate("!!document.querySelector('.reply-chip')"), false)
+  // Sent while an agent that is written to on its screen works: it is queued, the picture said as a count; Edit brings the words and the chip back.
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:h1', runner: 'claude', title: 'Holds words', folder: 'C:\\work\\notes', state: 'working', screen: true, terminal: false, mine: true, line: 'Holds words' }) + ', "")')
+  await ui.wait("[...document.querySelectorAll('.task-row strong')].some(e=>e.textContent==='Holds words')")
+  await ui.task('Holds words')
+  await ui.click('.view-switch button', 'Chat')
+  await ui.wait("!!document.querySelector('.task-reply textarea')")
+  await paste(picture)
+  await ui.wait("!!document.querySelector('.reply-chip')")
+  await ui.fill('.task-reply textarea', 'Please check the header too')
+  await ui.click('.task-reply .reply-send', 'Send when it finishes')
+  await ui.wait("!!document.querySelector('.held-reply')")
+  assert.deepEqual(await texts(ui, '.held-text'), ['Please check the header too · a picture'], 'queued: its words, and the picture as a count')
+  await ui.click('.held-edit', 'Edit queued message 1')
+  await ui.wait("!document.querySelector('.held-reply') && !!document.querySelector('.reply-chip img')")
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), 'Please check the header too', 'put back in the box: the words without the path')
+  assert.equal(await ui.evaluate("document.querySelector('.reply-chip .chip-words b').textContent"), 'paste-20261118-120000.png', 'and the picture as a chip again')
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 // The person's own arrangement: a group made (named straight away, there while empty), a task dragged into it (its row then
 // names its folder, its header names the group, a subject given later does not move it), a group folded (its counts stay, it
 // still takes a dropped task, it stays folded when Agents is opened again), a group of Togle's renamed and given its own name
@@ -2772,6 +2910,7 @@ app.whenReady().then(async () => {
     await go(checkWindowBar)
     await go(checkPaste)
     await go(checkPictures)
+    await go(checkReplyDock)
     await go(checkRail)
     await go(checkQuote)
     await go(checkInterrupt)

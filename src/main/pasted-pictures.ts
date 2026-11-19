@@ -37,6 +37,23 @@ export async function savePastedPicture(bytes: Uint8Array, type: string, now = D
   return file
 }
 
+const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
+
+/**
+ * A picture kept by `savePastedPicture`, as a data URL for the window to draw (a message that went with it shows it small). Only a
+ * file of that name directly in the folder is read: a path in what somebody wrote is no way to read any other file. Null when it is
+ * not there any more (a week has passed).
+ */
+export async function readPastedPicture(file: string): Promise<string | null> {
+  const wanted = path.resolve(file)
+  const kind = /^paste-[\w-]+\.(png|jpe?g|gif|webp)$/i.exec(path.basename(wanted))?.[1]?.toLowerCase()
+  if (!kind || path.dirname(wanted).toLowerCase() !== path.resolve(folder()).toLowerCase()) return null
+  const stat = await fs.stat(wanted).catch(() => null)
+  if (!stat?.isFile() || stat.size > MOST_BYTES) return null
+  const data = await fs.readFile(wanted).catch(() => null)
+  return data ? `data:${MIME[kind]};base64,${data.toString('base64')}` : null
+}
+
 /** Deletes the pictures pasted more than a week ago. */
 export async function prunePastedPictures(now = Date.now()): Promise<void> {
   const names = await fs.readdir(folder()).catch(() => [] as string[])
