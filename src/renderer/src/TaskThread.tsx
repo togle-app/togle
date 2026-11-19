@@ -971,21 +971,60 @@ export function currentPlan(entries: readonly LogEntry[]): PlanItem[] | undefine
   return undefined
 }
 
+/** How many items of a long checklist show at once; in a low window, fewer (the stylesheet's low window is 560px). */
+const PLAN_ROWS = 5
+const PLAN_ROWS_LOW = 3
+
+/**
+ * The part of a long checklist to show, as Claude Code's own shows it: the item being done, the one before it (what was just
+ * finished) and those after, as many as fit; the rest are counted. With none being done, the next one to do; with all done, the last.
+ */
+export function planWindow(plan: readonly PlanItem[], size: number): { start: number; end: number } {
+  if (plan.length <= size) return { start: 0, end: plan.length }
+  let at = plan.findIndex((item) => item.state === 'doing')
+  if (at < 0) at = plan.findIndex((item) => item.state === 'todo')
+  if (at < 0) at = plan.length - 1
+  const first = Math.max(0, Math.min(at - 1, plan.length - size))
+  return { start: first, end: first + size }
+}
+
+function useLowWindow(): boolean {
+  const query = '(max-height: 560px)'
+  const [low, setLow] = useState(() => window.matchMedia?.(query).matches === true)
+  useEffect(() => {
+    const list = window.matchMedia?.(query)
+    if (!list) return
+    const change = (): void => setLow(list.matches)
+    list.addEventListener('change', change)
+    return () => list.removeEventListener('change', change)
+  }, [])
+  return low
+}
+
 /**
  * The agent's own checklist for the turn at hand, by the reply box: each thing on it, done, being done or still to do. Open while
- * something is left to do, folded to its count once all of it is done; a press opens or folds it. A long one scrolls: it opens at
- * its bottom, where the latest items are, and stays there as items come, until the person scrolls up in it.
+ * something is left to do, folded to its count once all of it is done; a press opens or folds it. Folded it names the item being
+ * done. A long one does not grow: it shows a window on the item being done with those around it and counts the rest ("… 19 done",
+ * "… 3 to do"), and "Show all" opens the whole list, which scrolls, at its bottom where the latest items are, until the person
+ * scrolls up in it.
  */
 export function PlanCard({ plan }: { plan: PlanItem[] }): ReactNode {
   const done = plan.filter((item) => item.state === 'done').length
   const [open, setOpen] = useState<boolean | undefined>(undefined)
+  const [everything, setEverything] = useState(false)
   const shown = open ?? done < plan.length
+  const rows = useLowWindow() ? PLAN_ROWS_LOW : PLAN_ROWS
+  const long = plan.length > rows
+  const whole = everything && long
+  const { start, end } = whole ? { start: 0, end: plan.length } : planWindow(plan, rows)
+  const now = plan.find((item) => item.state === 'doing')
+  const before = plan.slice(0, start), after = plan.slice(end)
   const items = useRef<HTMLUListElement>(null)
   const atBottom = useRef(true)
   useLayoutEffect(() => {
     const list = items.current
-    if (shown && list && atBottom.current) list.scrollTop = list.scrollHeight
-  }, [shown, plan])
+    if (shown && whole && list && atBottom.current) list.scrollTop = list.scrollHeight
+  }, [shown, whole, plan])
   return (
     <section className="task-plan" aria-label="Its checklist">
       <button type="button" className="plan-head" aria-expanded={shown} onClick={() => { atBottom.current = true; setOpen(!shown) }}>
@@ -994,19 +1033,29 @@ export function PlanCard({ plan }: { plan: PlanItem[] }): ReactNode {
         <span className="plan-count">
           {done} of {plan.length} done
         </span>
+        {!shown && now && <span className="plan-now">{now.text}</span>}
       </button>
       {shown && (
-        <ul className="plan-items" ref={items} onScroll={(event) => { const list = event.currentTarget; atBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 4 }}>
-          {plan.map((item, index) => (
-            <li key={index} data-state={item.state}>
-              <span className="plan-mark" aria-hidden="true">
-                {item.state === 'done' ? <Icon name="check" size={11} /> : item.state === 'doing' ? <i className="row-spin" /> : <i className="plan-todo" />}
-              </span>
-              <span className="plan-text">{item.text}</span>
-              <span className="sr-only">{item.state === 'done' ? ', done' : item.state === 'doing' ? ', being done' : ', to do'}</span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className={whole ? 'plan-items whole' : 'plan-items'} ref={items} onScroll={(event) => { const list = event.currentTarget; atBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 4 }}>
+            {!!before.length && <li className="plan-gap">… {before.every((item) => item.state === 'done') ? `${before.length} done` : `${before.length} earlier`}</li>}
+            {plan.slice(start, end).map((item, index) => (
+              <li key={start + index} data-state={item.state}>
+                <span className="plan-mark" aria-hidden="true">
+                  {item.state === 'done' ? <Icon name="check" size={11} /> : item.state === 'doing' ? <i className="row-spin" /> : <i className="plan-todo" />}
+                </span>
+                <span className="plan-text">{item.text}</span>
+                <span className="sr-only">{item.state === 'done' ? ', done' : item.state === 'doing' ? ', being done' : ', to do'}</span>
+              </li>
+            ))}
+            {!!after.length && <li className="plan-gap">… {after.every((item) => item.state === 'todo') ? `${after.length} to do` : `${after.length} later`}</li>}
+          </ul>
+          {long && (
+            <button type="button" className="plan-more" onClick={() => { atBottom.current = true; setEverything(!whole) }}>
+              {whole ? 'Show fewer' : `Show all ${plan.length}`}
+            </button>
+          )}
+        </>
       )}
     </section>
   )
