@@ -308,9 +308,12 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 
 /* The list is as wide as the design draws it, and wider on a wide window, where its names would be cut short for no reason. */
 .tasks { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, var(--list-width, clamp(15.5rem, 22vw, 22rem))) minmax(0, 1fr); }
-/* Hidden, the list takes no room and the task has all of it; the handle stays at the edge to bring it back. */
-.tasks.list-hidden { grid-template-columns: minmax(0, 1fr); }
-.tasks.list-hidden > .tasks-list { display: none; }
+/* Hidden, the list takes no room and the task has all of it; the handle stays at the edge to bring it back. Only in a window with room for
+   both: in a narrow one a pane shows at a time and the edge is gone, so a list hidden in a wide window would not be reachable. */
+@media (min-width: 761px) {
+  .tasks.list-hidden { grid-template-columns: minmax(0, 1fr); }
+  .tasks.list-hidden > .tasks-list { display: none; }
+}
 .tasks-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 14px 7px 14px 15px; border-right: 1px solid var(--line); }
 .tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .task-status .shells-hint { min-width: 0; max-width: 34rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

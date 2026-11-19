@@ -33,11 +33,15 @@ test('the shells a job runs are the unfinished shell items of its state file, on
     { id: 'todo:1', kind: 'todo', label: 'Write it' },
     shell('b4h0lzltu', 'cd /repo &&\n  ./node_modules/.bin/electron   preview.cjs'),
     shell('bdone0001', 'npm test', { doneAt: 1_795_060_100_000 }),
+    shell('bzero0001', 'npm test', { doneAt: 0 }),
     { kind: 'shell', label: 'no id' },
-    shell('blong0001', 'x'.repeat(500))
+    shell('blong0001', 'x'.repeat(500)),
+    shell('bsecret01', 'API_KEY=abcd1234efgh5678ijkl npm run dev')
   ]
   const found = shellsOf({ fan })
-  assert.deepEqual(found.map((item) => item.id), ['b4h0lzltu', 'no id', 'blong0001'], 'a finished one and a todo are not running shells')
+  assert.deepEqual(found.map((item) => item.id), ['b4h0lzltu', 'no id', 'blong0001', 'bsecret01'], 'a finished one (a doneAt, even 0) and a todo are not running shells')
+  assert.equal(found[3].label.includes('abcd1234efgh5678ijkl'), false, 'a key in the command is not shown')
+  assert.ok(found[3].label.endsWith('npm run dev'))
   assert.equal(found[0].label, 'cd /repo && ./node_modules/.bin/electron preview.cjs', 'in one line')
   assert.equal(found[0].since, 1_795_060_000_000)
   assert.equal(found[1].since, undefined, 'a shell with no time has none')

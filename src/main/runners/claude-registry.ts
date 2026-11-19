@@ -11,6 +11,7 @@ import path from 'node:path'
 import type { BackgroundShell } from '@shared/runner'
 import { isJob, type AgentRow } from './claude-job'
 import { oneLine } from './claude-requests'
+import { withoutSecrets } from './claude-sessions'
 import { list, rec, text } from './jsonrpc'
 
 /** Where Claude Code keeps its own files: where its program is told to (CLAUDE_CONFIG_DIR), else ~/.claude. */
@@ -29,9 +30,10 @@ async function readObject(file: string): Promise<Record<string, unknown> | null>
 export function shellsOf(state: Record<string, unknown> | null): BackgroundShell[] {
   return list(state?.fan).flatMap((item): BackgroundShell[] => {
     const entry = rec(item)
-    // One that has finished is not running (a finished item may stay in the file).
-    if (entry.kind !== 'shell' || (typeof entry.doneAt === 'number' && entry.doneAt > 0)) return []
-    const label = oneLine(text(entry.label), 300)
+    // One that has finished is not running: a finished item stays in the file with a doneAt (0 when its time is not told), and one still
+    // running has none. Its command can hold a key or a password: it is shown without them, as every command of a task is.
+    if (entry.kind !== 'shell' || typeof entry.doneAt === 'number') return []
+    const label = oneLine(withoutSecrets(text(entry.label)), 300)
     const since = typeof entry.startedAt === 'number' && entry.startedAt > 0 ? entry.startedAt : undefined
     return [{ id: text(entry.id) || label, label, ...(since ? { since } : {}) }]
   })
