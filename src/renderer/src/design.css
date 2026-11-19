@@ -398,8 +398,11 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .agent-mark.quiet svg { margin-right: 0.5em; }
 .agent-mark.quiet + .agent-dot { display: none; }
 .state-chip .agent-mark.quiet svg, .todo-chip .agent-mark.quiet svg { margin-right: 0; }
-.agent-letter { display: inline-block; width: 1.3em; height: 1.3em; margin: -0.4em 0.45em -0.4em 0; border: 1px solid currentColor; border-radius: 0.3em; font-size: 0.75em; font-weight: 700; line-height: calc(1.3em - 2px); text-align: center; vertical-align: -0.12em; }
-.agent-letter::before { content: attr(data-letter); }
+/* The letter box is 3/4 of the text and its middle is the middle of the capitals beside it (raised 1/8 of its own size from the
+   baseline). `.agent-mark` in the selector keeps a container's rule for every span in it (a row's line sets 12px on them) from
+   resizing it. Its vertical margins are negative, so it does not make its line taller. */
+.agent-mark .agent-letter { display: inline-block; width: 1.3em; height: 1.3em; margin: -0.4em 0.45em -0.4em 0; border: 1px solid currentColor; border-radius: 0.3em; overflow: visible; font-size: 0.75em; font-weight: 700; line-height: calc(1.3em - 2px); text-align: center; vertical-align: 0.125em; }
+.agent-mark .agent-letter::before { content: attr(data-letter); }
 .av svg { width: 14px; height: 14px; }
 /* The window hidden in the tray or minimized: nothing on its page moves until it is back. */
 :root[data-away] *, :root[data-away] *::before, :root[data-away] *::after { animation-play-state: paused !important; }

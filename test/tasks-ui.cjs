@@ -1471,8 +1471,9 @@ async function checkAgentMarks(T, agent) {
     const svg = mark && mark.querySelector('svg'), letter = mark && mark.querySelector('.agent-letter')
     const range = document.createRange(), words = [...line.childNodes].find((node) => node.nodeType === 3 && node.textContent.trim())
     range.selectNodeContents(words || line)
-    const drawn = svg ? svg.getBoundingClientRect() : null, text = range.getBoundingClientRect()
+    const drawn = svg ? svg.getBoundingClientRect() : null, text = range.getBoundingClientRect(), box = letter ? letter.getBoundingClientRect() : null
     return {
+      boxOff: box ? Math.abs((box.top + box.height / 2) - (text.top + text.height / 2)) : null, boxHeight: box ? box.height : null,
       title: row.querySelector('strong').textContent, line: line.textContent, height: Math.round(row.getBoundingClientRect().height * 10) / 10,
       quiet: !!mark && mark.classList.contains('quiet'), agent: mark && mark.dataset.agent, tooltip: mark && mark.title, said: mark && (mark.querySelector('.sr-only') || {}).textContent,
       hidden: svg ? svg.getAttribute('aria-hidden') + ',' + svg.getAttribute('focusable') : null, letter: letter ? letter.dataset.letter : null,
@@ -1492,6 +1493,10 @@ async function checkAgentMarks(T, agent) {
   }
   const added = by('Rename the module')
   assert.equal(added.letter, 'A', 'an added agent shows its first letter in a box')
+  // The box is 3/4 of the line's text tall (a row's rule for the spans in it once made it as tall as the text) and its middle is the
+  // middle of the words beside it: it sat 2.5px low.
+  assert.ok(added.boxHeight > 9 && added.boxHeight <= 13, 'the letter box is smaller than the line: ' + added.boxHeight)
+  assert.ok(added.boxOff <= 1, 'and in the middle of its line\'s words: ' + added.boxOff)
   assert.ok(!added.agent, 'it has no maker\'s mark')
   assert.ok(added.line.startsWith('Aider · '), 'and its name, in the line: ' + added.line)
   assert.notEqual(added.dot, 'none', 'with the dot after it, as the name is there to read')
@@ -1501,6 +1506,11 @@ async function checkAgentMarks(T, agent) {
   assert.deepEqual(await ui.evaluate("(()=>{const name=document.querySelector('.task-agent-name');return [name.textContent,!!name.querySelector('svg'),name.querySelector('.agent-mark').dataset.agent]})()"), ['Codex', true, 'codex'], 'the header says Codex with its mark')
   await ui.task('Rename the module')
   assert.deepEqual(await ui.evaluate("(()=>{const name=document.querySelector('.task-agent-name');return [name.textContent,!!name.querySelector('svg'),name.querySelector('.agent-letter').dataset.letter]})()"), ['Aider', false, 'A'], 'an added agent: its letter and its name')
+  // In the header the letter box is in the middle of the name, and the name is on the center line of the chip beside it.
+  const header = await ui.evaluate("(()=>{const mid=r=>r.top+r.height/2;const name=document.querySelector('.task-status .task-agent-name');const mark=name.querySelector('.agent-mark');const box=mark.querySelector('.agent-letter');const range=document.createRange();range.selectNodeContents([...mark.childNodes].find(n=>n.nodeType===3&&n.textContent.trim()));const chip=document.querySelector('.task-status .state-chip');return {box:Math.abs(mid(box.getBoundingClientRect())-mid(range.getBoundingClientRect())),name:Math.abs(mid(name.getBoundingClientRect())-mid(chip.getBoundingClientRect())),height:name.getBoundingClientRect().height}})()")
+  assert.ok(header.box <= 1, 'the letter box is in the middle of its name in the header: ' + header.box)
+  assert.ok(header.name <= 1, 'and the name is level with the state chip: ' + header.name)
+  assert.ok(header.height <= 17.5, 'the box does not make the line taller: ' + header.height)
   // To-do: the chip of an item given to a task.
   await ui.click('.workspace-nav button', 'To-do')
   await ui.wait("document.querySelectorAll('.todo-chip').length>=1")
