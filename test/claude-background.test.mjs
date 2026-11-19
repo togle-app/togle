@@ -456,7 +456,7 @@ test('a reply from the cards view is typed in with Enter, and opens a closed scr
   }
 })
 
-test('a reply is refused while the session works or asks, and when it is a command of the agent’s own', { timeout: 40_000 }, async () => {
+test('a reply is refused while the session asks, and when it is a command of the agent’s own', { timeout: 40_000 }, async () => {
   const { backend, text } = claude()
   try {
     const task = await backend.start({ folder: scratch(), prompt: '', title: 'Refused' })
@@ -466,12 +466,29 @@ test('a reply is refused while the session works or asks, and when it is a comma
     await assert.rejects(() => task.send('!ls'), /command is typed on the agent/)
     type(task, 'question')
     await until(() => task.pending.length === 1, 'the question to be asked')
-    await assert.rejects(() => task.send('red'), /Reply when it has finished/, 'a line typed then would answer the question on its screen')
+    await assert.rejects(() => task.send('red'), /waits for you on its screen/, 'a line typed then would answer the question on its screen')
     task.reply(task.pending[0].id, 'red')
     await until(() => task.pending.length === 0, 'the question to be answered')
     await until(() => task.state === 'idle', 'the turn to end', 20_000)
     await task.send('now')
     await until(() => text(key).includes('fine, now'), 'the words to be typed and answered')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('words sent while the session only works are typed at once, as on its screen: its own queue takes them', { timeout: 40_000 }, async () => {
+  const { backend, text } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Busy' })
+    const key = `claude:${task.id}`
+    await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
+    type(task, 'slow')
+    await until(() => task.state === 'working', 'the turn to be at work')
+    // Not refused, not waiting: typed on the screen while it works, and answered when the turn gets to it.
+    await task.send('also this')
+    assert.equal(task.state, 'working')
+    await until(() => text(key).includes('fine, also this'), 'the queued words to be taken in and answered', 20_000)
   } finally {
     await backend.close()
   }

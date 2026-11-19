@@ -215,6 +215,8 @@ export class TerminalTask extends TaskBase implements TerminalSide {
   private stoppedAt = 0
   /** When it last printed anything. */
   private lastPrinted = 0
+  /** When this screen began. */
+  private readonly openedAt = Date.now()
   words?: string
 
   constructor(
@@ -348,6 +350,18 @@ export class TerminalTask extends TaskBase implements TerminalSide {
     const began = Date.now()
     while (!this.ended && Date.now() - began < maxMs) {
       if (this.printed > 0 && Date.now() - this.lastPrinted >= quietMs) return
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  }
+
+  /**
+   * Resolves once the program has drawn its screen and had a moment to take keys: for one that is at work, which never goes quiet (so
+   * `settled` would wait out its limit). Gives up after `maxMs`, so that what waits is typed in all the same.
+   */
+  async drawn(minMs = 1_500, maxMs = 8_000): Promise<void> {
+    const began = Date.now()
+    while (!this.ended && Date.now() - began < maxMs) {
+      if (this.printed > 0 && Date.now() - this.openedAt >= minMs) return
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
   }

@@ -402,8 +402,9 @@ module.exports = function install(fixture) {
     const printed = 'Claude Code v2.1.323\r\n> '
     terminals.set(key, { text: printed, end: printed.length }); runnerChanged(); return clone(runnerView(found))
   }
-  // As main does (hub.ts sendOrHold): words for an agent written to on its screen wait while it works, and go in when its turn ends.
-  const takesNoWords = found => !!found.screen && found.runner !== 'codex' && (found.state === 'working' || found.state === 'waiting' || !!found.waitingFor)
+  // As main does (hub.ts sendOrHold): words for an agent written to on its screen wait while it works, and go in when its turn ends. Claude Code is
+  // typed to at once while it only works (its own queue takes them); only a question or a permission that waits on its screen holds them.
+  const takesNoWords = found => !!found.screen && found.runner !== 'codex' && (found.runner === 'claude' ? found.state === 'waiting' || !!found.waitingFor || (found.pending ?? []).length > 0 : found.state === 'working' || found.state === 'waiting' || !!found.waitingFor)
   const dropHeld = found => { const held = found.held ?? []; delete found.held; delete found.heldNote; delete found.heldPaused; return held }
   api.handBackRunnerTask = async key => {
     record('handBackRunnerTask', [key]); const found = runnerFind(key)

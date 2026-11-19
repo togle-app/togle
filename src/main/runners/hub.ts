@@ -491,10 +491,16 @@ export class RunnerHub {
     this.touch(owned)
   }
 
-  /** Whether a task's agent cannot be written to now: one written to on its screen, while it works or asks. */
+  /**
+   * Whether a task's agent cannot be written to now: one written to on its screen, while it works or asks. Claude Code takes words while it
+   * works (its own queue holds them and takes them in as it goes, as for words typed on its screen); only a question or a permission that
+   * waits on its screen would take them as its answer.
+   */
   private takesNoWords(owned: Owned): boolean {
     const { handle } = owned
-    return !!handle.screen && handle.runner !== 'codex' && (handle.state === 'working' || handle.state === 'waiting' || !!handle.waitingFor)
+    if (!handle.screen || handle.runner === 'codex') return false
+    if (handle.runner === 'claude') return handle.state === 'waiting' || !!handle.waitingFor || handle.pending.length > 0
+    return handle.state === 'working' || handle.state === 'waiting' || !!handle.waitingFor
   }
 
   private dropHeld(owned: Owned): string[] {
@@ -506,12 +512,21 @@ export class RunnerHub {
     return dropped
   }
 
-  /** A task's state changed: when its turn has ended, what waits goes in after a moment, if it is still idle then. */
+  /**
+   * Whether what waits may go in now: nothing waits on the agent's screen, and its turn has ended, or (Claude Code, whose own queue takes
+   * words while it works) it is at work again.
+   */
+  private takesHeld(handle: Owned['handle']): boolean {
+    if (handle.pending.length || handle.waitingFor) return false
+    return handle.state === 'idle' || (handle.runner === 'claude' && handle.state === 'working')
+  }
+
+  /** A task's state changed: when what waits may go in (see `takesHeld`), it goes in after a moment, if it still may then. */
   private heldMayGo(owned: Owned): void {
     clearTimeout(owned.heldTimer)
     if (!owned.held?.length || owned.heldPaused) return
     const { handle } = owned
-    if (handle.state !== 'idle' || handle.pending.length || handle.waitingFor) return
+    if (!this.takesHeld(handle)) return
     owned.heldTimer = setTimeout(() => void this.deliverHeld(owned, false), HELD_SETTLE_MS)
     owned.heldTimer.unref?.()
   }
@@ -519,7 +534,7 @@ export class RunnerHub {
   /** What waits goes in, as one message: by itself once the turn has ended, or when the person sends it. */
   private async deliverHeld(owned: Owned, asked: boolean): Promise<void> {
     if (this.disposed || this.owned.get(owned.key) !== owned || !owned.held?.length) return
-    if (!asked && (owned.heldPaused || owned.handle.state !== 'idle' || owned.handle.pending.length || owned.handle.waitingFor)) return
+    if (!asked && (owned.heldPaused || !this.takesHeld(owned.handle))) return
     const words = owned.held.join('\n\n')
     this.dropHeld(owned)
     try {

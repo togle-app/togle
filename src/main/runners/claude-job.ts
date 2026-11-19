@@ -417,18 +417,20 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
   // ---- What the person does ----
 
   /**
-   * A reply from the cards view. Claude Code takes words on its screen only, so the screen is opened out of sight when it is
-   * closed, and the words are typed in with Enter once the turn has ended: typed while it asks or works, they would answer
-   * its question, or be taken as something else. A reply that starts as a command of its own is refused (see `submit`).
+   * A reply from the cards view. Claude Code takes words on its screen only, so the screen is opened out of sight when it is closed,
+   * and the words are typed in with Enter, as the person would. While it works its own queue takes them and takes them in as it goes
+   * (the same queue as words typed on its screen in Terminal); while it asks or waits on its screen they would answer its question,
+   * so they are not typed then (the hub holds them). A reply that starts as a command of its own is refused (see `submit`).
    */
   async send(words: string): Promise<void> {
     if (this.over) throw new Error('That task is over.')
-    if (this.state === 'working' || this.state === 'waiting' || this.waitingFor) throw new Error('It is working. Reply when it has finished.')
+    if (this.state === 'waiting' || this.waitingFor) throw new Error('It waits for you on its screen. Reply when that is answered.')
     refuseCommand(words)
     if (!this.screenTask) await this.show()
     const screen = this.screenTask
     if (!screen) throw new Error(this.closed ?? 'Its screen could not be opened.')
-    await screen.settled()
+    // A screen at work does not go quiet: it is typed on once it has drawn and had a moment.
+    await (this.state === 'working' ? screen.drawn() : screen.settled())
     await screen.submit(words)
     this.began()
   }

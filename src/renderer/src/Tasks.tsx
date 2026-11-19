@@ -1287,7 +1287,10 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   }
   // An agent that can only be written to on its screen takes words when its turn has ended (Codex takes them while it works too):
   // what is sent while it works waits, and goes in then. The box takes words all the while.
-  const holdsReply = !!task.screen && task.runner !== 'codex' && (task.state === 'working' || task.state === 'waiting' || !!task.waitingFor) && !task.pending.some((request) => request.kind === 'question')
+  // Claude Code takes words while it works (its own queue holds them and takes them in as it goes, as for words typed on its screen): they go in
+  // at once. Only something that waits on its screen holds them, since they would answer it.
+  const takesWhileWorking = task.runner === 'claude' && task.state === 'working' && !task.waitingFor && task.pending.length === 0
+  const holdsReply = !!task.screen && task.runner !== 'codex' && !takesWhileWorking && (task.state === 'working' || task.state === 'waiting' || !!task.waitingFor) && !task.pending.some((request) => request.kind === 'question')
   const replyHint = holdsReply ? `Reply: it goes in when ${agentOf(task)} finishes` : 'Reply, or hold ' + talkKey + ' and talk'
   // What waits to go in, and why it has not: it goes in by itself when the turn ends, unless the task stopped or it did not go in.
   const held = task.held ?? []
@@ -1664,7 +1667,12 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                       </button>
                     )}
                     {stopsHere ? (
-                      <button type="button" className="reply-send stop" disabled={!!pressed} aria-label={pressed === 'stop' ? 'Stopping' : 'Stop'} title={task.screen ? 'Stops what the agent is doing, as Esc does on its screen (Ctrl+C in Hermes)' : 'Stops what the agent is doing'} onClick={press('stop', onStop)}>
+                      <button type="button" className="reply-send stop" disabled={!!pressed} aria-label={pressed === 'stop' ? 'Stopping' : 'Stop'} title={task.screen ? 'Stops what the agent is doing, as Esc does on its screen (Ctrl+C in Hermes)' : 'Stops what the agent is doing'} onClick={() => {
+                        // Stopping ends a Claude Code session, and what was in its queue goes with it: it comes back into the box, as the agent's screen
+                        // gives the queue back to the prompt when it is stopped, so that nothing typed is lost.
+                        if (inQueue.length && !text.trim()) setText(inQueue.join('\n'))
+                        press('stop', onStop)()
+                      }}>
                         {pressed === 'stop' ? <i className="row-spin" /> : <Icon name="stop" size={12} />}
                       </button>
                     ) : (

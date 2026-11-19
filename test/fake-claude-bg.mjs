@@ -206,6 +206,7 @@ async function session(job) {
     const two = /^run2 (\S+) (\S+)/.exec(said)
     if (two) { await ask(two[1]); await ask(two[2]) }
     else if (run) await ask(run[1])
+    else if (said === 'slow') await new Promise((resolve) => setTimeout(resolve, 3_000))
     else if (said === 'question') await question()
     else if (said === 'plan') await plan()
     else say(`fine, ${said}`)

@@ -496,6 +496,9 @@ async function checkTasks(T, agent) {
   assert.deepEqual((await ui.calls('sendToRunnerTask')).map(call => call.args).at(-1), ['claude:s4', 'Now the footer'], 'a reply goes to the task, whichever view it is in')
   // Sent while it works, then the task is stopped: what waits does not go in by itself, and Send now sends it.
   await ui.wait("document.querySelector('.state-chip')?.textContent==='Working'")
+  // While it only works the words are typed at once (Claude Code's own queue takes them); a command that waits on its screen holds them.
+  await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'r8', kind: 'command', command: 'npm run lint', raw: 'npm run lint', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
+  await ui.wait("document.querySelector('.state-chip')?.textContent==='Waiting for you'")
   await ui.fill('.task-reply textarea', 'And the links')
   await ui.click('.task-reply button', 'Send when it finishes')
   await ui.wait("!!document.querySelector('.held-reply')")
@@ -2416,8 +2419,8 @@ async function checkQuote(T, agent) {
   await ui.wait("!!" + float)
   assert.ok(await ui.evaluate("(()=>{const f=" + float + ".getBoundingClientRect(),w=document.querySelector('.thread-place').getBoundingClientRect();return f.top>=w.top&&f.bottom<=w.bottom&&f.left>=w.left&&f.right<=w.right})()"), 'inside the conversation, never over the reply box')
   await ui.evaluate("getSelection().removeAllRanges()")
-  // While the agent works on its own screen, what is sent waits to go in, and the waiting card draws the quote as well.
-  await set({ screen: true, state: 'working', held: [], log: log(2) })
+  // While the agent waits on its own screen (Claude Code takes words while it only works), what is sent waits to go in, and the waiting card draws the quote as well.
+  await set({ screen: true, state: 'waiting', waitingFor: 'permission prompt', held: [], log: log(2) })
   await ui.wait("!!document.querySelector('.view-switch')")
   await ui.click('.view-switch button', 'Chat')
   await ui.wait("!!document.querySelector('.task-reply textarea')")
@@ -2444,13 +2447,14 @@ async function checkQuote(T, agent) {
   ui.window.destroy()
 }
 
-// Chat while the agent works: Enter queues, and the queue shows a row for each message with its own way back (Edit puts it back in the
+// Chat while the agent waits on its screen (Claude Code takes words while it only works; a question or a permission on its screen would take
+// them as its answer): Enter queues, and the queue shows a row for each message with its own way back (Edit puts it back in the
 // box, the cross takes it back); Interrupt, by its button or Ctrl+Enter, stops what the agent does and sends the words now, and
 // the queue can be sent with an interrupt too. Words that could not go in stay in the box.
 async function checkInterrupt(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.workspace-nav button', 'Agents')
-  await ui.evaluate('window.togleUITest.setTask("claude:s2",{screen:true,state:"working",held:[]})')
+  await ui.evaluate('window.togleUITest.setTask("claude:s2",{screen:true,state:"waiting",waitingFor:"permission prompt",held:[]})')
   await ui.task('Rebuild the pricing page')
   await ui.wait("!!document.querySelector('.view-switch')")
   await ui.click('.view-switch button', 'Chat')
@@ -2824,7 +2828,7 @@ async function checkReplyDock(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.reply-note').textContent"), 'The picture was not pasted. It did not answer.')
   assert.equal(await ui.evaluate("!!document.querySelector('.reply-chip')"), false)
   // Sent while an agent that is written to on its screen works: it is queued, the picture said as a count; Edit brings the words and the chip back.
-  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:h1', runner: 'claude', title: 'Holds words', folder: 'C:\\work\\notes', state: 'working', screen: true, terminal: false, mine: true, line: 'Holds words' }) + ', "")')
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'hermes:h1', runner: 'hermes', title: 'Holds words', folder: 'C:\\work\\notes', state: 'working', screen: true, terminal: false, mine: true, line: 'Holds words' }) + ', "")')
   await ui.wait("[...document.querySelectorAll('.task-row strong')].some(e=>e.textContent==='Holds words')")
   await ui.task('Holds words')
   await ui.click('.view-switch button', 'Chat')
@@ -2851,8 +2855,20 @@ async function checkReplyDock(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.held-foot .held-line').textContent"), 'Claude Code takes these in as it works.')
   assert.equal(await ui.evaluate("document.querySelectorAll('.held-reply button').length"), 0, 'it is the agent\'s queue: no button of Togle\'s on it')
   assert.equal(await ui.evaluate("!!document.querySelector('.you-row .task-you') && [...document.querySelectorAll('.task-you')].some(e=>e.textContent==='Also the header, please.')"), false, 'and it is not in the conversation until the agent takes it in')
-  await ui.evaluate("window.togleUITest.stopTask('claude:q1', 'idle', 'Done')")
+  // Sent from here while it only works: typed at once (its own queue takes it, as on its screen), and Togle holds nothing of it.
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').placeholder"), 'Reply, or hold F9 and talk', 'it takes words now: no "when it finishes"')
+  await ui.fill('.task-reply textarea', 'Also the footer')
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply .reply-send').getAttribute('aria-label')"), 'Send')
+  await ui.evaluate("document.querySelector('.task-reply textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
+  await ui.wait("window.togleUITest.calls().some(call=>call.name==='sendToRunnerTask'&&call.args[0]==='claude:q1')")
+  assert.deepEqual((await ui.calls('sendToRunnerTask')).map((call) => call.args).filter((args) => args[0] === 'claude:q1'), [['claude:q1', 'Also the footer']])
+  assert.equal(await ui.evaluate("document.querySelectorAll('.held-reply .held-row').length"), 2, 'the queue is the agent\'s: Togle holds none of it')
+  // Stop ends the session and its queue with it: what was queued comes back into the box (the screen gives it back to the prompt), none lost.
+  await ui.fill('.task-reply textarea', '')
+  await ui.click('.task-reply .reply-send', 'Stop')
   await ui.wait("!document.querySelector('.held-reply')")
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), 'Also the header, please.\nAnd the footer.', 'what was queued is in the box')
+  assert.deepEqual((await ui.calls('stopRunnerTask')).map((call) => call.args).filter((args) => args[0] === 'claude:q1'), [['claude:q1']])
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }

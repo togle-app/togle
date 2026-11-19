@@ -259,11 +259,11 @@ test('the list joins every installed agent, waiting first and then working, with
 })
 
 test('words sent from Chat while an agent written to on its screen works wait, and go in together once its turn has ended', async () => {
-  const claude = new FakeBackend('claude', { screens: true })
+  const claude = new FakeBackend('hermes', { screens: true })
   const { hub } = hubOf([claude])
   const folder = scratch()
   try {
-    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const view = await hub.start({ runner: 'hermes', folder, prompt: 'Fix the login redirect' })
     const task = claude.started[0]
     assert.equal(task.state, 'working')
     await hub.sendOrHold(view.key, 'Also keep the old link working')
@@ -284,11 +284,11 @@ test('words sent from Chat while an agent written to on its screen works wait, a
 })
 
 test('what waits does not go in after a Stop; the person sends it or takes it back, and Hand back gives it back', async () => {
-  const claude = new FakeBackend('claude', { screens: true })
+  const claude = new FakeBackend('hermes', { screens: true })
   const { hub } = hubOf([claude])
   const folder = scratch()
   try {
-    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const view = await hub.start({ runner: 'hermes', folder, prompt: 'Fix the login redirect' })
     const task = claude.started[0]
     await hub.sendOrHold(view.key, 'Use the new router')
     await hub.stop(view.key)
@@ -315,6 +315,35 @@ test('what waits does not go in after a Stop; the person sends it or takes it ba
   }
 })
 
+test('Claude Code takes words while it works, its own queue holding them: they are typed at once; a question or a permission that waits on its screen holds them', async () => {
+  const claude = new FakeBackend('claude', { screens: true })
+  const { hub } = hubOf([claude])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const task = claude.started[0]
+    assert.equal(task.state, 'working')
+    await hub.sendOrHold(view.key, 'Also keep the old link working')
+    assert.deepEqual(task.sent, ['Fix the login redirect', 'Also keep the old link working'], 'typed at once, as on its screen')
+    assert.equal((await hub.list()).find((t) => t.key === view.key).held, undefined, 'nothing waits')
+    // Something waits on its screen (a permission): words typed then would answer it, so they wait.
+    task.waitingFor = 'permission prompt'
+    await hub.sendOrHold(view.key, 'and add a test')
+    assert.deepEqual(task.sent, ['Fix the login redirect', 'Also keep the old link working'], 'not typed while it waits on its screen')
+    assert.deepEqual((await hub.list()).find((t) => t.key === view.key).held, ['and add a test'])
+    // Answered on its screen, it works again: what waited goes in then, not only when its turn ends (its own queue takes it).
+    task.waitingFor = undefined
+    task.setBase('waiting')
+    task.setBase('working')
+    await new Promise((resolve) => setTimeout(resolve, 1_900))
+    assert.deepEqual(task.sent.at(-1), 'and add a test', 'it goes in once it works again')
+    assert.equal((await hub.list()).find((t) => t.key === view.key).held, undefined)
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+})
+
 test('Codex takes words while it works: nothing waits', async () => {
   const codex = new FakeBackend('codex', { screens: true })
   const { hub } = hubOf([codex])
@@ -330,11 +359,11 @@ test('Codex takes words while it works: nothing waits', async () => {
 })
 
 test('an interrupt stops what the agent does and says the new words at once; what was queued goes in after the turn they start', async () => {
-  const claude = new FakeBackend('claude', { screens: true })
+  const claude = new FakeBackend('hermes', { screens: true })
   const { hub } = hubOf([claude])
   const folder = scratch()
   try {
-    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const view = await hub.start({ runner: 'hermes', folder, prompt: 'Fix the login redirect' })
     const task = claude.started[0]
     let stops = 0
     const stop = task.stop.bind(task)
@@ -363,11 +392,11 @@ test('an interrupt stops what the agent does and says the new words at once; wha
 })
 
 test('an interrupt with a command of the agent’s own is refused before anything is stopped; one that cannot go in is told', async () => {
-  const claude = new FakeBackend('claude', { screens: true })
+  const claude = new FakeBackend('hermes', { screens: true })
   const { hub } = hubOf([claude])
   const folder = scratch()
   try {
-    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const view = await hub.start({ runner: 'hermes', folder, prompt: 'Fix the login redirect' })
     const task = claude.started[0]
     await assert.rejects(hub.interrupt(view.key, '/exit'), /A command is typed on the agent’s screen/)
     assert.equal(task.state, 'working', 'it was not stopped')
@@ -398,11 +427,11 @@ test('Codex is interrupted too: stopped, then the new words', async () => {
 })
 
 test('the queue: one message taken back, all of it sent with an interrupt, and an interrupt whose words cannot go in waits with why', async () => {
-  const claude = new FakeBackend('claude', { screens: true })
+  const claude = new FakeBackend('hermes', { screens: true })
   const { hub } = hubOf([claude])
   const folder = scratch()
   try {
-    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const view = await hub.start({ runner: 'hermes', folder, prompt: 'Fix the login redirect' })
     const task = claude.started[0]
     const held = async () => (await hub.list()).find((t) => t.key === view.key).held
     await hub.sendOrHold(view.key, 'first')
