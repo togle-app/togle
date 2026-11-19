@@ -13,8 +13,8 @@ const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split
 const RECENT_MS = 24 * 3600_000
 const MOST_ROWS = 10
 
-/** Where a task is and how it stands, after its agent: the folder, and working, waiting or done. */
-const whereRest = (task: TaskView): string => [task.folder ? baseName(task.folder) : '', task.state === 'working' ? 'working' : task.state === 'waiting' ? 'waiting' : task.state === 'idle' ? 'done' : task.state].filter(Boolean).join(' · ')
+/** Where a task is and how it stands, after its agent: the folder, and working, waiting or idle. */
+const whereRest = (task: TaskView): string => [task.folder ? baseName(task.folder) : '', task.state === 'working' ? 'working' : task.state === 'waiting' ? 'waiting' : task.state === 'idle' ? 'idle' : task.state].filter(Boolean).join(' · ')
 /** A task as a short name for a chip or a row: its words, and under them the agent and the folder. */
 const where = (task: TaskView): string => [agentOf(task), whereRest(task)].filter(Boolean).join(' · ')
 
@@ -216,14 +216,14 @@ function CallAnswer({ taskKey, asked, task, onDismiss }: { taskKey: string; aske
     try { await work() } catch (failure) { setError(errorText(failure)) }
   }
   const state = task?.state
-  // Done, with nothing of its words to show: it said only steps, or its agent keeps no record Togle can read. Not said too early:
+  // Idle, with nothing of its words to show: it said only steps, or its agent keeps no record Togle can read. Not said too early:
   // a task is idle a moment before the question reaches it.
   const finished = !!task && state !== 'working' && state !== 'waiting' && (said.seen || Date.now() - asked.at > 15_000)
   return (
     <section className="call-answer" aria-label={`${task ? agentOf(task) : 'The agent'} answers`}>
       <header className="call-answer-head">
         <b className="cut">{task ? <AgentLead runner={task.runner} name={agentOf(task)} rest={task.folder ? baseName(task.folder) : task.title} /> : 'Gone'}</b>
-        {state && <span className="state-chip" data-state={state}>{state === 'idle' && !said.text ? 'Done' : ANSWER_STATE[state]}</span>}
+        {state && <span className="state-chip" data-state={state}>{state === 'idle' && !said.text ? 'Idle' : ANSWER_STATE[state]}</span>}
         {task && <button type="button" className="link" onClick={() => openTaskFrom(taskKey)} title="Open the task in Agents">Open</button>}
         <button type="button" className="ghost small" aria-label="Dismiss this answer" onClick={onDismiss}>×</button>
       </header>

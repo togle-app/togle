@@ -10,7 +10,9 @@
 //   the person empties the conversation ("/clear"); `id` does not.
 // - A screen is a client of the session: `claude attach <id>` in a pseudo-terminal. Killing it leaves the session running.
 //   A session has one screen at a time: a second one ends the first ("Session opened in another window"). Esc on the screen
-//   interrupts the turn, as in any terminal.
+//   interrupts the turn, as in any terminal, and the session goes on (measured on 2.1.328: idle 0.3 s later, same job and session).
+//   A key typed before the screen takes keys is lost (an Esc 0.3 s after the attach did nothing, one at 1.5 s worked). Esc twice
+//   within a moment on an idle prompt opens the rewind menu, which takes the next words as its own.
 // - A session that was stopped (`claude stop <id>`, which ends the command it was running too) comes back with `claude
 //   attach <id>`, the same session and conversation, with what it was given at its start, the hook included.
 // - The same hook as for any session (claude-hooks.ts) works here. The program posts a request, shows its own question at
@@ -151,6 +153,15 @@ export interface JobContext {
 /** How long a task started with words is shown as working before the list can say it is not: the program takes a moment to begin. */
 const BEGIN_MS = 6_000
 
+/**
+ * How long after its screen began Esc is pressed on it: Claude Code loses a key that comes before its screen takes keys (2.1.328 on
+ * Windows: an Esc 0.3 s after the attach was lost, one at 1.5 s and one at 4 s ended the turn within 0.3 s).
+ */
+const ESC_AFTER_MS = 2_000
+
+/** How soon after one Esc another may be pressed: two within the window of a double press open Claude Code's rewind menu (measured: 0.3 s apart). */
+const ESC_APART_MS = 2_000
+
 const NOTICED_ELSEWHERE = /opened in another window/i
 
 export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
@@ -167,6 +178,8 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
   private requests = 0
   private sawWaiting = false
   private stopped = false
+  /** When Esc was last pressed (or is being pressed) for Stop. */
+  private escapedAt = 0
   private over = false
   private holdWorkingUntil = 0
   /** Put to rest after a quiet day (see `rest`): its program is gone, and it is still Done, not stopped. */
@@ -429,14 +442,64 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     if (!this.screenTask) await this.show()
     const screen = this.screenTask
     if (!screen) throw new Error(this.closed ?? 'Its screen could not be opened.')
-    // A screen at work does not go quiet: it is typed on once it has drawn and had a moment.
-    await (this.state === 'working' ? screen.drawn() : screen.settled())
+    // A key typed before a screen takes keys is lost (an Esc 0.3 s after an attach was): a screen just opened gets `ESC_AFTER_MS` from its start.
+    // A screen at work does not go quiet, so it is not waited on to settle: it is typed on once it has drawn and had a moment.
+    const working = this.state === 'working'
+    await screen.drawn(working ? undefined : ESC_AFTER_MS)
+    if (!working) await screen.settled()
     await screen.submit(words)
     this.began()
   }
 
-  /** Ends the session and the command it runs. Its conversation is kept: opening its screen brings it back. */
+  /**
+   * Stop, as Esc is on the session's screen in a terminal: the turn it is on ends (and the command it runs, if it runs one), and the
+   * session goes on with what it was told. What was queued starts as the next turns: Claude Code does that on Esc, here as in a
+   * terminal. The screen is opened out of sight when it is closed, and Esc is pressed once it takes keys (a key that comes before is
+   * lost). Nothing is pressed for a session that is not at work (on a prompt with words in it Esc asks to clear them), nor twice
+   * within `ESC_APART_MS` (two close together open the rewind menu on an idle prompt, which takes the next words as its own). Where
+   * the screen cannot be used, the session is ended instead (`end`), and opening it brings it back.
+   */
   async stop(): Promise<void> {
+    if (this.over) return
+    // What it was doing when Stop was pressed: a card of Togle's that waits counts (taking it away changes the state).
+    const atWork = this.state === 'working' || this.state === 'waiting' || !!this.waitingFor
+    this.cancelRequests()
+    // No program runs, or it has nothing to stop.
+    if (this.pid === null || !atWork) return
+    if (Date.now() - this.escapedAt < ESC_APART_MS) return
+    this.escapedAt = Date.now()
+    const screen = await this.screenForKeys(ESC_AFTER_MS)
+    if (!screen) {
+      this.escapedAt = 0
+      await this.end()
+      return
+    }
+    screen.write('\x1b')
+    this.escapedAt = Date.now()
+    this.lastActive = Date.now()
+    this.context.look()
+  }
+
+  /**
+   * The screen, opened out of sight when it is closed and given `settleMs` from its start to take keys; null when it cannot be used
+   * (it did not open, or it ended meanwhile: another window took the session).
+   */
+  private async screenForKeys(settleMs: number): Promise<AttachScreen | null> {
+    if (!this.screenTask) {
+      try {
+        await this.show()
+      } catch {
+        return null
+      }
+    }
+    const screen = this.screenTask
+    if (!screen) return null
+    await screen.drawn(settleMs)
+    return this.screenTask === screen ? screen : null
+  }
+
+  /** Ends the session and the commands it runs (`claude stop`). Its conversation is kept: opening its screen brings it back. */
+  private async end(): Promise<void> {
     this.stopped = true
     this.cancelRequests()
     const out = await this.context.run(['stop', this.job], this.folder)
@@ -451,9 +514,10 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     this.context.look()
   }
 
-  /** Stop ends the commands the session runs as well, so there is nothing left for a second press. */
+  /** Ends the session and what it started, the commands it runs in the background too (Esc, which is Stop, does not end those). */
   async endCommands(): Promise<number> {
-    return 0
+    await this.end()
+    return 1
   }
 
   /** Lets go of the screen and of what waits. The session goes on, and Togle hears it again when it asks. */

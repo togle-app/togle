@@ -18,7 +18,12 @@
 //   "plan"          a plan to approve (ExitPlanMode), with the plan in the request: approved, or sent back with words
 //   "clear"         goes on in another session (the id with -2 after it), under the same job
 //   "bye"           ends it
+//   "slow"          works for three seconds; "long" for twenty: Esc on the screen ends the turn ("Interrupted") and the session goes on
 //   anything else   a message, answered "fine, <the words>"
+// Esc on a screen, as in Claude Code 2.1.328: while a turn works it ends the turn; while a question waits it declines it; on an idle
+// prompt it does nothing, but two within 800 ms open a rewind menu ("Rewind menu") that takes what is typed next as its own until
+// another Esc closes it. A key that reaches the screen before it is ready is lost: FAKE_CLAUDE_READY_MS (default 0) is how long a
+// screen takes keys after it connected. The Esc keys the session was given are counted in its job file (`escapes`).
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
@@ -82,6 +87,8 @@ else if (command === 'agents') {
   out(`  claude attach ${job}   open in this terminal`)
   if (running) out(`note: session ${running.job} is already running in the background, so this started a copy as ${job}. \`claude attach ${running.job}\` opens the original.`)
 } else if (command === 'attach') {
+  // (tests) a screen that cannot be opened: it says so in a line and ends
+  if (process.env.FAKE_ATTACH_FAILS) { console.error('Cannot attach to this session.'); process.exit(1) }
   const job = argv[1]
   let rec = job ? read(job) : null
   if (!rec) { console.error(`No job matching '${job}'. Run 'claude agents' to list running sessions.`); process.exit(1) }
@@ -193,6 +200,21 @@ async function session(job) {
     say(answer.approved ? `plan approved${answer.by === 'screen' ? ' (answered here)' : ''}` : `plan sent back: ${answer.message ?? 'no words'}`)
   }
   let turn = Promise.resolve()
+  // Esc: what it does depends on what the session is doing (see the top).
+  let interrupt = null
+  let escapes = 0
+  let lastEsc = 0
+  let menu = false
+  const esc = () => {
+    escapes++
+    write(job, { escapes })
+    const quick = Date.now() - lastEsc < 800
+    lastEsc = Date.now()
+    if (menu) { menu = false; say('menu closed'); return }
+    if (typed) { typed(false); return }
+    if (interrupt) { interrupt(); return }
+    if (quick) { menu = true; say('Rewind menu') }
+  }
   async function handle(said) {
     if (said === 'bye') { for (const controller of open) controller.abort(); process.exit(0) }
     if (said === 'clear') {
@@ -206,7 +228,14 @@ async function session(job) {
     const two = /^run2 (\S+) (\S+)/.exec(said)
     if (two) { await ask(two[1]); await ask(two[2]) }
     else if (run) await ask(run[1])
-    else if (said === 'slow') await new Promise((resolve) => setTimeout(resolve, 3_000))
+    else if (said === 'slow' || said === 'long') {
+      const stopped = await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(false), said === 'slow' ? 3_000 : 20_000)
+        interrupt = () => { clearTimeout(timer); resolve(true) }
+      })
+      interrupt = null
+      if (stopped) say('Interrupted')
+    }
     else if (said === 'question') await question()
     else if (said === 'plan') await plan()
     else say(`fine, ${said}`)
@@ -218,9 +247,23 @@ async function session(job) {
     client = socket
     socket.write(lines.join(''))
     let line = ''
+    const connected = Date.now()
+    const ready = Number(process.env.FAKE_CLAUDE_READY_MS ?? 0)
     socket.on('data', (data) => {
-      for (const key of data.toString('utf8')) {
+      // A key that comes before the screen takes keys is lost.
+      if (Date.now() - connected < ready) return
+      const keys = [...data.toString('utf8')]
+      for (let at = 0; at < keys.length; at++) {
+        const key = keys[at]
         if (key === '\x03') continue
+        if (key === '\x1b') {
+          // An arrow key is a sequence that starts with Esc: not the key.
+          if (keys[at + 1] === '[' || keys[at + 1] === 'O') at += 2
+          else esc()
+          continue
+        }
+        // The rewind menu takes what is typed as its own.
+        if (menu) continue
         if (key === '\r' || key === '\n') {
           const said = line
           line = ''

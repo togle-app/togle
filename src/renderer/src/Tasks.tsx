@@ -23,7 +23,8 @@ import { TerminalView } from './TerminalView'
 
 const api = window.togle
 
-const STATE_WORDS: Record<TaskView['state'], string> = { working: 'Working', waiting: 'Waiting for you', idle: 'Done', stopped: 'Stopped', failed: 'Stopped by an error' }
+// An agent that is not working says Idle, not Done: its session is still open and takes the next message.
+const STATE_WORDS: Record<TaskView['state'], string> = { working: 'Working', waiting: 'Waiting for you', idle: 'Idle', stopped: 'Stopped', failed: 'Stopped by an error' }
 // How often the list is asked for again: what runs in a terminal of its own sends no message when it changes.
 const REFRESH_MS = 4_000
 // The space under the reply part that floats over the foot of the conversation, in px (its `bottom` in the stylesheet): the conversation keeps room for it.
@@ -921,8 +922,8 @@ function TaskRow({ task, now, old, selected, withFolder, dragging, onSelect, onT
   const stoppedHere = needsYou(task) && task.state !== 'waiting'
   const elsewhere = !task.mine && !!task.pid
   // One line, as the design has it: the agent, where it works, and how it stands. A task in a terminal says so. Stopped
-  // and waiting for a reply, it says why; done long ago, it says when.
-  const standing = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : task.screen ? 'stopped · open it to go on' : 'stopped · reply to go on') : task.state === 'waiting' ? (task.waitingFor && !task.pending.length ? 'waiting on its screen' : 'waiting') : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `done · ${ago(task.updatedAt, now)}` : 'done'
+  // and waiting for a reply, it says why; idle for a long time, it says since when.
+  const standing = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : task.screen ? 'stopped · open it to go on' : 'stopped · reply to go on') : task.state === 'waiting' ? (task.waitingFor && !task.pending.length ? 'waiting on its screen' : 'waiting') : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `idle · ${ago(task.updatedAt, now)}` : 'idle'
   // A command it started still runs in the background: said after how it stands, as Claude Code's own screen says it.
   const shells = task.shells?.length ?? 0
   const detail = [standing, shells && !elsewhere && !stoppedHere ? `${shells} ${shells === 1 ? 'shell' : 'shells'} running` : ''].filter(Boolean).join(' · ')
@@ -1264,8 +1265,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
     setInterrupting(true)
     const full = goes(message)
     const said = withIt && quoted ? withQuote(quoted, full) : full
-    // A Claude Code task is stopped by ending its session, and its own queue goes with it: what it had queued is said again with the new words.
-    const sent = await onInterrupt(inQueue.length ? [said, ...inQueue].join(' ') : said)
+    // A Claude Code task is stopped as Esc stops it on its screen: what it had queued starts as its next turns, and these words come after.
+    const sent = await onInterrupt(said)
     setInterrupting(false)
     if (!sent) return
     setText('')
@@ -1296,7 +1297,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const replyHint = holdsReply ? `Reply: it goes in when ${agentOf(task)} finishes` : 'Reply, or hold ' + talkKey + ' and talk'
   // What waits to go in, and why it has not: it goes in by itself when the turn ends, unless the task stopped or it did not go in.
   const held = task.held ?? []
-  // What the agent has in its own queue and has not taken in (it is the queue its screen shows: typed there or sent from here); gone with its session.
+  // What the agent has in its own queue and has not taken in (it is the queue its screen shows: typed there or sent from here). Stop does not end it:
+  // Claude Code starts what it holds as its next turns, as Esc does on its screen.
   const inQueue = running ? history?.queued ?? [] : []
   const queueLength = inQueue.length + held.length
   const heldWaitsForYou = !!task.heldPaused || task.state === 'stopped' || task.state === 'failed'
@@ -1669,12 +1671,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                       </button>
                     )}
                     {stopsHere ? (
-                      <button type="button" className="reply-send stop" disabled={!!pressed} aria-label={pressed === 'stop' ? 'Stopping' : 'Stop'} title={task.screen ? 'Stops what the agent is doing, as Esc does on its screen (Ctrl+C in Hermes)' : 'Stops what the agent is doing'} onClick={() => {
-                        // Stopping ends a Claude Code session, and what was in its queue goes with it: it comes back into the box, as the agent's screen
-                        // gives the queue back to the prompt when it is stopped, so that nothing typed is lost.
-                        if (inQueue.length && !text.trim()) setText(inQueue.join('\n'))
-                        press('stop', onStop)()
-                      }}>
+                      <button type="button" className="reply-send stop" disabled={!!pressed} aria-label={pressed === 'stop' ? 'Stopping' : 'Stop'} title={task.screen ? 'Stops what the agent is doing, as Esc does on its screen (Ctrl+C in Hermes)' : 'Stops what the agent is doing'} onClick={press('stop', onStop)}>
                         {pressed === 'stop' ? <i className="row-spin" /> : <Icon name="stop" size={12} />}
                       </button>
                     ) : (
@@ -1731,7 +1728,7 @@ function TerminalPanel({ task, ending, onEnd }: { task: TaskView; ending: boolea
 
 /** A task on another of the person's devices, in the same one line as a task here. */
 function RemoteRow({ task, now, selected, onSelect }: { task: RemoteTask; now: number; selected: boolean; onSelect: () => void }) {
-  const detail = task.state === 'waiting' ? 'waiting for you' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : `done · ${ago(task.updatedAt, now)}`
+  const detail = task.state === 'waiting' ? 'waiting for you' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : `idle · ${ago(task.updatedAt, now)}`
   return (
     <button className={`task-row ${selected ? 'selected' : ''}`} role="listitem" data-state={task.state} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
       <StateMark kind={task.state === 'idle' ? 'done' : task.state} />

@@ -68,7 +68,7 @@ export function parseRun(args: string[], cwd: string): RunArgs {
   return { agent, folder: path.resolve(cwd, folder), ...(title ? { title } : {}), prompt: [...words, ...after].join(' ').trim() }
 }
 
-const STATE_WORDS: Record<string, string> = { waiting: 'waiting', working: 'working', idle: 'done', stopped: 'stopped', failed: 'stopped by an error' }
+const STATE_WORDS: Record<string, string> = { waiting: 'waiting', working: 'working', idle: 'idle', stopped: 'stopped', failed: 'stopped by an error' }
 
 /** Runs the command. Returns the exit code: 0 when it worked, 1 when Togle could not do it, 2 when it was not understood. */
 export async function runCli(argv: string[], io: CliIo): Promise<number> {

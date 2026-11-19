@@ -518,7 +518,7 @@ test('a screen that cannot open says why, and the task goes on', { timeout: 40_0
   const { backend, home } = claude()
   try {
     const task = await backend.start({ folder: scratch(), prompt: '', title: 'Settings gone' })
-    await task.stop()
+    await task.endCommands()
     // The session was given a settings file, and a stopped one reads it once more when it comes back.
     rmSync(job(home, task.screen.job).settings, { force: true })
     await task.screen.show()
@@ -550,14 +550,101 @@ test('"/clear" goes on in another session, and the task keeps its id and is not 
 
 // ---- Stopping, and coming back ----
 
-test('Stop ends the session and closes its screen; opening it brings the same session back', { timeout: 60_000 }, async () => {
+test('Stop is Esc on the session\'s screen: the turn ends, the program and its conversation go on, and a reply goes into the same session', { timeout: 60_000 }, async () => {
+  const { backend, home, text } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Stop is Esc' })
+    const key = `claude:${task.id}`
+    const jobId = task.screen.job
+    const pid = job(home, jobId).pid
+    const sessionId = job(home, jobId).sessionId
+    await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
+    type(task, 'long')
+    await until(() => task.state === 'working', 'the turn to be at work')
+    await task.stop()
+    await until(() => task.state === 'idle', 'the turn to end')
+    assert.equal(job(home, jobId).escapes, 1, 'one Esc reached the session')
+    assert.equal(alive(pid), true, 'the same program runs')
+    assert.equal(job(home, jobId).sessionId, sessionId, 'the same session and conversation')
+    assert.equal(job(home, jobId).state, undefined, 'the session was not ended: `claude stop` was not run')
+    assert.equal(task.screen.open, true, 'its screen is still open')
+    assert.ok(text(key).includes('Interrupted'), 'the screen shows that the turn was interrupted')
+    // A reply after it goes into the same session, which takes it as a new turn.
+    await task.send('again')
+    await until(() => text(key).includes('fine, again'), 'the reply to be answered')
+    assert.equal(job(home, jobId).sessionId, sessionId)
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Stop on a closed screen opens it out of sight and presses Esc once it takes keys: a key before that is lost', { timeout: 60_000 }, async () => {
+  // The stand-in loses what a screen is given in its first 1.2 seconds, as Claude Code does (0.3 s lost, 1.5 s taken); Stop waits 2 s.
+  const { backend, home } = claude({ env: { FAKE_CLAUDE_READY_MS: '1200' } })
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'long', title: 'Closed and stopped' })
+    const jobId = task.screen.job
+    await until(() => task.state === 'working', 'the turn to be at work')
+    await task.screen.hide()
+    assert.equal(task.terminal, undefined)
+    await task.stop()
+    assert.ok(task.terminal, 'Stop opened its screen')
+    await until(() => task.state === 'idle', 'the turn to end')
+    assert.equal(job(home, jobId).escapes, 1, 'the Esc was taken, not lost')
+    assert.equal(alive(job(home, jobId).pid), true, 'the session goes on')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Stop pressed twice presses Esc once, and presses none for a session that is not at work: two Esc close together open the rewind menu, which takes the next words', { timeout: 60_000 }, async () => {
+  const { backend, home, text } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Careful' })
+    const key = `claude:${task.id}`
+    const jobId = task.screen.job
+    await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
+    type(task, 'long')
+    await until(() => task.state === 'working', 'the turn to be at work')
+    await Promise.all([task.stop(), task.stop()])
+    await until(() => task.state === 'idle', 'the turn to end')
+    assert.equal(job(home, jobId).escapes, 1, 'two presses, one Esc')
+    // Idle: nothing is pressed (on a prompt with words in it, Esc asks to clear them).
+    await task.stop()
+    await sleep(300)
+    assert.equal(job(home, jobId).escapes, 1, 'nothing at work, nothing pressed')
+    assert.equal(text(key).includes('Rewind menu'), false, 'the rewind menu did not open')
+    await task.send('still here')
+    await until(() => text(key).includes('fine, still here'), 'the next words to be taken as a message')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Stop where the screen cannot be used ends the session instead, and opening it brings it back', { timeout: 60_000 }, async () => {
+  const { backend, home } = claude({ env: { FAKE_ATTACH_FAILS: '1' } })
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'long', title: 'No screen' })
+    const jobId = task.screen.job
+    await until(() => task.state === 'working', 'the turn to be at work')
+    const pid = job(home, jobId).pid
+    await task.stop()
+    await until(() => !alive(pid), 'the program to end')
+    assert.equal(task.state, 'stopped')
+    assert.equal(job(home, jobId).escapes, undefined, 'no Esc could reach it')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('End it ends the session and closes its screen; opening it brings the same session back', { timeout: 60_000 }, async () => {
   const { backend, home } = claude()
   try {
-    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Stop' })
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'End it' })
     const id = task.id
     const sessionId = job(home, task.screen.job).sessionId
     const pid = job(home, task.screen.job).pid
-    await task.stop()
+    await task.endCommands()
     await until(() => !alive(pid), 'the program to end')
     assert.equal(task.state, 'stopped')
     assert.equal(task.screen.open, false, 'its screen was a client of the session that is gone')
@@ -700,15 +787,19 @@ test('a restart of Togle does not start the quiet day again: a session quiet sin
   }
 })
 
-test('a request that waits when the task is stopped is not answered', { timeout: 40_000 }, async () => {
-  const { backend } = claude()
+test('a request that waits when the task is stopped is not answered by Togle: Esc declines the question on the screen, and the session goes on', { timeout: 40_000 }, async () => {
+  const { backend, home, text } = claude()
   try {
     const task = await backend.start({ folder: scratch(), prompt: '', title: 'Stop with a request' })
+    const key = `claude:${task.id}`
+    await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
     type(task, 'run f')
     await until(() => task.pending.length === 1, 'the request')
     await task.stop()
-    assert.equal(task.pending.length, 0)
-    assert.equal(task.state, 'stopped')
+    assert.equal(task.pending.length, 0, 'the card is gone: nothing of Togle\'s answers it')
+    await until(() => text(key).includes('refused f'), 'the question to be declined on its screen')
+    assert.equal(job(home, task.screen.job).escapes, 1)
+    await until(() => task.state === 'idle', 'the turn to end')
   } finally {
     await backend.close()
   }
@@ -802,7 +893,7 @@ test('a task of Togle\'s that the person opens in their own terminal later is To
   const a = claude({ home, keep })
   const task = await a.backend.start({ folder: scratch(), prompt: '', title: 'Comes back' })
   const jobId = task.screen.job
-  await task.stop()
+  await task.endCommands()
   await a.backend.close()
   const b = claude({ home, keep })
   const adopted = []
@@ -915,7 +1006,7 @@ test('a session a terminal has open and a stopped background session that has it
   const { backend, home } = claude()
   try {
     const task = await backend.start({ folder: dir, prompt: '', title: 'Both' })
-    await task.stop()
+    await task.endCommands()
     await until(() => !alive(job(home, task.screen.job).pid), 'the session to end')
     writeFileSync(path.join(home, 'interactive.json'), JSON.stringify([{ pid: process.pid, sessionId: task.id, cwd: dir }]))
     // The list is reused for a moment: wait until it has seen the program.

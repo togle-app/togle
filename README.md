@@ -53,7 +53,7 @@ Any other agent can be added in **Settings → Agents → Add an agent**, by a n
 
 ### To-do
 
-One list for the day, kept as a plain text file on your computer. What your agents need from you sits at the top, in amber. Every task you give an agent is on the list, says when it is done, and stays until you tick it. You add an item by typing or by holding F9. **From your calls** offers the notes' items that are yours and the calls with names to confirm.
+One list for the day, kept as a plain text file on your computer. What your agents need from you sits at the top, in amber. Every task you give an agent is on the list, says what the agent is doing (working, waiting for you, idle), and stays until you tick it. You add an item by typing or by holding F9. **From your calls** offers the notes' items that are yours and the calls with names to confirm.
 
 ## Keys
 

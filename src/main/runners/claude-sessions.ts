@@ -436,6 +436,8 @@ const RUNS = new Set(['Bash', 'PowerShell', 'Monitor'])
 const SEARCHES = new Set(['Grep', 'Glob'])
 // What Claude Code writes as the result of a command that was refused or interrupted.
 const REFUSED = /^(?:The user doesn't want|User rejected|The user rejected|Permission to use .{1,40} has been denied|\[Request interrupted)/i
+// What it writes when the person stopped it with Esc (Stop, here too): the command was run, and cut short: it is told as stopped, not as refused.
+const INTERRUPTED = /^\[Request interrupted/i
 
 /** Where a line is in a session's file, in bytes. */
 interface Place {
@@ -657,7 +659,8 @@ function ended(state: Conversation, call: string, waiting: Waiting, r: Json, blo
     return
   }
   if (entry.kind === 'command') {
-    entry.status = failed ? (REFUSED.test(textOf(block.content).trim()) ? 'declined' : 'failed') : 'finished'
+    const words = textOf(block.content).trim()
+    entry.status = failed ? (INTERRUPTED.test(words) ? 'stopped' : REFUSED.test(words) ? 'declined' : 'failed') : 'finished'
     if (took !== undefined) entry.took = took
     if (place && printed(r, block, alone).trim()) {
       entry.more = call

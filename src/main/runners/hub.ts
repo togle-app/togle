@@ -448,11 +448,21 @@ export class RunnerHub {
     return handle.state === 'working' || handle.state === 'waiting' || !!handle.waitingFor
   }
 
+  /**
+   * Whether a task's agent has stopped what it did, as far as new words go. Claude Code goes on with what it had queued when its turn is
+   * stopped (Esc, here as on its screen), so it is at work again at once: it has stopped when nothing waits on its screen.
+   */
+  private stoppedForWords(owned: Owned): boolean {
+    const { handle } = owned
+    if (handle.runner === 'claude') return handle.state !== 'waiting' && !handle.waitingFor && handle.pending.length === 0
+    return !this.atWork(owned)
+  }
+
   /** Waits for a task's agent to show that it has stopped, or says it did not. */
   private async untilStopped(owned: Owned): Promise<void> {
     const began = Date.now()
-    while (this.atWork(owned) && Date.now() - began < STOP_WAIT_MS) await new Promise((resolve) => setTimeout(resolve, 100))
-    if (this.atWork(owned)) throw new Error(`${this.nameOf(owned.handle.runner)} has not stopped yet. Press Stop, and send it when it has.`)
+    while (!this.stoppedForWords(owned) && Date.now() - began < STOP_WAIT_MS) await new Promise((resolve) => setTimeout(resolve, 100))
+    if (!this.stoppedForWords(owned)) throw new Error(`${this.nameOf(owned.handle.runner)} has not stopped yet. Press Stop, and send it when it has.`)
   }
 
   /**

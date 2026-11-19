@@ -173,8 +173,8 @@ export interface LogEntry {
    */
   kind: 'you' | 'agent' | 'command' | 'files' | 'step' | 'asked' | 'note'
   text: string
-  /** A command's outcome, or a step's where its agent's record tells one. */
-  status?: 'running' | 'finished' | 'declined' | 'failed'
+  /** A command's outcome, or a step's where its agent's record tells one. `stopped`: the person stopped it (Esc, Stop) while it ran. */
+  status?: 'running' | 'finished' | 'declined' | 'failed' | 'stopped'
   /** The files a `files` step changed, or a `read` step read. */
   paths?: string[]
   /** The pictures in what the person said (one pasted, a screenshot), by the key each is read with when it is shown. */

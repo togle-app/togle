@@ -12,6 +12,11 @@ const api = window.togle
 
 /** How often the conversation of a task that works is read again, in milliseconds. */
 const READ_AGAIN_MS = 3_000
+/**
+ * The same for Claude Code, whose session file is read from where it was read last (a file's size, and what was added): that is cheap, so
+ * what is typed on its screen (a queued message, an answer) shows within a second. Codex's and Hermes's are asked of their programs.
+ */
+const READ_AGAIN_FILE_MS = 1_000
 
 /** The conversations read last, by task (and whether all of it was read): one opened again shows at once and is read again behind it. */
 const readBefore = new Map<string, TaskHistory | null>()
@@ -30,7 +35,7 @@ function keepReading(key: string, history: TaskHistory | null): void {
  * before the last ones. A conversation read before shows at once (`loaded`) while it is read again; a read that fails keeps
  * what is shown.
  */
-export function useHistory(task: Pick<TaskView, 'key' | 'state' | 'updatedAt'>, on: boolean): { history: TaskHistory | null; loaded: boolean; all: boolean; showAll: () => void } {
+export function useHistory(task: Pick<TaskView, 'key' | 'state' | 'updatedAt' | 'runner'>, on: boolean): { history: TaskHistory | null; loaded: boolean; all: boolean; showAll: () => void } {
   const [all, setAll] = useState(false)
   const reading = `${task.key}${all ? ' all' : ''}`
   const [read, setRead] = useState<{ reading: string; history: TaskHistory | null } | null>(() => (readBefore.has(reading) ? { reading, history: readBefore.get(reading) ?? null } : null))
@@ -55,12 +60,12 @@ export function useHistory(task: Pick<TaskView, 'key' | 'state' | 'updatedAt'>, 
       )
     }
     again()
-    const timer = working ? setInterval(again, READ_AGAIN_MS) : undefined
+    const timer = working ? setInterval(again, task.runner === 'claude' ? READ_AGAIN_FILE_MS : READ_AGAIN_MS) : undefined
     return () => {
       live = false
       if (timer) clearInterval(timer)
     }
-  }, [task.key, task.updatedAt, all, working, on, reading])
+  }, [task.key, task.runner, task.updatedAt, all, working, on, reading])
   // Asked for all of it: the turns shown stay until all of it is read, unless all of it was read before.
   const shown = read?.reading === reading ? read : readBefore.has(reading) ? { reading, history: readBefore.get(reading) ?? null } : read
   return { history: shown?.history ?? null, loaded: !!shown, all, showAll: () => setAll(true) }
@@ -396,7 +401,7 @@ function CommandBox({ entry, taskKey, running, stopped }: { entry: LogEntry; tas
         {entry.status === 'failed' && <span className="box-chip bad">failed</span>}
         {entry.status === 'declined' && <span className="box-chip">refused</span>}
         {running && <span className="box-chip live">running</span>}
-        {stopped && <span className="box-chip">stopped</span>}
+        {(stopped || entry.status === 'stopped') && <span className="box-chip">stopped</span>}
       </div>
       {entry.more && (
         <div className="box-out">
@@ -465,7 +470,7 @@ function StepRow({ entry, taskKey }: { entry: LogEntry; taskKey: string }): Reac
       )}
       {entry.status === 'declined' && <span className="row-note">refused</span>}
       {entry.status === 'failed' && <span className="row-note">failed</span>}
-      {stopped && <span className="row-note quiet">stopped</span>}
+      {(stopped || entry.status === 'stopped') && <span className="row-note quiet">stopped</span>}
       {/* A clock that runs is for the eye only: read out, it would speak every second. */}
       {time && (
         <span className="row-time" aria-hidden={ticking || undefined}>

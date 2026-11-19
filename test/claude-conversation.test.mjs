@@ -383,3 +383,19 @@ test('words that started a turn of their own are shown once, by their message li
   write(18, line(enqueue(18, 'Again.', 2)) + line(enqueue(18, 'Again.', 3)) + line(remove(18, 'Again.', 5)) + line(takenIn(18, 'Again.', 2)) + line(takenIn(18, 'Again.', 3)) + line(takenIn(18, 'Late.', 6)))
   assert.deepEqual(await saidIn(18), [['you', 'Again.'], ['you', 'Again.'], ['you', 'Late.']])
 })
+
+test('a command the person stopped with Esc is told as stopped, and one they refused as declined', async () => {
+  write(20,
+    line(asked(20, 'Run the long job.')) +
+    line(said(20, [{ type: 'tool_use', id: 'k1', name: 'Bash', input: { command: 'ping -n 45 127.0.0.1' } }, { type: 'tool_use', id: 'k2', name: 'Bash', input: { command: 'rm -rf build' } }])) +
+    line(result(20, 'k1', '[Request interrupted by user for tool use]', true)) +
+    line(result(20, 'k2', "The user doesn't want to proceed with this tool use. The tool use was rejected.", true)) +
+    line(asked(20, '[Request interrupted by user for tool use]'))
+  )
+  const history = await claudeConversation(id(20))
+  assert.deepEqual(history.entries.map((entry) => [entry.kind, entry.text, entry.status ?? null]), [
+    ['you', 'Run the long job.', null],
+    ['command', 'ping -n 45 127.0.0.1', 'stopped'],
+    ['command', 'rm -rf build', 'declined']
+  ])
+})

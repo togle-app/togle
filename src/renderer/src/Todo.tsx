@@ -28,7 +28,7 @@ function chipOf(task: TaskView | undefined): { words: string; tone: 'work' | 'wa
     case 'waiting':
       return { words: 'waiting for you', tone: 'wait' }
     case 'idle':
-      return { words: 'done', tone: 'done' }
+      return { words: 'idle', tone: 'done' }
     case 'failed':
       return { words: task.signedOut ? 'signed out' : 'stopped by an error', tone: 'fail' }
     default:

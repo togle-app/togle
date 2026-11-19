@@ -497,7 +497,7 @@ async function checkMeetings(T, agent) {
   await ui.wait("document.querySelectorAll('.give-row').length===4")
   assert.equal(await ui.evaluate("document.querySelector('.give-panel').getAttribute('aria-label')"), 'Give this call to')
   const rowOf = title => "[...document.querySelectorAll('.give-row')].find(r=>r.textContent.includes(" + JSON.stringify(title) + "))"
-  assert.equal(await ui.evaluate(rowOf('Rebuild the pricing page') + ".querySelector('small').textContent"), 'Claude Code · website · done', 'a task that has finished can take the call')
+  assert.equal(await ui.evaluate(rowOf('Rebuild the pricing page') + ".querySelector('small').textContent"), 'Claude Code · website · idle', 'a task that is idle can take the call')
   assert.equal(await ui.evaluate(rowOf('Write the release notes') + ".querySelector('small').textContent"), 'Hermes · It is working', 'one that works cannot: Hermes takes words when its turn has ended')
   assert.equal(await ui.evaluate(rowOf('Write the release notes') + ".querySelector('input').disabled"), true)
   assert.equal(await ui.evaluate(rowOf('Check refunds') + ".querySelector('small').textContent"), 'Claude Code · Open it in Agents first', 'a task Togle does not run is not written to')

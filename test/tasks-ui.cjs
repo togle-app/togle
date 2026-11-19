@@ -141,11 +141,11 @@ async function checkTasks(T, agent) {
   assert.deepEqual(rows.map(row => row.danger), [false, false, false, false, false], 'the red mark is on the command, not on the row')
   assert.equal(rows[3].more, 'Claude Code · working')
   assert.equal(rows[1].more, 'Claude Code · terminal', 'a task in a terminal says so')
-  assert.equal(rows[4].more, 'Claude Code · done', 'what finished today says done')
+  assert.equal(rows[4].more, 'Claude Code · idle', 'what finished today says idle')
   assert.deepEqual(await texts(ui, '.task-row-action'), ['Take over'], 'a Claude Code task in a terminal offers Take over on its row')
   await ui.click('.task-earlier-toggle', 'Earlier · 1 task')
   await ui.wait("document.querySelectorAll('.task-row').length===6")
-  assert.match((await texts(ui, '.task-earlier .task-copy > span'))[0], /^Codex · done · \d+ days ago$/, 'an older task says when it was last worked on')
+  assert.match((await texts(ui, '.task-earlier .task-copy > span'))[0], /^Codex · idle · \d+ days ago$/, 'an older task says when it was last worked on')
   assert.deepEqual(await texts(ui, '.task-earlier .task-project-name'), ['mobile-app'], 'Earlier is by project too')
   assert.equal(await ui.evaluate("!!document.querySelector('.tasks-found')"), false, 'the agents found are listed in Settings')
   await ui.capture('tasks-list')
@@ -458,8 +458,8 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await texts(ui, '.view-switch button'), ['Chat', 'Terminal'], 'two views of the task, picked with a switch')
   assert.equal(await ui.evaluate("document.querySelector('.view-switch [aria-pressed=\"true\"]').textContent"), 'Terminal', 'Terminal is the view tasks open in')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-reply')"), false, 'the terminal has no reply box: it is answered on the screen')
-  assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'nothing to stop: it is done')
-  assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Done')
+  assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'nothing to stop: it is idle')
+  assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Idle')
   assert.equal(await ui.evaluate("document.querySelector('.task-row[aria-current=\"true\"]').textContent.includes('Take over')"), false, 'no Take over once it is here')
   await ui.evaluate("window.togleUITest.askOutside('claude:s4', { id: 'r7', kind: 'command', command: 'npm run migrate', raw: 'npm run migrate', folder: 'C:\\\\work\\\\notes', offersAlways: false })")
   await ui.wait("document.querySelector('.state-chip')?.textContent==='Waiting for you'")
@@ -709,7 +709,7 @@ async function checkTodo(T, agent) {
 
   // The list: open items first, the ticked one last and struck through, a chip for what an agent does with an item.
   assert.deepEqual(await todo(), ['Review the onboarding copy', 'Fix the login redirect', 'Write the release notes', 'Send the invoice to Marta'])
-  assert.deepEqual(await texts(ui, '.todo-chip'), ['Claude Code · working', 'Claude Code · done'])
+  assert.deepEqual(await texts(ui, '.todo-chip'), ['Claude Code · working', 'Claude Code · idle'])
   assert.equal(await ui.evaluate("document.querySelector('.todo-item.done .todo-text').textContent"), 'Send the invoice to Marta')
   assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.todo-item.done .todo-text')).textDecorationLine"), 'line-through')
   assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['Give to an agent'], 'only an item with no agent can be given, and an item whose agent is done has the chip only')
@@ -1526,7 +1526,7 @@ async function checkAgentMarks(T, agent) {
   // To-do: the chip of an item given to a task.
   await ui.click('.workspace-nav button', 'To-do')
   await ui.wait("document.querySelectorAll('.todo-chip').length>=1")
-  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.todo-chip')].map(chip=>[chip.textContent,!!chip.querySelector('.agent-mark.quiet svg')])"), [['Claude Code · working', true], ['Claude Code · done', true]], 'a chip names the agent by its mark')
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.todo-chip')].map(chip=>[chip.textContent,!!chip.querySelector('.agent-mark.quiet svg')])"), [['Claude Code · working', true], ['Claude Code · idle', true]], 'a chip names the agent by its mark')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -1650,7 +1650,7 @@ async function checkMarksLight(T, agent) {
 
 // The navigation and the Agents list: the pointer drags the edge after each (a real drag), the keys move it, a tab on it hides the pane or
 // shows it again; the navigation narrowed past its words is its icons only; what was set is kept for the next window.
-// A task whose turn ended while a command it started still runs is Done, and says what runs: in its row ("done · 1 shell running") and in its
+// A task whose turn ended while a command it started still runs is Idle, and says what runs: in its row ("idle · 1 shell running") and in its
 // status line, as Claude Code's own screen says it ("1 shell still running"), with the command; with two, the count and the commands on the pointer.
 async function checkShells(T, agent) {
   const ui = await open(T, agent, 1180)
@@ -1660,13 +1660,13 @@ async function checkShells(T, agent) {
   const row = "[...document.querySelectorAll('.task-row')].find(r=>r.querySelector('strong').textContent==='Rebuild the pricing page')"
   await set({ state: 'idle', shells: [{ id: 'b0000001', label: 'npm run dev', since: Date.now() - 60_000 }] })
   await ui.task('Rebuild the pricing page')
-  await ui.wait(row + ".textContent.includes('done · 1 shell running')", 'the row to say a shell runs')
-  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Done', 'the task is done, not working')
+  await ui.wait(row + ".textContent.includes('idle · 1 shell running')", 'the row to say a shell runs')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Idle', 'the task is idle, not working')
   assert.equal(await ui.evaluate("document.querySelector('.task-status .shells-hint').textContent.trim()"), '1 shell still running · npm run dev')
   await set({ shells: [{ id: 'b0000001', label: 'npm run dev' }, { id: 'b0000002', label: 'sleep 600' }] })
   await ui.wait("document.querySelector('.task-status .shells-hint')?.textContent.trim()==='2 shells still running'", 'the count of two')
   assert.equal(await ui.evaluate("document.querySelector('.task-status .shells-hint').title"), 'npm run dev\nsleep 600', 'each command on the pointer')
-  assert.ok((await ui.evaluate(row + ".textContent")).includes('done · 2 shells running'))
+  assert.ok((await ui.evaluate(row + ".textContent")).includes('idle · 2 shells running'))
   // Working, it says so too; with nothing running there is no line.
   await set({ state: 'working' })
   await ui.wait(row + ".textContent.includes('working · 2 shells running')", 'working, with its shells')
@@ -2087,12 +2087,12 @@ async function checkGroups(T, agent) {
   await ui.evaluate('new Promise(r=>setTimeout(r,200))')
   assert.deepEqual(await titles(subject('Pricing page')), ['Check the pricing tests', 'Rebuild the pricing page'], 'one changed: the order holds')
   await set('codex:n1', { state: 'idle', line: '', fresh: true })
-  await ui.wait("[...document.querySelectorAll('.task-row')].some(r=>r.textContent.includes('done · new'))")
-  assert.equal(await lineOf('Check the pricing tests'), 'Codex · done · new', 'finished while not on screen: new')
+  await ui.wait("[...document.querySelectorAll('.task-row')].some(r=>r.textContent.includes('idle · new'))")
+  assert.equal(await lineOf('Check the pricing tests'), 'Codex · idle · new', 'finished while not on screen: new')
   assert.deepEqual(await titles(subject('Pricing page')), ['Rebuild the pricing page', 'Check the pricing tests'], 'what works, then what is new')
   assert.equal(await ui.evaluate(website + ".querySelector('.group-counts').getAttribute('aria-label')"), '1 waiting, 1 working, 1 new', 'and its project counts it')
   await ui.task('Check the pricing tests')
-  await ui.wait("[...document.querySelectorAll('.task-row')].find(r=>r.querySelector('strong').textContent==='Check the pricing tests').querySelector('.task-copy > span').textContent==='Codex · done'")
+  await ui.wait("[...document.querySelectorAll('.task-row')].find(r=>r.querySelector('strong').textContent==='Check the pricing tests').querySelector('.task-copy > span').textContent==='Codex · idle'")
   assert.ok((await ui.calls('taskOnScreen')).some((call) => call.args[0] === 'codex:n1'), 'the window told main which task is on screen')
   assert.equal(await ui.evaluate(website + ".querySelector('.group-counts').getAttribute('aria-label')"), '1 waiting, 1 working', 'opened, it is not new')
   // A heading folds and opens like a group's head. It says how many tasks it holds; folded, its rows go, and it says what
@@ -2863,16 +2863,17 @@ async function checkReplyDock(T, agent) {
   await ui.wait("window.togleUITest.calls().some(call=>call.name==='sendToRunnerTask'&&call.args[0]==='claude:q1')")
   assert.deepEqual((await ui.calls('sendToRunnerTask')).map((call) => call.args).filter((args) => args[0] === 'claude:q1'), [['claude:q1', 'Also the footer']])
   assert.equal(await ui.evaluate("document.querySelectorAll('.held-reply .held-row').length"), 2, 'the queue is the agent\'s: Togle holds none of it')
-  // An interrupt stops the session, and its queue with it: what was queued is said again after the new words, none lost.
+  // An interrupt is Esc on its screen and then the new words: the session goes on and so does its queue (Claude Code starts what was queued as
+  // its next turns, as it does for Esc in a terminal), so only the new words are sent.
   await ui.fill('.task-reply textarea', 'No, use the other approach')
   await ui.click('.reply-interrupt', 'Interrupt')
   await ui.wait("window.togleUITest.calls().some(call=>call.name==='interruptRunnerTask'&&call.args[0]==='claude:q1')")
-  assert.deepEqual((await ui.calls('interruptRunnerTask')).map((call) => call.args).filter((args) => args[0] === 'claude:q1').at(-1), ['claude:q1', 'No, use the other approach Also the header, please. And the footer.'])
-  // Stop ends the session and its queue with it: what was queued comes back into the box (the screen gives it back to the prompt), none lost.
+  assert.deepEqual((await ui.calls('interruptRunnerTask')).map((call) => call.args).filter((args) => args[0] === 'claude:q1').at(-1), ['claude:q1', 'No, use the other approach'])
+  // Stop is Esc on its screen too: what was queued goes on as its next turns, so nothing is put back into the box.
   await ui.fill('.task-reply textarea', '')
   await ui.click('.task-reply .reply-send', 'Stop')
-  await ui.wait("!document.querySelector('.held-reply')")
-  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), 'Also the header, please.\nAnd the footer.', 'what was queued is in the box')
+  await ui.wait("window.togleUITest.calls().some(call=>call.name==='stopRunnerTask'&&call.args[0]==='claude:q1')")
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea')?.value ?? ''"), '', 'the queue is the agent\'s: nothing is put back into the box')
   assert.deepEqual((await ui.calls('stopRunnerTask')).map((call) => call.args).filter((args) => args[0] === 'claude:q1'), [['claude:q1']])
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
@@ -2914,7 +2915,7 @@ async function checkArrange(T, agent) {
   // A task dragged into it.
   await drag('Fix the login redirect', box('Launch week'))
   await ui.wait(box('Launch week') + ".querySelectorAll('.task-row').length===1")
-  assert.equal(await lineOf('Fix the login redirect'), 'Claude Code · website · done', 'out of its folder\'s group, its row names its folder')
+  assert.equal(await lineOf('Fix the login redirect'), 'Claude Code · website · idle', 'out of its folder\'s group, its row names its folder')
   await ui.evaluate("window.togleUITest.setTask('claude:s3',{subject:'Login'})")
   await pause(250)
   assert.deepEqual(await titles(box('Launch week')), ['Fix the login redirect'], 'a subject given later does not move it')

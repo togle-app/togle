@@ -391,6 +391,37 @@ test('an interrupt stops what the agent does and says the new words at once; wha
   }
 })
 
+test('Claude Code goes on with its queue when it is stopped (Esc), so an interrupt sends the new words without waiting for it to be idle; a question that waits on its screen is waited out', async () => {
+  const claude = new FakeBackend('claude', { screens: true })
+  const { hub } = hubOf([claude])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix the login redirect' })
+    const task = claude.started[0]
+    // Esc ends the turn and Claude Code starts what it had queued: it is at work all the same, and that is not "has not stopped".
+    let stops = 0
+    task.stop = async () => { stops++; task.setBase('working') }
+    await hub.interrupt(view.key, 'No, use the other approach')
+    assert.equal(stops, 1)
+    assert.deepEqual(task.sent, ['Fix the login redirect', 'No, use the other approach'], 'the new words went in, and the person was not told that it had not stopped')
+    // A permission waits on its screen: Esc declines it, and the words go in once it no longer waits.
+    task.waitingFor = 'permission prompt'
+    task.setBase('waiting')
+    task.stop = async () => { setTimeout(() => { task.waitingFor = undefined; task.setBase('working') }, 300) }
+    await hub.interrupt(view.key, 'Skip that')
+    assert.equal(task.sent.at(-1), 'Skip that', 'sent once nothing waited on its screen')
+    // One that still waits after the stop is told, and nothing was typed.
+    task.waitingFor = 'permission prompt'
+    task.setBase('waiting')
+    task.stop = async () => {}
+    await assert.rejects(hub.interrupt(view.key, 'Stop that'), /has not stopped yet/)
+    assert.equal(task.sent.at(-1), 'Skip that')
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+}, { timeout: 30_000 })
+
 test('an interrupt with a command of the agent’s own is refused before anything is stopped; one that cannot go in is told', async () => {
   const claude = new FakeBackend('hermes', { screens: true })
   const { hub } = hubOf([claude])
