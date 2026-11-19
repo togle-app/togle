@@ -2120,10 +2120,15 @@ async function checkRail(T, agent) {
   const middle = await ui.evaluate("(()=>{const r=" + list + "[4].getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()")
   await movePointer(ui, middle)
   await ui.wait("document.querySelector('.rail-tip span')?.textContent==='Rename Pro to Team.'")
+  // A tick that is lit (by the pointer, or by being the one read) is wider, and none is scaled: a scaled edge left single bright pixels
+  // behind the pointer on a real screen (the user's picture). The tick under the pointer and the last one are 12px; the rest are 8px.
+  const sizes = "[...document.querySelectorAll('.rail-tick:not(.rail-earlier)')].map(t=>{const a=getComputedStyle(t,'::after');return a.transform+' '+a.width})"
+  assert.deepEqual(await ui.evaluate(sizes), ['none 8px', 'none 8px', 'none 8px', 'none 8px', 'none 12px', 'none 8px', 'none 8px', 'none 12px'], 'the tick under the pointer and the lit one are wider; nothing is scaled')
   await movePointer(ui, { x: middle.x, y: middle.y + 90 })
   await ui.wait("!document.querySelector('.rail-tip')")
   assert.equal(await ui.evaluate("(()=>{const e=document.elementFromPoint(" + middle.x + "," + (middle.y + 90) + ");return !!e&&!e.closest('.thread-rail')})()"), true, 'the strip off the ticks is the conversation’s, not the rail’s')
   assert.equal(await ui.evaluate("getComputedStyle(" + list + "[4], '::after').transitionDuration"), '0s', 'a tick does not fade in or out: nothing trails behind the pointer')
+  assert.deepEqual(await ui.evaluate(sizes), ['none 8px', 'none 8px', 'none 8px', 'none 8px', 'none 8px', 'none 8px', 'none 8px', 'none 12px'], 'off the ticks every one is back to its width, but the lit one')
   await movePointer(ui, { x: 300, y: 400 })
   // A press takes the conversation to that question, and its tick is lit.
   await ui.evaluate(list + "[2].click()")

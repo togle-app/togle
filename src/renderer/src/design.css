@@ -513,11 +513,13 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .rail-ticks::-webkit-scrollbar { display: none; }
 .rail-track { position: relative; display: flex; flex: none; flex-direction: column; margin-block: auto; }
 .rail-tick { position: relative; display: flex; flex: none; align-items: center; justify-content: flex-end; box-sizing: border-box; width: 22px; height: 12px; margin: 0; padding: 0 4px 0 0; border: 0; border-radius: 4px; background: none; cursor: pointer; pointer-events: auto; }
-/* No transition: the tick the pointer is on is lit at once and is not the moment it is off, so nothing trails behind a pointer. */
-.rail-tick::after { content: ''; width: 8px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--muted) 55%, transparent); transform-origin: right center; }
+/* No transition: the tick the pointer is on is lit at once and is not the moment it is off, so nothing trails behind a pointer. And no
+   transform: a lit tick is wider (12px, growing to the left inside its button), because a tick scaled to a width with a fraction in it
+   left a single bright pixel of its edge behind, beside each tick the pointer had passed, on a real screen. */
+.rail-tick::after { content: ''; width: 8px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--muted) 55%, transparent); }
 .rail-tick:hover:not(:disabled) { background: none; }
-.rail-tick:hover::after, .rail-tick:focus-visible::after { background: var(--ink); transform: scaleX(1.5); }
-.rail-tick[aria-current='location']::after { background: var(--togle); transform: scaleX(1.5); }
+.rail-tick:hover::after, .rail-tick:focus-visible::after { background: var(--ink); width: 12px; }
+.rail-tick[aria-current='location']::after { background: var(--togle); width: 12px; }
 .rail-tick:focus-visible { outline: 2px solid var(--togle); outline-offset: -2px; }
 .rail-earlier::after { width: 8px; height: 0; border-top: 2px dotted color-mix(in srgb, var(--muted) 70%, transparent); background: none; }
 .rail-earlier:hover::after, .rail-earlier:focus-visible::after { background: none; border-top-color: var(--ink); }
