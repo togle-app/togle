@@ -1032,6 +1032,27 @@ test('the end of a turn is told with what the session said last, before the task
   }
 })
 
+test('a card answered before the list has seen the turn work does not show the task idle: it works on, and is done after its words', { timeout: 40_000 }, async () => {
+  // The list reads what the session says 700 ms after it is asked, so the card is answered while the list still says idle.
+  const { backend } = claude({ env: { FAKE_CLAUDE_AGENTS_MS: '700' }, backend: { said: async () => 'Added the column. The tests pass.' } })
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Quick' })
+    const events = watch(task)
+    type(task, 'run g')
+    await until(() => task.pending.length === 1, 'the request')
+    task.answer(task.pending[0].id, 'allow-once')
+    await until(() => task.state === 'idle' && events.some((event) => event.type === 'message'), 'the turn to end with its words')
+    const order = events.map((event) => (event.type === 'state' ? `state:${event.state}` : event.type))
+    const ended = order.indexOf('request-ended')
+    assert.ok(ended >= 0, 'the card ended')
+    // What it shows after the Allow is Working (the agent goes on with the command), and Idle comes only after the words.
+    assert.equal(order[ended + 1], 'state:working', 'after the Allow it is working: ' + JSON.stringify(order))
+    assert.ok(order.indexOf('message') < order.lastIndexOf('state:idle'), 'the words come before done: ' + JSON.stringify(order))
+  } finally {
+    await backend.close()
+  }
+})
+
 // ---- Quitting Togle, and the next run ----
 
 test('quitting Togle leaves the session running, and a new Togle takes it up and hears it ask', { timeout: 60_000 }, async () => {

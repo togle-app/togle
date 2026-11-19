@@ -429,8 +429,9 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     this.lastActive = Date.now()
     // Its own wait for the program to say it waits, from the start: what was seen of the one before does not count.
     this.sawWaiting = false
-    // A turn that is asked about is a turn at work: its end is told, however quickly the list sees it.
-    if (this.last === 'idle') this.last = 'working'
+    // A turn that is asked about is a turn at work: its end is told, however quickly the list sees it, and it shows Working once the card is dealt
+    // with (answered before the list left idle, the task would fall back to Idle at once, ahead of its words, while it goes on with the command).
+    if (this.last === 'idle') this.set('working')
     this.context.look()
     const answer = await asked
     // Dropped (answered on the screen, the task stopped, Togle quit): Claude Code has its answer or decides on its own screen.
