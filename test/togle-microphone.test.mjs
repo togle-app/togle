@@ -70,7 +70,8 @@ const link = (dir, options = {}) => new MicrophoneLink({ folder: dir, client: { 
 const until = async (check, ms = 3000) => { const end = Date.now() + ms; while (Date.now() < end) { if (check()) return; await wait(20) } assert.fail('timed out') }
 
 test('Togle works the same without Togle Studio', async () => {
-  const microphone = link(path.join(work, 'never installed'))
+  // (On a Mac the helper above says the computer has the app; here it does not.)
+  const microphone = link(path.join(work, 'never installed'), { installed: () => undefined })
   assert.deepEqual(await microphone.refresh(), { installed: false, running: false })
   assert.deepEqual(await microphone.prepareCall(MICROPHONE_DEFAULTS), { installed: false, running: false })
   await assert.rejects(microphone.turnOn('user'), /isn't installed/)
@@ -110,7 +111,7 @@ test('a link that does not prove the token, or points somewhere else, shows noth
   other.stop()
   for (const broken of [{}, { api: 2 }, { api: 1, product: 'Other' }]) {
     fs.writeFileSync(path.join(elsewhere, 'link.json'), JSON.stringify(broken))
-    assert.equal((await link(elsewhere).refresh()).installed, false)
+    assert.equal((await link(elsewhere, { installed: () => undefined }).refresh()).installed, false)
   }
 })
 
@@ -169,7 +170,7 @@ test('signed out of Togle Studio: a call leaves it alone, and asking for it open
 
 test('starts an installed Togle Studio that is not running, only through its own program', async t => {
   const dir = folder(), fake = fakeMicrophone(dir, { state: { ...offState, phase: 'on', systemDefault: true } })
-  const program = process.platform === 'win32' ? path.join(dir, 'Togle Studio.exe') : process.platform === 'darwin' ? '/usr/bin/open' : path.join(dir, 'togle-microphone')
+  const program = process.platform === 'win32' ? path.join(dir, 'Togle Studio.exe') : process.platform === 'darwin' ? '/usr/bin/open' : path.join(dir, 'togle-studio')
   if (process.platform !== 'darwin') fs.writeFileSync(program, '')
   const args = process.platform === 'darwin' ? ['-b', 'io.togle.studio', '--args', '--hidden'] : ['--hidden']
   const runs = []
@@ -327,7 +328,7 @@ test('the old Togle Microphone link file can still start the renamed app from so
   microphone.stop()
   // Another app's file in the old folder is ignored.
   fs.writeFileSync(path.join(previous, 'link.json'), JSON.stringify({ ...old, product: 'Something else' }))
-  const other = link(dir, { development: true, previousFolder: previous, run: launch => runs.push(launch) })
+  const other = link(dir, { development: true, previousFolder: previous, run: launch => runs.push(launch), installed: () => undefined })
   assert.deepEqual(await other.refresh(), { installed: false, running: false })
   other.stop()
 })

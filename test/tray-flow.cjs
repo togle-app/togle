@@ -6,7 +6,12 @@ app.disableHardwareAcceleration()
 const { EventEmitter } = require('node:events')
 const assert = require('node:assert/strict')
 const fs = require('node:fs'), path = require('node:path')
-const defaultMode = process.platform === 'win32' ? 'hold' : 'toggle'
+// The way the app words it (src/main/typing-way.ts): F9 is held to talk wherever Togle can type into another app, which is Windows, a Mac and
+// Linux on X11; on Wayland it is pressed once to start and once to stop.
+const session = (process.env.XDG_SESSION_TYPE || '').toLowerCase()
+const onWayland = process.platform === 'linux' && (session ? session === 'wayland' : !!process.env.WAYLAND_DISPLAY)
+const holds = process.platform === 'win32' || process.platform === 'darwin' || (process.platform === 'linux' && !onWayland && !!process.env.DISPLAY)
+const defaultMode = holds ? 'hold' : 'toggle'
 const defaultPrompt = defaultMode === 'hold' ? 'Hold' : 'Press'
 let icon
 class TestTray extends EventEmitter {
@@ -87,7 +92,7 @@ async function run() {
   await wait(() => js("!!document.querySelector('#settings-voice')"))
   assert.equal(await js("document.querySelectorAll('[aria-label=\"Talk shortcut\"]').length"), 1, 'The shortcut has one editable home')
   await wait(() => js("!!document.querySelector('#settings-voice [data-choice=\"Microphone\"]')"))
-  assert.equal(invoke('settings:get').dictation.mode, process.platform === 'win32' ? 'hold' : 'toggle', 'Dictation uses the shortcut mode supported by this platform')
+  assert.equal(invoke('settings:get').dictation.mode, defaultMode, 'Dictation uses the shortcut mode supported by this platform')
   // The microphones are a choice of Togle's own: its button opens the list, and the headset is pressed in it.
   await js("(()=>{const b=document.querySelector('#settings-voice [data-choice=\"Microphone\"]');b.scrollIntoView({block:'center'});b.click()})()")
   await wait(() => js("[...document.querySelectorAll('.menu-overlay [role=menuitemradio]')].some(item=>item.textContent.trim()==='USB headset')"))

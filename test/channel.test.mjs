@@ -260,11 +260,15 @@ test('the secret is made once, only this person can read it, and a program that 
 })
 
 test('the address depends on the data folder, and is a pipe on Windows and a socket elsewhere', () => {
-  const a = T.channelAddress('C:\\Users\\Someone\\AppData\\Roaming\\Togle')
-  assert.equal(T.channelAddress('C:\\Users\\Someone\\AppData\\Roaming\\Togle'), a)
-  assert.notEqual(T.channelAddress('C:\\Users\\Someone\\AppData\\Roaming\\Togle-dev'), a)
+  // A data folder as the computer has it: a Windows path means nothing to another system (it would be a name under the current folder).
+  const data = process.platform === 'win32' ? 'C:\\Users\\Someone\\AppData\\Roaming' : '/home/someone/.config'
+  const a = T.channelAddress(path.join(data, 'Togle'))
+  assert.equal(T.channelAddress(path.join(data, 'Togle')), a)
+  assert.notEqual(T.channelAddress(path.join(data, 'Togle-dev')), a)
   if (process.platform === 'win32') assert.match(a, /^\\\\\.\\pipe\\togle-[0-9a-f]{16}$/)
   else assert.ok(path.isAbsolute(a) && a.length < 104)
+  // A relative data folder is made whole first (from the folder Togle runs in), so the address is never a relative path.
+  if (process.platform !== 'win32') assert.ok(path.isAbsolute(T.channelAddress('Togle')), 'a relative data folder still gives a whole path')
 })
 
 test('a socket file left behind is cleared, and one that something answers on is not taken over', { skip: process.platform === 'win32' && 'sockets are files only off Windows' }, async () => {

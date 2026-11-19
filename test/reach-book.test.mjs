@@ -158,7 +158,8 @@ test('adding by code: out of order or tampered, the exchange stops', () => {
 test('what a computer shares about a task: the command whole, keys and passwords hidden elsewhere', () => {
   const shared = shareTask({
     key: 'codex:t1', id: 't1', runner: 'codex', agent: 'Codex', title: 'Deploy with token=ghp_abcdefghijklmnopqrstuvwxyz123456',
-    folder: 'C:\\work\\infra\\', state: 'waiting', updatedAt: now, mine: true, commandsRunning: false,
+    // A folder as the computer that shares it has it, with a closing separator: the other devices get only its own name.
+    folder: process.platform === 'win32' ? 'C:\\work\\infra\\' : '/work/infra/', state: 'waiting', updatedAt: now, mine: true, commandsRunning: false,
     line: 'Wants to run terraform apply with password: hunter2hunter2',
     pending: [{ id: 'r1', kind: 'command', command: 'curl -H "Authorization: Bearer sk-live-abcdefghijklmnopqrstuvwx" https://api.example.com', offersAlways: true, always: 'Always allow curl', danger: 'Sends data to the internet' }]
   })
