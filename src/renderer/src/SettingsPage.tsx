@@ -82,6 +82,7 @@ export function SettingsPage({ settings, stt, at, onSave }: Props) {
             <div className="sets-part">
               <Agents settings={settings} save={save} />
               <Devices />
+              <Updates settings={settings} save={save} />
             </div>
           </div>
         </div>
@@ -117,6 +118,42 @@ function Update() {
         </Row>
         : <Row label={false} name={state.phase === 'refused' ? 'An update was refused' : 'Togle couldn’t check for an update'} note={state.message} />}
       {failure && <p className="error" role="alert">{failure}</p>}
+    </Section>
+  )
+}
+
+/**
+ * How Togle's own updates go in: a signed update that has been downloaded waits for "Restart to update" (above), or goes in as Togle
+ * closes, at a quit the person asked for, when they say so here. What is said under the switch is true of this build: until the
+ * maintainer sets the release key, Togle does not look for updates at all.
+ */
+function Updates({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
+  const [state, setState] = useState<UpdateState>({ phase: 'off' })
+  useEffect(() => {
+    let live = true
+    void api.updateStatus().then((value) => { if (live && value?.phase) setState(value) }).catch(() => {})
+    const off = api.onUpdate((value) => { if (live && value?.phase) setState(value) })
+    return () => { live = false; off() }
+  }, [])
+  const on = settings.updates?.installOnQuit === true
+  const at = state.checkedAt ? new Date(state.checkedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''
+  // The row's value, and what it means in more words.
+  const [value, meaning] =
+    state.phase === 'off' ? ['Not set up in this build', 'This build has no release key yet, so Togle does not look for updates. The switch counts once it does.']
+    : state.phase === 'checking' ? ['Looking…', 'Looking for an update.']
+    : state.phase === 'downloading' ? [`Downloading ${state.version ?? ''}`.trim(), 'An update was found. It is checked against the release key when it has arrived.']
+    : state.phase === 'ready' ? [`${state.version} is ready`, on ? 'It goes in when you quit.' : 'It goes in when you press Restart to update.']
+    : state.phase === 'none' ? [`Up to date${at ? ` · ${at}` : ''}`, 'The newest release is the one you have. Togle looks once a day.']
+    : [state.phase === 'refused' ? 'An update was refused' : 'Could not look', state.message ?? '']
+  return (
+    <Section id="settings-updates" title="Updates">
+      <Row name="Install updates when I quit">
+        <input type="checkbox" role="switch" className="switch" title="An update that has been downloaded and checked against Togle's release key goes in as Togle closes, when you quit it. Togle never closes by itself for it, and does not open again after. Off, it waits until you press Restart to update."
+          checked={on} onChange={(event) => void save({ updates: { installOnQuit: event.target.checked } })} />
+      </Row>
+      <Row label={false} name="Update check">
+        <span className="setting-value" title={meaning}>{value}</span>
+      </Row>
     </Section>
   )
 }

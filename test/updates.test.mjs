@@ -71,3 +71,28 @@ test('a signed update waits, checked; a forged one is refused and never saved; a
   await assert.rejects(good.install(), /changed after it was checked/)
   assert.deepEqual(states.filter((phase) => phase !== 'checking' && phase !== 'downloading'), ['none', 'refused', 'ready'])
 })
+
+test('an update that goes in as Togle closes does not open Togle again, and is checked once more first', async () => {
+  const { key, pub } = generate()
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'togle-updates-'))
+  const make = (files, platform, arch = 'x64') => new Updates({ current: '0.1.0', key: pub, folder, releases: 'https://example.test/latest', fetch: release(files, key), changed() {}, platform, arch })
+  // Windows: the installer runs quietly once Togle has gone. Without --force-run it does not start Togle; Restart to update does.
+  const win = make({ 'Togle.Setup.0.2.0.exe': Buffer.from('the next Togle, made up') }, 'win32')
+  await win.check()
+  const quiet = await win.install(undefined, { reopen: false })
+  assert.deepEqual([quiet.after, quiet.args], ['quit-and-run', ['/S']])
+  assert.deepEqual((await win.install()).args, ['/S', '--force-run'], 'Restart to update still opens Togle again')
+  fs.writeFileSync(quiet.file, 'something else')
+  await assert.rejects(win.install(undefined, { reopen: false }), /changed after it was checked/, 'a file changed since the check never goes in, at a quit either')
+  // Linux: the AppImage is replaced where it runs from, and nothing is started.
+  const linux = make({ 'Togle-0.2.0.AppImage': Buffer.from('the next Togle for Linux') }, 'linux')
+  await linux.check()
+  const here = path.join(folder, 'Togle.AppImage')
+  fs.writeFileSync(here, 'the running one')
+  assert.deepEqual(await linux.install(here, { reopen: false }), { after: 'replaced' })
+  assert.equal(fs.readFileSync(here, 'utf8'), 'the next Togle for Linux')
+  // A Mac is only shown the download: there it stays for the person to open.
+  const mac = make({ 'Togle-0.2.0-arm64-mac.zip': Buffer.from('the next Togle for Mac') }, 'darwin', 'arm64')
+  await mac.check()
+  assert.equal((await mac.install(undefined, { reopen: false })).after, 'show')
+})

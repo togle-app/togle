@@ -561,9 +561,22 @@ async function installUpdate(): Promise<'quitting' | 'shown'> {
   const next = await updates.install()
   if (next.after === 'show') { shell.showItemInFolder(next.file); return 'shown' }
   if (next.after === 'quit-and-run') installAfterQuit = { file: next.file, args: next.args }
-  else app.relaunch()
+  else if (next.after === 'relaunch') app.relaunch()
   void requestQuit()
   return 'quitting'
+}
+/**
+ * "Install updates when I quit": a signed update that is waiting goes in as Togle closes, at a quit the person asked for. A
+ * shutdown or a log-off never gets here (the window's session-end sets `quitting` first), nothing here quits Togle, and Togle is
+ * not opened again after it. It goes through updates.install, so what was checked is checked again. A Mac only shows the file,
+ * so there it stays for "Restart to update".
+ */
+async function installOnQuit(): Promise<void> {
+  if (!getSettings().updates.installOnQuit || installAfterQuit || !updates.ready) return
+  try {
+    const next = await updates.install(undefined, { reopen: false })
+    if (next.after === 'quit-and-run') installAfterQuit = { file: next.file, args: next.args }
+  } catch (error) { console.warn('[updates] not installed as Togle closed:', (error as Error).message) }
 }
 
 async function requestQuit(confirmed = false): Promise<void> {
@@ -582,7 +595,7 @@ async function requestQuit(confirmed = false): Promise<void> {
   taskSubjects?.stop()
   try { await Promise.all([meetingNotes.stop(), callTitles.stop()]); await voices.flush(); await callFile.flush(); await dictationHistory.flush() }
   catch (error) { console.warn('[quit] could not finish saving:', (error as Error).message) }
-  finally { await agentsEnded; app.quit() }
+  finally { await agentsEnded; await installOnQuit(); app.quit() }
 }
 function dictationEscape(): void {
   if (dictation.active && dictation.status().phase !== 'inserting' && !hotkeysOff) {

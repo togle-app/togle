@@ -116,18 +116,21 @@ export class Updates {
    * What to do with the checked build: on Windows run its installer quietly once Togle has quit (it opens Togle again);
    * on Linux the AppImage replaces the running one, and Togle starts again; on a Mac the download is shown, to open.
    * The file is checked against its digest just before, so one changed since it was checked never runs.
+   * `reopen: false` is for an update that goes in as Togle closes at the person's own quit: Togle is not opened again after it
+   * (on Linux the new AppImage is in place, and `replaced` says so).
    */
-  async install(appImage = process.env.APPIMAGE): Promise<{ after: 'quit-and-run'; file: string; args: string[] } | { after: 'relaunch' } | { after: 'show'; file: string }> {
+  async install(appImage = process.env.APPIMAGE, options: { reopen?: boolean } = {}): Promise<{ after: 'quit-and-run'; file: string; args: string[] } | { after: 'relaunch' } | { after: 'replaced' } | { after: 'show'; file: string }> {
+    const reopen = options.reopen ?? true
     const file = this.ready
     if (!file) throw new Error('No checked update is waiting.')
     const data = await fs.readFile(file)
     if (createHash('sha256').update(data).digest('hex') !== this.digest) throw new Error('The update changed after it was checked, so it won’t run.')
-    if (this.platform === 'win32') return { after: 'quit-and-run', file, args: ['/S', '--force-run'] }
+    if (this.platform === 'win32') return { after: 'quit-and-run', file, args: reopen ? ['/S', '--force-run'] : ['/S'] }
     if (this.platform === 'linux' && appImage) {
       const next = appImage + '.new'
       await fs.writeFile(next, data, { mode: 0o755 })
       await fs.rename(next, appImage)
-      return { after: 'relaunch' }
+      return { after: reopen ? 'relaunch' : 'replaced' }
     }
     return { after: 'show', file }
   }

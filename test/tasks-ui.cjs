@@ -944,6 +944,14 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual(await texts(ui, '#settings-agents .agent-label'), ['Claude Code', 'Codex', 'Hermes'])
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('#settings-agents .agent-name .av')].map(av=>av.dataset.agent+':'+(av.querySelector('svg')?'mark':av.textContent))"), ['claude:mark', 'codex:mark', 'hermes:mark'], 'each agent with the mark its maker made, not a letter')
   assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add an agent'])
+  // Updates: one switch, off (an update waits for Restart to update, as it always did), and what is true of this build as a row's
+  // value: with no release key Togle does not look for updates.
+  assert.deepEqual(await texts(ui, '#settings-updates .setting .name'), ['Install updates when I quit', 'Update check'])
+  assert.equal(await ui.evaluate("document.querySelector('#settings-updates input[role=switch]').checked"), false, 'off until it is turned on')
+  assert.equal(await ui.evaluate("document.querySelector('#settings-updates .setting-value').textContent"), 'Not set up in this build')
+  assert.match(await ui.evaluate("document.querySelector('#settings-updates .setting-value').title"), /no release key yet, so Togle does not look for updates/)
+  await ui.evaluate("document.querySelector('#settings-updates input[role=switch]').click()")
+  await ui.wait("window.togleUITest.calls().some(call=>call.name==='updateSettings'&&call.args?.updates?.installOnQuit===true)")
   // Which view a task opens in: a switch of two, the same as a task has on its own line, Terminal until it is changed.
   const viewSwitch = '#settings-agents [role=radiogroup][aria-label="Tasks open in"]'
   const pickedView = "document.querySelector(" + JSON.stringify(viewSwitch + ' [aria-checked=true]') + ")?.textContent"
@@ -1008,7 +1016,7 @@ async function checkAgentSettings(T, agent) {
   // The groups are as wide as the place, in columns of their own: two as the design draws them (Keys, Meetings and Accounts
   // beside Voice and Agents), and three on a wide window (Keys, Meetings beside Accounts, Voice beside Agents). A wide window
   // once made five thin columns of them, then one small block in a corner, then one in the middle.
-  const groups = ['settings-keys', 'settings-voice', 'settings-meetings', 'settings-agents', 'settings-accounts']
+  const groups = ['settings-keys', 'settings-voice', 'settings-meetings', 'settings-agents', 'settings-accounts', 'settings-updates']
   // Every row of Settings, each group's name and the line under the plan: where it is from the top of the groups, and how large.
   const rows = "(()=>{const top=document.querySelector('.sets').getBoundingClientRect().top;return [...document.querySelectorAll('.sets .setting, .sets .section-head, .sets .ai-plan-other')].filter(e=>!e.closest('.setting-detail')).map(e=>{const r=e.getBoundingClientRect();return [e.textContent.trim().slice(0,20),Math.round(r.left),Math.round(r.top-top),Math.round(r.width),Math.round(r.height)].join(' ')})})()"
   // A form to type in is a dialog: the card the design draws, no wider than drawn, in the middle of the window, whole in it, over a layer that dims the whole window under the title bar.
@@ -1018,7 +1026,8 @@ async function checkAgentSettings(T, agent) {
     ui.window.setContentSize(width, 900)
     await ui.wait('innerWidth===' + width)
     const at = await ui.evaluate(places)
-    const [keys, voice, meetings, agents, accounts] = groups.map(id => at[id])
+    const [keys, voice, meetings, agents, accounts, updates] = groups.map(id => at[id])
+    assert.ok(updates.left === agents.left && updates.top > agents.top, 'Updates under Agents, in the same column, at ' + width)
     if (width < 1150) {
       assert.ok(voice.top === keys.top && voice.left >= keys.left + keys.width, 'Keys beside Voice, in two columns, at ' + width)
       assert.ok(meetings.left === keys.left && accounts.left === keys.left && agents.left === voice.left, 'Meetings and Accounts under Keys, Agents under Voice, at ' + width)
@@ -1083,9 +1092,9 @@ async function checkAgentSettings(T, agent) {
   assert.ok(await ui.evaluate("(()=>{const place=document.querySelector('.shell-content'),f=document.querySelector('form.ai-key-form').getBoundingClientRect();return place.scrollWidth<=place.clientWidth&&f.left>=15&&f.right<=innerWidth-15&&f.top>=36})()"), 'the key form fits a narrow window')
   await ui.click('form.ai-key-form button', 'Cancel')
   await ui.wait("!document.querySelector('form.ai-key-form')")
-  const stacked = ['settings-keys', 'settings-meetings', 'settings-accounts', 'settings-voice', 'settings-agents']
+  const stacked = ['settings-keys', 'settings-meetings', 'settings-accounts', 'settings-voice', 'settings-agents', 'settings-updates']
   assert.ok(stacked.every((id, n) => narrow[id].left === narrow[stacked[0]].left && (n === 0 || narrow[id].top > narrow[stacked[n - 1]].top)), 'one column in a narrow window')
-  assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Meetings', 'Accounts', 'Voice', 'Agents'], 'and it is the order they are in the page')
+  assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Meetings', 'Accounts', 'Voice', 'Agents', 'Updates'], 'and it is the order they are in the page')
   // Removing an agent is quiet words on its row, not a button: the row reads as a name and how it stands.
   assert.equal(await ui.evaluate("[...document.querySelectorAll('#settings-agents button[aria-label^=\"Remove \"]')].every(b=>getComputedStyle(b).borderTopWidth==='0px'&&getComputedStyle(b).fontWeight==='400')"), true)
   // No place has a widest it can be: on a wide window To-do and a task are as wide as the room they have, from its left edge.

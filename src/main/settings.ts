@@ -62,7 +62,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // Agents added in Settings (Codex, Claude Code and Hermes are found by themselves).
   addedAgents: [],
   // Agents found by themselves that the person removed from Togle's lists.
-  hiddenAgents: []
+  hiddenAgents: [],
+  // An update that has been checked and downloaded waits for "Restart to update" until the person says it may go in as Togle closes.
+  updates: { installOnQuit: false }
 }
 
 let current: Settings = DEFAULT_SETTINGS
