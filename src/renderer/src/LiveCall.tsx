@@ -115,7 +115,7 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, ca
         {people.map((line) => <PersonChip key={line.voiceId} line={line} />)}
       </div>
       {callKey && <CallAgentsRow call={callKey} live />}
-      <div className="live-lines" ref={lines} onScroll={(event) => { const box = event.currentTarget; atEnd.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40 }}>
+      <div className={`live-lines${!transcript.length && !partials.length ? ' waiting' : ''}`} ref={lines} onScroll={(event) => { const box = event.currentTarget; atEnd.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40 }}>
         {!transcript.length && !partials.length && <p className="hint">Listening… The words appear as people speak.</p>}
         {transcript.map((line, index) => <LiveLine key={line.id} line={line} since={since} marked={marked.has(line.id)} continues={joins[index]} />)}
         {partials.map((partial, index) => (

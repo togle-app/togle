@@ -151,12 +151,14 @@ async function checkCall(T, agent) {
   assert.equal(await ui.evaluate("document.querySelectorAll('.tell-others').length"), 1, 'copying the line is not telling them')
 
   // The words as people speak: who said them, a guessed name with a question mark, a voice not named yet.
+  assert.equal(await ui.evaluate("document.querySelector('.live-lines').classList.contains('waiting')&&document.querySelector('.live-lines > .hint')?.textContent.startsWith('Listening')"), true, 'nothing said yet: one calm line in the middle of the card')
   const now = Date.now()
   await ui.emit('onTranscript', { id: 'l1', speaker: 'them', voiceId: 'voice:1', voiceName: 'Dario', voiceNamedBy: 'user', text: 'Can we ship the pricing page with two plans first?', at: now - 9000, end: now - 8000 })
   await ui.emit('onTranscript', { id: 'l2', speaker: 'them', voiceId: 'voice:2', voiceName: 'Marta', voiceNamedBy: 'suggested', text: 'Then the API timeline has to move to the end of the month.', at: now - 7000, end: now - 6000 })
   await ui.emit('onTranscript', { id: 'l3', speaker: 'them', voiceId: 'voice:4', text: 'I can take the staging logs.', at: now - 5000, end: now - 4000 })
   await ui.emit('onTranscript', { id: 'l4', speaker: 'me', text: 'Sounds good to me.', at: now - 3000, end: now - 2500 })
   await ui.wait("document.querySelectorAll('.live-line').length===4")
+  assert.equal(await ui.evaluate("document.querySelector('.live-lines').classList.contains('waiting')"), false, 'the lines take the card once something is said')
   assert.deepEqual(await texts(ui, '.live-line .who'), ['Dario', 'Marta?', 'Voice 4', 'You'])
   // Like a chat: each line has an avatar, the first letter of who said it (a guess's question mark is not part of it) on that
   // voice's color; yours is Togle's, and the same voice is always the same color.

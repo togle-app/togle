@@ -956,7 +956,7 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .live-lines > * + * { margin-top: 2px; }
 /* Nothing said yet: a calm line in the card, not a line of text on the page. */
 .live-lines > .hint { margin: 0; padding: 26px 18px; text-align: center; }
-.live-lines:has(> .hint:only-child) { display: grid; place-content: center; }
+.live-lines.waiting { display: grid; place-content: center; }
 /* One turn of a call, live or saved, drawn the same way: an avatar (the voice's first letter on its own color), who said it and when, and
    the words under them. A marked one stands out. A voice that goes on has no head of its own: its words sit under its last ones and its
    time shows under the pointer. */
