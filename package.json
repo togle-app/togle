@@ -30,7 +30,7 @@
     "pack": "node scripts/build.cjs package --dir",
     "dist": "node scripts/build.cjs package",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "rolldown -c test/rolldown.config.mjs && node --test test/*.test.mjs",
+    "test": "rolldown -c test/rolldown.config.mjs && node --test --test-timeout=120000 test/*.test.mjs",
     "test:macos": "node scripts/test-macos.cjs",
     "test:linux": "node scripts/test-linux.cjs",
     "test:ui": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/ui-launch.cjs",

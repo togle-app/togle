@@ -1011,6 +1011,9 @@ test('a task of Togle\'s that the person opens in their own terminal later is To
   const a = claude({ home, keep })
   const task = await a.backend.start({ folder: scratch(), prompt: '', title: 'Comes back' })
   const jobId = task.screen.job
+  // The screen's own program (`claude attach`) takes a moment to start and look at the session. One that looked after the session was ended would find
+  // it stopped and bring it back, as Claude Code does when a stopped session is opened: so it is waited for.
+  await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
   await task.endCommands()
   await a.backend.close()
   const b = claude({ home, keep })
