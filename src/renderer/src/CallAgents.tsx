@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { KNOWN_AGENTS, stepsLine, type CallAgents as CallAgentList, type GiveResult, type RunnerKind, type RunnerStatus, type TaskView } from '@shared/runner'
+import { stepsLine, type CallAgents as CallAgentList, type GiveResult, type RunnerKind, type RunnerStatus, type TaskView } from '@shared/runner'
+import { AgentLead, AgentMark, agentOf } from './AgentMark'
 import { Markdown } from './Markdown'
 import { useKeptState } from './kept'
 import { Menu } from './Menu'
@@ -9,12 +10,13 @@ import { RequestCard } from './RequestCard'
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
-const agentOf = (task: Pick<TaskView, 'runner' | 'agent'>): string => task.agent ?? KNOWN_AGENTS[task.runner] ?? task.runner
 const RECENT_MS = 24 * 3600_000
 const MOST_ROWS = 10
 
+/** Where a task is and how it stands, after its agent: the folder, and working, waiting or done. */
+const whereRest = (task: TaskView): string => [task.folder ? baseName(task.folder) : '', task.state === 'working' ? 'working' : task.state === 'waiting' ? 'waiting' : task.state === 'idle' ? 'done' : task.state].filter(Boolean).join(' · ')
 /** A task as a short name for a chip or a row: its words, and under them the agent and the folder. */
-const where = (task: TaskView): string => [agentOf(task), task.folder ? baseName(task.folder) : '', task.state === 'working' ? 'working' : task.state === 'waiting' ? 'waiting' : task.state === 'idle' ? 'done' : task.state].filter(Boolean).join(' · ')
+const where = (task: TaskView): string => [agentOf(task), whereRest(task)].filter(Boolean).join(' · ')
 
 /**
  * Why a task cannot be sent a call now, in words, or nothing when it can. Togle sends to a task it runs; Claude Code and Hermes take
@@ -125,7 +127,7 @@ export function CallAgentsRow({ call, live }: { call: string; live: boolean }) {
           return (
             <span key={key} className="agent-chip" title={task ? `${task.title} · ${where(task)}${agents.sent[key] ? ` · sent ${new Date(agents.sent[key]).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}` : 'That task is gone'}>
               {live && <input type="checkbox" aria-label={`Send to ${task?.title ?? 'this agent'}`} checked={!unticked.includes(key)} onChange={(event) => setUnticked((previous) => (event.target.checked ? previous.filter((item) => item !== key) : [...previous, key]))} />}
-              <span className="cut">{task ? `${agentOf(task)} · ${task.folder ? baseName(task.folder) : task.title}` : 'Gone'}</span>
+              <span className="cut">{task ? <AgentLead runner={task.runner} name={agentOf(task)} rest={task.folder ? baseName(task.folder) : task.title} /> : 'Gone'}</span>
               <button type="button" className="ghost small" aria-label={`Take ${task?.title ?? 'this agent'} off the call`} onClick={() => void change(agents.keys.filter((item) => item !== key))}>×</button>
             </span>
           )
@@ -220,7 +222,7 @@ function CallAnswer({ taskKey, asked, task, onDismiss }: { taskKey: string; aske
   return (
     <section className="call-answer" aria-label={`${task ? agentOf(task) : 'The agent'} answers`}>
       <header className="call-answer-head">
-        <b className="cut">{task ? `${agentOf(task)} · ${task.folder ? baseName(task.folder) : task.title}` : 'Gone'}</b>
+        <b className="cut">{task ? <AgentLead runner={task.runner} name={agentOf(task)} rest={task.folder ? baseName(task.folder) : task.title} /> : 'Gone'}</b>
         {state && <span className="state-chip" data-state={state}>{state === 'idle' && !said.text ? 'Done' : ANSWER_STATE[state]}</span>}
         {task && <button type="button" className="link" onClick={() => openTaskFrom(taskKey)} title="Open the task in Agents">Open</button>}
         <button type="button" className="ghost small" aria-label="Dismiss this answer" onClick={onDismiss}>×</button>
@@ -304,6 +306,7 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
     return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', key) }
   }, [])
   useEffect(() => { setRunner((current) => (current && status.some((item) => item.runner === current) ? current : status[0]?.runner)) }, [status])
+  const pickedAgent = status.find((item) => item.runner === runner)
   const now = Date.now()
   // The tasks Togle runs, then the ones from the last day: the ones that can take the call first.
   const rows = useMemo(() => {
@@ -388,7 +391,7 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
               <input type="checkbox" checked={picked.includes(task.key)} disabled={!!reason && !picked.includes(task.key)} onChange={() => toggle(task.key)} />
               <span className="grow">
                 <b className="cut">{task.title}</b>
-                <small className="cut">{reason ? `${agentOf(task)} · ${reason}` : where(task)}</small>
+                <small className="cut"><AgentLead runner={task.runner} name={agentOf(task)} rest={reason || whereRest(task)} /></small>
               </span>
             </label>
           )
@@ -402,8 +405,8 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
               <small>{creating ? '' : status.length ? (mode === 'give' ? 'Starts an agent with the call' : 'Starts an agent for this call') : 'No agent found'}</small>
               {creating && (
                 <span className="give-new">
-                  <Menu className="pick-chip" ariaLabel="Agent" title="The agent that does it" label={status.find((item) => item.runner === runner)?.name ?? 'Pick an agent'}
-                    items={status.map((item) => ({ label: item.name, checked: item.runner === runner, onSelect: () => setRunner(item.runner) }))} />
+                  <Menu className="pick-chip" ariaLabel="Agent" title="The agent that does it" label={pickedAgent ? <AgentMark runner={pickedAgent.runner} name={pickedAgent.name} /> : 'Pick an agent'}
+                    items={status.map((item) => ({ label: <AgentMark runner={item.runner} name={item.name} />, checked: item.runner === runner, onSelect: () => setRunner(item.runner) }))} />
                   <Menu className="pick-chip" ariaLabel="Folder" title={folder || 'The folder it works in'} label={folder ? baseName(folder) : 'Pick a folder'}
                     items={[...options.map((path) => ({ label: baseName(path), detail: path, checked: path === folder, onSelect: () => setFolder(path) })), ...(options.length ? ['divider' as const] : []), { label: 'Choose…', onSelect: () => void choose() }]} />
                 </span>

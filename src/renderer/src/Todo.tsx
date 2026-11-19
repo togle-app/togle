@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { KNOWN_AGENTS, needsYou, type RunnerStatus, type TaskView, type ViewRequest } from '@shared/runner'
+import { needsYou, type RunnerStatus, type TaskView, type ViewRequest } from '@shared/runner'
 import { canAllowHere, shownPart } from '@shared/runner-command'
 import type { TodoItem, TodoList } from '@shared/todo'
 import type { CallOffer, TodoOffer } from '@shared/call-todo'
 import { meetingTitle } from './MeetingsPage'
 import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, useKeptState } from './kept'
+import { AgentLead, agentOf } from './AgentMark'
 import { StateMark, type MarkKind } from './StateMark'
 
 const api = window.togle
 
-/** A task's agent by name: the name it came with, else the one Togle knows it by. */
-const agentOf = (task: Pick<TaskView, 'runner' | 'agent'>): string => task.agent ?? KNOWN_AGENTS[task.runner] ?? task.runner
 // How often the tasks are asked for again: what runs in a terminal of its own sends no message when it changes.
 const REFRESH_MS = 4_000
 
@@ -20,21 +19,20 @@ const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split
 /** A chip's tone as the mark in it. */
 const TONE_MARK: Record<'work' | 'wait' | 'done' | 'fail' | 'gone', MarkKind> = { work: 'working', wait: 'waiting', done: 'done', fail: 'failed', gone: 'stopped' }
 
-/** What the task an item was given to is doing, as a short chip. */
-function chipOf(task: TaskView | undefined): { text: string; tone: 'work' | 'wait' | 'done' | 'fail' | 'gone' } {
-  if (!task) return { text: 'Task not found', tone: 'gone' }
-  const who = agentOf(task)
+/** What the task an item was given to is doing, as a short chip: its agent's mark, then these words. */
+function chipOf(task: TaskView | undefined): { words: string; tone: 'work' | 'wait' | 'done' | 'fail' | 'gone' } {
+  if (!task) return { words: 'Task not found', tone: 'gone' }
   switch (task.state) {
     case 'working':
-      return { text: `${who} · working`, tone: 'work' }
+      return { words: 'working', tone: 'work' }
     case 'waiting':
-      return { text: `${who} · waiting for you`, tone: 'wait' }
+      return { words: 'waiting for you', tone: 'wait' }
     case 'idle':
-      return { text: `${who} · done`, tone: 'done' }
+      return { words: 'done', tone: 'done' }
     case 'failed':
-      return { text: `${who} · ${task.signedOut ? 'signed out' : 'stopped by an error'}`, tone: 'fail' }
+      return { words: task.signedOut ? 'signed out' : 'stopped by an error', tone: 'fail' }
     default:
-      return { text: `${who} · stopped`, tone: 'gone' }
+      return { words: 'stopped', tone: 'gone' }
   }
 }
 
@@ -236,7 +234,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
           {chip && (
             <button className={`todo-chip ${chip.tone}`} title="Open the task" disabled={!task} onClick={() => task && onOpenTask(task.key)}>
               {task && <StateMark kind={TONE_MARK[chip.tone]} still />}
-              {chip.text}
+              {task ? <AgentLead runner={task.runner} name={agentOf(task)} rest={chip.words} /> : chip.words}
             </button>
           )}
           {!item.done && !item.task && !!installed.length && (
@@ -281,7 +279,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
                   <span className="todo-grow">
                     <b>{task.title}</b>
                     <small className="todo-line">
-                      {agentOf(task)} · {baseName(task.folder)} · {says}
+                      <AgentLead runner={task.runner} name={agentOf(task)} rest={`${baseName(task.folder)} · ${says}`} />
                       {/* A command that looks dangerous is marked red, and why is on it. */}
                       {detail && (code ? <> <code className={request?.danger ? 'danger' : undefined} title={request?.danger || undefined}>{detail.split('\n')[0]}</code></> : ` ${detail}`)}
                     </small>

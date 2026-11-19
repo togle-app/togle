@@ -10,6 +10,7 @@ import { modelSourceId } from '@shared/model-selection'
 import { AI_TASKS } from '@shared/preferences'
 import { MANAGE_USAGE_URL } from '@shared/plan'
 import { isMicrophoneOn, microphoneNeedsSignIn, type TogleMicrophoneStatus } from '@shared/microphone'
+import { AgentAvatar } from './AgentMark'
 import { useHotkeys } from './hotkeys'
 import { Shortcut } from './Shortcut'
 import { Field, FormOver, openedInView, Row, Section, Toggle, useOneOpen } from './Rows'
@@ -294,9 +295,6 @@ function RememberedVoices({ settings, save }: { settings: Settings; save: (patch
   )
 }
 
-/** An agent's letter, as the design marks each agent: C for Claude Code, X for Codex, H for Hermes. */
-const agentLetter = (agent: RunnerStatus): string => (agent.runner === 'codex' ? 'X' : agent.name.trim().charAt(0).toUpperCase() || '?')
-
 /** The coding agents Togle found on this computer, and the ones the person added: any agent that speaks ACP. */
 function Agents({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
   // The agents found last (here or on the Agents screen) show at once, and are looked for again behind them.
@@ -322,7 +320,7 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
     <Section id="settings-agents" title="Agents">
       {found === null ? <Row label={false} name="Looking…" /> : !found.length ? <Row label={false} name="No agent found" /> : found.map((agent) => (
         <Fragment key={agent.runner}>
-          <Row label={false} className="agent-row" name={<span className="agent-name"><span className="av" aria-hidden="true">{agentLetter(agent)}</span><span className="agent-label">{agent.name}</span></span>}>
+          <Row label={false} className="agent-row" name={<span className="agent-name"><AgentAvatar runner={agent.runner} name={agent.name} /><span className="agent-label">{agent.name}</span></span>}>
             <span className={`setting-value ${agent.installed ? 'found' : ''}`}>{agent.removed ? 'Removed' : agent.installed ? (agent.added ? `Added · ${runsInTerminal(agent.runner) ? 'terminal' : 'conversation'}` : 'Found') : 'Not found'}</span>
             {/* Quiet, as the design draws the row (a name and how it stands): removing an agent is rare, and is not what the screen is about. */}
             {agent.removed

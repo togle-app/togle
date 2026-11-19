@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
+import { AgentMark } from './AgentMark'
 import { Menu } from './Menu'
 import { asksEveryTime, type RunnerKind, type RunnerStatus, type TaskBoxOpen } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
@@ -168,6 +169,7 @@ export function TaskBox() {
     input.current?.focus()
   }
 
+  const pickedAgent = installed.find((status) => status.runner === runner)
   return (
     <form ref={form} className="taskbox" onSubmit={(event) => void start(event)} onKeyDown={(event) => event.key === 'Escape' && api.closeTaskBox()} aria-label="Start a task">
       {loaded && !installed.length ? (
@@ -175,8 +177,8 @@ export function TaskBox() {
       ) : (
         <>
           <div className="taskbox-pick">
-            <Menu className="pick-chip" ariaLabel="Agent" title="The agent that does it" label={installed.find((status) => status.runner === runner)?.name ?? 'Pick an agent'}
-              items={installed.map((status) => ({ label: status.name, checked: status.runner === runner, onSelect: () => setRunner(status.runner) }))} />
+            <Menu className="pick-chip" ariaLabel="Agent" title="The agent that does it" label={pickedAgent ? <AgentMark runner={pickedAgent.runner} name={pickedAgent.name} /> : 'Pick an agent'}
+              items={installed.map((status) => ({ label: <AgentMark runner={status.runner} name={status.name} />, checked: status.runner === runner, onSelect: () => setRunner(status.runner) }))} />
             <Menu className="pick-chip" ariaLabel="Folder" title={folder || 'The folder it works in'} label={folder ? label(folder) : 'Pick a folder'}
               items={[
                 ...options.map((path) => ({ label: label(path), detail: path, checked: path === folder, onSelect: () => setFolder(path) })),

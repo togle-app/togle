@@ -355,6 +355,19 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .state-chip > .state-mark[data-mark='waiting']::before, .todo-chip > .state-mark[data-mark='waiting']::before { display: none; }
 .state-chip > .state-mark[data-mark='waiting']::after, .todo-chip > .state-mark[data-mark='waiting']::after { width: 6px; height: 6px; }
 @media (prefers-reduced-motion: reduce) { .state-mark[data-mark]::before, .state-mark[data-mark]::after { animation: none !important; } }
+/* An agent's mark (AgentMark.tsx): its maker's own mark in the color of the line it is in, a little taller than the text and set
+   in the line itself, so the words keep their baseline. Alone in a line (quiet) its name is its tooltip and is there for screen
+   readers, and the dot after it is not shown. An agent the person added shows its first letter in a box, then its name. In a list
+   of agents (Settings, the first minute) it fills the square. */
+.agent-mark { white-space: nowrap; }
+.agent-mark svg { display: inline-block; flex: none; width: 1.25em; height: 1.25em; margin-right: 0.4em; vertical-align: -0.28em; }
+.agent-mark.quiet { position: relative; }
+.agent-mark.quiet svg { margin-right: 0.5em; }
+.agent-mark.quiet + .agent-dot { display: none; }
+.state-chip .agent-mark.quiet svg, .todo-chip .agent-mark.quiet svg { margin-right: 0; }
+.agent-letter { display: inline-block; width: 1.3em; height: 1.3em; margin: -0.4em 0.45em -0.4em 0; border: 1px solid currentColor; border-radius: 0.3em; font-size: 0.75em; font-weight: 700; line-height: calc(1.3em - 2px); text-align: center; vertical-align: -0.12em; }
+.agent-letter::before { content: attr(data-letter); }
+.av svg { width: 14px; height: 14px; }
 /* The window hidden in the tray or minimized: nothing on its page moves until it is back. */
 :root[data-away] *, :root[data-away] *::before, :root[data-away] *::after { animation-play-state: paused !important; }
 .task-copy { display: flex; flex-direction: column; flex: 1; min-width: 0; }

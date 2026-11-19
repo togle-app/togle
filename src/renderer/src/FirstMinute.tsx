@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { LocalSpeechState, Settings, SttStatus } from '@shared/types'
 import type { RunnerStatus, TaskView } from '@shared/runner'
 import { localModelsFor } from '@shared/speech'
+import { AgentAvatar } from './AgentMark'
 import { useAccounts } from './Accounts'
 import { useHotkeys } from './hotkeys'
 
@@ -174,7 +175,7 @@ function Found() {
       <ul className="first-found" aria-label="Found on this computer">
         {installed.map((agent) => {
           const count = found.tasks.filter((task) => task.runner === agent.runner).length
-          return <li key={agent.runner}><span className="av" aria-hidden="true">{agent.runner === 'codex' ? 'X' : agent.name.charAt(0).toUpperCase()}</span><strong>{agent.name}</strong><span>{count === 1 ? '1 task' : `${count} tasks`}</span></li>
+          return <li key={agent.runner}><AgentAvatar runner={agent.runner} name={agent.name} /><strong>{agent.name}</strong><span>{count === 1 ? '1 task' : `${count} tasks`}</span></li>
         })}
       </ul>
     </div>

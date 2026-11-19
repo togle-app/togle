@@ -6,6 +6,7 @@ import { openSettings } from './open-settings'
 import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, useKeptState, WaitLine } from './kept'
+import { AgentLead, AgentMark, agentOf } from './AgentMark'
 import { PointMenu, type Point } from './PointMenu'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { withQuote, splitQuote } from '@shared/quote'
@@ -18,8 +19,6 @@ import { TerminalView } from './TerminalView'
 
 const api = window.togle
 
-/** A task's agent by name: the name it came with, else the one Togle knows it by. */
-const agentOf = (task: Pick<TaskView, 'runner' | 'agent'>): string => task.agent ?? KNOWN_AGENTS[task.runner] ?? task.runner
 const STATE_WORDS: Record<TaskView['state'], string> = { working: 'Working', waiting: 'Waiting for you', idle: 'Done', stopped: 'Stopped', failed: 'Stopped by an error' }
 // How often the list is asked for again: what runs in a terminal of its own sends no message when it changes.
 const REFRESH_MS = 4_000
@@ -847,7 +846,7 @@ function NoAgents() {
       {AGENT_INSTALLS.map((agent) => (
         <div key={agent.runner} className="no-agents-row">
           <span className="no-agents-name">
-            <strong>{agent.name}</strong> by {agent.maker} ·{' '}
+            <strong><AgentMark runner={agent.runner} name={agent.name} /></strong> by {agent.maker} ·{' '}
             <button className="link" onClick={() => api.openExternal(agent.page)}>
               Its page
             </button>
@@ -890,9 +889,10 @@ function TaskRow({ task, now, old, selected, withFolder, dragging, onSelect, onT
   // and waiting for a reply, it says why; done long ago, it says when.
   const detail = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : task.screen ? 'stopped · open it to go on' : 'stopped · reply to go on') : task.state === 'waiting' ? (task.waitingFor && !task.pending.length ? 'waiting on its screen' : 'waiting') : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `done · ${ago(task.updatedAt, now)}` : 'done'
   // A scheduled job's row is the job: its schedule, when it runs next (or that it runs now), and its last run when that failed.
-  const job = task.schedule ? [agentOf(task), task.state === 'failed' ? 'last run failed' : '', task.schedule, task.state === 'working' ? 'running now' : task.nextRun ? `next ${nextTime(task.nextRun, now)}` : ''].filter(Boolean).join(' · ') : ''
-  // Its project is the heading over it, so the line leaves out the folder, unless the person moved it to another group.
-  const line = job || (elsewhere ? `${agentOf(task)} · terminal` : [agentOf(task), withFolder ? baseName(task.folder) : '', detail].filter(Boolean).join(' · '))
+  const job = task.schedule ? [task.state === 'failed' ? 'last run failed' : '', task.schedule, task.state === 'working' ? 'running now' : task.nextRun ? `next ${nextTime(task.nextRun, now)}` : ''].filter(Boolean).join(' · ') : ''
+  // Its project is the heading over it, so the line leaves out the folder, unless the person moved it to another group. The agent
+  // is its mark (its name is the tooltip), first in the line.
+  const line = job || (elsewhere ? 'terminal' : [withFolder ? baseName(task.folder) : '', detail].filter(Boolean).join(' · '))
   const fresh = isFresh(task)
   return (
     <div
@@ -913,7 +913,7 @@ function TaskRow({ task, now, old, selected, withFolder, dragging, onSelect, onT
         <span className="task-copy">
           <strong>{task.title}</strong>
           <span>
-            {line}
+            <AgentLead runner={task.runner} name={agentOf(task)} rest={line} />
             {/* Finished, and not opened since: new until it has been on screen. */}
             {fresh && <span className="task-new"> · new</span>}
           </span>
@@ -1324,7 +1324,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
       </header>
       <div className="task-status">
         <span className="state-chip" data-state={task.signedOut ? 'failed' : task.state}><StateMark kind={task.signedOut ? 'failed' : chipMark(task.state, task.schedule)} still />{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
-        <span className="task-agent-name">{agentOf(task)}</span>
+        <span className="task-agent-name"><AgentMark runner={task.runner} name={agentOf(task)} /></span>
         {changed > 0 && <span className="hint">{`${changed} ${changed === 1 ? 'file' : 'files'} changed`}</span>}
         {twoViews && (
           <span className="segmented view-switch" role="group" aria-label="View">
@@ -1596,7 +1596,7 @@ function RemoteRow({ task, now, selected, onSelect }: { task: RemoteTask; now: n
       <StateMark kind={task.state === 'idle' ? 'done' : task.state} />
       <span className="task-copy">
         <strong>{task.title}</strong>
-        <span>{task.agent} · {task.terminal ? 'terminal' : task.folder} · {detail}</span>
+        <span><AgentLead name={task.agent} rest={`${task.terminal ? 'terminal' : task.folder} · ${detail}`} /></span>
       </span>
     </button>
   )

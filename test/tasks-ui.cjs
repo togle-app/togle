@@ -940,7 +940,7 @@ async function checkAgentSettings(T, agent) {
   // The agents Togle found, as the design's Settings lists them.
   await ui.wait("document.querySelectorAll('#settings-agents .setting').length===6")
   assert.deepEqual(await texts(ui, '#settings-agents .agent-label'), ['Claude Code', 'Codex', 'Hermes'])
-  assert.deepEqual(await texts(ui, '#settings-agents .agent-name .av'), ['C', 'X', 'H'], 'each agent with its letter, as the design marks them')
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('#settings-agents .agent-name .av')].map(av=>av.dataset.agent+':'+(av.querySelector('svg')?'mark':av.textContent))"), ['claude:mark', 'codex:mark', 'hermes:mark'], 'each agent with the mark its maker made, not a letter')
   assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add an agent'])
   // Which view a task opens in: a switch of two, the same as a task has on its own line, Terminal until it is changed.
   const viewSwitch = '#settings-agents [role=radiogroup][aria-label="Tasks open in"]'
@@ -1438,6 +1438,59 @@ async function checkMarks(T, agent, theme = 'dark') {
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
   nativeTheme.themeSource = before
+}
+
+// Where a line says which agent a task belongs to, it shows the agent's mark: the maker's own for Claude Code, Codex and Hermes,
+// a drawing in the line's color with the name as its tooltip and for screen readers (so the line's text is the same as before),
+// and for an agent the person added its first letter in a box, then its name (two can share a letter). A mark never takes focus,
+// never makes a row taller, and sits in the middle of the line's words. The task's header and To-do show it too.
+async function checkAgentMarks(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  await ui.evaluate("window.togleUITest.terminalTask({ key: 'term-aider:m1', runner: 'term-aider', agent: 'Aider', title: 'Rename the module', folder: 'C:\\\\work\\\\api-server', state: 'working', words: 'Rename the module' }, '')")
+  await ui.wait("[...document.querySelectorAll('.task-row strong')].some(e=>e.textContent==='Rename the module')")
+  const rows = await ui.evaluate(`[...document.querySelectorAll('.task-row')].map((row) => {
+    const line = row.querySelector('.task-copy > span'), mark = line.querySelector('.agent-mark')
+    const svg = mark && mark.querySelector('svg'), letter = mark && mark.querySelector('.agent-letter')
+    const range = document.createRange(), words = [...line.childNodes].find((node) => node.nodeType === 3 && node.textContent.trim())
+    range.selectNodeContents(words || line)
+    const drawn = svg ? svg.getBoundingClientRect() : null, text = range.getBoundingClientRect()
+    return {
+      title: row.querySelector('strong').textContent, line: line.textContent, height: Math.round(row.getBoundingClientRect().height * 10) / 10,
+      quiet: !!mark && mark.classList.contains('quiet'), agent: mark && mark.dataset.agent, tooltip: mark && mark.title, said: mark && (mark.querySelector('.sr-only') || {}).textContent,
+      hidden: svg ? svg.getAttribute('aria-hidden') + ',' + svg.getAttribute('focusable') : null, letter: letter ? letter.dataset.letter : null,
+      off: drawn ? Math.abs((drawn.top + drawn.height / 2) - (text.top + text.height / 2)) : null, dot: (line.querySelector('.agent-dot') && getComputedStyle(line.querySelector('.agent-dot')).display) || null
+    }
+  })`)
+  const by = (title) => rows.find((row) => row.title === title)
+  for (const [title, name, key] of [['Rebuild the pricing page', 'Claude Code', 'claude'], ['Add the status column', 'Codex', 'codex']]) {
+    const row = by(title)
+    assert.ok(row.quiet && row.agent === key, title + ': the maker\'s mark, alone in its line: ' + JSON.stringify(row))
+    assert.equal(row.tooltip, name, title + ': its name is the tooltip')
+    assert.equal(row.said, name, title + ': and what screen readers get')
+    assert.equal(row.hidden, 'true,false', title + ': the drawing is hidden from screen readers and never takes focus')
+    assert.ok(row.line.startsWith(name + ' · '), title + ': the line\'s text still starts with the agent: ' + row.line)
+    assert.equal(row.dot, 'none', title + ': the dot after the mark is not shown')
+    assert.ok(row.off <= 1.5, title + ': the mark sits in the middle of the words: ' + row.off)
+  }
+  const added = by('Rename the module')
+  assert.equal(added.letter, 'A', 'an added agent shows its first letter in a box')
+  assert.ok(!added.agent, 'it has no maker\'s mark')
+  assert.ok(added.line.startsWith('Aider · '), 'and its name, in the line: ' + added.line)
+  assert.notEqual(added.dot, 'none', 'with the dot after it, as the name is there to read')
+  assert.equal(new Set(rows.map((row) => row.height)).size, 1, 'no mark makes a row taller: ' + rows.map((row) => row.height))
+  // The task's header: the mark and the name. An added agent's: its letter and the name.
+  await ui.task('Add the status column')
+  assert.deepEqual(await ui.evaluate("(()=>{const name=document.querySelector('.task-agent-name');return [name.textContent,!!name.querySelector('svg'),name.querySelector('.agent-mark').dataset.agent]})()"), ['Codex', true, 'codex'], 'the header says Codex with its mark')
+  await ui.task('Rename the module')
+  assert.deepEqual(await ui.evaluate("(()=>{const name=document.querySelector('.task-agent-name');return [name.textContent,!!name.querySelector('svg'),name.querySelector('.agent-letter').dataset.letter]})()"), ['Aider', false, 'A'], 'an added agent: its letter and its name')
+  // To-do: the chip of an item given to a task.
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.wait("document.querySelectorAll('.todo-chip').length>=1")
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.todo-chip')].map(chip=>[chip.textContent,!!chip.querySelector('.agent-mark.quiet svg')])"), [['Claude Code · working', true], ['Claude Code · done', true]], 'a chip names the agent by its mark')
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
 }
 
 // An agent signed out: its task's row is amber and says what signs it in again, here, in the task and on To-do.
@@ -2381,6 +2434,7 @@ app.whenReady().then(async () => {
     await go(checkCallStrip)
     await go(checkStoppedTasks)
     await go(checkMarks)
+    await go(checkAgentMarks)
     await go(checkSignedOut)
     await go(checkTerminalTask)
     await go(checkAgentSettings)
