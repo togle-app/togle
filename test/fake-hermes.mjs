@@ -9,7 +9,8 @@
 //   "fail"        says why in words, then answers with a plain error
 // FAKE_CALLS names a file that gets one line for each of set_mode, set_model, new, resume and load;
 // FAKE_NO_RESUME takes session/resume away so that session/load is used; FAKE_PID_FILE gets the long command's pid;
-// FAKE_NO_COMMANDS makes it an agent that tells no commands of its own.
+// FAKE_NO_COMMANDS makes it an agent that tells no commands of its own; FAKE_NO_LIST takes the session list away (no `list` among its
+// session capabilities), FAKE_ACP_SESSIONS gives it sessions it kept before (JSON), FAKE_ACP_PAGE pages its list.
 import { spawn } from 'node:child_process'
 import { appendFileSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
@@ -110,7 +111,17 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   const fail = (text) => out({ id, error: { code: -32600, message: text } })
   switch (method) {
     case 'initialize':
-      return reply({ protocolVersion: 1, agentInfo: { name: 'hermes-agent', version: 'fake' }, agentCapabilities: { loadSession: true, sessionCapabilities: process.env.FAKE_NO_RESUME ? { list: {} } : { list: {}, resume: {}, fork: {} } } })
+      return reply({ protocolVersion: 1, agentInfo: { name: 'hermes-agent', version: 'fake' }, agentCapabilities: { loadSession: true, sessionCapabilities: { ...(process.env.FAKE_NO_LIST ? {} : { list: {} }), ...(process.env.FAKE_NO_RESUME ? {} : { resume: {}, fork: {} }) } } })
+    case 'session/list': {
+      // The sessions the agent keeps: those FAKE_ACP_SESSIONS names (as JSON: sessionId, cwd, title, updatedAt), then those made here;
+      // FAKE_ACP_PAGE is how many go in one answer, the rest behind a cursor. FAKE_LIST_FAILS makes it an error.
+      calls({ method, cursor: params?.cursor })
+      if (process.env.FAKE_LIST_FAILS) return fail('session/list is not available')
+      const kept = [...JSON.parse(process.env.FAKE_ACP_SESSIONS ?? '[]'), ...[...sessions.values()].map((made) => ({ sessionId: made.id, cwd: made.cwd, title: null, updatedAt: new Date().toISOString() }))]
+      const size = Number(process.env.FAKE_ACP_PAGE ?? 0) || kept.length || 1
+      const from = Number(params?.cursor ?? 0)
+      return reply({ sessions: kept.slice(from, from + size), ...(from + size < kept.length ? { nextCursor: String(from + size) } : {}) })
+    }
     case 'session/new': {
       const session = { id: `s${nextSession++}`, cwd: params.cwd }
       sessions.set(session.id, session)

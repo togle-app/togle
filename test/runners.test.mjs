@@ -567,6 +567,60 @@ const hermes = (env = {}, options = {}) =>
   })
 const callsOf = (file) => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [])
 
+test('an ACP agent that can list its sessions has them listed: those it kept before the task here, read page by page, and not one a task of Togle’s runs', { timeout: 30_000 }, async () => {
+  const calls = path.join(scratch(), 'calls.jsonl')
+  const kept = [
+    { sessionId: 'old-1', cwd: path.join(os.tmpdir(), 'site'), title: 'Fix the login redirect', updatedAt: '2026-11-18T10:00:00Z' },
+    { sessionId: 'old-2', cwd: path.join(os.tmpdir(), 'api'), title: null, updatedAt: '2026-11-17T09:00:00Z' },
+    { sessionId: 'old-3', cwd: '', title: '  Three\nlines  ', updatedAt: 'not a date' }
+  ]
+  const backend = hermes({ FAKE_CALLS: calls, FAKE_ACP_SESSIONS: JSON.stringify(kept), FAKE_ACP_PAGE: '2' })
+  try {
+    const rows = await backend.list()
+    assert.deepEqual(rows.map((row) => [row.id, row.title, row.folder ? path.basename(row.folder) : '', row.state, row.runner]), [
+      ['old-1', 'Fix the login redirect', 'site', 'idle', 'hermes'],
+      ['old-2', 'api', 'api', 'idle', 'hermes'],
+      ['old-3', 'Three lines', '', 'idle', 'hermes']
+    ], 'a session with no title is named by its folder')
+    assert.equal(rows[0].updatedAt, Date.parse('2026-11-18T10:00:00Z'))
+    assert.equal(rows[2].updatedAt, 0, 'a time that is not one is none')
+    assert.deepEqual(callsOf(calls).filter((call) => call.method === 'session/list').map((call) => call.cursor ?? null), [null, '2'], 'both pages were read')
+    // A session a task of Togle’s runs is that task, and not a second row.
+    const task = await backend.start({ folder: os.tmpdir(), prompt: 'say ok' })
+    const again = await backend.list()
+    assert.equal(again.some((row) => row.id === task.id), false)
+    assert.deepEqual(again.map((row) => row.id), ['old-1', 'old-2', 'old-3'])
+    // Opened from the list, a session goes through the agent’s own way of picking one up, in the folder it was in.
+    const opened = await backend.resume('old-1', { asks: true, folder: rows[0].folder })
+    assert.equal(opened.id, 'old-1')
+    assert.deepEqual(callsOf(calls).filter((call) => call.method === 'session/resume').map((call) => [call.sessionId, call.cwd]), [['old-1', rows[0].folder]])
+  } finally {
+    await backend.close()
+  }
+})
+
+test('an ACP agent that offers no list, or cannot give it, lists none, and is not asked again at once', { timeout: 30_000 }, async () => {
+  const dir = scratch()
+  const kept = JSON.stringify([{ sessionId: 'old-1', cwd: dir, title: 'Kept', updatedAt: '2026-11-18T10:00:00Z' }])
+  const quiet = path.join(dir, 'quiet.jsonl')
+  const none = hermes({ FAKE_NO_LIST: '1', FAKE_ACP_SESSIONS: kept, FAKE_CALLS: quiet })
+  try {
+    assert.deepEqual(await none.list(), [], 'it does not say it can list: the hub’s record of the tasks Togle started stands for its list')
+    assert.equal(callsOf(quiet).filter((call) => call.method === 'session/list').length, 0, 'and it was not asked')
+  } finally {
+    await none.close()
+  }
+  const failed = path.join(dir, 'failed.jsonl')
+  const failing = hermes({ FAKE_LIST_FAILS: '1', FAKE_ACP_SESSIONS: kept, FAKE_CALLS: failed })
+  try {
+    assert.deepEqual(await failing.list(), [])
+    assert.deepEqual(await failing.list(), [])
+    assert.equal(callsOf(failed).filter((call) => call.method === 'session/list').length, 1, 'asked once: the next look leaves it alone for a while')
+  } finally {
+    await failing.close()
+  }
+})
+
 test('Hermes starts a task, keeps the name given, asks in its asking mode, and ends the turn by what it said', { timeout: 30_000 }, async () => {
   const calls = path.join(scratch(), 'calls.jsonl')
   const backend = hermes({ FAKE_CALLS: calls }, { model: 'openai-codex:gpt-6.1-sol' })

@@ -5,7 +5,9 @@
 // What trying Hermes on Windows (Hermes 0.22) showed, which this follows for every ACP agent:
 // - Starting a session takes several seconds, and a turn is one `session/prompt` that answers when the turn ends.
 // - `session/cancel` ends the turn and the command that is running, so Stop needs no second press.
-// - ACP's own list of sessions may be empty for sessions it did not start, so Togle keeps a record of its own (the hub).
+// - ACP's own list of sessions (`session/list`, offered as `sessionCapabilities.list`) may be empty for sessions it did not start, so Togle
+//   keeps a record of its own (the hub). An agent that does offer the list has its sessions listed as tasks, the ones the person has in
+//   its own app or terminal too; one that does not (Grok's `grok agent stdio` offers `loadSession` only) lists none.
 // - A command that needs permission arrives as `session/request_permission` with options: allow once or always, reject
 //   once or always. Allow once is the "once" option; "always" is the agent's own, said in its own words.
 import { execFile, spawn } from 'node:child_process'
@@ -375,6 +377,8 @@ class AcpServer {
   readonly peer: JsonRpcPeer
   /** Whether the agent can pick a session up with `session/resume` (else `session/load` does). */
   resumes = false
+  /** Whether the agent can list the sessions it keeps (`session/list`). */
+  lists = false
 
   constructor(
     readonly runner: string,
@@ -405,7 +409,9 @@ class AcpServer {
       const init = rec(
         await this.peer.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'togle', title: 'Togle', version } }, 60_000)
       )
-      this.resumes = 'resume' in rec(rec(init.agentCapabilities).sessionCapabilities)
+      const sessions = rec(rec(init.agentCapabilities).sessionCapabilities)
+      this.resumes = 'resume' in sessions
+      this.lists = 'list' in sessions
     } catch (error) {
       const why = this.peer.errors.join('').trim().split('\n').pop()
       throw new Error(`${this.name} did not start${why ? `: ${why}` : '.'}`, { cause: error })
@@ -438,10 +444,17 @@ class AcpServer {
   }
 }
 
+/** How long an agent that could not be asked for its list is left alone, in milliseconds. */
+const LIST_RETRY_MS = 60_000
+/** The most pages of its list that are read (an agent may keep many sessions). */
+const LIST_PAGES = 3
+
 export class AcpBackend implements Backend {
   readonly runner: string
   readonly name: string
   private server: Promise<AcpServer> | null = null
+  /** When asking the agent for its list last failed. */
+  private listFailedAt = 0
 
   constructor(private readonly options: AcpOptions) {
     this.runner = options.runner
@@ -473,9 +486,38 @@ export class AcpBackend implements Backend {
     return server
   }
 
-  /** ACP may list none of the sessions it did not start, so the hub's record of started tasks is the list. */
+  /**
+   * The sessions the agent keeps, for an agent that says it can list them (`sessionCapabilities.list`, ACP's `session/list`): the ones
+   * the person has in the agent's own app or terminal, and not only the ones Togle started. The agent's program is started to ask, and
+   * stays, as it does for a task. An agent that offers no list, or cannot start, lists none (the hub's record of the tasks Togle started
+   * stands for it), and is not started again for a list for a minute. A session may list as the agent's own and not be there when it
+   * is opened: that is told then.
+   */
   async list(): Promise<TaskInfo[]> {
-    return []
+    if (Date.now() - this.listFailedAt < LIST_RETRY_MS) return []
+    try {
+      const server = await this.connect()
+      if (!server.lists) return []
+      const rows: TaskInfo[] = []
+      let cursor = ''
+      for (let page = 0; page < LIST_PAGES; page++) {
+        const found = rec(await server.peer.request('session/list', cursor ? { cursor } : {}, 30_000))
+        for (const item of list(found.sessions).map(rec)) {
+          const id = text(item.sessionId)
+          // One a task of Togle's runs is that task, and not a second row.
+          if (!id || server.tasks.has(id)) continue
+          const folder = text(item.cwd)
+          const title = oneLine(text(item.title)) || (folder ? path.basename(folder.replace(/[\\/]+$/, '')) : '') || `${this.name} session`
+          rows.push({ id, runner: this.runner, title, folder, state: 'idle', updatedAt: Date.parse(text(item.updatedAt)) || 0 })
+        }
+        cursor = text(found.nextCursor)
+        if (!cursor) break
+      }
+      return rows
+    } catch {
+      this.listFailedAt = Date.now()
+      return []
+    }
   }
 
   async start(options: StartOptions): Promise<TaskHandle> {
