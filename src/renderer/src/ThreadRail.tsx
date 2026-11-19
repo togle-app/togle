@@ -3,6 +3,8 @@ import type { Prompt } from './TaskThread'
 
 /** How far under the top of the conversation a question's turn may begin and still be the one being read. */
 const SLACK = 8
+/** The room the conversation keeps under its line (its top padding): a turn taken to the top is put there, not at the line. */
+const roomOf = (box: HTMLElement): number => parseFloat(getComputedStyle(box).paddingTop) || 0
 /** The most of a question its tip shows. */
 const TIP_LENGTH = 160
 const timeOf = (at: number): string => new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
@@ -32,7 +34,7 @@ export function ThreadRail({ prompts, log, onEarlier, onLeaveEnd }: { prompts: P
     // A pressed question whose turn has gone out of view (the conversation was taken somewhere else) is let go of.
     const turn = pickedKey.current === null ? null : box.querySelector<HTMLElement>(`[data-turn="${pickedKey.current}"]`)
     if (pickedKey.current !== null && (!turn || turn.offsetTop + turn.offsetHeight <= box.scrollTop || turn.offsetTop >= box.scrollTop + box.clientHeight)) setPicked(null)
-    const line = box.scrollTop + SLACK
+    const line = box.scrollTop + SLACK + roomOf(box)
     let at = 0
     prompts.forEach((prompt, index) => {
       const top = tops.get(prompt.key)
@@ -89,7 +91,7 @@ export function ThreadRail({ prompts, log, onEarlier, onLeaveEnd }: { prompts: P
     onLeaveEnd()
     setPicked(prompt.key)
     const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    box.scrollTo({ top: Math.max(0, turn.offsetTop), behavior: still ? 'auto' : 'smooth' })
+    box.scrollTo({ top: Math.max(0, turn.offsetTop - roomOf(box)), behavior: still ? 'auto' : 'smooth' })
   }
 
   const point = (button: HTMLElement, text: string, at?: number): void => {
