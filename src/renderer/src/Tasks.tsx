@@ -1741,7 +1741,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                               replyText.current?.focus()
                             }}>Edit</button>
                           )}
-                          <button type="button" className="ghost small held-remove" aria-label={`Remove queued message ${index + 1}`} title="Take it back" onClick={() => void onHeld('drop', index)}>×</button>
+                          <button type="button" className="ghost small held-remove" aria-label={`Remove queued message ${index + 1}`} title="Take it back" onClick={() => void onHeld('drop', index)}><Icon name="close" size={12} /></button>
                         </span>
                       </li>
                     )

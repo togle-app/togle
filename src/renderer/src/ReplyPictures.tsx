@@ -103,7 +103,7 @@ export function PictureChips({ pictures, onRemove }: { pictures: Attached[]; onR
               </span>
             </button>
             <button type="button" className="chip-remove" aria-label={`Remove ${picture.name}`} title="Remove" onClick={() => onRemove(picture.path)}>
-              <Icon name="close" size={9} />
+              <Icon name="close" size={10} />
             </button>
           </li>
         ))}

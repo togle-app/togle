@@ -3,6 +3,7 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { caughtOnEnter, CLEAR_LINE, isLeftArrow, leftLeaves, LEFT_NOTE, noteFor, promptIsEmpty, TypedLine } from '@shared/screen-guard'
+import { Icon } from './Icon'
 import { WaitLine } from './kept'
 
 const api = window.togle
@@ -258,7 +259,7 @@ export function TerminalView({ taskKey, screenId, guard, active = true }: { task
             <b>{note.title}</b> {note.body}
           </span>
           <button type="button" className="ghost small" aria-label="Put this note away" onClick={() => setNote(null)}>
-            ×
+            <Icon name="close" size={12} />
           </button>
         </div>
       )}

@@ -21,6 +21,15 @@ app.on('window-all-closed', () => {})
 let checkpoint = 'startup'
 const timeout = setTimeout(() => { console.error('Window checks timed out at ' + checkpoint); app.exit(1) }, 300000)
 
+// An icon in its button, as a person sees it: the middle of the icon against the middle of the room inside the button (its border and padding taken off), the
+// room on each side, in pixels: the same on every side, and a multiple of 4 px, which is whole device pixels at 100%, 125%, 150%, 175% and 200% alike.
+const centred = async (ui, selector, what) => {
+  const at = await ui.evaluate("(() => { const button = document.querySelector(" + JSON.stringify(selector) + "); const icon = button?.querySelector(':scope > svg'); if (!icon) return null; const b = button.getBoundingClientRect(), i = icon.getBoundingClientRect(), s = getComputedStyle(button); const left = b.left + parseFloat(s.borderLeftWidth) + parseFloat(s.paddingLeft), right = b.right - parseFloat(s.borderRightWidth) - parseFloat(s.paddingRight), top = b.top + parseFloat(s.borderTopWidth) + parseFloat(s.paddingTop), bottom = b.bottom - parseFloat(s.borderBottomWidth) - parseFloat(s.paddingBottom); return { room: [i.left - left, right - i.right, i.top - top, bottom - i.bottom] } })()")
+  assert.ok(at, what + ' is an icon in its button, not a letter')
+  assert.ok(at.room.every((side) => Math.abs(side - at.room[0]) < 0.01), what + ' is in the middle of its button, the same room on every side: ' + JSON.stringify(at.room))
+  assert.equal(at.room[0] % 4, 0, what + ' has a multiple of 4 px round it: ' + JSON.stringify(at.room))
+}
+
 async function open(T, agent, scenario, width = 1024, height = 850, surface) {
   checkpoint = scenario + ' at ' + width + 'px'
   const settings = structuredClone(T.getSettings())
@@ -229,6 +238,7 @@ async function checkCall(T, agent) {
   const onCall = (await ui.calls('setCallAgents')).at(-1)
   assert.deepEqual(onCall[1], ['claude:s9'])
   assert.equal(await ui.evaluate("document.querySelector('.agent-chip .cut').textContent"), 'Claude Code · website')
+  await centred(ui, '.agent-chip button', 'the cross of an agent on the call')
   assert.equal(await ui.evaluate("document.querySelector('.agent-chip input').checked"), true, 'connected, it is ticked: it gets what is said')
   await ui.capture('live-call-agents')
   await ui.click('.call-agents .primary', 'Send what was said')
@@ -245,6 +255,7 @@ async function checkCall(T, agent) {
   assert.deepEqual((await ui.calls('giveCall')).at(-1)[0], { call: onCall[0], tasks: ['claude:s9'], prompt: 'Did Dario agree to two plans?' }, 'the question goes to the ticked agents, with no other words')
   assert.equal(await ui.evaluate("document.querySelector('.call-ask input').value"), '', 'the box is empty once it was asked')
   assert.equal(await ui.evaluate("document.querySelector('.call-answer-head b').textContent"), 'Claude Code · website')
+  await centred(ui, '.call-answer-head .ghost', 'the cross of an answer')
   assert.equal(await ui.evaluate("document.querySelector('.call-answer-question').textContent"), 'You asked: Did Dario agree to two plans?')
   assert.equal(await ui.evaluate("document.querySelector('.call-answer .hint:not(.call-answer-question)').textContent"), 'Working on it…', 'until it has said something')
   await ui.evaluate("window.togleUITest.answerOnCall('claude:s9', 'Did Dario agree to two plans?', 'Yes. At 12:38 Dario asks to ship with two plans first, and nobody objects.')")

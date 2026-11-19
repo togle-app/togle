@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { AgentMark } from './AgentMark'
+import { Icon } from './Icon'
 import { Menu } from './Menu'
 import { asksEveryTime, type RunnerKind, type RunnerStatus, type TaskBoxOpen } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
@@ -190,7 +191,7 @@ export function TaskBox() {
             <div className="taskbox-attach">
               <span title={attach.path}>Call: {attach.title}</span>
               <button type="button" aria-label="Leave the call out" title="Leave the call out" onClick={() => setAttach(null)}>
-                ×
+                <Icon name="close" size={10} />
               </button>
             </div>
           )}
@@ -198,7 +199,7 @@ export function TaskBox() {
             <div className="taskbox-todo">
               <span title={todo.text}>To-do: {todo.text}</span>
               <button type="button" aria-label="Not for this to-do" title="Not for this to-do: the task goes on the list as an item of its own" onClick={() => setTodo(null)}>
-                ×
+                <Icon name="close" size={10} />
               </button>
             </div>
           )}

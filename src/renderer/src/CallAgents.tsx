@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { stepsLine, type CallAgents as CallAgentList, type GiveResult, type RunnerKind, type RunnerStatus, type TaskView } from '@shared/runner'
 import { AgentLead, AgentMark, agentOf } from './AgentMark'
+import { Icon } from './Icon'
 import { Markdown } from './Markdown'
 import { useKeptState } from './kept'
 import { Menu } from './Menu'
@@ -128,7 +129,7 @@ export function CallAgentsRow({ call, live }: { call: string; live: boolean }) {
             <span key={key} className="agent-chip" title={task ? `${task.title} · ${where(task)}${agents.sent[key] ? ` · sent ${new Date(agents.sent[key]).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}` : 'That task is gone'}>
               {live && <input type="checkbox" aria-label={`Send to ${task?.title ?? 'this agent'}`} checked={!unticked.includes(key)} onChange={(event) => setUnticked((previous) => (event.target.checked ? previous.filter((item) => item !== key) : [...previous, key]))} />}
               <span className="cut">{task ? <AgentLead runner={task.runner} name={agentOf(task)} rest={task.folder ? baseName(task.folder) : task.title} /> : 'Gone'}</span>
-              <button type="button" className="ghost small" aria-label={`Take ${task?.title ?? 'this agent'} off the call`} onClick={() => void change(agents.keys.filter((item) => item !== key))}>×</button>
+              <button type="button" className="ghost small" aria-label={`Take ${task?.title ?? 'this agent'} off the call`} onClick={() => void change(agents.keys.filter((item) => item !== key))}><Icon name="close" size={10} /></button>
             </span>
           )
         })}
@@ -225,7 +226,7 @@ function CallAnswer({ taskKey, asked, task, onDismiss }: { taskKey: string; aske
         <b className="cut">{task ? <AgentLead runner={task.runner} name={agentOf(task)} rest={task.folder ? baseName(task.folder) : task.title} /> : 'Gone'}</b>
         {state && <span className="state-chip" data-state={state}>{state === 'idle' && !said.text ? 'Idle' : ANSWER_STATE[state]}</span>}
         {task && <button type="button" className="link" onClick={() => openTaskFrom(taskKey)} title="Open the task in Agents">Open</button>}
-        <button type="button" className="ghost small" aria-label="Dismiss this answer" onClick={onDismiss}>×</button>
+        <button type="button" className="ghost small" aria-label="Dismiss this answer" onClick={onDismiss}><Icon name="close" size={12} /></button>
       </header>
       <p className="hint call-answer-question">You asked: {asked.question}</p>
       {said.text

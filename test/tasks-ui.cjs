@@ -76,6 +76,16 @@ async function open(T, agent, width, surface, extra = {}) {
 }
 
 const texts = (ui, selector) => ui.evaluate("[...document.querySelectorAll(" + JSON.stringify(selector) + ")].map(e=>e.textContent.trim().replace(/\\s+/g,' '))")
+// An icon in its button, as a person sees it: the middle of the icon against the middle of the room inside the button (its border and padding taken off), the
+// room on each side, in pixels. A cross that is a letter, a button whose padding is wider than the button (the base rule button.small has 9px a side, and once
+// pushed the cross of the quote off to the right), or an icon on a half pixel, is off: the same room on every side, and a multiple of 4 px, which is whole
+// device pixels at 100%, 125%, 150%, 175% and 200% alike.
+const centred = async (ui, selector, what) => {
+  const at = await ui.evaluate("(() => { const button = document.querySelector(" + JSON.stringify(selector) + "); const icon = button?.querySelector(':scope > svg'); if (!icon) return null; const b = button.getBoundingClientRect(), i = icon.getBoundingClientRect(), s = getComputedStyle(button); const left = b.left + parseFloat(s.borderLeftWidth) + parseFloat(s.paddingLeft), right = b.right - parseFloat(s.borderRightWidth) - parseFloat(s.paddingRight), top = b.top + parseFloat(s.borderTopWidth) + parseFloat(s.paddingTop), bottom = b.bottom - parseFloat(s.borderBottomWidth) - parseFloat(s.paddingBottom); return { room: [i.left - left, right - i.right, i.top - top, bottom - i.bottom] } })()")
+  assert.ok(at, what + ' is an icon in its button, not a letter')
+  assert.ok(at.room.every((side) => Math.abs(side - at.room[0]) < 0.01), what + ' is in the middle of its button, the same room on every side: ' + JSON.stringify(at.room))
+  assert.equal(at.room[0] % 4, 0, what + ' has a multiple of 4 px round it: ' + JSON.stringify(at.room))
+}
 // A task in the Agents list dragged over what `target` finds and held there (no drop), and then let go of elsewhere.
 const holdOver = (ui, title, target) => ui.evaluate("(async()=>{const item=[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent===" + JSON.stringify(title) + ");window.__held=new DataTransfer();item.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:window.__held}));await new Promise(r=>setTimeout(r,60));" + target + ".dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:window.__held}));return true})()")
 const letGo = (ui, title) => ui.evaluate("[...document.querySelectorAll('.task-item')].find(i=>i.querySelector('strong').textContent===" + JSON.stringify(title) + ").dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:window.__held}))")
@@ -482,6 +492,7 @@ async function checkTasks(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.held-line').textContent"), 'Goes in when Claude Code finishes this turn.')
   assert.deepEqual(await texts(ui, '.held-actions button'), ['Interrupt and send'], 'it goes in by itself, or now with an interrupt')
   assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), '', 'the box is empty again')
+  await centred(ui, '.held-remove', 'the cross of a queued message')
   await ui.click('.held-remove', 'Remove queued message 1')
   await ui.wait("!document.querySelector('.held-reply')")
   assert.deepEqual((await ui.calls('heldRunnerReply')).map(call => call.args).at(-1), ['claude:s4', 'drop', 0], 'the one message is taken back')
@@ -553,6 +564,7 @@ async function checkTasks(T, agent) {
     let from = await sentCount()
     await enter()
     assert.equal(await ui.evaluate("document.querySelector('.terminal-note b')?.textContent"), '/exit is not run here', 'the note names the command')
+    await centred(ui, '.terminal-note button', 'the cross of the note over the screen')
     assert.ok((await note()).includes('Hand back closes the screen, and the task goes on.'), 'and says what to do instead')
     assert.deepEqual(await sentSince(from), ['\x05\x15'], 'Enter was not sent: the line was emptied instead')
     await ui.capture('tasks-exit-kept-off')
@@ -886,6 +898,7 @@ async function checkTaskBox(T, agent) {
   await ui.evaluate("window.togleUITest.emit('onTaskBoxShown',{prompt:'Review the onboarding copy',todo:{line:0,text:'Review the onboarding copy'},runner:'claude',folder:'C:\\\\work\\\\website'})")
   await ui.wait("!!document.querySelector('.taskbox-todo')")
   assert.equal((await texts(ui, '.taskbox-todo span'))[0], 'To-do: Review the onboarding copy')
+  await centred(ui, '.taskbox-todo button', 'the cross of the to-do chip')
   assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').value"), 'Review the onboarding copy')
   assert.deepEqual(await texts(ui, '.pick-chip'), ['Claude Code', 'website'], 'the agent and the folder it was opened with')
   await ui.capture('task-box-todo')
@@ -2442,6 +2455,7 @@ async function checkQuote(T, agent) {
   await mouse('mousePressed', at[0], at[1]); await mouse('mouseReleased', at[0], at[1])
   await ui.wait("!!document.querySelector('.quote-bar')")
   assert.equal(await ui.evaluate("document.querySelector('.quote-bar-words span').textContent"), words)
+  await centred(ui, '.quote-bar-remove', 'the cross of the quote')
   assert.equal(await ui.evaluate("getSelection().toString()"), '', 'the selection is let go')
   assert.equal(await ui.evaluate("document.activeElement.tagName+':'+document.activeElement.getAttribute('aria-label')"), 'TEXTAREA:Reply to the agent')
   assert.equal(await ui.evaluate("!!" + float), false)
@@ -3068,6 +3082,7 @@ async function checkReplyDock(T, agent) {
   const chip = await box('.reply-chip'), cross = await box('.chip-remove')
   assert.ok(cross.right >= chip.right - 3 && cross.right <= chip.right + 9 && cross.top <= chip.top + 1 && cross.top >= chip.top - 10 && cross.width <= 20, 'a small button at the chip\'s top right: ' + JSON.stringify({ chip, cross }))
   assert.equal(await ui.evaluate("document.querySelector('.chip-remove').getAttribute('aria-label')"), 'Remove paste-20261118-120000.png')
+  await centred(ui, '.chip-remove', 'the cross of a picture chip')
   assert.deepEqual(await ui.evaluate("[" + round + ".classList.contains('stop')," + round + ".disabled]"), [false, false], 'a picture alone can be sent: Send, not Stop')
   assert.ok((await box('.task-dock')).bottom === dock.bottom, 'the dock grows upward: its foot stays where it was')
   // It opens whole, with a zoom: the percentage, out and in, and the keys.

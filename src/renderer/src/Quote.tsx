@@ -1,5 +1,6 @@
 import { useEffect, useState, type RefObject } from 'react'
 import { cleanQuote } from '@shared/quote'
+import { Icon } from './Icon'
 
 /** Where the person's selection is, for the Quote button: its words, and the place over it (or under it, near the top). */
 export interface QuoteSpot {
@@ -100,7 +101,7 @@ export function QuoteBar({ quote, onRemove }: { quote: string; onRemove: () => v
         <span>{quote}</span>
       </span>
       <button type="button" className="ghost small quote-bar-remove" aria-label="Remove the quote" title="Remove the quote (Esc)" onClick={onRemove}>
-        ×
+        <Icon name="close" size={12} />
       </button>
     </div>
   )
