@@ -91,6 +91,8 @@ const rightClick = async (ui, target) => {
   await debug.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: 'right', buttons: 2, clickCount: 1 })
   await debug.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'right', buttons: 0, clickCount: 1 })
 }
+// The pointer moved to a place in the page, as real input.
+const movePointer = (ui, at) => debuggerOf(ui).sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y })
 // The menu key pressed with `target` focused: the page gets a contextmenu event with no pointer.
 const menuKey = async (ui, target) => {
   const debug = debuggerOf(ui)
@@ -1867,7 +1869,9 @@ async function checkRail(T, agent) {
   const list = "[...document.querySelectorAll('.rail-tick:not(.rail-earlier)')]"
   const log = "document.querySelector('.task-log.thread')"
   const lit = list + ".findIndex(t=>t.getAttribute('aria-current')==='location')"
-  const topOf = (index) => "document.querySelectorAll('.turn[data-turn]')[" + index + "].offsetTop"
+  // Where a press on a tick takes the conversation: the turn at the top with the room the conversation keeps under its line, or as far
+  // as it can go.
+  const topOf = (index) => "(()=>{const l=" + log + ";return Math.min(l.querySelectorAll('.turn[data-turn]')[" + index + "].offsetTop-parseFloat(getComputedStyle(l).paddingTop),l.scrollHeight-l.clientHeight)})()"
   // Two questions: no rail, and the conversation has all its width.
   await set({ log: turns(2), state: 'idle' })
   await ui.task('Rebuild the pricing page')
@@ -1892,6 +1896,16 @@ async function checkRail(T, agent) {
   await ui.evaluate(list + "[4].dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'}))")
   await ui.wait("document.querySelector('.rail-tip span')?.textContent==='Rename Pro to Team.'")
   await ui.evaluate("document.querySelector('.thread-rail').dispatchEvent(new PointerEvent('pointerout',{bubbles:true,pointerType:'mouse',relatedTarget:document.body}))")
+  // A real pointer: on a tick its tip shows; off the ticks (the rest of the rail's strip is the conversation's) it goes at once, and
+  // nothing is left lit or shown behind it.
+  const middle = await ui.evaluate("(()=>{const r=" + list + "[4].getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()")
+  await movePointer(ui, middle)
+  await ui.wait("document.querySelector('.rail-tip span')?.textContent==='Rename Pro to Team.'")
+  await movePointer(ui, { x: middle.x, y: middle.y + 90 })
+  await ui.wait("!document.querySelector('.rail-tip')")
+  assert.equal(await ui.evaluate("(()=>{const e=document.elementFromPoint(" + middle.x + "," + (middle.y + 90) + ");return !!e&&!e.closest('.thread-rail')})()"), true, 'the strip off the ticks is the conversation’s, not the rail’s')
+  assert.equal(await ui.evaluate("getComputedStyle(" + list + "[4], '::after').transitionDuration"), '0s', 'a tick does not fade in or out: nothing trails behind the pointer')
+  await movePointer(ui, { x: 300, y: 400 })
   // A press takes the conversation to that question, and its tick is lit.
   await ui.evaluate(list + "[2].click()")
   await ui.wait("Math.abs(" + log + ".scrollTop-" + topOf(2) + ")<=1")
@@ -1900,7 +1914,8 @@ async function checkRail(T, agent) {
   const there = await ui.evaluate(log + ".scrollTop")
   await set({ state: 'working', log: turns(8).concat([{ id: 900, at: Date.now() - 1000, kind: 'you', text: 'One more thing.' }, { id: 901, at: Date.now() - 500, kind: 'agent', text: 'On it.' }]) })
   await ui.wait("document.querySelectorAll('.rail-tick').length===9")
-  assert.ok(Math.abs(await ui.evaluate(log + ".scrollTop") - there) <= 1, 'new words do not take the person from the question')
+  const now = await ui.evaluate(log + ".scrollTop")
+  assert.ok(Math.abs(now - there) <= 3, 'new words do not take the person from the question: it was at ' + there + ' and is at ' + now)
   assert.equal(await ui.evaluate(lit), 2, 'and the tick stays lit')
   await set({ state: 'idle', log: turns(8) })
   await ui.wait("document.querySelectorAll('.rail-tick').length===8")

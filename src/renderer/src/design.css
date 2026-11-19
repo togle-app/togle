@@ -447,11 +447,13 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
    rail sits between it and the bar. */
 .task-log.thread.has-rail { padding-right: 29px; }
 .thread-rail { position: absolute; top: 0; right: 8px; bottom: 14px; z-index: 5; width: 22px; pointer-events: none; }
-.rail-ticks { display: flex; flex-direction: column; height: 100%; overflow-y: auto; overscroll-behavior: contain; pointer-events: auto; scrollbar-width: none; }
+/* Only the ticks take the pointer: the rest of the strip is the conversation's, and a tip never stays for a pointer that is not on a tick. */
+.rail-ticks { display: flex; flex-direction: column; height: 100%; overflow-y: auto; overscroll-behavior: contain; pointer-events: none; scrollbar-width: none; }
 .rail-ticks::-webkit-scrollbar { display: none; }
 .rail-track { position: relative; display: flex; flex: none; flex-direction: column; margin-block: auto; }
-.rail-tick { position: relative; display: flex; flex: none; align-items: center; justify-content: flex-end; box-sizing: border-box; width: 22px; height: 12px; margin: 0; padding: 0 4px 0 0; border: 0; border-radius: 4px; background: none; cursor: pointer; }
-.rail-tick::after { content: ''; width: 8px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--muted) 55%, transparent); transform-origin: right center; transition: transform 0.12s ease-out, background-color 0.12s; }
+.rail-tick { position: relative; display: flex; flex: none; align-items: center; justify-content: flex-end; box-sizing: border-box; width: 22px; height: 12px; margin: 0; padding: 0 4px 0 0; border: 0; border-radius: 4px; background: none; cursor: pointer; pointer-events: auto; }
+/* No transition: the tick the pointer is on is lit at once and is not the moment it is off, so nothing trails behind a pointer. */
+.rail-tick::after { content: ''; width: 8px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--muted) 55%, transparent); transform-origin: right center; }
 .rail-tick:hover:not(:disabled) { background: none; }
 .rail-tick:hover::after, .rail-tick:focus-visible::after { background: var(--ink); transform: scaleX(1.5); }
 .rail-tick[aria-current='location']::after { background: var(--togle); transform: scaleX(1.5); }
@@ -461,7 +463,6 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .rail-tip { position: absolute; right: calc(100% + 6px); display: flex; flex-direction: column; gap: 2px; width: max-content; max-width: min(300px, 70vw); padding: 7px 10px; transform: translateY(-50%); border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 14px 28px -12px var(--shadow); color: var(--ink); font-size: 12px; line-height: 1.4; pointer-events: none; }
 .rail-tip time { color: var(--muted); font-size: 11px; }
 .rail-tip span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow-wrap: anywhere; }
-@media (prefers-reduced-motion: reduce) { .rail-tick::after { transition: none; } }
 /* Quote and reply (Quote.tsx): the Quote button over a part of one message the person has selected, the bar over the reply box that
    holds the part being answered, and that part drawn over the reply in the card of what was said (one line, so the pinned card
    stays three lines: the quote's line and two of the reply; opened, all of it). */

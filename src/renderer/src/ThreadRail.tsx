@@ -130,7 +130,7 @@ export function ThreadRail({ prompts, log, onEarlier, onLeaveEnd }: { prompts: P
       <div className="rail-ticks" ref={ticks}>
         <div className="rail-track">
           {onEarlier && (
-            <button type="button" className="rail-tick rail-earlier" aria-label="Show earlier turns" tabIndex={-1} onClick={onEarlier} onPointerEnter={(event) => point(event.currentTarget, 'Show earlier turns')} onFocus={(event) => point(event.currentTarget, 'Show earlier turns')} onBlur={() => setTip(null)} />
+            <button type="button" className="rail-tick rail-earlier" aria-label="Show earlier turns" tabIndex={-1} onClick={onEarlier} onPointerEnter={(event) => point(event.currentTarget, 'Show earlier turns')} onPointerLeave={(event) => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.rail-tick'))) setTip(null) }} onFocus={(event) => point(event.currentTarget, 'Show earlier turns')} onBlur={() => setTip(null)} />
           )}
           {prompts.map((prompt, index) => (
             <button
@@ -142,6 +142,8 @@ export function ThreadRail({ prompts, log, onEarlier, onLeaveEnd }: { prompts: P
               tabIndex={index === active ? 0 : -1}
               onClick={() => jump(prompt)}
               onPointerEnter={(event) => point(event.currentTarget, prompt.text, prompt.at)}
+              // Off a tick, its tip goes (on to another tick, it goes there).
+              onPointerLeave={(event) => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.rail-tick'))) setTip(null) }}
               onFocus={(event) => point(event.currentTarget, prompt.text, prompt.at)}
               onBlur={() => setTip(null)}
             />
