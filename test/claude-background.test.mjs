@@ -90,6 +90,12 @@ const watch = (task) => {
   return events
 }
 const type = (task, words) => task.terminal.write(`${words}\r`)
+/**
+ * Waits until the task's screen is connected to the session. The screen's own program (`claude attach`) takes a moment to start and look at the session; one
+ * that looks after the session was ended finds it stopped and brings it back, as Claude Code does when a stopped session is opened. So a test that ends a
+ * session right after starting it waits for this first.
+ */
+const connected = (task) => until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
 /** Another program on the session, as a second window is: it connects to the session's own port. */
 async function another(home, id) {
   const socket = net.connect(job(home, id).port, '127.0.0.1')
@@ -762,6 +768,7 @@ test('End it ends the session and closes its screen; opening it brings the same 
     const id = task.id
     const sessionId = job(home, task.screen.job).sessionId
     const pid = job(home, task.screen.job).pid
+    await connected(task)
     await task.endCommands()
     await until(() => !alive(pid), 'the program to end')
     assert.equal(task.state, 'stopped')
@@ -1011,9 +1018,7 @@ test('a task of Togle\'s that the person opens in their own terminal later is To
   const a = claude({ home, keep })
   const task = await a.backend.start({ folder: scratch(), prompt: '', title: 'Comes back' })
   const jobId = task.screen.job
-  // The screen's own program (`claude attach`) takes a moment to start and look at the session. One that looked after the session was ended would find
-  // it stopped and bring it back, as Claude Code does when a stopped session is opened: so it is waited for.
-  await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
+  await connected(task)
   await task.endCommands()
   await a.backend.close()
   const b = claude({ home, keep })
@@ -1127,6 +1132,7 @@ test('a session a terminal has open and a stopped background session that has it
   const { backend, home } = claude()
   try {
     const task = await backend.start({ folder: dir, prompt: '', title: 'Both' })
+    await connected(task)
     await task.endCommands()
     await until(() => !alive(job(home, task.screen.job).pid), 'the session to end')
     writeFileSync(path.join(home, 'interactive.json'), JSON.stringify([{ pid: process.pid, sessionId: task.id, cwd: dir }]))
