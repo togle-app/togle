@@ -96,7 +96,10 @@ export function addedAgentsFrom(value: unknown): AddedAgent[] {
  */
 export type TaskState = 'working' | 'waiting' | 'idle' | 'stopped' | 'failed'
 
-/** A command a task started that still runs in the background (Claude Code calls it a shell): what it runs, and since when. */
+/**
+ * A command a task started that still runs in the background (Claude Code calls it a shell): what it runs, and since when. A monitor
+ * has the same shape: its description for `label`.
+ */
 export interface BackgroundShell {
   id: string
   /** Its command, in one line. */
@@ -128,9 +131,15 @@ export interface TaskInfo {
   waitingFor?: string
   /**
    * The commands the task started that still run in the background, when its agent tells (Claude Code): its turn can be over
-   * while they run, and then it is Done, not working.
+   * while they run, and then it is Idle, with the commands said.
    */
   shells?: BackgroundShell[]
+  /**
+   * What the task watches in the background for its agent to go on with (Claude Code's monitors: the CI runs it waits on, a log, a
+   * pull request), when its agent tells. A monitor says something to its agent when there is something, and the agent goes on by
+   * itself: a task that waits on one is Working, with the monitors said, not Idle.
+   */
+  monitors?: BackgroundShell[]
   /**
    * A task that runs in the background (Claude Code's own background sessions): the id its agent opens its screen with.
    * It goes on without any window, so there is no program to take over: its screen is opened.

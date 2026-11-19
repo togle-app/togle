@@ -118,6 +118,8 @@ export interface TaskHandle {
   takeBackQueue?(read: () => Promise<{ queued: readonly string[]; said: readonly string[] }>): Promise<string[]>
   /** What the task started that still runs in the background, when its agent tells (Claude Code's shells). */
   readonly shells?: readonly BackgroundShell[]
+  /** What the task watches in the background for its agent to go on with, when its agent tells (Claude Code's monitors). */
+  readonly monitors?: readonly BackgroundShell[]
   /** The commands and models its agent told it has for this task, so far. Left out by an agent that tells none. */
   offers?(): TaskOffers
 }

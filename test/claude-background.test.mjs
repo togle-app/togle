@@ -844,6 +844,38 @@ test('a task with a command still running in the background says so, tells the w
   }
 })
 
+test('a task that waits on a monitor is working, says what for, and is not put to rest; when the monitor is done it is idle', { timeout: 60_000 }, async () => {
+  // Claude Code's own folder, apart from the stand-in's: a job's state file lists what it started, monitors among it.
+  const config = scratch()
+  const { backend, home } = claude({ env: { CLAUDE_CONFIG_DIR: config }, backend: { restMs: 600, written: async () => 1, every: { busy: 100, idle: 100 } } })
+  const state = (job, fan) => { mkdirSync(path.join(config, 'jobs', job), { recursive: true }); writeFileSync(path.join(config, 'jobs', job, 'state.json'), JSON.stringify({ state: 'done', tempo: 'idle', fan })) }
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Waits' })
+    const pid = job(home, task.screen.job).pid
+    const events = watch(task)
+    await task.screen.hide()
+    await until(() => task.state === 'idle', 'the session to be idle')
+    assert.deepEqual([...task.monitors], [], 'nothing is watched')
+    // A monitor it started runs, and its turn is over: it goes on by itself when the monitor says something, so it is not idle.
+    state(task.screen.job, [{ id: 'bmon00001', kind: 'monitor', label: 'Watch the macOS and Ubuntu CI runs', startedAt: Date.now() }])
+    await until(() => task.monitors.length === 1, 'the task to say what it waits on')
+    assert.equal(task.monitors[0].label, 'Watch the macOS and Ubuntu CI runs')
+    assert.equal(task.state, 'working', 'waiting on a monitor is working')
+    assert.ok(events.some((event) => event.type === 'shells'), 'the window is told')
+    const listed = (await backend.list()).find((row) => row.id === task.id)
+    assert.deepEqual([listed?.state, listed?.monitors?.map((item) => item.label)], ['working', ['Watch the macOS and Ubuntu CI runs']], 'the list says it too')
+    // More than a quiet day (600 ms here) with the monitor watching: its program, and the monitor with it, is left alone.
+    await sleep(2000)
+    assert.ok(alive(pid), 'a task that waits on a monitor is not put to rest')
+    assert.equal(task.state, 'working')
+    // The monitor is done: it waits on nothing, and is idle again.
+    state(task.screen.job, [])
+    await until(() => task.monitors.length === 0 && task.state === 'idle', 'the task to be idle once the monitor is done')
+  } finally {
+    await backend.close()
+  }
+})
+
 test('a task that waits, was written lately, or that the person has open in their own terminal is not put to rest', { timeout: 90_000 }, async () => {
   let lately = true
   const { backend, home } = claude({ backend: { restMs: 400, written: async () => (lately ? Date.now() : 1), every: { busy: 100, idle: 100 } } })

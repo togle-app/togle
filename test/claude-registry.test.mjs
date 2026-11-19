@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { after, test } from 'node:test'
 
-const { claudeConfigDir, isJob, shellsOf, stateOfJob, withShells } = await import('./.build/togle.mjs')
+const { claudeConfigDir, isJob, monitorsOf, shellsOf, stateOfJob, withShells } = await import('./.build/togle.mjs')
 
 const made = []
 after(() => { for (const dir of made) rmSync(dir, { recursive: true, force: true }) })
@@ -88,6 +88,53 @@ test('without the program\'s record, the job\'s tempo decides; files that cannot
   assert.deepEqual(broken, job({ id: '11223344', pid: 444, sessionId: 's-3' }), 'a record that is not JSON, and no state file: as it was')
   assert.deepEqual(nothing, job({ id: '55667788', pid: 902, sessionId: 's-4' }), 'no files at all: as it was')
   assert.deepEqual(await withShells(path.join(dir, 'nowhere'), [job()]), [job()], 'no such folder: as it was')
+})
+
+const monitor = (id, label, extra = {}) => ({ id, kind: 'monitor', label, startedAt: 1_795_060_000_000, ...extra })
+
+test('the monitors a job runs are the unfinished monitor items of its state file, apart from its shells', () => {
+  assert.deepEqual(monitorsOf(null), [])
+  assert.deepEqual(monitorsOf({ fan: [shell('b1', 'npm run dev')] }), [], 'a shell is not a monitor')
+  const fan = [
+    shell('b1', 'npm run dev'),
+    monitor('m1', 'Watch the macOS and Ubuntu CI runs\nof the latest commit'),
+    monitor('m2', 'Done one', { doneAt: 1_795_060_100_000 }),
+    { id: 'a1', kind: 'artifact_watch', label: 'the design page' }
+  ]
+  assert.deepEqual(monitorsOf({ fan }).map((item) => [item.id, item.label]), [['m1', 'Watch the macOS and Ubuntu CI runs of the latest commit']], 'one that runs, in one line; a finished monitor and a watch of a page are not')
+  assert.deepEqual(shellsOf({ fan }).map((item) => item.id), ['b1'], 'and the shells are as they were')
+})
+
+test('a session that waits on a monitor is not idle: its turn is over, but it goes on by itself when the monitor says something', async () => {
+  const dir = home({
+    registry: { 111: { status: 'shell' }, 222: { status: 'shell' }, 333: { status: 'busy' }, 444: { status: 'waiting' } },
+    jobs: {
+      b3c4d5e6: { tempo: 'idle', fan: [monitor('m5', 'Watch the CI runs')] },
+      a1b2c3d4: { tempo: 'idle', fan: [monitor('m1', 'Watch the CI runs')] },
+      e5f6a7b8: { tempo: 'idle', fan: [monitor('m2', 'Watch the CI runs'), shell('b2', 'npm run dev')] },
+      c9d0e1f2: { tempo: 'active', fan: [monitor('m3', 'Watch the CI runs')] },
+      d0e1f2a3: { tempo: 'idle', fan: [monitor('m4', 'Watch the CI runs', { doneAt: 1_795_060_100_000 })] }
+    }
+  })
+  const rows = await withShells(dir, [
+    job(),
+    job({ id: 'e5f6a7b8', pid: 222, sessionId: 's-2' }),
+    job({ id: 'c9d0e1f2', pid: 333, sessionId: 's-3' }),
+    job({ id: 'd0e1f2a3', pid: 111, sessionId: 's-4' }),
+    job({ id: 'b3c4d5e6', pid: 444, sessionId: 's-5', status: 'waiting', waitingFor: 'permission prompt' })
+  ])
+  // The program's record says shell for a session that only waits on a monitor too (a monitor is a command): the job's fan tells them apart.
+  assert.deepEqual([rows[0].status, rows[0].monitors?.map((item) => item.label), rows[0].shells], ['busy', ['Watch the CI runs'], undefined], 'waiting on a monitor: busy, and what for')
+  assert.equal(stateOfJob(rows[0]), 'working', 'so working, not idle')
+  assert.deepEqual([rows[1].status, rows[1].monitors?.length, rows[1].shells?.length], ['busy', 1, 1], 'a monitor and a shell: working, and both said')
+  assert.deepEqual([rows[2].status, rows[2].monitors?.length], ['busy', 1], 'at work, with a monitor: as it was, and the monitor said')
+  assert.deepEqual([rows[3].status, rows[3].monitors], ['shell', undefined], "a monitor that has finished waits on nothing: the old rule (idle by the program's record)")
+  assert.equal(stateOfJob(rows[3]), 'idle')
+  assert.deepEqual([rows[4].status, rows[4].monitors?.length], ['waiting', 1], 'one that asks the person still asks: the monitor does not make it work')
+  assert.equal(stateOfJob(rows[4]), 'waiting')
+  // A list that calls the session idle (another version of Claude Code, or a stand-in) while a monitor runs: still working.
+  const [idle] = await withShells(dir, [job({ status: 'idle' })])
+  assert.deepEqual([idle.status, stateOfJob(idle)], ['busy', 'working'])
 })
 
 test('Claude Code\'s own folder is where its program is told to keep it, else ~/.claude', () => {

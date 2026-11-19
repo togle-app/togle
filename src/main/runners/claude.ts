@@ -257,7 +257,8 @@ export class ClaudeBackend implements Backend {
         ...(row.pid && !job ? { pid: row.pid } : {}),
         ...(job ? { job: row.id } : before?.job ? { job: before.job } : {}),
         ...(row.status === 'waiting' && row.waitingFor ? { waitingFor: row.waitingFor } : {}),
-        ...(row.shells?.length ? { shells: row.shells } : {})
+        ...(row.shells?.length ? { shells: row.shells } : {}),
+        ...(row.monitors?.length ? { monitors: row.monitors } : {})
       })
     }
     for (const task of this.jobs.values()) {
@@ -265,7 +266,7 @@ export class ClaudeBackend implements Backend {
       // After "/clear" Claude Code keeps the task in another session: that one is this task, and not a second row.
       if (task.session() !== task.id) found.delete(task.session())
       const before = found.get(task.id)
-      found.set(task.id, { id: task.id, runner: 'claude', title: task.title || before?.title || 'Claude Code task', ...(before?.asked ? { asked: before.asked } : {}), folder: task.folder || before?.folder || '', state: task.state, updatedAt: before?.updatedAt ?? Date.now(), job: task.screen.job, ...(before?.pid ? { pid: before.pid } : {}), ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}), ...(task.shells.length ? { shells: [...task.shells] } : {}) })
+      found.set(task.id, { id: task.id, runner: 'claude', title: task.title || before?.title || 'Claude Code task', ...(before?.asked ? { asked: before.asked } : {}), folder: task.folder || before?.folder || '', state: task.state, updatedAt: before?.updatedAt ?? Date.now(), job: task.screen.job, ...(before?.pid ? { pid: before.pid } : {}), ...(task.waitingFor ? { waitingFor: task.waitingFor } : {}), ...(task.shells.length ? { shells: [...task.shells] } : {}), ...(task.monitors.length ? { monitors: [...task.monitors] } : {}) })
     }
     return [...found.values()].sort((a, b) => b.updatedAt - a.updatedAt)
   }

@@ -1022,6 +1022,7 @@ export class RunnerHub {
       ...(handle.terminal ? { terminal: true, ...(handle.terminal.words ? { words: handle.terminal.words } : {}) } : {}),
       ...(handle.waitingFor ? { waitingFor: handle.waitingFor } : {}),
       ...(handle.shells?.length ? { shells: handle.shells.map((shell) => ({ ...shell })) } : {}),
+      ...(handle.monitors?.length ? { monitors: handle.monitors.map((monitor) => ({ ...monitor })) } : {}),
       ...(handle.screen ? { screen: true, job: handle.screen.job, ...(handle.screen.screenId ? { screenId: handle.screen.screenId } : {}), ...(handle.screen.closed ? { screenClosed: handle.screen.closed } : {}) } : {}),
       ...(owned.held?.length ? { held: [...owned.held], ...(owned.heldNote ? { heldNote: owned.heldNote } : {}), ...(owned.heldPaused ? { heldPaused: true } : {}) } : {})
     }

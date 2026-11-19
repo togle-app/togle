@@ -946,7 +946,9 @@ function TaskRow({ task, now, old, selected, withFolder, dragging, onSelect, onT
   const standing = elsewhere ? '' : stoppedHere ? (task.signedOut ? `signed out${task.fix ? ` · sign in with ${task.fix}` : ''}` : task.state === 'failed' ? `stopped by an error${task.line ? ': ' + task.line : ''}` : task.screen ? 'stopped · open it to go on' : 'stopped · reply to go on') : task.state === 'waiting' ? (task.waitingFor && !task.pending.length ? 'waiting on its screen' : 'waiting') : task.state === 'working' ? 'working' : task.state === 'failed' ? 'stopped by an error' : task.state === 'stopped' ? 'stopped' : old ? `idle · ${ago(task.updatedAt, now)}` : 'idle'
   // A command it started still runs in the background: said after how it stands, as Claude Code's own screen says it.
   const shells = task.shells?.length ?? 0
-  const detail = [standing, shells && !elsewhere && !stoppedHere ? `${shells} ${shells === 1 ? 'shell' : 'shells'} running` : ''].filter(Boolean).join(' · ')
+  // A monitor it started still watches (the CI runs it waits on, say): it goes on by itself when there is something, so it is working, and the row says what for.
+  const monitors = task.monitors?.length ?? 0
+  const detail = [standing, monitors && !elsewhere && !stoppedHere ? `waiting on ${monitors} ${monitors === 1 ? 'monitor' : 'monitors'}` : '', shells && !elsewhere && !stoppedHere ? `${shells} ${shells === 1 ? 'shell' : 'shells'} running` : ''].filter(Boolean).join(' · ')
   // A scheduled job's row is the job: its schedule, when it runs next (or that it runs now), and its last run when that failed.
   const job = task.schedule ? [task.state === 'failed' ? 'last run failed' : '', task.schedule, task.state === 'working' ? 'running now' : task.nextRun ? `next ${nextTime(task.nextRun, now)}` : ''].filter(Boolean).join(' · ') : ''
   // Its project is the heading over it, so the line leaves out the folder, unless the person moved it to another group. The agent
@@ -1538,6 +1540,12 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
         <span className="task-agent-name"><AgentMark runner={task.runner} name={agentOf(task)} /></span>
         {/* Which model it works with and how hard it thinks, right after its name, as its own record says it (an agent that tells neither has none). */}
         {modelWords && <span className="hint status-model" title={modelTitle(model)}>{modelWords}</span>}
+        {/* What it waits on, for it to go on with: only how many, and what for on the pointer (a monitor's description says it). */}
+        {task.monitors && task.monitors.length > 0 && (
+          <span className="hint monitors-hint" title={task.monitors.map((monitor) => monitor.label).join('\n')}>
+            {`waiting on ${task.monitors.length} ${task.monitors.length === 1 ? 'monitor' : 'monitors'}`}
+          </span>
+        )}
         {/* What it started that still runs: only how many, right after how it stands (the commands are on the pointer). */}
         {task.shells && task.shells.length > 0 && (
           <span className="hint shells-hint" title={task.shells.map((shell) => shell.label).join('\n')}>

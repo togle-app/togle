@@ -1688,7 +1688,8 @@ async function checkMarksLight(T, agent) {
 // shows it again; the navigation narrowed past its words is its icons only; what was set is kept for the next window.
 // A task whose turn ended while a command it started still runs is Idle, and says that something runs: in its row ("idle · 1 shell running") and in its
 // status line ("1 shell running"), only how many, right after how it stands; the commands are on the pointer. The files changed stay where the design
-// puts them, the last thing before the switch of views, whether a shell runs or not.
+// puts them, the last thing before the switch of views, whether a shell runs or not. One that waits on a monitor is Working, and says so ("waiting on
+// 1 monitor"), before its shells.
 async function checkShells(T, agent) {
   const ui = await open(T, agent, 1180)
   await ui.click('.workspace-nav button', 'Agents')
@@ -1711,6 +1712,23 @@ async function checkShells(T, agent) {
   await set({ state: 'idle', shells: [] })
   await ui.wait("!document.querySelector('.task-status .shells-hint')", 'no line once nothing runs')
   assert.equal(await ui.evaluate(row + ".textContent.includes('shell')"), false, 'and none in the row')
+  // A task that waits on a monitor (Claude Code's Monitor tool: its turn is over, and it goes on by itself when the monitor says something) is
+  // not idle. It is Working, and says what it waits on in the same two places: "waiting on 1 monitor", the description on the pointer. The
+  // monitors come before the shells.
+  const watch = 'Watch the macOS and Ubuntu CI runs of the newest commit'
+  await set({ state: 'working', monitors: [{ id: 'bmon00001', label: watch, since: Date.now() - 60_000 }] })
+  await ui.wait(row + ".textContent.includes('working · waiting on 1 monitor')", 'the row to say a monitor is waited on')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Working', 'waiting on a monitor is working, not idle')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .monitors-hint').textContent.trim()"), 'waiting on 1 monitor', 'how many, and not what for')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .monitors-hint').title"), watch, 'what it waits for is on the pointer')
+  await set({ monitors: [{ id: 'bmon00001', label: watch }, { id: 'bmon00002', label: 'Watch the build' }], shells: [{ id: 'b0000001', label: 'npm run dev' }] })
+  await ui.wait("document.querySelector('.task-status .monitors-hint')?.textContent.trim()==='waiting on 2 monitors'", 'the count of two')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .monitors-hint').title"), watch + '\nWatch the build', 'each on the pointer')
+  assert.ok((await ui.evaluate(row + ".textContent")).includes('working · waiting on 2 monitors · 1 shell running'), 'monitors, then shells, in the row')
+  assert.equal(await ui.evaluate("(() => { const a = document.querySelector('.task-status .monitors-hint'); const b = document.querySelector('.task-status .shells-hint'); return !!a && !!b && a.getBoundingClientRect().right <= b.getBoundingClientRect().left })()"), true, 'monitors, then shells, in the status line')
+  await set({ state: 'idle', monitors: [], shells: [] })
+  await ui.wait("!document.querySelector('.task-status .monitors-hint') && !document.querySelector('.task-status .shells-hint')", 'no line once nothing is waited on')
+  assert.equal(await ui.evaluate(row + ".textContent.includes('monitor')"), false, 'and none in the row')
   // The line keeps one order: how it stands and which agent, how many shells run, and at its end the files changed, then the switch of views. The files
   // changed are in the same place with a shell running (with a long command, as the user saw it) and without one.
   const files = Array.from({ length: 134 }, (_, n) => 'src/part' + n + '.ts')

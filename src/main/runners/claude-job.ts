@@ -45,6 +45,8 @@ export interface AgentRow {
   startedAt?: number
   /** The commands it started that still run in the background (claude-registry.ts adds them; the list does not tell). */
   shells?: BackgroundShell[]
+  /** The monitors it started that still run, which say something to it when there is something (claude-registry.ts adds them too). */
+  monitors?: BackgroundShell[]
 }
 
 /** A session in the background. */
@@ -272,6 +274,11 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     return this.row?.shells ?? []
   }
 
+  /** What it watches in the background, for it to go on with. */
+  get monitors(): readonly BackgroundShell[] {
+    return this.row?.monitors ?? []
+  }
+
   get open(): boolean {
     return this.screenTask !== null
   }
@@ -298,7 +305,7 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
     }
     this.row = row
     // What it runs in the background changed (a command began, or ended): the window is told, though no state changed to carry it.
-    const shellKey = (row.shells ?? []).map((shell) => shell.id).join(',')
+    const shellKey = (row.shells ?? []).map((shell) => shell.id).join(',') + '|' + (row.monitors ?? []).map((monitor) => monitor.id).join(',')
     if (shellKey !== this.shellKey) {
       this.shellKey = shellKey
       this.emit({ type: 'shells' })
@@ -363,11 +370,11 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
 
   /**
    * Whether it may be put to rest: its program runs and has nothing to do, no screen of Togle's is open on it, and it waits for
-   * nothing, and no command it started still runs (ending its program ends that too). Whether it has been quiet long enough, and
-   * whether the person has a screen of their own on it, is for the backend.
+   * nothing, and no command it started still runs and no monitor still watches (ending its program ends those too). Whether it has been
+   * quiet long enough, and whether the person has a screen of their own on it, is for the backend.
    */
   get restable(): boolean {
-    return !this.over && this.pid !== null && this.state === 'idle' && !this.screenTask && !this.pending.length && !this.waitingFor && !this.shells.length
+    return !this.over && this.pid !== null && this.state === 'idle' && !this.screenTask && !this.pending.length && !this.waitingFor && !this.shells.length && !this.monitors.length
   }
 
   /** The time it started, when its row says (in milliseconds): a session that never said a word is not quiet from before it began. */
