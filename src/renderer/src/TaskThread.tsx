@@ -973,15 +973,22 @@ export function currentPlan(entries: readonly LogEntry[]): PlanItem[] | undefine
 
 /**
  * The agent's own checklist for the turn at hand, by the reply box: each thing on it, done, being done or still to do. Open while
- * something is left to do, folded to its count once all of it is done; a press opens or folds it.
+ * something is left to do, folded to its count once all of it is done; a press opens or folds it. A long one scrolls: it opens at
+ * its bottom, where the latest items are, and stays there as items come, until the person scrolls up in it.
  */
 export function PlanCard({ plan }: { plan: PlanItem[] }): ReactNode {
   const done = plan.filter((item) => item.state === 'done').length
   const [open, setOpen] = useState<boolean | undefined>(undefined)
   const shown = open ?? done < plan.length
+  const items = useRef<HTMLUListElement>(null)
+  const atBottom = useRef(true)
+  useLayoutEffect(() => {
+    const list = items.current
+    if (shown && list && atBottom.current) list.scrollTop = list.scrollHeight
+  }, [shown, plan])
   return (
     <section className="task-plan" aria-label="Its checklist">
-      <button type="button" className="plan-head" aria-expanded={shown} onClick={() => setOpen(!shown)}>
+      <button type="button" className="plan-head" aria-expanded={shown} onClick={() => { atBottom.current = true; setOpen(!shown) }}>
         <Icon name="chevron" size={12} />
         <span className="plan-title">Checklist</span>
         <span className="plan-count">
@@ -989,7 +996,7 @@ export function PlanCard({ plan }: { plan: PlanItem[] }): ReactNode {
         </span>
       </button>
       {shown && (
-        <ul className="plan-items">
+        <ul className="plan-items" ref={items} onScroll={(event) => { const list = event.currentTarget; atBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 4 }}>
           {plan.map((item, index) => (
             <li key={index} data-state={item.state}>
               <span className="plan-mark" aria-hidden="true">

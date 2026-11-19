@@ -1493,6 +1493,47 @@ async function checkAgentMarks(T, agent) {
   ui.window.destroy()
 }
 
+// The agent's checklist opens at the bottom of its scroll, where the latest items are, and stays there as items come, until the person
+// scrolls up in it; folded and opened again, it is at the bottom again.
+async function checkPlanBottom(T, agent) {
+  const ui = await open(T, agent, 1180)
+  await ui.evaluate("localStorage.setItem('togle.taskviews', JSON.stringify({ 'claude:s2': 'cards' }))")
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  const items = (count) => Array.from({ length: count }, (_, n) => ({ text: 'Step ' + (n + 1) + ' of the plan', state: n < count - 3 ? 'done' : n === count - 3 ? 'doing' : 'todo' }))
+  const log = (count) => [{ id: 1, at: Date.now() - 60000, kind: 'you', text: 'Do the whole plan.' }, { id: 2, at: Date.now() - 50000, kind: 'step', step: 'plan', text: 'plan', plan: items(count) }]
+  const set = (count) => ui.evaluate('window.togleUITest.setTask("claude:s2", { state: "working", log: ' + JSON.stringify(log(count)) + ' })')
+  const count = (n) => ui.wait("document.querySelectorAll('.task-plan li').length===" + n)
+  const place = () => ui.evaluate("(()=>{const list=document.querySelector('.plan-items');return {top:Math.round(list.scrollTop),max:list.scrollHeight-list.clientHeight}})()")
+  await set(24)
+  await ui.task('Rebuild the pricing page')
+  await count(24)
+  let at = await place()
+  assert.ok(at.max > 50, 'a long checklist scrolls: ' + JSON.stringify(at))
+  assert.ok(Math.abs(at.top - at.max) <= 1, 'it opens at its bottom, where the latest items are: ' + JSON.stringify(at))
+  // Items come: it stays at the bottom.
+  await set(27)
+  await count(27)
+  at = await place()
+  assert.ok(Math.abs(at.top - at.max) <= 1, 'with new items it is still at the bottom: ' + JSON.stringify(at))
+  // The person scrolls up in it: items that come do not take them back down.
+  await ui.evaluate("(()=>{const list=document.querySelector('.plan-items');list.scrollTop=0;list.dispatchEvent(new Event('scroll'))})()")
+  await ui.paint()
+  await set(30)
+  await count(30)
+  at = await place()
+  assert.equal(at.top, 0, 'scrolled up, it stays where they put it: ' + JSON.stringify(at))
+  // Folded and opened again, it is at the bottom again.
+  await ui.evaluate("document.querySelector('.plan-head').click()")
+  await ui.wait("!document.querySelector('.plan-items')")
+  await ui.evaluate("document.querySelector('.plan-head').click()")
+  await ui.wait("!!document.querySelector('.plan-items')")
+  at = await place()
+  assert.ok(Math.abs(at.top - at.max) <= 1, 'opened again, it is at the bottom: ' + JSON.stringify(at))
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
 // An agent signed out: its task's row is amber and says what signs it in again, here, in the task and on To-do.
 async function checkSignedOut(T, agent) {
   const ui = await open(T, agent, 1024)
@@ -2435,6 +2476,7 @@ app.whenReady().then(async () => {
     await go(checkStoppedTasks)
     await go(checkMarks)
     await go(checkAgentMarks)
+    await go(checkPlanBottom)
     await go(checkSignedOut)
     await go(checkTerminalTask)
     await go(checkAgentSettings)
