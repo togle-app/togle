@@ -1537,7 +1537,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
         <span className="state-chip" data-state={task.signedOut ? 'failed' : task.state}><StateMark kind={task.signedOut ? 'failed' : chipMark(task.state, task.schedule)} still />{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
         <span className="task-agent-name"><AgentMark runner={task.runner} name={agentOf(task)} /></span>
         {/* Which model it works with and how hard it thinks, right after its name, as its own record says it (an agent that tells neither has none). */}
-        {modelWords && <span className="hint task-model" title={modelTitle(model)}>{modelWords}</span>}
+        {modelWords && <span className="hint status-model" title={modelTitle(model)}>{modelWords}</span>}
         {/* What it started that still runs: only how many, right after how it stands (the commands are on the pointer). */}
         {task.shells && task.shells.length > 0 && (
           <span className="hint shells-hint" title={task.shells.map((shell) => shell.label).join('\n')}>

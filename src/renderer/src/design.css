@@ -494,9 +494,11 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-status .hint { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--muted); font-size: 12px; }
 .task-status button.link { margin: 0; padding: 0; color: var(--muted); font-size: 12px; }
 .task-status button.link:hover { color: var(--ink); }
-/* Its model and effort, right after the agent's name: one line with it, so a little closer to it than the other parts are to each other. */
-.task-status .task-model { margin-left: -4px; white-space: nowrap; }
-.task-status .task-model::before { content: '·'; margin-right: 0.45em; }
+/* Its model and effort, right after the agent's name and joined to it by a dot, as the line above joins the first hint to the name; the dot stays when
+   nothing else is on the line before the switch (that rule leaves the hint before the switch alone, as it is the files changed there). The class is
+   not .task-model: Settings has a section of that name (styles.css), and its border and padding would come with it. */
+.task-status .status-model { margin-left: -5px; white-space: nowrap; }
+.task-status .status-model::before { content: '·'; }
 /* The switch between a task's two views, on the line that says how it stands. */
 .task-status .view-switch { margin-left: auto; flex: none; }
 .view-switch button { flex: none; padding: 3px 11px; font-size: 12px; }
