@@ -202,6 +202,18 @@ export interface StepDetail {
   diff?: boolean
 }
 
+/**
+ * The model a task's agent works with now and how hard it was asked to think, as the agent's own record says it (an agent that tells
+ * nothing of either has none: the window then says nothing). Each is as the agent writes it; `modelWords` (model-words.ts) puts it in
+ * words for the window.
+ */
+export interface ModelInfo {
+  /** The model's id: "claude-opus-5-5", "gpt-6.2-sol". */
+  model?: string
+  /** The effort: "low", "medium", "high", "xhigh", "max" (Claude Code), "ultra" (Hermes). */
+  effort?: string
+}
+
 /** A request as the window shows it: with Togle's mark on a command that looks dangerous. */
 export interface ViewRequest extends PendingRequest {
   /** Why the command looks dangerous, in plain words. Only a hint: the whole command is what runs. */

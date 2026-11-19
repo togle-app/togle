@@ -18,7 +18,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { AgentQuestion, StepDetail, TaskHistory, TaskInfo, TaskState } from '@shared/runner'
+import type { AgentQuestion, ModelInfo, StepDetail, TaskHistory, TaskInfo, TaskState } from '@shared/runner'
 import { askedLine } from './claude-sessions'
 import { daemonPid, daemonState, startDaemon } from './codex-daemon'
 import { codexEntries, turnsOf } from './codex-history'
@@ -817,6 +817,18 @@ export class CodexBackend implements Backend {
   async step(id: string, more: string): Promise<StepDetail | null> {
     const raw = this.details.get(id)?.get(more)
     return isFileKey(more) ? diffOf(raw) : detailOf(raw)
+  }
+
+  /**
+   * The model and the reasoning effort a thread runs on: the thread's own `model` and `reasoningEffort` (Codex 0.166 gives both on every
+   * thread), read without its turns, which is cheap. Null when the server has no such thread or tells neither.
+   */
+  async modelOf(id: string): Promise<ModelInfo | null> {
+    const server = await this.listing()
+    const thread = rec(rec(await server.peer.request('thread/read', { threadId: id, includeTurns: false }, 15_000).catch(() => ({}))).thread)
+    const model = text(thread.model)
+    const effort = text(thread.reasoningEffort)
+    return model || effort ? { ...(model ? { model } : {}), ...(effort ? { effort } : {}) } : null
   }
 
   // ---- Starting and opening ----

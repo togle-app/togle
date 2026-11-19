@@ -1,7 +1,7 @@
 // What Hermes kept of a session's conversation, for the Chat view: its `hermes sessions export - --session-id <id>` (one JSON
 // object, with the session's messages) made into the same entries the window shows for any task. The export holds every row,
 // including ones that were compacted away or are Hermes's own notes to itself: only the live conversation is drawn.
-import type { LogEntry, PlanItem } from '@shared/runner'
+import type { LogEntry, ModelInfo, PlanItem } from '@shared/runner'
 import { tidyPlan } from '@shared/plan-items'
 import { list, rec, text } from './jsonrpc'
 
@@ -28,6 +28,28 @@ const WEB = new Set(['web_search', 'web_extract'])
 const PLANS = new Set(['todo_list'])
 // Rows Hermes keeps for itself, not for the person to read.
 const NOT_SHOWN = new Set(['hidden', 'internal_notification', 'model_switch', 'process_complete'])
+
+/**
+ * The model a Hermes session runs on and the effort it asks for, from its export: the row's `model`, and the `effort` of the `reasoning_config`
+ * inside its `model_config` ("ultra"; "off" when reasoning is turned off). Both `model_config` and `reasoning_config` come as JSON text or as
+ * objects. Null when the export tells neither.
+ */
+export function hermesModel(session: unknown): ModelInfo | null {
+  const object = (value: unknown): Record<string, unknown> => {
+    if (typeof value !== 'string') return rec(value)
+    try {
+      return rec(JSON.parse(value))
+    } catch {
+      return {}
+    }
+  }
+  const row = rec(session)
+  const config = object(row.model_config)
+  const reasoning = object(config.reasoning_config)
+  const model = text(row.model) || text(config.model)
+  const effort = reasoning.enabled === false ? 'off' : text(reasoning.effort)
+  return model || effort ? { ...(model ? { model } : {}), ...(effort ? { effort } : {}) } : null
+}
 
 /** The words of a message: its text, or the text parts of a list of parts. */
 function wordsOf(content: unknown): string {

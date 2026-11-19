@@ -18,7 +18,8 @@ import { QuoteBar, QuoteBlock, QuoteFloat, useQuoteSpot } from './Quote'
 import { RequestCard } from './RequestCard'
 import { PictureChips, pastedPictures, pathWords, useAttached } from './ReplyPictures'
 import { StateMark, type MarkKind } from './StateMark'
-import { clock, currentPlan, lastTurnKey, PlanCard, promptsOf, Thread, turnStart, useHistory, type Sending } from './TaskThread'
+import { clock, currentPlan, lastTurnKey, PlanCard, promptsOf, Thread, turnStart, useHistory, useModel, type Sending } from './TaskThread'
+import { modelLine, modelTitle } from '@shared/model-words'
 import { Ticks } from './Ticks'
 import { ThreadRail } from './ThreadRail'
 import { TerminalView } from './TerminalView'
@@ -1146,6 +1147,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   // Read only while Chat is what shows: the agent's screen (open, or closed with Terminal picked) needs none of it.
   const webShown = !sessionShown && !(task.mine && !!task.screen && view === 'session' && !task.terminal)
   const { history, loaded: historyLoaded, all, showAll } = useHistory(task, webShown)
+  const model = useModel(task)
+  const modelWords = modelLine(model)
   // Until the agent's record is read (the first time), nothing is shown rather than Togle's own log for a moment: the record is
   // what stays. With no record to read, Togle's own log is the conversation.
   const shown = history ? history.entries : historyLoaded ? log : []
@@ -1533,6 +1536,8 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
       <div className="task-status">
         <span className="state-chip" data-state={task.signedOut ? 'failed' : task.state}><StateMark kind={task.signedOut ? 'failed' : chipMark(task.state, task.schedule)} still />{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
         <span className="task-agent-name"><AgentMark runner={task.runner} name={agentOf(task)} /></span>
+        {/* Which model it works with and how hard it thinks, right after its name, as its own record says it (an agent that tells neither has none). */}
+        {modelWords && <span className="hint task-model" title={modelTitle(model)}>{modelWords}</span>}
         {/* What it started that still runs: only how many, right after how it stands (the commands are on the pointer). */}
         {task.shells && task.shells.length > 0 && (
           <span className="hint shells-hint" title={task.shells.map((shell) => shell.label).join('\n')}>

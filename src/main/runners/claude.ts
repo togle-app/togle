@@ -15,8 +15,8 @@ import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { StepDetail, TaskHistory, TaskInfo } from '@shared/runner'
-import { claudeChange, claudeConversation, claudeHasSession, claudeLastSaid, claudePicture, claudeSessions, claudeStep, claudeWrittenAt } from './claude-sessions'
+import type { ModelInfo, StepDetail, TaskHistory, TaskInfo } from '@shared/runner'
+import { claudeChange, claudeConversation, claudeHasSession, claudeLastSaid, claudeModel, claudePicture, claudeSessions, claudeStep, claudeWrittenAt } from './claude-sessions'
 import { HookServer, type HookTarget } from './claude-hooks'
 import { ClaudeJob, claudeEnv, isJob, rowOf, stateOfJob, type AgentRow, type JobContext, type JobRow } from './claude-job'
 import { claudeConfigDir, withShells } from './claude-registry'
@@ -333,6 +333,11 @@ export class ClaudeBackend implements Backend {
   /** A session's conversation as its file keeps it: what the Chat view shows, also of what was said before Togle opened it. */
   history(id: string, all: boolean): Promise<TaskHistory | null> {
     return (this.options.conversation ?? claudeConversation)(id, all)
+  }
+
+  /** The model and the effort of the session's last answer, from the end of its file. */
+  modelOf(id: string): Promise<ModelInfo | null> {
+    return claudeModel(id)
   }
 
   /** A picture the person put in that conversation (pasted, a screenshot), read again from the session's file. */

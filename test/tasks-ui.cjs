@@ -1702,7 +1702,8 @@ async function checkShells(T, agent) {
   // changed are in the same place with a shell running (with a long command, as the user saw it) and without one.
   const files = Array.from({ length: 134 }, (_, n) => 'src/part' + n + '.ts')
   const command = 'cd /c/Users/someone/togle-opensource && (timeout 400 node --test test/claude-background.test.mjs test/runner-hub.test.mjs)'
-  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:sh1', runner: 'claude', title: 'Many files', folder: 'C:\\work\\notes', state: 'working', screen: true, terminal: false, mine: true, line: 'Many files', shells: [{ id: 'b0000009', label: command }], log: [{ id: 1, at: Date.now() - 60_000, kind: 'you', text: 'Fix it' }, { id: 2, at: Date.now() - 50_000, kind: 'files', text: 'Changed 134 files', paths: files }] }) + ', "")')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-status .task-model')"), false, 'an agent that tells neither model nor effort has no words for them')
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:sh1', runner: 'claude', title: 'Many files', folder: 'C:\\work\\notes', state: 'working', screen: true, terminal: false, mine: true, line: 'Many files', model: { model: 'claude-opus-5-5', effort: 'max' }, shells: [{ id: 'b0000009', label: command }], log: [{ id: 1, at: Date.now() - 60_000, kind: 'you', text: 'Fix it' }, { id: 2, at: Date.now() - 50_000, kind: 'files', text: 'Changed 134 files', paths: files }] }) + ', "")')
   await ui.task('Many files')
   await ui.wait("document.querySelector('.task-title h2')?.textContent==='Many files'")
   // (The count is of the conversation, which Chat reads: Terminal, the view a screen opens in, does not say it.)
@@ -1710,12 +1711,16 @@ async function checkShells(T, agent) {
   await ui.wait("!!document.querySelector('.task-status .files-hint')")
   const line = () => ui.evaluate(`(() => {
     const at = (selector) => { const el = document.querySelector('.task-status ' + selector); if (!el) return null; const b = el.getBoundingClientRect(); return { left: Math.round(b.left), right: Math.round(b.right), top: Math.round(b.top) } }
-    return { name: at('.task-agent-name'), shells: at('.shells-hint'), files: at('.files-hint'), views: at('.view-switch'), shellWords: document.querySelector('.task-status .shells-hint')?.textContent.trim() ?? null, fileWords: document.querySelector('.task-status .files-hint')?.textContent.trim() ?? null }
+    return { name: at('.task-agent-name'), model: at('.task-model'), shells: at('.shells-hint'), files: at('.files-hint'), views: at('.view-switch'), modelWords: document.querySelector('.task-status .task-model')?.textContent.trim() ?? null, modelTitle: document.querySelector('.task-status .task-model')?.title ?? null, shellWords: document.querySelector('.task-status .shells-hint')?.textContent.trim() ?? null, fileWords: document.querySelector('.task-status .files-hint')?.textContent.trim() ?? null }
   })()`)
+  await ui.wait("!!document.querySelector('.task-status .task-model')")
   const withShell = await line()
   assert.equal(withShell.shellWords, '1 shell running', 'not the command: it is on the pointer')
   assert.equal(withShell.fileWords, '134 files changed')
-  assert.ok(withShell.name.right <= withShell.shells.left && withShell.shells.right <= withShell.files.left && withShell.files.right <= withShell.views.left, 'agent, shells, files changed, switch: in that order: ' + JSON.stringify(withShell))
+  assert.equal(withShell.modelWords, 'Opus 5.5 · max', 'the model and the effort, right after the agent’s name')
+  assert.equal(withShell.modelTitle, 'Model: Opus 5.5 (claude-opus-5-5). Effort: max.', 'and in full on the pointer')
+  assert.ok(withShell.name.right <= withShell.model.left && withShell.model.right <= withShell.shells.left && withShell.shells.right <= withShell.files.left && withShell.files.right <= withShell.views.left, 'agent, model and effort, shells, files changed, switch: in that order: ' + JSON.stringify(withShell))
+  assert.ok(withShell.model.left - withShell.name.right <= 8, 'the model is right against the name: ' + JSON.stringify(withShell))
   assert.ok(Math.abs(withShell.views.left - withShell.files.right - 10) <= 2, 'the files changed are right before the switch: ' + JSON.stringify(withShell))
   assert.equal(new Set([withShell.name.top, withShell.shells.top, withShell.files.top, withShell.views.top]).size <= 2, true, 'all on one line (a hint and a button differ by a pixel or two)')
   await ui.evaluate('window.togleUITest.setTask("claude:sh1", { shells: [] })')
@@ -1723,6 +1728,22 @@ async function checkShells(T, agent) {
   const without = await line()
   assert.deepEqual([without.files.left, without.files.right], [withShell.files.left, withShell.files.right], 'the files changed are in the same place without a shell')
   assert.ok(Math.abs(without.views.left - without.files.right - 10) <= 2, 'still right before the switch')
+  // The person changes the model and the effort on the agent's own screen: its next answer says so, the task changes, and the line is read again at once.
+  // A reading that tells nothing (an agent between answers, one that cannot be asked) leaves what was said.
+  const reads = async () => (await ui.calls('runnerModel')).length
+  const readsBefore = await reads()
+  await ui.evaluate('window.togleUITest.setTask("claude:sh1", { model: { model: "claude-sonnet-5-5", effort: "high" }, updatedAt: Date.now() })')
+  await ui.wait("document.querySelector('.task-status .task-model')?.textContent.trim()==='Sonnet 5.5 · high'")
+  assert.ok(await reads() > readsBefore, 'it was asked again, by key')
+  assert.deepEqual((await ui.calls('runnerModel')).at(-1).args, ['claude:sh1'])
+  const readsThen = await reads()
+  await ui.evaluate('window.togleUITest.setTask("claude:sh1", { model: null, updatedAt: Date.now() })')
+  await ui.wait("window.togleUITest.calls().filter(call=>call.name==='runnerModel').length>" + readsThen)
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .task-model')?.textContent.trim()"), 'Sonnet 5.5 · high', 'a reading that tells nothing leaves what was said')
+  // Another task with no model of its own does not carry this one's: each task has its own line.
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Rebuild the pricing page'")
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-status .task-model')"), false, 'another task, no model words of this one')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }

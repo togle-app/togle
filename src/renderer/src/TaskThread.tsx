@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import type { LogEntry, PlanItem, StepDetail, TaskHistory, TaskState, TaskView } from '@shared/runner'
+import type { LogEntry, ModelInfo, PlanItem, StepDetail, TaskHistory, TaskState, TaskView } from '@shared/runner'
 import { Icon, type IconName } from './Icon'
 import { splitQuote } from '@shared/quote'
 import { tidyPlan } from '@shared/plan-items'
@@ -20,6 +20,8 @@ const READ_AGAIN_MS = 3_000
  * what is typed on its screen (a queued message, an answer) shows within a second. Codex's and Hermes's are asked of their programs.
  */
 const READ_AGAIN_FILE_MS = 1_000
+/** How often the model and effort of a task that works are read again, in milliseconds (main keeps an answer for 3 seconds). */
+const MODEL_AGAIN_MS = 5_000
 
 /** The conversations read last, by task (and whether all of it was read): one opened again shows at once and is read again behind it. */
 const readBefore = new Map<string, TaskHistory | null>()
@@ -73,6 +75,41 @@ export function useHistory(task: Pick<TaskView, 'key' | 'state' | 'updatedAt' | 
   // Asked for all of it: the turns shown stay until all of it is read, unless all of it was read before.
   const shown = read?.reading === reading ? read : readBefore.has(reading) ? { reading, history: readBefore.get(reading) ?? null } : read
   return { history: shown?.history ?? null, loaded: !!shown, all, showAll: () => setAll(true) }
+}
+
+/** The model and effort each task was last read with: a task shown again says them at once, and they are read again behind. */
+const modelBefore = new Map<string, ModelInfo | null>()
+
+/**
+ * The model a task's agent works with now and the effort it thinks with, for the status line: read when the task opens, when it changes, and every
+ * few seconds while it works or waits (the person can change both on the agent's own screen). Read in either view: it is a line of the agent's own
+ * record, not the conversation. Null until the agent tells; a reading that tells nothing leaves what was known.
+ */
+export function useModel(task: Pick<TaskView, 'key' | 'state' | 'updatedAt'>): ModelInfo | null {
+  const [info, setInfo] = useState<ModelInfo | null>(() => modelBefore.get(task.key) ?? null)
+  const atWork = task.state === 'working' || task.state === 'waiting'
+  useEffect(() => {
+    let live = true
+    const again = (): void => {
+      void api.runnerModel(task.key).then(
+        (found) => {
+          if (!live || !found) return
+          modelBefore.delete(task.key)
+          modelBefore.set(task.key, found)
+          while (modelBefore.size > 30) modelBefore.delete(modelBefore.keys().next().value as string)
+          setInfo((was) => (was?.model === found.model && was?.effort === found.effort ? was : found))
+        },
+        () => undefined
+      )
+    }
+    again()
+    const timer = atWork ? setInterval(again, MODEL_AGAIN_MS) : undefined
+    return () => {
+      live = false
+      if (timer) clearInterval(timer)
+    }
+  }, [task.key, task.updatedAt, atWork])
+  return info
 }
 
 // ---- Times ----

@@ -1,6 +1,6 @@
 // What the rest of the app can do with a coding agent, whichever agent it is. One backend per agent implements it:
 // see its tasks, start one, answer what it waits for, stop it, and pick it up again later.
-import type { BackgroundShell, Decision, PendingRequest, RunnerKind, StepDetail, TaskEvent, TaskHistory, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
+import type { BackgroundShell, Decision, ModelInfo, PendingRequest, RunnerKind, StepDetail, TaskEvent, TaskHistory, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
 
 export interface StartOptions {
   /** The folder the task works in. */
@@ -157,6 +157,11 @@ export interface Backend {
    * its bytes in base64. Read again from the agent's own record only when the window shows it; null when it is not kept.
    */
   picture?(id: string, key: string): Promise<{ type: string; data: string } | null>
+  /**
+   * The model a task works with now and the effort it thinks with, as the agent's own record says it, for the window's status line. Null when
+   * the agent tells neither (yet). Left out by an agent that keeps none Togle can read.
+   */
+  modelOf?(id: string): Promise<ModelInfo | null>
   /** Stops using the agent's program. Tasks that run in the background go on. */
   close(): Promise<void>
 }

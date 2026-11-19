@@ -3,7 +3,7 @@
 // the ones Togle runs (with what happened in each, so the window can show it), and the actions on a task by its key.
 import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
-import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Decision, type LogEntry, type RunnerKind, type RunnerStatus, type StartRequest, type StepDetail, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
+import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Decision, type LogEntry, type ModelInfo, type RunnerKind, type RunnerStatus, type StartRequest, type StepDetail, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
 import { ownGroupOf } from '@shared/task-groups'
 import { carriedFlags } from './claude-job'
@@ -98,6 +98,8 @@ const HELD_MOST = 20
 const HELD_SETTLE_MS = 1_500
 /** How long an interrupt waits for the agent to stop before it says it did not (Stop is asked, and an agent may take a moment to show it). */
 const STOP_WAIT_MS = 8_000
+/** How long a task's model and effort are taken as they were last read, in milliseconds. */
+const MODEL_KEPT_MS = 3_000
 
 const LOG_LIMIT = 400
 const keyOf = (runner: RunnerKind, id: string): string => `${runner}:${id}`
@@ -123,6 +125,8 @@ const order = (a: TaskView, b: TaskView): number => rank(a) - rank(b) || b.updat
 
 export class RunnerHub {
   private readonly owned = new Map<string, Owned>()
+  /** The model and effort each task was last read with, and when (see `model`). */
+  private readonly models = new Map<string, { at: number; info: ModelInfo | null; running?: Promise<ModelInfo | null> }>()
   private cache: { at: number; infos: TaskInfo[] } | null = null
   private found: { at: number; status: RunnerStatus[] } | null = null
   private timer: NodeJS.Timeout | null = null
@@ -684,6 +688,30 @@ export class RunnerHub {
   async step(key: string, more: string): Promise<StepDetail | null> {
     const kept = await this.recordOf(key)
     return (kept && (await kept.backend.step?.(kept.id, more).catch(() => null))) ?? null
+  }
+
+  /**
+   * Which model a task's agent works with now and how hard it thinks, for the status line of a task: asked of the agent that keeps the task's
+   * record (`modelOf`). What it says can change as the task goes on (/model and /effort on the agent's screen), so it is read again after a
+   * few seconds, and one read answers all who ask meanwhile. Null when the agent tells neither, or keeps no record Togle can read.
+   */
+  async model(key: string): Promise<ModelInfo | null> {
+    const held = this.models.get(key)
+    if (held?.running) return held.running
+    if (held && Date.now() - held.at < MODEL_KEPT_MS) return held.info
+    const entry: { at: number; info: ModelInfo | null; running?: Promise<ModelInfo | null> } = { at: Date.now(), info: held?.info ?? null }
+    entry.running = (async (): Promise<ModelInfo | null> => {
+      const kept = await this.recordOf(key)
+      const found = kept ? await (kept.backend.modelOf?.(kept.id) ?? Promise.resolve(null)).catch(() => null) : null
+      entry.info = found
+      entry.at = Date.now()
+      entry.running = undefined
+      return found
+    })()
+    this.models.delete(key)
+    this.models.set(key, entry)
+    while (this.models.size > 60) this.models.delete(this.models.keys().next().value as string)
+    return entry.running
   }
 
   /** Whose record a task's conversation is in, and under which id: the session a task Togle runs is in now. */

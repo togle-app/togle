@@ -5,7 +5,7 @@
 import { createReadStream, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { LogEntry, PlanItem, StepKind, TaskHistory } from '@shared/runner'
+import type { LogEntry, ModelInfo, PlanItem, StepKind, TaskHistory } from '@shared/runner'
 import { tidyPlan } from '@shared/plan-items'
 import { lastTurns } from './history-turns'
 
@@ -394,6 +394,40 @@ export async function claudeLastSaid(id: string): Promise<string> {
     if (bytes >= size) break
   }
   return ''
+}
+
+/**
+ * The model and the effort a session's last answer used. Claude Code writes both on each answer it gives (the record's `message.model`, and
+ * `effort` beside it), so the end of the file says what the session works with now, also after the person changed it on its screen (/model,
+ * /effort). What a helper agent answered with is left out, and so is an answer with no model of its own ("<synthetic>"). Null when the session
+ * has no answer yet, or no file. Read from the end of the file only: it is cheap, whatever the session's length.
+ */
+export async function claudeModel(id: string): Promise<ModelInfo | null> {
+  let file = sessionFiles.get(id)
+  if (file && !(await fs.stat(file).then((stat) => stat.size > 0, () => false))) file = undefined
+  if (!file) {
+    for (const home of await claudeHomes()) {
+      file = (await filesIn(path.join(home, 'projects'), 1, /\.jsonl$/i)).find((candidate) => path.basename(candidate, '.jsonl') === id)
+      if (file) break
+    }
+    if (!file) return null
+    sessionFiles.set(id, file)
+  }
+  const size = (await fs.stat(file).catch(() => null))?.size ?? 0
+  for (const bytes of TAIL_BYTES) {
+    const tail = await readEnd(file, size, 'tail', bytes).catch(() => null)
+    if (!tail) return null
+    for (const line of tail.lines.slice().reverse()) {
+      const r = parse(line)
+      if (!r || r.type !== 'assistant' || r.isSidechain || !isObject(r.message)) continue
+      const model = str(r.message.model)
+      if (!model || model.startsWith('<')) continue
+      const effort = str(r.effort) || str(r.perTurnEffort)
+      return { model, ...(effort ? { effort } : {}) }
+    }
+    if (bytes >= size) break
+  }
+  return null
 }
 
 /**

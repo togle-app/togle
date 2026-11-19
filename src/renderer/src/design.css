@@ -494,6 +494,9 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-status .hint { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--muted); font-size: 12px; }
 .task-status button.link { margin: 0; padding: 0; color: var(--muted); font-size: 12px; }
 .task-status button.link:hover { color: var(--ink); }
+/* Its model and effort, right after the agent's name: one line with it, so a little closer to it than the other parts are to each other. */
+.task-status .task-model { margin-left: -4px; white-space: nowrap; }
+.task-status .task-model::before { content: '·'; margin-right: 0.45em; }
 /* The switch between a task's two views, on the line that says how it stands. */
 .task-status .view-switch { margin-left: auto; flex: none; }
 .view-switch button { flex: none; padding: 3px 11px; font-size: 12px; }

@@ -28,10 +28,10 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import type { LogEntry, StepDetail, TaskHistory, TaskInfo } from '@shared/runner'
+import type { LogEntry, ModelInfo, StepDetail, TaskHistory, TaskInfo } from '@shared/runner'
 import { exists, lines } from './acp'
 import { askedLine } from './claude-sessions'
-import { hermesEntries } from './hermes-history'
+import { hermesEntries, hermesModel } from './hermes-history'
 import { lastTurns } from './history-turns'
 import { detailOf, diffOf, isFileKey } from './step-detail'
 import { keepJson } from './keep'
@@ -548,6 +548,8 @@ const KEEP_NAMES = 200
 /** The name Togle gives a session it starts, which is also the id of its task. */
 const STARTED_NAME = /^togle-[0-9a-f]{8}$/
 const SESSION_WORD = /^[\w][\w.:-]{0,200}$/
+/** How long a session's model and effort are taken as they were last read, in milliseconds (reading them is a Python program). */
+const MODEL_KEPT_MS = 60_000
 
 export class HermesBackend implements Backend {
   readonly runner = 'hermes' as const
@@ -562,6 +564,8 @@ export class HermesBackend implements Backend {
   private readonly names = new Map<string, string>()
   /** The conversation of the sessions asked for lately, by the id Hermes gave, and when it was read. */
   private readonly conversations = new Map<string, { at: number; running?: Promise<LogEntry[] | null>; entries: LogEntry[] | null; details: Map<string, string> }>()
+  /** The model and the effort each session was last seen with (from its last export), and when: asked again only after a while. */
+  private readonly modelSeen = new Map<string, { at: number; info: ModelInfo | null }>()
   private loaded?: Promise<void>
 
   constructor(private readonly options: HermesOptions) {}
@@ -677,7 +681,11 @@ export class HermesBackend implements Backend {
     // What is kept is the conversation as entries, never the export: an export holds every row of the session, 25 MB for the biggest here.
     // With the entries, what their steps hold to be opened (what a command printed, a thought's words): kept as long as they are.
     const details = new Map<string, string>()
-    const running = exported(command, this.options.env ?? process.env, real).then((session) => (session ? hermesEntries(session, details) : null))
+    const running = exported(command, this.options.env ?? process.env, real).then((session) => {
+      // The same export says which model and effort the session has: kept, so that the status line does not ask for it again.
+      if (session) this.seen(real, hermesModel(session))
+      return session ? hermesEntries(session, details) : null
+    })
     const entry: { at: number; running?: Promise<LogEntry[] | null>; entries: LogEntry[] | null; details: Map<string, string> } = { at: Date.now(), running, entries: null, details }
     this.conversations.set(real, entry)
     const entries = await running
@@ -693,6 +701,29 @@ export class HermesBackend implements Backend {
   async step(id: string, more: string): Promise<StepDetail | null> {
     const raw = this.conversations.get(this.sessionOf(id))?.details.get(more)
     return isFileKey(more) ? diffOf(raw) : detailOf(raw)
+  }
+
+  private seen(session: string, info: ModelInfo | null): void {
+    this.modelSeen.delete(session)
+    this.modelSeen.set(session, { at: Date.now(), info })
+    while (this.modelSeen.size > 8) this.modelSeen.delete(this.modelSeen.keys().next().value as string)
+  }
+
+  /**
+   * The model and the effort a session runs on, from its export (the session's `model`, and the effort in its `model_config`). An export starts a
+   * Python program and takes a second or two, so it is asked for again only after a minute, and the conversation's own export, when Chat reads
+   * one, answers it too. Null when Hermes has no such session or tells neither.
+   */
+  async modelOf(id: string): Promise<ModelInfo | null> {
+    await this.ready()
+    const real = this.sessionOf(id)
+    if (!SESSION_WORD.test(real)) return null
+    const seen = this.modelSeen.get(real)
+    if (seen && Date.now() - seen.at < MODEL_KEPT_MS) return seen.info
+    const session = await exported(await this.command(), this.options.env ?? process.env, real)
+    const info = session ? hermesModel(session) : null
+    this.seen(real, info)
+    return info
   }
 
   /** A session by the id Hermes knows it by: one Togle started has the name it was started with as its id here. */

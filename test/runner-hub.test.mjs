@@ -375,6 +375,35 @@ test('Take back hands the agent what its record says (what waits, and what was s
   }
 })
 
+test('a task’s model and effort are asked of its agent, shared by those who ask at once, kept a few seconds, and none for an agent that tells none or fails', async () => {
+  const claude = new FakeBackend('claude', { screens: true })
+  const codex = new FakeBackend('codex')
+  let reads = 0
+  claude.modelOf = async () => { reads++; await new Promise((resolve) => setTimeout(resolve, 50)); return { model: 'claude-opus-5-5', effort: 'high' } }
+  const { hub } = hubOf([claude, codex])
+  const folder = scratch()
+  try {
+    const view = await hub.start({ runner: 'claude', folder, prompt: 'Fix it' })
+    const both = await Promise.all([hub.model(view.key), hub.model(view.key)])
+    assert.deepEqual(both, [{ model: 'claude-opus-5-5', effort: 'high' }, { model: 'claude-opus-5-5', effort: 'high' }])
+    assert.equal(reads, 1, 'one read answered both')
+    await hub.model(view.key)
+    assert.equal(reads, 1, 'and its answer is kept for a few seconds')
+    await new Promise((resolve) => setTimeout(resolve, 3_200))
+    await hub.model(view.key)
+    assert.equal(reads, 2, 'then it is read again: the person may have changed it on the agent’s screen')
+    // An agent that tells neither: nothing. One whose read fails: nothing too, and no error.
+    const plain = await hub.start({ runner: 'codex', folder, prompt: 'Write the notes' })
+    assert.equal(await hub.model(plain.key), null)
+    const second = await hub.start({ runner: 'claude', folder, prompt: 'And the changelog' })
+    claude.modelOf = async () => { throw new Error('it did not answer') }
+    assert.equal(await hub.model(second.key), null)
+  } finally {
+    await hub.dispose()
+    rmSync(folder, { recursive: true, force: true })
+  }
+})
+
 test('Take back is for an agent with a queue of its own: Codex has none, and says so', async () => {
   const codex = new FakeBackend('codex')
   const { hub } = hubOf([codex])

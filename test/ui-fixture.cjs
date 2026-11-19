@@ -418,6 +418,8 @@ module.exports = function install(fixture) {
     if (takesNoWords(found)) { found.held = [...(found.held ?? []), text]; delete found.heldNote; delete found.heldPaused; runnerChanged(); return }
     found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged()
   }
+  // The model and effort a task's agent works with now (a task given `model: { model, effort }`), as main reads them from the agent's record.
+  api.runnerModel = async key => { record('runnerModel', [key]); return clone(runnerFind(key).model ?? null) }
   // What waits in the agent's own queue (a task given `history.queued`), given back as main does it: its screen's Up arrow and an emptied prompt.
   // The words come back in the order they were queued, and the queue is empty.
   api.takeBackRunnerQueue = async key => {
