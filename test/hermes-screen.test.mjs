@@ -251,19 +251,36 @@ test('a reply Hermes did not take at the first Enter is pressed again, and one i
   }
 })
 
-test('a reply is refused while the agent works or waits, and when it is a command of the agent’s own', { timeout: 30_000 }, async () => {
-  const backend = hermes()
+test('a reply sent while the turn works is typed at once and steers it, as a line typed on its screen does; one sent while it asks, or that is a command of the agent’s own, is refused', { timeout: 30_000 }, async () => {
+  const backend = hermes({ backend: { loadMs: 300 } })
   try {
     const task = await backend.start({ folder: scratch(), prompt: 'sleep' })
     await until(() => backend.text(task).includes('sleeping'), 'the turn to be at work')
-    await assert.rejects(() => task.send('hello'), /Reply when it has finished/)
+    await task.send('also this')
+    assert.equal(task.state, 'working', 'the turn goes on: the words did not end it, and no new turn began')
+    await until(() => backend.text(task).includes('steering: also this'), 'the words to reach the screen and steer the turn')
     await task.stop()
     await until(() => task.state === 'stopped', 'the turn to end')
     await assert.rejects(() => task.send('/model'), /command is typed on the agent/)
     await assert.rejects(() => task.send('!ls'), /command is typed on the agent/)
     const asking = await backend.start({ folder: scratch(), prompt: 'ask' })
     await until(() => asking.state === 'waiting', 'the second task to wait')
-    await assert.rejects(() => asking.send('y'), /Reply when it has finished/, 'a line typed then would answer its question')
+    await assert.rejects(() => asking.send('y'), /waits for you on its screen/, 'a line typed then would answer its question')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('the answer of a turn that was steered takes the words in, and it ends as one turn', { timeout: 30_000 }, async () => {
+  const backend = hermes({ backend: { loadMs: 300 } })
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'slow' })
+    const events = watch(task)
+    await until(() => backend.text(task).includes('working slowly'), 'the turn to be at work')
+    await task.send('and say banana')
+    await until(() => backend.text(task).includes('slow done + and say banana'), 'the answer to take the words in')
+    await until(() => task.state === 'idle', 'the turn to end')
+    assert.equal(events.filter((e) => e.type === 'turn-ended').length, 1, 'the words started no turn of their own')
   } finally {
     await backend.close()
   }

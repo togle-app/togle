@@ -6,6 +6,9 @@ import { tidyPlan } from '@shared/plan-items'
 import { list, rec, text } from './jsonrpc'
 
 const WORDS_MOST = 20_000
+// A line the person typed while a turn worked is kept as a user message wrapped in marks (Hermes put it in the turn at its next tool, and did
+// not start a turn of its own for it: measured on 0.22.5): their words are between the marks.
+const STEERED = /^\[OUT-OF-BAND USER MESSAGE[^\]]*\]\s*([\s\S]*?)\s*\[\/OUT-OF-BAND USER MESSAGE\]$/
 const COMMAND_MOST = 2_000
 const NAME_MOST = 300
 // The most of what one command printed, or of one thought, kept to be opened (its end), and the most kept of a whole session:
@@ -102,7 +105,8 @@ export function hermesEntries(session: unknown, details?: Map<string, string>): 
     const at = typeof row.timestamp === 'number' ? Math.round(row.timestamp * 1000) : 0
     const role = text(row.role)
     if (role === 'user') {
-      const words = wordsOf(row.content).trim()
+      const kept = wordsOf(row.content).trim()
+      const words = STEERED.exec(kept)?.[1]?.trim() ?? kept
       // What Hermes adds to a turn of its own is marked "[System:": not the person's words.
       if (words && !words.startsWith('[System:')) entries.push({ id, at, kind: 'you', text: words.slice(0, WORDS_MOST) })
     } else if (role === 'assistant') {

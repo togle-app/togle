@@ -56,6 +56,23 @@ test('an export becomes a conversation: what was asked, what Hermes said, comman
   assert.equal(new Set(entries.map((e) => e.id)).size, entries.length)
 })
 
+test('a line typed while a turn worked is in the conversation as the person’s own words, where Hermes put it in the turn', () => {
+  const wrapped = (words) => `[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered once at this position; not tool output and not a new delivery when replayed from conversation history]\n${words}\n[/OUT-OF-BAND USER MESSAGE]`
+  const entries = T.hermesEntries(session(
+    message(201, 'user', { content: 'Run the long command, then say finished.' }),
+    message(202, 'assistant', { content: '', tool_calls: [call('c1', 'terminal', { command: 'ping -n 45 127.0.0.1' })] }),
+    message(203, 'tool', { tool_call_id: 'c1', tool_name: 'terminal', content: JSON.stringify({ output: 'running', exit_code: 0, error: null }) }),
+    message(204, 'user', { content: wrapped('Also say the word banana at the end.') }),
+    message(205, 'assistant', { content: 'finished banana' })
+  ))
+  assert.deepEqual(entries.map((e) => [e.kind, e.text]), [
+    ['you', 'Run the long command, then say finished.'],
+    ['command', 'ping -n 45 127.0.0.1'],
+    ['you', 'Also say the word banana at the end.'],
+    ['agent', 'finished banana']
+  ])
+})
+
 test('rows are read in the order Hermes wrote them, not by their time, and a command nothing answered stays running', () => {
   const entries = T.hermesEntries(session(
     message(202, 'assistant', { content: 'Second.', timestamp: 1 }),

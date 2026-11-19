@@ -1288,11 +1288,12 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
     window.getSelection()?.removeAllRanges()
     replyText.current?.focus()
   }
-  // An agent that can only be written to on its screen takes words when its turn has ended (Codex takes them while it works too):
-  // what is sent while it works waits, and goes in then. The box takes words all the while.
-  // Claude Code takes words while it works (its own queue holds them and takes them in as it goes, as for words typed on its screen): they go in
-  // at once. Only something that waits on its screen holds them, since they would answer it.
-  const takesWhileWorking = task.runner === 'claude' && task.state === 'working' && !task.waitingFor && task.pending.length === 0
+  // An agent that can only be written to on its screen and takes no words while it works (an agent the person added, in a terminal) takes
+  // them when its turn has ended: what is sent while it works waits, and goes in then. The box takes words all the while.
+  // Claude Code and Hermes take words while they work (Claude Code's own queue holds them and takes them in as it goes, Hermes puts them in the
+  // turn at its next tool, as for words typed on their screens): they go in at once. Only something that waits on the screen holds them, since
+  // they would answer it.
+  const takesWhileWorking = (task.runner === 'claude' || task.runner === 'hermes') && task.state === 'working' && !task.waitingFor && task.pending.length === 0
   const holdsReply = !!task.screen && task.runner !== 'codex' && !takesWhileWorking && (task.state === 'working' || task.state === 'waiting' || !!task.waitingFor) && !task.pending.some((request) => request.kind === 'question')
   const replyHint = holdsReply ? `Reply: it goes in when ${agentOf(task)} finishes` : 'Reply, or hold ' + talkKey + ' and talk'
   // What waits to go in, and why it has not: it goes in by itself when the turn ends, unless the task stopped or it did not go in.

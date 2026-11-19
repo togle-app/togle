@@ -56,6 +56,8 @@ export interface HermesOptions {
   findMs?: number
   /** How long a reply typed on its screen waits to see Hermes take it (its window title goes to busy), in milliseconds. */
   takeMs?: number
+  /** How long a screen just opened is given to load its session before a line is typed on it while the turn works, in milliseconds. */
+  loadMs?: number
   /** How long a session's conversation is reused before Hermes is asked for it again, in milliseconds. Each ask starts a Python program. */
   historyMs?: number
 }
@@ -257,10 +259,14 @@ interface TaskContext {
   findMs: number
   /** How long a reply waits to see Hermes take it, in milliseconds. */
   takeMs: number
+  /** How long a screen just opened is given to load its session before a line is typed on it while the turn works. */
+  loadMs: number
 }
 
 class HermesTask extends TaskBase implements ScreenSide {
   readonly runner = 'hermes' as const
+  /** Its screen takes a line typed while a turn works: it steers the turn with it, at the next tool (measured, see `send`). */
+  readonly takesWordsWhileWorking = true
   private screenTask: HermesScreen | null = null
   private screens = 0
   private sawBusy = false
@@ -446,16 +452,27 @@ class HermesTask extends TaskBase implements ScreenSide {
   // ---- What the person does ----
 
   /**
-   * A reply from the cards view. Hermes takes words on its screen only, so the screen is opened out of sight when it is closed,
-   * and the words are typed in with Enter once its turn has ended (typed while it asks, they would answer the question). A reply
-   * that starts as a command of its own is refused (see `submit`).
+   * A reply from the cards view. Hermes takes words on its screen only, so the screen is opened out of sight when it is closed, and the
+   * words are typed in with Enter, as the person would. While a turn works they are typed at once, since that is what its screen does
+   * with a line typed meanwhile (measured on Hermes 0.22.5, a line typed while a command ran was not queued and did not end the turn:
+   * Hermes put it in the turn at the next tool, as a user message marked "[OUT-OF-BAND USER MESSAGE", and its answer took it in). While
+   * it asks (an approval, a question) they would answer it, so they wait for the person. A reply that starts as a command of its own is
+   * refused (see `submit`).
    */
   async send(words: string): Promise<void> {
-    if (this.state === 'working' || this.state === 'waiting' || this.waitingFor) throw new Error('It is working. Reply when it has finished.')
+    if (this.state === 'waiting' || this.waitingFor) throw new Error('It waits for you on its screen. Reply when that is answered.')
+    const working = this.state === 'working'
     refuseCommand(words)
     if (!this.screenTask) await this.show()
     const screen = this.screenTask
     if (!screen) throw new Error(this.closed ?? 'Its screen could not be opened.')
+    if (working) {
+      // A screen at work does not go quiet, and no turn begins that its title could show: it is typed on once it has drawn (a screen
+      // just opened loads the session first, for some seconds), and the turn goes on.
+      await screen.drawn(this.context.loadMs, Math.max(25_000, this.context.loadMs))
+      await screen.submit(words)
+      return
+    }
     // A screen that was just opened loads the session before it takes words, with long pauses between what it prints: it is given
     // a longer quiet than a program that draws at once.
     await screen.settled(1_500, 20_000)
@@ -560,7 +577,8 @@ export class HermesBackend implements Backend {
       },
       find: (task) => this.locate(task),
       findMs: this.options.findMs ?? 3_000,
-      takeMs: this.options.takeMs ?? 5_000
+      takeMs: this.options.takeMs ?? 5_000,
+      loadMs: this.options.loadMs ?? 6_000
     }))
     this.resolved.catch(() => {
       this.resolved = undefined

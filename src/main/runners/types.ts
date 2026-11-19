@@ -102,6 +102,12 @@ export interface TaskHandle {
   readonly screen?: ScreenSide
   /** What a task waits for in its agent's own screen when Togle has no request of its own for it ("permission prompt"). */
   readonly waitingFor?: string
+  /**
+   * Whether its agent's own screen takes a line typed while a turn only works, in its own way (Claude Code queues it, Hermes steers the
+   * turn with it): then Chat types it at once, as Terminal does, and holds words only while something waits on the screen (they would
+   * answer it). Without this, words sent while it works wait in Togle until its turn has ended.
+   */
+  readonly takesWordsWhileWorking?: boolean
   /** What the task started that still runs in the background, when its agent tells (Claude Code's shells). */
   readonly shells?: readonly BackgroundShell[]
   /** The commands and models its agent told it has for this task, so far. Left out by an agent that tells none. */

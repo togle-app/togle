@@ -11,6 +11,8 @@
 //   "slow"     works for a second and a half
 //   "ask"      waits on the person (⚠) until a line is typed, then goes on
 //   "sleep"    works until Ctrl+C
+// A line typed while a turn works is not queued and does not end the turn: it steers it ("steering: <words>"), and the answer takes it in
+// ("ok + <words>"), as the real Hermes 0.22.5 does (measured: it puts the line in the turn at the next tool).
 //   "fail"     the turn fails at once; the session is kept with no folder, as Hermes does when its model fails
 // FAKE_HERMES_FIRST_ENTER_IGNORED: a typed line is kept in the input at its first Enter and taken at the second (a screen not ready for
 // Enter yet); FAKE_HERMES_DEAF: a typed line is never taken. FAKE_HERMES_HELD makes `--resume` refuse, as Hermes does when another window holds the session; FAKE_HERMES_ARGS names a file
@@ -124,6 +126,9 @@ function screen() {
   let ignored = false
   let waiting = null
   let sleeping = null
+  // What was typed while the turn worked: Hermes puts it in the turn (it steers it, and does not end it or queue it), and the turn's
+  // answer takes it in.
+  const steers = []
   const keep = (workspace = folder) => {
     const rows = load()
     row = rows.find((candidate) => candidate.title === name) ?? row
@@ -137,7 +142,9 @@ function screen() {
   const end = (said, workspace = folder) => {
     busy = false
     keep(workspace)
-    if (said) process.stdout.write(`${said}\r\n`)
+    const told = steers.length && said ? `${said} + ${steers.splice(0).join(' + ')}` : said
+    steers.length = 0
+    if (told) process.stdout.write(`${told}\r\n`)
     title('✓')
   }
   const turn = (text) => {
@@ -161,6 +168,7 @@ function screen() {
       process.stdout.write('sleeping\r\n')
       return undefined
     }
+    if (/^slow/.test(text)) process.stdout.write('working slowly\r\n')
     return setTimeout(() => end(/^slow/.test(text) ? 'slow done' : 'ok'), /^slow/.test(text) ? 1500 : 300)
   }
   process.stdout.write(`HERMES SCREEN ${resume ?? name}\r\n`)
@@ -177,6 +185,7 @@ function screen() {
           if (sleeping) clearInterval(sleeping)
           sleeping = null
           waiting = null
+          steers.length = 0
           end('interrupted')
         } else process.exit(0)
       } else if (char === '\r' || char === '\n') {
@@ -193,6 +202,10 @@ function screen() {
           }
           words = typed
           turn(typed)
+        } else if (typed && busy) {
+          // A line typed while the turn works steers it.
+          steers.push(typed)
+          process.stdout.write(`steering: ${typed}\r\n`)
         }
       } else line += char
     }

@@ -118,6 +118,9 @@ class FakeTask extends T.TaskBase {
     this.folder = folder
     this.sent = []
     this.running = 0
+    // As the real Claude Code and Hermes tasks say: their screens take a line typed while they only work. The stand-in named hermes here
+    // models an agent written to on its screen that does not (it holds words while it works), which no real agent of Togle's is now.
+    this.takesWordsWhileWorking = runner === 'claude'
   }
   async send(text) {
     this.sent.push(text)

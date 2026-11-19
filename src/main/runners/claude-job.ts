@@ -166,6 +166,8 @@ const NOTICED_ELSEWHERE = /opened in another window/i
 
 export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
   readonly runner = 'claude' as const
+  /** Its own queue takes a line typed while it works, and takes it in at its next step. */
+  readonly takesWordsWhileWorking = true
   private current: string
   private row?: JobRow
   /** What the list last said it was. */

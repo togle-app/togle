@@ -2827,8 +2827,9 @@ async function checkReplyDock(T, agent) {
   await ui.wait("!!document.querySelector('.reply-note')")
   assert.equal(await ui.evaluate("document.querySelector('.reply-note').textContent"), 'The picture was not pasted. It did not answer.')
   assert.equal(await ui.evaluate("!!document.querySelector('.reply-chip')"), false)
-  // Sent while an agent that is written to on its screen works: it is queued, the picture said as a count; Edit brings the words and the chip back.
-  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'hermes:h1', runner: 'hermes', title: 'Holds words', folder: 'C:\\work\\notes', state: 'working', screen: true, terminal: false, mine: true, line: 'Holds words' }) + ', "")')
+  // Sent while an agent that is written to on its screen asks something there (words would answer it): it is queued, the picture said as a count;
+  // Edit brings the words and the chip back. (Hermes, like Claude Code, takes words while it only works: it steers its turn with them.)
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'hermes:h1', runner: 'hermes', title: 'Holds words', folder: 'C:\\work\\notes', state: 'waiting', waitingFor: 'approval or an answer', screen: true, terminal: false, mine: true, line: 'Holds words' }) + ', "")')
   await ui.wait("[...document.querySelectorAll('.task-row strong')].some(e=>e.textContent==='Holds words')")
   await ui.task('Holds words')
   await ui.click('.view-switch button', 'Chat')

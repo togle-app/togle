@@ -396,10 +396,12 @@ export class RunnerHub {
   }
 
   /**
-   * What the person sends from Chat. An agent written to on its own screen (Claude Code, Hermes) takes words only once its
-   * turn has ended: typed while it works or asks, they could answer its question. So words sent then wait, in the order they
-   * came, and go in together when the turn ends (not after a Stop or an error: then they wait for the person). A command of
-   * the agent's own is refused at once, as it would be when it went in. Codex takes words while it works.
+   * What the person sends from Chat. An agent whose screen takes a line typed while it works (Claude Code queues it, Hermes steers
+   * the turn with it: `takesWordsWhileWorking`) is typed to at once, as in Terminal; typed while it asks, words would answer its
+   * question, so they wait. Another agent written to on its own screen takes words only once its turn has ended: words sent while
+   * it works wait too. What waits goes in together, in the order it came, when the agent can take it (not after a Stop or an error:
+   * then it waits for the person). A command of the agent's own is refused at once, as it would be when it went in. Codex takes
+   * words while it works.
    */
   async sendOrHold(key: string, text: string): Promise<void> {
     const owned = this.mine(key)
@@ -454,7 +456,7 @@ export class RunnerHub {
    */
   private stoppedForWords(owned: Owned): boolean {
     const { handle } = owned
-    if (handle.runner === 'claude') return handle.state !== 'waiting' && !handle.waitingFor && handle.pending.length === 0
+    if (handle.takesWordsWhileWorking) return handle.state !== 'waiting' && !handle.waitingFor && handle.pending.length === 0
     return !this.atWork(owned)
   }
 
@@ -502,14 +504,14 @@ export class RunnerHub {
   }
 
   /**
-   * Whether a task's agent cannot be written to now: one written to on its screen, while it works or asks. Claude Code takes words while it
-   * works (its own queue holds them and takes them in as it goes, as for words typed on its screen); only a question or a permission that
-   * waits on its screen would take them as its answer.
+   * Whether a task's agent cannot be written to now: one written to on its screen, while it works or asks. Claude Code and Hermes take words
+   * while they work (Claude Code's own queue holds them and takes them in as it goes, Hermes puts them in the turn at its next tool, as for
+   * words typed on their screens); only a question or a permission that waits on the screen would take them as its answer.
    */
   private takesNoWords(owned: Owned): boolean {
     const { handle } = owned
     if (!handle.screen || handle.runner === 'codex') return false
-    if (handle.runner === 'claude') return handle.state === 'waiting' || !!handle.waitingFor || handle.pending.length > 0
+    if (handle.takesWordsWhileWorking) return handle.state === 'waiting' || !!handle.waitingFor || handle.pending.length > 0
     return handle.state === 'working' || handle.state === 'waiting' || !!handle.waitingFor
   }
 
@@ -523,12 +525,12 @@ export class RunnerHub {
   }
 
   /**
-   * Whether what waits may go in now: nothing waits on the agent's screen, and its turn has ended, or (Claude Code, whose own queue takes
-   * words while it works) it is at work again.
+   * Whether what waits may go in now: nothing waits on the agent's screen, and its turn has ended, or (an agent whose screen takes words
+   * while it works: Claude Code, Hermes) it is at work again.
    */
   private takesHeld(handle: Owned['handle']): boolean {
     if (handle.pending.length || handle.waitingFor) return false
-    return handle.state === 'idle' || (handle.runner === 'claude' && handle.state === 'working')
+    return handle.state === 'idle' || (!!handle.takesWordsWhileWorking && handle.state === 'working')
   }
 
   /** A task's state changed: when what waits may go in (see `takesHeld`), it goes in after a moment, if it still may then. */
