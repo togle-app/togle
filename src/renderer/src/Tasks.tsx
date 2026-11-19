@@ -27,7 +27,14 @@ const REFRESH_MS = 4_000
 // What finished within a day stays in the list; older tasks fold under Earlier.
 const RECENT_MS = 24 * 3600_000
 // The task looked at last, for when the screen is opened again.
-let remembered: string | undefined
+// The task shown, kept while the page lives (a screen left and come back to) and over a page that loads again.
+let remembered: string | undefined = (() => {
+  try {
+    return sessionStorage.getItem('togle.selected') || undefined
+  } catch {
+    return undefined
+  }
+})()
 // Where each thread was read to when its task was last on screen, and the list's own scroll: kept while the window is open, so that a
 // place drawn again is where it was left.
 const threadScrolls = new Map<string, { top: number; stick: boolean }>()
@@ -466,6 +473,12 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   // list too when it does not have the task yet.
   useEffect(() => {
     remembered = selected
+    try {
+      if (selected) sessionStorage.setItem('togle.selected', selected)
+      else sessionStorage.removeItem('togle.selected')
+    } catch {
+      /* kept for this run only */
+    }
     setLog(selected && logs.has(selected) ? { key: selected, entries: logs.get(selected) ?? [] } : null)
     if (selected && !selected.startsWith(REMOTE) && !tasksNow.current.some((task) => task.key === selected)) {
       setLookingFor(selected)

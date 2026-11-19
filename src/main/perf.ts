@@ -81,6 +81,11 @@ export class PerfLog {
     this.add({ type: 'heard', ...timing })
   }
 
+  /** The main window's page loading again, or going (and why): a page that loads by itself sends the person back to where it starts. */
+  page(what: 'load' | 'gone', reason?: string): void {
+    this.add({ type: 'page', at: new Date().toISOString(), what, ...(reason ? { reason } : {}) })
+  }
+
   /** Every request to the model as it ends (answers, frame descriptions, notes, reviews), stopped ones too. */
   request(u: Usage): void {
     const { lane, model, input, cached, output, reasoning, rounds, hedged, end } = u

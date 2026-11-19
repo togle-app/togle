@@ -1640,6 +1640,26 @@ async function checkMarksLight(T, agent) {
 
 // The navigation and the Agents list: the pointer drags the edge after each (a real drag), the keys move it, a tab on it hides the pane or
 // shows it again; the navigation narrowed past its words is its icons only; what was set is kept for the next window.
+// A page that loads again (it crashed, or a key reloaded it) comes back to the place it was in, Agents with its task, and not to To-do; a
+// new window starts at To-do.
+async function checkPlaceKept(T, agent) {
+  const place = (page) => page.evaluate("document.querySelector('.workspace-nav [aria-current=page]')?.getAttribute('aria-label')")
+  const ui = await open(T, agent, 1180)
+  assert.equal(await place(ui), 'To-do', 'a new window starts at To-do')
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("document.querySelector('.tasks-detail')?.textContent.includes('Rebuild the pricing page')", 'the task shown')
+  ui.window.webContents.reload()
+  await ui.wait("document.querySelector('.workspace-nav [aria-current=page]')?.getAttribute('aria-label')==='Agents'", 'Agents again after the page loaded again')
+  await ui.wait("document.querySelector('.tasks-detail')?.textContent.includes('Rebuild the pricing page')", 'its task again')
+  const fresh = await open(T, agent, 1180)
+  assert.equal(await place(fresh), 'To-do', 'another window is at To-do again')
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  fresh.window.destroy()
+  ui.window.destroy()
+}
+
 async function checkPanes(T, agent) {
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   const ui = await open(T, agent, 1180)
@@ -2740,6 +2760,7 @@ app.whenReady().then(async () => {
     await go(checkMarks)
     await go(checkMarksLight)
     await go(checkTheme)
+    await go(checkPlaceKept)
     await go(checkPanes)
     await go(checkAgentMarks)
     await go(checkPlanWindow)

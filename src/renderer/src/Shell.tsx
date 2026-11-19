@@ -24,6 +24,20 @@ import { useCall } from './useCall'
 const api = window.togle
 
 type View = 'todo' | 'agents' | 'meetings' | 'settings'
+
+/**
+ * Where the window was when its page last loaded: a page that loads again (it crashed, or a key reloaded it) comes back to the same
+ * place, not to To-do. A new run starts at To-do.
+ */
+const PLACE = 'togle.place'
+function placeBefore(): View {
+  try {
+    const place = sessionStorage.getItem(PLACE)
+    return place === 'agents' || place === 'meetings' || place === 'settings' ? place : 'todo'
+  } catch {
+    return 'todo'
+  }
+}
 const PLACES: { id: View; label: string; icon: string; title: string }[] = [
   { id: 'todo', label: 'To-do', icon: 'todo', title: 'What needs you today' },
   { id: 'agents', label: 'Agents', icon: 'tasks', title: 'Every agent task on this computer' },
@@ -39,7 +53,7 @@ export function Shell() {
   const [auth, setAuth] = useState<AuthStatus>({ signedIn: false })
   const [stt, setStt] = useState<SttStatus>({ state: 'starting' } as SttStatus)
   const [microphone, setMicrophone] = useState<TogleMicrophoneStatus>()
-  const [view, setView] = useState<View>('todo')
+  const [view, setView] = useState<View>(placeBefore)
   // In Meetings: the call being written down, or the list (with a call opened from elsewhere).
   const [live, setLive] = useState(false)
   const [meetingFocus, setMeetingFocus] = useState<{ id: string; seq: number }>()
@@ -51,6 +65,13 @@ export function Shell() {
   const [waiting, setWaiting] = useState(0)
   const keepGoing = useRef<HTMLButtonElement>(null)
   const call = useCall(settings)
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(PLACE, view)
+    } catch {
+      /* kept for this run only */
+    }
+  }, [view])
 
   // Settings as main last sent them, with the changes asked for and not saved yet laid over them: a switch moves when it is
   // pressed, and word from main about something else does not move it back. A change main refuses is gone again, and the

@@ -829,6 +829,7 @@ function createWindow(): void {
   win.webContents.on('render-process-gone', (_e, details) => {
     pageDown = true
     pageStopped()
+    perf.page('gone', details.reason)
     // A page that crashed loads again (the call is saved, and the new page picks it up): a frameless window left
     // empty has nothing to click, not even to close it. Not over and over: a page that keeps crashing stays down.
     if (details.reason === 'clean-exit' || !win || win.isDestroyed()) return
@@ -840,7 +841,10 @@ function createWindow(): void {
   })
   let savedForClose = false
   win.webContents.on('did-start-loading', () => {
-    if (pageLoads++) restoredFrom = undefined
+    if (pageLoads++) {
+      restoredFrom = undefined
+      perf.page('load')
+    }
     // A page that loads again (or crashed) has no task on screen until it says so: until it says again, a task that finishes is new.
     freshTasks.shown(null)
   })
@@ -1738,6 +1742,10 @@ if (process.argv.includes('--togle-hook')) {
       { id: 'togle-edit', role: 'editMenu' },
       { role: 'windowMenu' }
     ]))
+    // Elsewhere an installed Togle has no menu: Electron's own gives its window the browser's keys, so Ctrl+R reloaded the whole window
+    // (back to To-do), Ctrl+W hid it and Ctrl+Plus zoomed it, and none of them reached the screen of a task, where Claude Code uses
+    // Ctrl+R and Ctrl+W itself. A run from the source keeps the menu (Reload, Developer Tools).
+    else if (app.isPackaged) Menu.setApplicationMenu(null)
     await Promise.all([loadSettings(), auth.load(), claude.load(), compat.load(), ...Object.values(speechApis).map((api) => api.load())])
     // The theme before any window: none opens in the other one. The system's own change moves the window's first-paint color too.
     applyTheme(getSettings().appearance.theme)
