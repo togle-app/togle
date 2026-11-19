@@ -1263,7 +1263,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
     toEnd()
     setInterrupting(true)
     const full = goes(message)
-    const sent = await onInterrupt(withIt && quoted ? withQuote(quoted, full) : full)
+    const said = withIt && quoted ? withQuote(quoted, full) : full
+    // A Claude Code task is stopped by ending its session, and its own queue goes with it: what it had queued is said again with the new words.
+    const sent = await onInterrupt(inQueue.length ? [said, ...inQueue].join(' ') : said)
     setInterrupting(false)
     if (!sent) return
     setText('')

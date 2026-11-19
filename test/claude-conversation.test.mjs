@@ -315,6 +315,7 @@ test('how a file changed is made fit to show: its lines as they are, no keys or 
   assert.ok(long.text.startsWith('+line 0\n') && long.text.length <= 24000 && /\+line \d+$/.test(long.text), 'its start, cut at the end of a line')
 })
 
+const popAll = (n, content, seconds) => ({ type: 'queue-operation', operation: 'popAll', timestamp: stamp(seconds), sessionId: id(n), content })
 // What they type while Claude Code works waits in its queue (queue-operation lines), which Chat shows as the agent's screen does (history.queued), until
 // the turn takes it in (an attachment, never a message line: it is in the conversation from there) or ends (it then starts a turn, and has its message line).
 const stamp = (seconds) => `2026-11-16T10:00:${String(seconds).padStart(2, '0')}.000Z`
@@ -341,6 +342,22 @@ test('what they type while Claude Code works is in its queue, as on its screen, 
   history = await claudeConversation(id(14))
   assert.equal(history.queued, undefined, 'nothing is queued')
   assert.equal(history.entries.some((entry) => entry.text === 'And the footer.'), false, 'and it was not said')
+})
+
+test('the queue pulled back to the prompt (the Up arrow: a popAll line for each message) is no queue, and queued again joined when they press Enter; Esc sends what is queued as the next turns', async () => {
+  // Measured on Claude Code 2.1.328: Up gives each queued message back (popAll), Enter queues the prompt again as ONE message (the lines joined
+  // by a line break), and Esc stops the turn and the queued messages start the next turns (a dequeue for each, then a message line from the queue).
+  write(19, line(asked(19, 'Ping it.')) + line(enqueue(19, 'first queued', 3)) + line(enqueue(19, 'second queued', 4)))
+  assert.deepEqual((await claudeConversation(id(19))).queued, ['first queued', 'second queued'])
+  appendFileSync(file(19), line(popAll(19, 'first queued', 6)) + line(popAll(19, 'second queued', 6)))
+  assert.equal((await claudeConversation(id(19))).queued, undefined, 'pulled back: not queued, and not said')
+  const joined = 'first queued\nsecond queued'
+  appendFileSync(file(19), line(enqueue(19, joined, 8)) + line(enqueue(19, 'third queued', 10)))
+  assert.deepEqual((await claudeConversation(id(19))).queued, [joined, 'third queued'], 'queued again, as one message and the next')
+  appendFileSync(file(19), line({ type: 'queue-operation', operation: 'dequeue', timestamp: stamp(12), sessionId: id(19) }) + line({ type: 'queue-operation', operation: 'dequeue', timestamp: stamp(12), sessionId: id(19) }) + line(asked(19, joined)) + line(asked(19, 'third queued')))
+  const history = await claudeConversation(id(19))
+  assert.equal(history.queued, undefined, 'both started turns: the queue is empty')
+  assert.deepEqual(history.entries.map((entry) => [entry.kind, entry.text]), [['you', 'Ping it.'], ['you', joined], ['you', 'third queued']], 'and each is said once, by its message line')
 })
 
 test('words that started a turn of their own are shown once, by their message line; words taken back, or sent by a task or another session, are not shown', async () => {

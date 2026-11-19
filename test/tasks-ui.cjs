@@ -2863,6 +2863,11 @@ async function checkReplyDock(T, agent) {
   await ui.wait("window.togleUITest.calls().some(call=>call.name==='sendToRunnerTask'&&call.args[0]==='claude:q1')")
   assert.deepEqual((await ui.calls('sendToRunnerTask')).map((call) => call.args).filter((args) => args[0] === 'claude:q1'), [['claude:q1', 'Also the footer']])
   assert.equal(await ui.evaluate("document.querySelectorAll('.held-reply .held-row').length"), 2, 'the queue is the agent\'s: Togle holds none of it')
+  // An interrupt stops the session, and its queue with it: what was queued is said again after the new words, none lost.
+  await ui.fill('.task-reply textarea', 'No, use the other approach')
+  await ui.click('.reply-interrupt', 'Interrupt')
+  await ui.wait("window.togleUITest.calls().some(call=>call.name==='interruptRunnerTask'&&call.args[0]==='claude:q1')")
+  assert.deepEqual((await ui.calls('interruptRunnerTask')).map((call) => call.args).filter((args) => args[0] === 'claude:q1').at(-1), ['claude:q1', 'No, use the other approach Also the header, please. And the footer.'])
   // Stop ends the session and its queue with it: what was queued comes back into the box (the screen gives it back to the prompt), none lost.
   await ui.fill('.task-reply textarea', '')
   await ui.click('.task-reply .reply-send', 'Stop')

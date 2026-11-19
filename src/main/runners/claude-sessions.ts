@@ -697,7 +697,12 @@ export function feedConversation(state: Conversation, lines: string[], places?: 
           state.queued.push({ words, at })
           if (state.queued.length > QUEUED_MOST) state.queued.shift()
         }
-      } else if (r.operation === 'remove' && r.reason !== 'absorbed_mid_turn') unqueue(state, theirWords(str(r.content)))
+      // They take it back: the Up arrow on the screen gives the queue back to the prompt, one "popAll" line for each message (measured on
+      // Claude Code 2.1.328; a "remove" that is not an absorption is the same). It is theirs again, in the prompt, and is queued again when they press Enter.
+      } else if (r.operation === 'popAll' || (r.operation === 'remove' && r.reason !== 'absorbed_mid_turn')) {
+        if (r.operation === 'popAll' && r.content === undefined) state.queued.length = 0
+        else unqueue(state, theirWords(str(r.content)))
+      }
       return
     }
     const command = queuedCommand(r)
