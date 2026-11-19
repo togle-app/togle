@@ -1291,6 +1291,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const replyHint = holdsReply ? `Reply: it goes in when ${agentOf(task)} finishes` : 'Reply, or hold ' + talkKey + ' and talk'
   // What waits to go in, and why it has not: it goes in by itself when the turn ends, unless the task stopped or it did not go in.
   const held = task.held ?? []
+  // What the agent has in its own queue and has not taken in (it is the queue its screen shows: typed there or sent from here); gone with its session.
+  const inQueue = running ? history?.queued ?? [] : []
+  const queueLength = inQueue.length + held.length
   const heldWaitsForYou = !!task.heldPaused || task.state === 'stopped' || task.state === 'failed'
   const heldLine = task.heldNote ? `It did not go in: ${task.heldNote}` : heldWaitsForYou ? 'Not sent: the task stopped.' : `Goes in when ${agentOf(task)} finishes this turn.`
   useEffect(() => {
@@ -1563,14 +1566,25 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
             {/* The agent's own checklist for the turn at hand, on top of the reply box. */}
             {plan && <PlanCard key={`${task.key} ${lastTurnKey(shown) ?? ''}`} plan={plan} />}
 
-            {/* What was sent while the agent worked, waiting for its turn to end: as it will be said, with when it goes in. */}
-            {task.mine && held.length > 0 && (
+            {/* What waits to go in: in the agent's own queue (typed on its screen, or sent from here: one queue, as its screen shows it, which
+                takes it in as it works) and, for an agent that takes words only when its turn has ended, what Togle holds for it, as it will
+                be said, with when it goes in. */}
+            {task.mine && queueLength > 0 && (
               <div className="held-reply" role="status" aria-label="Queued messages">
                 <div className="held-head">
                   <span className="held-title">Queued</span>
-                  <span className="held-count" aria-label={`${held.length} ${held.length === 1 ? 'message' : 'messages'}`}>{held.length}</span>
+                  <span className="held-count" aria-label={`${queueLength} ${queueLength === 1 ? 'message' : 'messages'}`}>{queueLength}</span>
                 </div>
                 <ol className="held-words">
+                  {inQueue.map((words, index) => {
+                    const split = splitQuote(words)
+                    const said = splitPictures(split ? split.reply : words)
+                    return (
+                      <li key={`queued-${index}`} className="held-row">
+                        <span className="held-text">{split && <QuoteBlock text={split.quote} />}{said.words}{!!said.files.length && <span className="held-pictures">{said.words ? ' · ' : ''}{said.files.length === 1 ? 'a picture' : `${said.files.length} pictures`}</span>}</span>
+                      </li>
+                    )
+                  })}
                   {held.map((words, index) => {
                     const split = splitQuote(words)
                     // The pictures that went with it are said as a count: they come back as chips when it is put back in the box.
@@ -1596,13 +1610,19 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                   })}
                 </ol>
                 <div className="held-foot">
-                  <span className={task.heldNote ? 'held-line bad' : 'held-line'}>{heldLine}</span>
-                  <span className="held-actions">
-                    {heldWaitsForYou
-                      ? <button type="button" className="small" disabled={!!pressed} onClick={press('held-send', () => onHeld('send'))}>{pressed === 'held-send' ? 'Sending…' : 'Send now'}</button>
-                      : <button type="button" className="small" disabled={!!pressed} onClick={press('held-interrupt', () => onHeld('interrupt'))} title={`Stops what ${agentOf(task)} is doing and sends what is queued now`}>{pressed === 'held-interrupt' ? 'Interrupting…' : 'Interrupt and send'}</button>}
-                    {held.length > 1 && <button type="button" className="ghost small" onClick={() => void onHeld('drop')}>Remove all</button>}
-                  </span>
+                  {held.length > 0 ? (
+                    <>
+                      <span className={task.heldNote ? 'held-line bad' : 'held-line'}>{heldLine}</span>
+                      <span className="held-actions">
+                        {heldWaitsForYou
+                          ? <button type="button" className="small" disabled={!!pressed} onClick={press('held-send', () => onHeld('send'))}>{pressed === 'held-send' ? 'Sending…' : 'Send now'}</button>
+                          : <button type="button" className="small" disabled={!!pressed} onClick={press('held-interrupt', () => onHeld('interrupt'))} title={`Stops what ${agentOf(task)} is doing and sends what is queued now`}>{pressed === 'held-interrupt' ? 'Interrupting…' : 'Interrupt and send'}</button>}
+                        {held.length > 1 && <button type="button" className="ghost small" onClick={() => void onHeld('drop')}>Remove all</button>}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="held-line">{agentOf(task)} takes {inQueue.length === 1 ? 'it' : 'these'} in as it works.</span>
+                  )}
                 </div>
               </div>
             )}

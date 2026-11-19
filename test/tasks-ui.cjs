@@ -2839,6 +2839,20 @@ async function checkReplyDock(T, agent) {
   await ui.wait("!document.querySelector('.held-reply') && !!document.querySelector('.reply-chip img')")
   assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), 'Please check the header too', 'put back in the box: the words without the path')
   assert.equal(await ui.evaluate("document.querySelector('.reply-chip .chip-words b').textContent"), 'paste-20261118-120000.png', 'and the picture as a chip again')
+  // The agent's own queue (typed on its screen, or sent from here: it is one queue, as the screen shows it) is the same Queued card, and it
+  // is gone when the turn ends: what was not taken in starts the next turn and is in the conversation then.
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:q1', runner: 'claude', title: 'Has a queue', folder: 'C:\\work\\notes', state: 'working', screen: true, terminal: false, mine: true, line: 'Has a queue', history: { entries: [{ id: 1, at: Date.now() - 60000, kind: 'you', text: 'Rebuild the table.' }], queued: ['Also the header, please.', 'And the footer.'] } }) + ', "")')
+  await ui.wait("[...document.querySelectorAll('.task-row strong')].some(e=>e.textContent==='Has a queue')")
+  await ui.task('Has a queue')
+  await ui.click('.view-switch button', 'Chat')
+  await ui.wait("document.querySelectorAll('.held-reply .held-row').length===2")
+  assert.deepEqual(await texts(ui, '.held-text'), ['Also the header, please.', 'And the footer.'], 'what the agent has queued, in the order typed')
+  assert.equal(await ui.evaluate("document.querySelector('.held-reply .held-count').textContent"), '2')
+  assert.equal(await ui.evaluate("document.querySelector('.held-foot .held-line').textContent"), 'Claude Code takes these in as it works.')
+  assert.equal(await ui.evaluate("document.querySelectorAll('.held-reply button').length"), 0, 'it is the agent\'s queue: no button of Togle\'s on it')
+  assert.equal(await ui.evaluate("!!document.querySelector('.you-row .task-you') && [...document.querySelectorAll('.task-you')].some(e=>e.textContent==='Also the header, please.')"), false, 'and it is not in the conversation until the agent takes it in')
+  await ui.evaluate("window.togleUITest.stopTask('claude:q1', 'idle', 'Done')")
+  await ui.wait("!document.querySelector('.held-reply')")
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }

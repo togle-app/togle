@@ -341,6 +341,11 @@ export interface TaskHistory {
   entries: LogEntry[]
   /** Whether turns before these were left out: the rest can be asked for. */
   more: boolean
+  /**
+   * What the person typed that the agent has in its own queue and has not taken in yet (Claude Code's: typed on its screen or sent from
+   * Chat, the same queue), oldest first. It is not in `entries` until the agent takes it in. Chat shows it as the queue the agent's screen shows.
+   */
+  queued?: string[]
 }
 
 /** A command an agent has for a task ("/model"), in the agent's own words: Togle only lists what the agent tells it. */

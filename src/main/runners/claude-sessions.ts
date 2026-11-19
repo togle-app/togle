@@ -457,10 +457,10 @@ interface ListedTask extends PlanItem {
   finished?: number
 }
 
-/** Their words that wait in Claude Code's queue: the entry they are shown by, until a line says what became of them. */
+/** Their words that wait in Claude Code's queue, and when they were typed, until a line says what became of them. */
 interface Queued {
   words: string
-  entry: LogEntry
+  at: number
 }
 
 /** What is read of a session so far: its entries, and how far into its file. */
@@ -511,12 +511,6 @@ const QUEUED_MOST = 30
 function unqueue(state: Conversation, words: string): Queued | undefined {
   const at = words ? state.queued.findIndex((item) => item.words === words) : -1
   return at < 0 ? undefined : state.queued.splice(at, 1)[0]
-}
-
-/** What was shown as theirs, off the conversation: it was not theirs after all, or they took it back, or its message line takes its place. */
-function withdraw(state: Conversation, item: Queued): void {
-  const at = state.entries.indexOf(item.entry)
-  if (at >= 0) state.entries.splice(at, 1)
 }
 
 /** How long it was from a call to its result, when both have a time and they are in order. */
@@ -692,28 +686,24 @@ export function feedConversation(state: Conversation, lines: string[], places?: 
     if (!r || r.isSidechain) return
     const stamp = Date.parse(str(r.timestamp))
     const at = Number.isFinite(stamp) ? stamp : 0
-    // What they type while Claude Code works waits in its queue, and is shown as soon as it is queued, where it was typed. The line that
-    // says what became of it settles it: the turn takes it in (an attachment: it stays), they take it back (it goes), a finished task or
-    // another session sent it (it goes), or it starts a turn of its own (its message line, further on, takes its place).
+    // What they type while Claude Code works waits in its queue, which is where Chat shows it (as the agent's screen does), not in the
+    // conversation. The line that says what became of it settles it: the turn takes it in (an attachment: it is theirs from there, at
+    // the time they typed it), they take it back (it goes), a finished task or another session sent it (it goes), or it starts a turn
+    // of its own (its message line, further on, is it).
     if (r.type === 'queue-operation') {
       if (r.operation === 'enqueue') {
         const words = theirWords(str(r.content))
         if (words) {
-          state.queued.push({ words, entry: push(state, 'you', words.slice(0, WORDS_MOST), at) })
+          state.queued.push({ words, at })
           if (state.queued.length > QUEUED_MOST) state.queued.shift()
         }
-      } else if (r.operation === 'remove' && r.reason !== 'absorbed_mid_turn') {
-        const taken = unqueue(state, theirWords(str(r.content)))
-        if (taken) withdraw(state, taken)
-      }
+      } else if (r.operation === 'remove' && r.reason !== 'absorbed_mid_turn') unqueue(state, theirWords(str(r.content)))
       return
     }
     const command = queuedCommand(r)
     if (command) {
       const waiting = unqueue(state, command.words)
-      if (!command.theirs) {
-        if (waiting) withdraw(state, waiting)
-      } else if (command.words && !waiting) push(state, 'you', command.words.slice(0, WORDS_MOST), at)
+      if (command.theirs && command.words) push(state, 'you', command.words.slice(0, WORDS_MOST), waiting?.at ?? at)
       return
     }
     if (!isObject(r.message)) return
@@ -723,9 +713,8 @@ export function feedConversation(state: Conversation, lines: string[], places?: 
     if (r.type === 'user') {
       if (said(r)) {
         const words = theirWords(textOf(content))
-        // Words that waited in the queue and then started this turn are shown by this line instead.
-        const waiting = unqueue(state, words)
-        if (waiting) withdraw(state, waiting)
+        // Words that waited in the queue and then started this turn are this line.
+        unqueue(state, words)
         // The pictures in it (one pasted, a screenshot), each read again from this line when the window shows it.
         const pictures = place ? blocks.flatMap((block, position) => (isPicture(block) ? [`image:${place.offset}#${position}`] : [])) : []
         push(state, 'you', words.slice(0, WORDS_MOST), at, pictures.length ? { images: pictures } : {})
@@ -755,7 +744,7 @@ export function feedConversation(state: Conversation, lines: string[], places?: 
 
 /** The last turns of what is read, or all of them (up to a limit). */
 export function snapshotConversation(state: Conversation, all: boolean): TaskHistory {
-  return lastTurns(state.entries, all, state.cut)
+  return { ...lastTurns(state.entries, all, state.cut), ...(state.queued.length ? { queued: state.queued.map((item) => item.words.slice(0, WORDS_MOST)) } : {}) }
 }
 
 /** Reads what a session's file gained since `state.offset` (only whole lines: the last may be half written). */

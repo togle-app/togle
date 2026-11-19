@@ -315,24 +315,32 @@ test('how a file changed is made fit to show: its lines as they are, no keys or 
   assert.ok(long.text.startsWith('+line 0\n') && long.text.length <= 24000 && /\+line \d+$/.test(long.text), 'its start, cut at the end of a line')
 })
 
-// What they type while Claude Code works waits in its queue (queue-operation lines) until the turn takes it in (an attachment, never a message
-// line) or ends (it then starts a turn, and has its message line).
+// What they type while Claude Code works waits in its queue (queue-operation lines), which Chat shows as the agent's screen does (history.queued), until
+// the turn takes it in (an attachment, never a message line: it is in the conversation from there) or ends (it then starts a turn, and has its message line).
 const stamp = (seconds) => `2026-11-16T10:00:${String(seconds).padStart(2, '0')}.000Z`
 const enqueue = (n, content, seconds) => ({ type: 'queue-operation', operation: 'enqueue', timestamp: stamp(seconds), sessionId: id(n), content })
 const remove = (n, content, seconds, reason = 'absorbed_mid_turn') => ({ type: 'queue-operation', operation: 'remove', timestamp: stamp(seconds), sessionId: id(n), content, reason })
 const takenIn = (n, prompt, seconds, extra = {}) => ({ type: 'attachment', attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind: 'human' }, timestamp: stamp(seconds), humanTurn: true, ...extra }, sessionId: id(n), timestamp: stamp(seconds), isSidechain: false })
 const saidIn = async (n) => (await claudeConversation(id(n))).entries.map((entry) => [entry.kind, entry.text])
 
-test('what they type while Claude Code works is shown as soon as it is queued, and stays where it was typed once the turn takes it in', async () => {
-  write(14, line(asked(14, 'Rebuild the pricing page.')) + line(said(14, [{ type: 'tool_use', id: 'w1', name: 'Bash', input: { command: 'npm test' } }])) + line(enqueue(14, 'Also make the table sortable.', 3)))
-  // Queued: it is in the conversation at once, after what Claude Code was doing when they typed it.
-  assert.deepEqual(await saidIn(14), [['you', 'Rebuild the pricing page.'], ['command', 'npm test'], ['you', 'Also make the table sortable.']])
-  // The turn works on, then takes it in: still one line of theirs, where it was typed, with the work after it following.
+test('what they type while Claude Code works is in its queue, as on its screen, until the turn takes it in; then it is in the conversation, at the time it was typed', async () => {
+  write(14, line(asked(14, 'Rebuild the pricing page.')) + line(said(14, [{ type: 'tool_use', id: 'w1', name: 'Bash', input: { command: 'npm test' } }])) + line(enqueue(14, 'Also make the table sortable.', 3)) + line(enqueue(14, 'And the footer.', 4)))
+  // Queued: not in the conversation yet, but in the queue, in the order typed.
+  let history = await claudeConversation(id(14))
+  assert.deepEqual(history.entries.map((entry) => [entry.kind, entry.text]), [['you', 'Rebuild the pricing page.'], ['command', 'npm test']])
+  assert.deepEqual(history.queued, ['Also make the table sortable.', 'And the footer.'])
+  // The turn works on, then takes the first in: it is in the conversation where the turn took it, with the time it was typed, and the queue is the one left.
   appendFileSync(file(14), line(result(14, 'w1', 'ok')) + line(said(14, [{ type: 'text', text: 'Tests pass.' }])) + line(remove(14, 'Also make the table sortable.', 9)) + line(takenIn(14, 'Also make the table sortable.', 3)) + line(said(14, [{ type: 'text', text: 'Done, and the table sorts.' }])))
-  const history = await claudeConversation(id(14))
-  assert.deepEqual(history.entries.map((entry) => [entry.kind, entry.text]), [['you', 'Rebuild the pricing page.'], ['command', 'npm test'], ['you', 'Also make the table sortable.'], ['agent', 'Tests pass.'], ['agent', 'Done, and the table sorts.']])
-  assert.equal(history.entries[2].at, Date.parse(stamp(3)), 'at the time they typed it')
+  history = await claudeConversation(id(14))
+  assert.deepEqual(history.entries.map((entry) => [entry.kind, entry.text]), [['you', 'Rebuild the pricing page.'], ['command', 'npm test'], ['agent', 'Tests pass.'], ['you', 'Also make the table sortable.'], ['agent', 'Done, and the table sorts.']])
+  assert.equal(history.entries[3].at, Date.parse(stamp(3)), 'at the time they typed it')
   assert.equal(history.entries[1].status, 'finished', 'the command still ends where its result came')
+  assert.deepEqual(history.queued, ['And the footer.'], 'what is not taken in yet is still queued')
+  // Taken back (the agent's screen pops it into the prompt box): it is in no queue and in no conversation.
+  appendFileSync(file(14), line(remove(14, 'And the footer.', 12, 'popped')))
+  history = await claudeConversation(id(14))
+  assert.equal(history.queued, undefined, 'nothing is queued')
+  assert.equal(history.entries.some((entry) => entry.text === 'And the footer.'), false, 'and it was not said')
 })
 
 test('words that started a turn of their own are shown once, by their message line; words taken back, or sent by a task or another session, are not shown', async () => {
@@ -341,6 +349,7 @@ test('words that started a turn of their own are shown once, by their message li
     line(asked(15, 'Rebuild the pricing page.')) + line(enqueue(15, 'Then the footer.', 2)) + line(said(15, [{ type: 'text', text: 'Pricing page done.' }])) +
     line({ type: 'queue-operation', operation: 'dequeue', timestamp: stamp(8), sessionId: id(15) }) + line(asked(15, 'Then the footer.')) + line(said(15, [{ type: 'text', text: 'Footer done.' }])))
   assert.deepEqual(await saidIn(15), [['you', 'Rebuild the pricing page.'], ['agent', 'Pricing page done.'], ['you', 'Then the footer.'], ['agent', 'Footer done.']])
+  assert.equal((await claudeConversation(id(15))).queued, undefined, 'and it is not in the queue any more')
   // Taken back: the words went to the prompt box again, and were not sent.
   write(16, line(asked(16, 'Ask.')) + line(enqueue(16, 'Never mind.', 2)) + line(remove(16, 'Never mind.', 4, 'popped')) + line(said(16, [{ type: 'text', text: 'Answer.' }])))
   assert.deepEqual(await saidIn(16), [['you', 'Ask.'], ['agent', 'Answer.']])
