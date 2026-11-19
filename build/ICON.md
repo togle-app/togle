@@ -20,3 +20,13 @@ node test/verify-package-icon.cjs dist/win-unpacked/Togle.exe
 ```
 
 `signAndEditExecutable=false` also disables icon embedding. The verification command checks the primary executable icon against the source at every size and checks the runtime assets.
+
+## The name and icon Windows shows
+
+Notifications and the taskbar take Togle's name and icon from the Start menu shortcut that carries Togle's id, `io.togle.app` (the builder's `appId`). If they show Electron's, another shortcut carries the id too, and Windows picked it. Check:
+
+```powershell
+Get-StartApps | Where-Object AppID -eq io.togle.app
+```
+
+It lists one entry, named Togle. Togle run from the source (`app.isPackaged` is false) uses `io.togle.app.source` so it can't take the id (`src/main/app-id.ts`, tested in `test/app-id.test.mjs`). A taskbar button that is already open keeps its old icon until Togle restarts.

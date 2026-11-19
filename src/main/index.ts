@@ -11,6 +11,7 @@ import { DictationVocabularyStore } from './dictation-vocabulary'
 import { correctSpeech, speechLesson, speechWords, withSpeechWord } from '@shared/speech-words'
 import type { DictationVocabularyEdit } from '@shared/dictation'
 import { DictationTargetBridge } from './dictation-target'
+import { appUserModelId } from './app-id'
 import { applyTheme, themeColors } from './theme'
 import { Updates } from './updates'
 import { RELEASE_KEY } from './release-key'
@@ -1727,7 +1728,8 @@ if (process.argv.includes('--togle-hook')) {
 
   app.whenReady().then(async () => {
     started.ready = Date.now()
-    app.setAppUserModelId('io.togle.app')
+    // The installed app is `io.togle.app`; a run from the source has its own id, so it never takes the installed app's name and icon.
+    app.setAppUserModelId(appUserModelId(app.isPackaged))
     // A native Edit menu supplies macOS text-editing shortcuts to every window, including sign-in and settings.
     // Quit still runs through before-quit, preserving the active call's confirmation and save flow.
     if (process.platform === 'darwin') Menu.setApplicationMenu(Menu.buildFromTemplate([
