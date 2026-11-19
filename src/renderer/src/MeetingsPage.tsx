@@ -288,23 +288,31 @@ function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDelet
   return (
     <div className="meetings meeting-detail call-history">
       {!record ? <p className="hint" role="status">{error || 'Loading call…'}</p> : <>
-        <div className="call-detail-head">
-          {editing
-            ? <input className="rename-title" aria-label="Call title" value={title} maxLength={140} autoFocus onChange={event => setTitle(event.target.value)} onBlur={rename}
-                onKeyDown={event => { if (event.key === 'Enter') rename(); else if (event.key === 'Escape') setEditing(false) }} />
-            : <h2 title={`${whenText(record.startedAt)} · ${callLength((record.endedAt ?? record.transcript.at(-1)?.at ?? record.startedAt) - record.startedAt)} · click to rename`}
-                tabIndex={0} onClick={() => { setTitle(record.title); setEditing(true) }}
-                onKeyDown={event => { if (event.key === 'Enter' || event.key === 'F2') { event.preventDefault(); setTitle(record.title); setEditing(true) } }}
-                onContextMenu={event => { if (record.status === 'live') return; event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }) }}>{meetingTitle(record)}</h2>}
-          <div className="call-record-actions">
-            <Menu ariaLabel="Share" title="Share this call" label="Share" align="right" items={[
-              { label: copied ? 'Copied' : 'Copy the notes', disabled: busy || !record.summary, keepOpen: false, onSelect: () => void navigator.clipboard.writeText(record.summary).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }, failure => setError(errorText(failure))) },
-              { label: 'Save as a file', disabled: busy, onSelect: () => void run(async () => { await api.exportCallSession(record.id) }) }
-            ]} />
-            <button className="primary" disabled={busy || !ended} title={ended ? 'Give this call to a new agent task, or to agents that are running' : 'End the call first'} aria-expanded={giving} onClick={() => { setGiven(''); setGiving(!giving) }}>Give to an agent</button>
+        {/* The call's name, its buttons and its tabs stay on top while the notes or the transcript scroll under them. */}
+        <div className="call-detail-top">
+          <div className="call-detail-head">
+            {editing
+              ? <input className="rename-title" aria-label="Call title" value={title} maxLength={140} autoFocus onChange={event => setTitle(event.target.value)} onBlur={rename}
+                  onKeyDown={event => { if (event.key === 'Enter') rename(); else if (event.key === 'Escape') setEditing(false) }} />
+              : <h2 title={`${whenText(record.startedAt)} · ${callLength((record.endedAt ?? record.transcript.at(-1)?.at ?? record.startedAt) - record.startedAt)} · click to rename`}
+                  tabIndex={0} onClick={() => { setTitle(record.title); setEditing(true) }}
+                  onKeyDown={event => { if (event.key === 'Enter' || event.key === 'F2') { event.preventDefault(); setTitle(record.title); setEditing(true) } }}
+                  onContextMenu={event => { if (record.status === 'live') return; event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }) }}>{meetingTitle(record)}</h2>}
+            <div className="call-record-actions">
+              <Menu ariaLabel="Share" title="Share this call" label="Share" align="right" items={[
+                { label: copied ? 'Copied' : 'Copy the notes', disabled: busy || !record.summary, keepOpen: false, onSelect: () => void navigator.clipboard.writeText(record.summary).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }, failure => setError(errorText(failure))) },
+                { label: 'Save as a file', disabled: busy, onSelect: () => void run(async () => { await api.exportCallSession(record.id) }) }
+              ]} />
+              <button className="primary" disabled={busy || !ended} title={ended ? 'Give this call to a new agent task, or to agents that are running' : 'End the call first'} aria-expanded={giving} onClick={() => { setGiven(''); setGiving(!giving) }}>Give to an agent</button>
+            </div>
+            {/* The list opens under its button, over the page: the notes under it do not move. */}
+            {giving && <GivePanel call={record.id} mode="give" connected={connected} onClose={() => setGiving(false)} onGiven={(_results, line) => setGiven(line)} />}
           </div>
-          {/* The list opens under its button, over the page: the notes under it do not move. */}
-          {giving && <GivePanel call={record.id} mode="give" connected={connected} onClose={() => setGiving(false)} onGiven={(_results, line) => setGiven(line)} />}
+          <div className="tabs call-detail-tabs" role="tablist" aria-label="Call details">
+            {(['notes', 'transcript'] as const).map(name => <button key={name} role="tab" id={`meeting-tab-${name}`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => onTab(name)}>{name === 'notes' ? 'Notes' : 'Transcript'}</button>)}
+          </div>
+          {/* Under it, what scrolls fades out while the part is stuck at the top, instead of showing cut. */}
+          <span className="call-detail-fade" aria-hidden="true" />
         </div>
         {given && <p className="hint" role="status">{given}</p>}
         {menu && <CallMenu at={menu} label={`${meetingTitle(record)}: rename or delete`} onClose={() => setMenu(null)} items={[
@@ -318,9 +326,6 @@ function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDelet
           </CallConfirm>
         )}
         {ended && noise && <NoisyMicrophone finding={noise} microphone={microphone} minutes={((record.endedAt ?? record.startedAt) - record.startedAt) / 60_000} />}
-        <div className="tabs call-detail-tabs" role="tablist" aria-label="Call details">
-          {(['notes', 'transcript'] as const).map(name => <button key={name} role="tab" id={`meeting-tab-${name}`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => onTab(name)}>{name === 'notes' ? 'Notes' : 'Transcript'}</button>)}
-        </div>
         <section className="call-detail-content" role="tabpanel" aria-labelledby={`meeting-tab-${tab}`}>
           {tab === 'notes' ? <CallNotes key={`notes-${record.id}`} record={record} onRecord={setRecord} /> : <CallTranscript key={record.id} record={record} />}
         </section>

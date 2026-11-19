@@ -882,6 +882,14 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .call-record-actions button { padding: 3px 9px; font-size: 12px; }
 .call-detail-tabs { margin: 0 0 12px; gap: 14px; }
 .call-detail-tabs button { padding: 0 0 6px; font-size: 13px; }
+/* The call's name, its buttons and its tabs are one part that stays on top while the notes or the transcript scroll under it. It covers the
+   page's own room above it (14px) and at its sides (16px; at the right the bar's 8px are kept), so that nothing shows above or beside it,
+   and under it what scrolls fades out while it is stuck, instead of showing cut. (A sticky part stops at the page's padding, not at its
+   edge: its top is the 14px that room is.) */
+.call-detail-top { position: sticky; top: -14px; z-index: 6; margin: -14px -8px 0 -16px; padding: 14px 8px 12px 16px; background: var(--surface); container-type: scroll-state; }
+.call-detail-top .call-detail-tabs { margin-bottom: 0; }
+.call-detail-fade { position: absolute; top: 100%; right: 0; left: 0; height: 14px; background: linear-gradient(var(--surface), transparent); opacity: 0; pointer-events: none; }
+@container scroll-state(stuck: top) { .call-detail-fade { opacity: 1; } }
 .call-detail-content { font-size: 13px; line-height: 1.5; }
 .meeting-notes { display: flex; flex-direction: column; gap: 10px; }
 .meeting-notes > p { margin: 0; }

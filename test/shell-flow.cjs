@@ -466,6 +466,17 @@ async function checkMeetings(T, agent) {
   await ui.click('.meeting-detail [role=tab]', 'Notes')
   assert.equal(await ui.evaluate("!!document.querySelector('.meeting-detail .call-detail-head .hint')"), false, 'the page opens on its name and its buttons, as the design has it')
   assert.deepEqual(await texts(ui, '.meeting-detail .call-record-actions > *'), ['Share', 'Give to an agent'], 'Share, then Give to an agent, as the design has them')
+  // Its name, its buttons and its tabs are one part that stays on top while the page scrolls under it (a long page is made here by room under the notes).
+  await ui.evaluate("document.querySelector('.meeting-detail .call-detail-content').style.minHeight='2600px'")
+  await ui.evaluate("document.querySelector('.shell-content').scrollTop=700")
+  await ui.paint()
+  const stuck = await ui.evaluate("(()=>{const scroller=document.querySelector('.shell-content'),c=scroller.getBoundingClientRect(),t=document.querySelector('.call-detail-top').getBoundingClientRect(),h=document.querySelector('.call-detail-head h2').getBoundingClientRect(),tabs=document.querySelector('.call-detail-tabs').getBoundingClientRect(),notes=document.querySelector('.call-detail-content').getBoundingClientRect();return {scrolled:Math.round(scroller.scrollTop),top:Math.round(t.top-c.top),left:Math.round(t.left-c.left),nameTop:Math.round(h.top-c.top),tabsBottom:Math.round(tabs.bottom-c.top),topPartBottom:Math.round(t.bottom-c.top),notesTop:Math.round(notes.top-c.top)}})()")
+  assert.ok(stuck.scrolled >= 600, 'the page scrolled: ' + JSON.stringify(stuck))
+  assert.ok(stuck.top === 0 && stuck.left === 0, 'its top part stays at the top of the page, over the page\'s own room: ' + JSON.stringify(stuck))
+  assert.ok(stuck.nameTop >= 10 && stuck.tabsBottom <= stuck.topPartBottom && stuck.notesTop < 0, 'the name and the tabs are in view and the notes went up under them: ' + JSON.stringify(stuck))
+  await ui.capture('meeting-sticky')
+  await ui.evaluate("document.querySelector('.meeting-detail .call-detail-content').style.minHeight='';document.querySelector('.shell-content').scrollTop=0")
+  await ui.paint()
   // Its name is renamed with a click on it; a right click on it renames or deletes it.
   await ui.click('.meeting-detail .call-detail-head h2', 'Sprint review')
   await ui.wait("!!document.querySelector('.meeting-detail .rename-title')")
