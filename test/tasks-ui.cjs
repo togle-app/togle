@@ -1353,6 +1353,74 @@ async function checkStoppedTasks(T, agent) {
   ui.window.destroy()
 }
 
+// How a task stands is drawn by a mark (StateMark.tsx). Every mark stays readable on what it sits on (3:1, the least WCAG asks of
+// a symbol), and a stopped one is a square that stands out from its disc and the disc from the window. The dot of a waiting mark
+// is the middle of its halo at any screen scale: the box, the dot and the halo are whole numbers with one middle, and the halo
+// grows no further than the box. (A 7px dot in a 14px box sat half a pixel off its halo at every scale, and a muted square on a
+// disc that was barely there was lost on the dark window.)
+async function checkMarks(T, agent, theme = 'dark') {
+  const { nativeTheme } = require('electron')
+  const before = nativeTheme.themeSource
+  nativeTheme.themeSource = theme
+  const ui = await open(T, agent, 1024)
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelectorAll('.task-row').length===5")
+  await ui.evaluate("window.togleUITest.stopTask('claude:s4','stopped','')")
+  await ui.wait("!!document.querySelector('.state-mark[data-mark=\"stopped\"]')")
+  const measure = `(() => {
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    // What is on screen where a mark is: each layer drawn over the one below it, the way the page paints them.
+    const composite = (layers) => {
+      ctx.globalCompositeOperation = 'copy'; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 1, 1); ctx.globalCompositeOperation = 'source-over'
+      for (const layer of layers) { ctx.fillStyle = layer; ctx.fillRect(0, 0, 1, 1) }
+      const d = ctx.getImageData(0, 0, 1, 1).data
+      return { r: d[0], g: d[1], b: d[2] }
+    }
+    const light = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b) }
+    const ratio = (a, b) => { const x = light(a), y = light(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
+    const under = (el) => { const layers = []; for (let p = el.parentElement; p; p = p.parentElement) layers.unshift(getComputedStyle(p).backgroundColor); return layers }
+    return [...document.querySelectorAll('.state-mark')].filter((mark) => mark.getClientRects().length).map((mark) => {
+      const kind = mark.dataset.mark, style = getComputedStyle(mark), after = getComputedStyle(mark, '::after'), before = getComputedStyle(mark, '::before')
+      const back = under(mark)
+      const glyph = kind === 'working' || kind === 'resting' ? after.borderTopColor : kind === 'stopped' || kind === 'waiting' ? after.backgroundColor : style.color
+      const withDisc = [...back, style.backgroundColor]
+      const box = parseFloat(style.width)
+      const svg = mark.querySelector('svg')
+      const size = svg ? parseFloat(getComputedStyle(svg).width) : parseFloat(after.width)
+      const frames = kind === 'waiting' && !mark.classList.contains('still') ? mark.getAnimations({ subtree: true }).find((a) => a.animationName === 'mark-call') : undefined
+      const last = frames ? frames.effect.getKeyframes().pop().transform : ''
+      return {
+        kind, still: mark.classList.contains('still'), chip: !!mark.closest('.state-chip, .todo-chip'),
+        glyphOnBack: ratio(composite([...withDisc, glyph]), composite(back)), glyphOnDisc: ratio(composite([...withDisc, glyph]), composite(withDisc)), discOnBack: ratio(composite(withDisc), composite(back)),
+        box, size, halo: kind === 'waiting' ? { size: parseFloat(before.width), left: parseFloat(before.left), top: parseFloat(before.top), shown: before.display !== 'none', reach: parseFloat((/scale[(]([0-9.]+)/.exec(last) || [0, 0])[1]) * parseFloat(before.width) } : undefined
+      }
+    })
+  })()`
+  const marks = await ui.evaluate(measure)
+  const kinds = new Set(marks.map(mark => mark.kind))
+  for (const kind of ['working', 'waiting', 'done', 'stopped']) assert.ok(kinds.has(kind), 'the list shows a ' + kind + ' mark: ' + [...kinds])
+  for (const mark of marks) {
+    const name = mark.kind + (mark.chip ? ' in a chip' : '') + ' (' + theme + ')'
+    assert.ok(mark.glyphOnBack >= 3, name + ' is readable on what it sits on: ' + mark.glyphOnBack.toFixed(2) + ':1')
+    // Where a mark has a box, what is drawn in it sits at its middle on whole pixels: the box and the drawing are both even or both odd.
+    assert.equal((mark.box - mark.size) % 2, 0, name + ' sits in the middle of its box on whole pixels: ' + mark.size + ' in ' + mark.box)
+    if (mark.kind === 'waiting' && mark.halo.shown) {
+      assert.equal(mark.halo.size, mark.size, name + ': the halo starts as big as the dot')
+      assert.equal(mark.halo.left, (mark.box - mark.size) / 2, name + ': the halo starts where the dot is (left)')
+      assert.equal(mark.halo.top, (mark.box - mark.size) / 2, name + ': the halo starts where the dot is (top)')
+      if (!mark.still) assert.ok(mark.halo.reach > mark.size && mark.halo.reach <= mark.box, name + ': the call grows out of the dot and stays in the mark\'s box: ' + mark.halo.reach + ' of ' + mark.box)
+    }
+  }
+  const stopped = marks.find(mark => mark.kind === 'stopped' && !mark.chip)
+  assert.ok(stopped.glyphOnDisc >= 3, 'the stopped square stands out from its disc: ' + stopped.glyphOnDisc.toFixed(2) + ':1')
+  assert.ok(stopped.discOnBack >= 1.5, 'the stopped disc stands out from the window: ' + stopped.discOnBack.toFixed(2) + ':1')
+  assert.ok(marks.some(mark => mark.kind === 'waiting' && !mark.still && mark.halo.reach), 'a waiting row calls with its halo')
+  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+  nativeTheme.themeSource = before
+}
+
 // An agent signed out: its task's row is amber and says what signs it in again, here, in the task and on To-do.
 async function checkSignedOut(T, agent) {
   const ui = await open(T, agent, 1024)
@@ -2263,32 +2331,36 @@ app.whenReady().then(async () => {
     const store = new T.AgentStore(async () => '')
     await store.load()
     const agent = store.list()[0]
-    await checkWindowBar(T, agent)
-    await checkPaste(T, agent)
-    await checkPictures(T, agent)
-    await checkRail(T, agent)
-    await checkQuote(T, agent)
-    await checkInterrupt(T, agent)
-    await checkKept(T, agent)
-    await checkSecret(T, agent)
-    await checkArrange(T, agent)
-    await checkGroups(T, agent)
-    await checkTasks(T, agent)
-    await checkNarrow(T, agent)
-    await checkSlowMain(T, agent)
-    await checkQuit(T, agent)
-    await checkNotice(T, agent)
-    await checkTodo(T, agent)
-    await checkNoChanges(T, agent)
-    await checkTaskBox(T, agent)
-    await checkCallNotice(T, agent)
-    await checkKeysNotice(T, agent)
-    await checkCallStrip(T, agent)
-    await checkStoppedTasks(T, agent)
-    await checkSignedOut(T, agent)
-    await checkTerminalTask(T, agent)
-    await checkAgentSettings(T, agent)
-    await checkReach(T, agent)
+    // TASKS_UI_ONLY=checkMarks,checkArrange runs just those checks (to work on one); all of them otherwise.
+    const only = process.env.TASKS_UI_ONLY?.split(',')
+    const go = (check) => !only || only.includes(check.name) ? check(T, agent) : undefined
+    await go(checkWindowBar)
+    await go(checkPaste)
+    await go(checkPictures)
+    await go(checkRail)
+    await go(checkQuote)
+    await go(checkInterrupt)
+    await go(checkKept)
+    await go(checkSecret)
+    await go(checkArrange)
+    await go(checkGroups)
+    await go(checkTasks)
+    await go(checkNarrow)
+    await go(checkSlowMain)
+    await go(checkQuit)
+    await go(checkNotice)
+    await go(checkTodo)
+    await go(checkNoChanges)
+    await go(checkTaskBox)
+    await go(checkCallNotice)
+    await go(checkKeysNotice)
+    await go(checkCallStrip)
+    await go(checkStoppedTasks)
+    await go(checkMarks)
+    await go(checkSignedOut)
+    await go(checkTerminalTask)
+    await go(checkAgentSettings)
+    await go(checkReach)
     console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, no See changes anywhere, the task box, a signed-out agent, a task in a terminal of its own, the offer to change keys, the agents in Settings, other devices’ tasks with Settings → Devices, and the window with main slow to answer passed')
     clearTimeout(timeout)
     app.quit()

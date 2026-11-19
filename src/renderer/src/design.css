@@ -333,31 +333,34 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-row-action { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); }
 /* How a task stands, in a mark whose shape says it without its color (StateMark.tsx): a ring that turns while it works; a dot
    that calls while it waits for you, its halo growing out of it and fading; a tick on a soft disc when done; an exclamation
-   mark when an error stopped it; a square when it was stopped; an empty ring for a scheduled job between its runs. Only
-   transform and opacity move, and nothing moves with less motion asked for. */
-/* A mark is one 14px box, centered where the 8px dot was, so the words keep their place. */
-.task-row > .state-mark { margin: 0 -3px; }
-.state-mark { position: relative; display: inline-grid; flex: none; place-items: center; box-sizing: border-box; width: 14px; height: 14px; border-radius: 50%; color: var(--muted); }
+   mark when an error stopped it; a stop symbol (a square on a disc) when it was stopped; an empty ring for a scheduled job
+   between its runs. Only transform and opacity move, and nothing moves with less motion asked for. */
+/* A mark is one 16px box, centered where the 8px dot was, so the words keep their place. What is inside it is whole numbers
+   (an 8px dot, a 14px ring, a 6px square), so each sits in the middle of the box at any screen scale, and the halo is the dot's
+   own size and place, grown: it can only be around the dot. */
+.task-row > .state-mark { margin: 0 -4px; }
+.state-mark { position: relative; display: inline-grid; flex: none; place-items: center; box-sizing: border-box; width: 16px; height: 16px; border-radius: 50%; color: var(--muted); }
 .state-mark svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.state-mark[data-mark='working']::after { content: ''; box-sizing: border-box; width: 12px; height: 12px; border: 2px solid color-mix(in srgb, var(--togle) 24%, transparent); border-top-color: var(--togle); border-radius: 50%; animation: step-spin 0.9s linear infinite; }
-.state-mark[data-mark='waiting']::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: var(--wait); opacity: 0.28; }
+.state-mark[data-mark='working']::after { content: ''; box-sizing: border-box; width: 14px; height: 14px; border: 2px solid color-mix(in srgb, var(--togle) 24%, transparent); border-top-color: var(--togle); border-radius: 50%; animation: step-spin 0.9s linear infinite; }
+.state-mark[data-mark='waiting']::before { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--wait); opacity: 0.28; transform: scale(1.75); }
 .state-mark[data-mark='waiting']:not(.still)::before { animation: mark-call 2.2s ease-out infinite; }
-.state-mark[data-mark='waiting']::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--wait); }
-@keyframes mark-call { from { transform: scale(0.5); opacity: 0.6; } 75%, to { transform: scale(1.3); opacity: 0; } }
+.state-mark[data-mark='waiting']::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--wait); }
+@keyframes mark-call { from { transform: scale(1); opacity: 0.55; } 75%, to { transform: scale(2); opacity: 0; } }
 .state-mark[data-mark='done'] { background: var(--ok-soft); color: var(--ok); }
 .state-mark[data-mark='failed'] { background: var(--danger-soft); color: var(--danger); }
-.state-mark[data-mark='stopped'] { background: var(--raised); }
-.state-mark[data-mark='stopped']::after { content: ''; width: 5px; height: 5px; border-radius: 1.5px; background: var(--muted); }
-.state-mark[data-mark='resting']::after { content: ''; box-sizing: border-box; width: 11px; height: 11px; border: 1.5px solid color-mix(in srgb, var(--muted) 75%, transparent); border-radius: 50%; }
+/* A stop symbol: a square the color of the text on a faint disc of the same. The square is the brightest thing in the mark column,
+   so it reads at once on the dark window (it was a muted square on a disc that was barely there). */
+.state-mark[data-mark='stopped'] { background: color-mix(in srgb, var(--ink) 22%, transparent); }
+.state-mark[data-mark='stopped']::after { content: ''; width: 6px; height: 6px; border-radius: 1.5px; background: var(--ink); }
+.state-mark[data-mark='resting']::after { content: ''; box-sizing: border-box; width: 12px; height: 12px; border: 1.5px solid color-mix(in srgb, var(--muted) 75%, transparent); border-radius: 50%; }
 /* In a chip, which has the soft color already: the mark alone, a little smaller, before the words. */
 .state-chip:has(> .state-mark), .todo-chip:has(> .state-mark) { display: inline-flex; align-items: center; gap: 5px; padding-left: 6px; }
 .state-chip > .state-mark, .todo-chip > .state-mark { width: 12px; height: 12px; background: none; }
 .state-chip > .state-mark svg, .todo-chip > .state-mark svg { width: 12px; height: 12px; }
 .state-chip > .state-mark[data-mark='working']::after, .todo-chip > .state-mark[data-mark='working']::after { width: 10px; height: 10px; border-width: 1.75px; }
-.state-chip > .state-mark[data-mark='resting']::after, .todo-chip > .state-mark[data-mark='resting']::after { width: 9px; height: 9px; }
+.state-chip > .state-mark[data-mark='resting']::after, .todo-chip > .state-mark[data-mark='resting']::after { width: 8px; height: 8px; }
 .state-chip > .state-mark[data-mark='waiting']::before, .todo-chip > .state-mark[data-mark='waiting']::before { display: none; }
 .state-chip > .state-mark[data-mark='waiting']::after, .todo-chip > .state-mark[data-mark='waiting']::after { width: 6px; height: 6px; }
-.state-chip > .state-mark[data-mark='stopped'], .todo-chip > .state-mark[data-mark='stopped'] { color: inherit; }
 @media (prefers-reduced-motion: reduce) { .state-mark[data-mark]::before, .state-mark[data-mark]::after { animation: none !important; } }
 /* The window hidden in the tray or minimized: nothing on its page moves until it is back. */
 :root[data-away] *, :root[data-away] *::before, :root[data-away] *::after { animation-play-state: paused !important; }
