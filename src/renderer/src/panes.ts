@@ -7,12 +7,15 @@ import { useSyncExternalStore } from 'react'
 export const NAV_DEFAULT = 136
 export const NAV_ICONS = 52
 export const NAV_MAX = 240
-/** Dragged narrower than this, the navigation goes to its icons: there is no room for a word. */
-export const NAV_WORDS_FROM = 96
-/** Squeezed narrower than this, the navigation goes to its icons, and dragged out past it the words come back. */
-export const NAV_COLLAPSE_BELOW = 76
-/** The Agents list: no narrower than its names need, no wider than this, and the open task keeps DETAIL_MIN at least. */
-export const LIST_MIN = 240
+/**
+ * The narrowest the navigation is with its words: what its longest button needs (To-do with its count of what waits is 111px, with the
+ * navigation's own room 128; this is a little more). A navigation drawn narrower had a word run over its edge.
+ */
+export const NAV_WORDS_FROM = 132
+/** Squeezed narrower than this, the navigation goes to its icons, and dragged out past it the words come back (it stays at its narrowest with words between). */
+export const NAV_COLLAPSE_BELOW = 92
+/** The Agents list: no narrower than its head and its names need (its label and its two buttons need 248), no wider than this, and the open task keeps DETAIL_MIN at least. */
+export const LIST_MIN = 256
 export const LIST_MAX = 560
 export const DETAIL_MIN = 320
 /** Squeezed narrower than this, the Agents list hides, and dragged out past it it is back. */
@@ -79,5 +82,8 @@ export function usePanes(): Panes {
   )
 }
 
-/** The navigation's width: its icons only when it was narrowed past its words. */
-export const navPx = (kept: Panes): number => (kept.nav === undefined ? NAV_DEFAULT : kept.nav < NAV_WORDS_FROM ? NAV_ICONS : Math.min(NAV_MAX, kept.nav))
+/**
+ * The navigation's width: its icons only when it was set so (NAV_ICONS); else its words, never narrower than they need (a width kept
+ * by an earlier Togle, from the time a word could run over the edge, is the narrowest now).
+ */
+export const navPx = (kept: Panes): number => (kept.nav === undefined ? NAV_DEFAULT : kept.nav <= NAV_ICONS ? NAV_ICONS : Math.min(NAV_MAX, Math.max(NAV_WORDS_FROM, kept.nav)))

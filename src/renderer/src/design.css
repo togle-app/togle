@@ -216,6 +216,9 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 /* Each place has its icon beside its name, at every width; in a narrow window the icon is all there is room for. */
 .shell-nav button { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 9px; width: 100%; padding: 6px 9px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 13px; font-weight: 600; text-align: left; }
 .shell-nav button > svg { flex-shrink: 0; }
+/* Whatever the width, a word stays inside its button: it is cut with an ellipsis and never runs over the edge into the pane beside. */
+.shell-nav button { overflow: hidden; }
+.shell-nav button > span:not(.nav-count):not(.dot) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shell-nav button:hover:not(:disabled) { background: var(--raised); color: var(--ink); }
 .shell-nav button[aria-current='page'], .shell-nav button[aria-current='page']:hover:not(:disabled) { background: var(--togle-soft); color: var(--togle); }
 .shell-nav .nav-count { margin-left: auto; min-width: 0; padding: 0 7px; border-radius: 999px; background: var(--wait-soft); color: var(--wait); font-size: 11px; font-weight: 600; line-height: 17px; font-variant-numeric: tabular-nums; }
@@ -241,12 +244,17 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
    is collapsed by squeezing it (there is no button), so the hidden list leaves a faint line to drag it out from. */
 .resize-handle { position: absolute; top: 0; bottom: 0; z-index: 8; width: 6px; cursor: col-resize; touch-action: none; outline: none; }
 .nav-handle { left: var(--nav-width, 136px); }
-.list-handle { left: var(--list-width, clamp(15.5rem, 22vw, 22rem)); }
+.list-handle { left: var(--list-width, clamp(16rem, 22vw, 22rem)); }
 /* Hidden, its edge is the 6px beside the navigation's own (not over it: the navigation could not be dragged then). */
 .tasks.list-hidden > .list-handle { left: 6px; }
 .resize-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: -1px; width: 3px; background: transparent; }
 .list-handle.collapsed::before { left: 1px; width: 2px; background: color-mix(in srgb, var(--togle) 30%, var(--line)); }
 .resize-handle:hover::before, .resize-handle.dragging::before, .resize-handle:focus-visible::before { background: var(--togle); }
+/* A grip at the middle of each edge, always there: a small rounded bar on the line, so that the edge looks like what it is, a thing to take hold
+   of. It takes the line's color when the pointer or the keys are on the edge, or it is dragged. */
+.resize-handle::after { content: ''; position: absolute; top: 50%; left: -2px; width: 4px; height: 36px; margin-top: -18px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 55%, transparent); pointer-events: none; }
+.list-handle.collapsed::after { left: 0; }
+.resize-handle:hover::after, .resize-handle.dragging::after, .resize-handle:focus-visible::after { background: var(--togle); }
 @media (max-width: 560px) {
   .nav-handle { display: none; }
   .shell-layout { grid-template-columns: 52px minmax(0, 1fr); }
@@ -307,7 +315,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 /* ---- Agents: the list of tasks, and the one open beside it ---- */
 
 /* The list is as wide as the design draws it, and wider on a wide window, where its names would be cut short for no reason. */
-.tasks { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, var(--list-width, clamp(15.5rem, 22vw, 22rem))) minmax(0, 1fr); }
+.tasks { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, var(--list-width, clamp(16rem, 22vw, 22rem))) minmax(0, 1fr); }
 /* Hidden, the list takes no room and the task has all of it; the handle stays at the edge to bring it back. Only in a window with room for
    both: in a narrow one a pane shows at a time and the edge is gone, so a list hidden in a wide window would not be reachable. */
 @media (min-width: 761px) {
