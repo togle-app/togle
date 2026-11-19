@@ -749,8 +749,8 @@ function pastedOf(file: string): Promise<string | null> {
 }
 
 /**
- * A picture in what the person said: small in its card, in a place of its own size before it comes (nothing moves when it
- * does); pressed, it opens whole over the window. One no longer kept says so. `pasted`: `picture` is the file of one pasted into the
+ * A picture in what the person said: small in its card, with its own proportions (a wide strip is shown whole, not cut to a box), in a
+ * place of a size of its own before it comes; pressed, it opens whole over the window. One no longer kept says so. `pasted`: `picture` is the file of one pasted into the
  * reply box (Togle keeps it a week), not the key of one in the agent's record.
  */
 function Picture({ taskKey, picture, index, pasted }: { taskKey: string; picture: string; index: number; pasted?: boolean }): ReactNode {
@@ -771,7 +771,7 @@ function Picture({ taskKey, picture, index, pasted }: { taskKey: string; picture
     <>
       <button
         type="button"
-        className="you-picture"
+        className={src ? 'you-picture' : 'you-picture waiting'}
         aria-label={`${label}: open it`}
         title="Open the picture"
         disabled={!src}

@@ -20,7 +20,8 @@ export function useKeptState<T>(name: string, initial: T): [T, (next: T | ((prev
     let set = watchers.get(name)
     if (!set) watchers.set(name, (set = new Set()))
     set.add(notify)
-    return () => { set?.delete(notify) }
+    // A name nobody watches any more is let go of too: names are per row of a conversation, so there are many of them over a long run.
+    return () => { set?.delete(notify); if (set && !set.size && watchers.get(name) === set) watchers.delete(name) }
   }, [name])
   const value = useSyncExternalStore(subscribe, () => (states.has(name) ? (states.get(name) as T) : initial))
   const change = useCallback((next: T | ((previous: T) => T)): void => {

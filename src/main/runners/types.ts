@@ -110,10 +110,12 @@ export interface TaskHandle {
   readonly takesWordsWhileWorking?: boolean
   /**
    * Gives what waits in its agent's own queue (words typed while it works) back to the person: it comes out of the queue and its prompt is
-   * left empty, so that the words are Chat's to change and send again. All of the queue or none, as Claude Code's Up arrow does it: `words` are
-   * what the queue holds, in the order it was typed. Left out by an agent that has no queue of its own.
+   * left empty, so that the words are Chat's to change and send again. All of the queue or none, as Claude Code's Up arrow does it. `read`
+   * says what its record holds now (the words queued, in the order typed, and everything the person said in the conversation, to tell
+   * words the turn took in from words that came back). Resolves with the words that came back; none when nothing was queued; rejects, with
+   * nothing changed, when the agent did not give the queue back. Left out by an agent that has no queue of its own.
    */
-  takeBackQueue?(words: readonly string[]): Promise<void>
+  takeBackQueue?(read: () => Promise<{ queued: readonly string[]; said: readonly string[] }>): Promise<string[]>
   /** What the task started that still runs in the background, when its agent tells (Claude Code's shells). */
   readonly shells?: readonly BackgroundShell[]
   /** The commands and models its agent told it has for this task, so far. Left out by an agent that tells none. */

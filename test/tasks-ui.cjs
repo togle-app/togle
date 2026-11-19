@@ -166,7 +166,7 @@ async function checkTasks(T, agent) {
   assert.deepEqual(await texts(ui, '.you-row .you-label'), ['You'])
   assert.equal(await ui.evaluate("document.querySelector('.task-log').getAttribute('aria-label')"), 'The conversation')
   assert.equal(await ui.evaluate("document.querySelector('.state-chip').textContent"), 'Waiting for you')
-  assert.ok((await ui.evaluate("document.querySelector('.task-status .hint').textContent")).startsWith('2 files changed'))
+  assert.ok((await ui.evaluate("document.querySelector('.task-status .files-hint').textContent")).startsWith('2 files changed'))
   assert.deepEqual(await texts(ui, '.task-title .crumb-words, .task-title h2'), ['api-server', 'Add the status column'], 'its box, then its name')
   assert.equal(await ui.evaluate("document.querySelector('.task-agent-name').textContent"), 'Codex', 'the agent after how it stands')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-request .hint')"), false, 'no folder line under the command')
@@ -1673,8 +1673,9 @@ async function checkMarksLight(T, agent) {
 
 // The navigation and the Agents list: the pointer drags the edge after each (a real drag), the keys move it, a tab on it hides the pane or
 // shows it again; the navigation narrowed past its words is its icons only; what was set is kept for the next window.
-// A task whose turn ended while a command it started still runs is Idle, and says what runs: in its row ("idle · 1 shell running") and in its
-// status line, as Claude Code's own screen says it ("1 shell still running"), with the command; with two, the count and the commands on the pointer.
+// A task whose turn ended while a command it started still runs is Idle, and says that something runs: in its row ("idle · 1 shell running") and in its
+// status line ("1 shell running"), only how many, right after how it stands; the commands are on the pointer. The files changed stay where the design
+// puts them, the last thing before the switch of views, whether a shell runs or not.
 async function checkShells(T, agent) {
   const ui = await open(T, agent, 1180)
   await ui.click('.workspace-nav button', 'Agents')
@@ -1685,9 +1686,10 @@ async function checkShells(T, agent) {
   await ui.task('Rebuild the pricing page')
   await ui.wait(row + ".textContent.includes('idle · 1 shell running')", 'the row to say a shell runs')
   assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Idle', 'the task is idle, not working')
-  assert.equal(await ui.evaluate("document.querySelector('.task-status .shells-hint').textContent.trim()"), '1 shell still running · npm run dev')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .shells-hint').textContent.trim()"), '1 shell running', 'how many, and not what it runs')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .shells-hint').title"), 'npm run dev', 'the command is on the pointer')
   await set({ shells: [{ id: 'b0000001', label: 'npm run dev' }, { id: 'b0000002', label: 'sleep 600' }] })
-  await ui.wait("document.querySelector('.task-status .shells-hint')?.textContent.trim()==='2 shells still running'", 'the count of two')
+  await ui.wait("document.querySelector('.task-status .shells-hint')?.textContent.trim()==='2 shells running'", 'the count of two')
   assert.equal(await ui.evaluate("document.querySelector('.task-status .shells-hint').title"), 'npm run dev\nsleep 600', 'each command on the pointer')
   assert.ok((await ui.evaluate(row + ".textContent")).includes('idle · 2 shells running'))
   // Working, it says so too; with nothing running there is no line.
@@ -1696,6 +1698,31 @@ async function checkShells(T, agent) {
   await set({ state: 'idle', shells: [] })
   await ui.wait("!document.querySelector('.task-status .shells-hint')", 'no line once nothing runs')
   assert.equal(await ui.evaluate(row + ".textContent.includes('shell')"), false, 'and none in the row')
+  // The line keeps one order: how it stands and which agent, how many shells run, and at its end the files changed, then the switch of views. The files
+  // changed are in the same place with a shell running (with a long command, as the user saw it) and without one.
+  const files = Array.from({ length: 134 }, (_, n) => 'src/part' + n + '.ts')
+  const command = 'cd /c/Users/someone/togle-opensource && (timeout 400 node --test test/claude-background.test.mjs test/runner-hub.test.mjs)'
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:sh1', runner: 'claude', title: 'Many files', folder: 'C:\\work\\notes', state: 'working', screen: true, terminal: false, mine: true, line: 'Many files', shells: [{ id: 'b0000009', label: command }], log: [{ id: 1, at: Date.now() - 60_000, kind: 'you', text: 'Fix it' }, { id: 2, at: Date.now() - 50_000, kind: 'files', text: 'Changed 134 files', paths: files }] }) + ', "")')
+  await ui.task('Many files')
+  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Many files'")
+  // (The count is of the conversation, which Chat reads: Terminal, the view a screen opens in, does not say it.)
+  await ui.click('.view-switch button', 'Chat')
+  await ui.wait("!!document.querySelector('.task-status .files-hint')")
+  const line = () => ui.evaluate(`(() => {
+    const at = (selector) => { const el = document.querySelector('.task-status ' + selector); if (!el) return null; const b = el.getBoundingClientRect(); return { left: Math.round(b.left), right: Math.round(b.right), top: Math.round(b.top) } }
+    return { name: at('.task-agent-name'), shells: at('.shells-hint'), files: at('.files-hint'), views: at('.view-switch'), shellWords: document.querySelector('.task-status .shells-hint')?.textContent.trim() ?? null, fileWords: document.querySelector('.task-status .files-hint')?.textContent.trim() ?? null }
+  })()`)
+  const withShell = await line()
+  assert.equal(withShell.shellWords, '1 shell running', 'not the command: it is on the pointer')
+  assert.equal(withShell.fileWords, '134 files changed')
+  assert.ok(withShell.name.right <= withShell.shells.left && withShell.shells.right <= withShell.files.left && withShell.files.right <= withShell.views.left, 'agent, shells, files changed, switch: in that order: ' + JSON.stringify(withShell))
+  assert.ok(Math.abs(withShell.views.left - withShell.files.right - 10) <= 2, 'the files changed are right before the switch: ' + JSON.stringify(withShell))
+  assert.equal(new Set([withShell.name.top, withShell.shells.top, withShell.files.top, withShell.views.top]).size <= 2, true, 'all on one line (a hint and a button differ by a pixel or two)')
+  await ui.evaluate('window.togleUITest.setTask("claude:sh1", { shells: [] })')
+  await ui.wait("!document.querySelector('.task-status .shells-hint')")
+  const without = await line()
+  assert.deepEqual([without.files.left, without.files.right], [withShell.files.left, withShell.files.right], 'the files changed are in the same place without a shell')
+  assert.ok(Math.abs(without.views.left - without.files.right - 10) <= 2, 'still right before the switch')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -2179,18 +2206,31 @@ async function checkPictures(T, agent) {
   await ui.click('.workspace-nav button', 'Agents')
   const picture = nativeImage.createFromBuffer(Buffer.alloc(40 * 30 * 4, 0x9a), { width: 40, height: 30 }).toDataURL()
   const at = Date.now() - 60_000
+  // A wide strip (a status bar, 16 to 1) and a tall one (a phone screen, 1 to 3): pictures of any shape.
+  const svg = (width, height, fill) => 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '"><rect width="' + width + '" height="' + height + '" fill="' + fill + '"/><rect width="' + width / 2 + '" height="' + height / 2 + '" fill="#ffffff"/></svg>')
   const entries = [
     { id: 1, at, kind: 'you', text: '[Image #1] Why is this button cut?', images: ['image:0#1'] },
     { id: 2, at: at + 5_000, kind: 'agent', text: 'It is too narrow.' },
     { id: 3, at: at + 9_000, kind: 'you', text: '[Image #1] And this one?', images: ['image:900#1'] },
-    { id: 4, at: at + 12_000, kind: 'agent', text: 'That one too.' }
+    { id: 4, at: at + 12_000, kind: 'agent', text: 'That one too.' },
+    { id: 5, at: at + 15_000, kind: 'you', text: '[Image #1] [Image #2] The bar, and the phone.', images: ['image:wide#1', 'image:tall#1'] }
   ]
-  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:p9', runner: 'claude', title: 'Why is the button cut', folder: 'C:\\work\\website', terminal: false, mine: true, state: 'idle', line: '', history: { entries, pictures: { 'image:0#1': picture } } }) + ', "")')
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'claude:p9', runner: 'claude', title: 'Why is the button cut', folder: 'C:\\work\\website', terminal: false, mine: true, state: 'idle', line: '', history: { entries, pictures: { 'image:0#1': picture, 'image:wide#1': svg(1600, 100, '#3a4a7a'), 'image:tall#1': svg(300, 900, '#7a4a3a') } } }) + ', "")')
   await ui.wait("[...document.querySelectorAll('.task-row strong')].some(e=>e.textContent==='Why is the button cut')")
   await ui.task('Why is the button cut')
   await ui.wait("document.querySelector('.you-picture img')?.naturalWidth===40")
-  assert.deepEqual(await texts(ui, '.task-you'), ['Why is this button cut?', 'And this one?'], 'the words that stood in for a picture are not said again')
-  assert.deepEqual(await ui.evaluate("(()=>{const r=document.querySelector('.you-picture').getBoundingClientRect();return [Math.round(r.width),Math.round(r.height)]})()"), [168, 112], 'its place has its size')
+  assert.deepEqual(await texts(ui, '.task-you'), ['Why is this button cut?', 'And this one?', 'The bar, and the phone.'], 'the words that stood in for a picture are not said again')
+  // A picture keeps its own proportions: a small one stays as it is (never made bigger), a wide strip is shown whole and not cut to a box that shows
+  // its middle, a tall one is shown whole too; none is higher than 112px or wider than its card.
+  await ui.wait("document.querySelectorAll('.you-picture img').length===3")
+  await ui.wait("[...document.querySelectorAll('.you-picture img')].every(i=>i.naturalWidth>0)")
+  const shapes = await ui.evaluate("[...document.querySelectorAll('.you-picture img')].map(i=>{const r=i.getBoundingClientRect();return {natural:[i.naturalWidth,i.naturalHeight],shown:[Math.round(r.width),Math.round(r.height)]}})")
+  assert.deepEqual(shapes[0].shown, [40, 30], 'a small picture is not made bigger, and not cut: ' + JSON.stringify(shapes))
+  const ratio = (shape) => shape.shown[0] / shape.shown[1]
+  assert.ok(shapes[1].shown[0] > 400 && Math.abs(ratio(shapes[1]) - 16) < 0.6, 'a wide strip is shown whole, 16 to 1, much wider than the old box of 168: ' + JSON.stringify(shapes[1]))
+  assert.ok(shapes[2].shown[1] <= 112 && shapes[2].shown[1] >= 100 && Math.abs(ratio(shapes[2]) - 1 / 3) < 0.03, 'a tall one is shown whole, 1 to 3, at most 112 high: ' + JSON.stringify(shapes[2]))
+  assert.equal(await ui.evaluate("(()=>{const card=document.querySelector('.you-row').getBoundingClientRect();return [...document.querySelectorAll('.you-picture')].every(p=>{const r=p.getBoundingClientRect();return r.right<=card.right+1&&r.height<=114})})()"), true, 'inside its card, and low')
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('.you-picture img')].every(i=>getComputedStyle(i).objectFit!=='cover')"), true, 'nothing is cut to fit')
   await ui.wait("!!document.querySelector('.you-picture.gone')")
   assert.equal(await ui.evaluate("document.querySelector('.you-picture.gone').textContent"), 'The picture is no longer kept')
   await ui.click('.you-picture', 'Picture 1: open it')

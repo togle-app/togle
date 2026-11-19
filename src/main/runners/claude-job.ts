@@ -170,9 +170,34 @@ const ESC_APART_MS = 2_000
  * that is running). More of them than there are lines do nothing to an empty prompt, and a line that wraps is taken in as many steps as it has rows.
  */
 const UP_KEY = '\x1b[A'
+const DOWN_KEY = '\x1b[B'
 const ONE_LINE_BACK = '\x01\x0b\x7f'
-/** How long Claude Code is given to put the queue in its prompt, before the prompt is emptied. */
-const POP_MS = 450
+/**
+ * How long its record is given to show that the arrow gave the queue back (the `popAll` lines are written within a moment of the key). Where nothing
+ * was queued any more (the turn took it in first), the arrow recalls the previous prompt of the folder, or moves the cursor in a draft of several
+ * lines, and Down puts that back (tried on 2.1.328: Up on an empty prompt showed the earlier prompt, and Down emptied it again; over a draft of one
+ * line Up showed the earlier prompt and Down brought the draft back; over a draft of two lines both only moved the cursor).
+ */
+const POP_CONFIRM_MS = 3_000
+
+/** What a task's record says now: what waits in the agent's own queue, and everything the person said in the conversation. */
+export interface QueueRecord {
+  queued: readonly string[]
+  said: readonly string[]
+}
+
+/** The words that were said more times in `now` than in `was`: what the conversation gained, whatever the order or the ids. */
+function gained(now: readonly string[], was: readonly string[]): Set<string> {
+  const count = (list: readonly string[]): Map<string, number> => {
+    const counts = new Map<string, number>()
+    for (const words of list) counts.set(words, (counts.get(words) ?? 0) + 1)
+    return counts
+  }
+  const before = count(was)
+  const more = new Set<string>()
+  for (const [words, times] of count(now)) if (times > (before.get(words) ?? 0)) more.add(words)
+  return more
+}
 /** A screen's width, as least as it is in Togle's window, to count the rows a long line takes (more than are needed is harmless). */
 const NARROWEST_COLUMNS = 40
 
@@ -509,21 +534,36 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
 
   /**
    * Gives the queue back, as the Up arrow does on the screen in a terminal: all that was typed while the session works comes out of its queue
-   * into its prompt, and the prompt is emptied again, so that the words (`words`, in the order they were queued) are the person's to change in
-   * Chat. The screen is opened out of sight when it is closed, and the keys wait until it takes them. Nothing is pressed for a session that is
-   * over. See UP_KEY for what was measured.
+   * into its prompt, and the prompt is emptied again, so that the words are the person's to change in Chat. The screen is opened out of sight
+   * when it is closed, and the queue is read (`read`) once it takes keys, so that the arrow follows what waits then. The arrow is believed
+   * only when the record shows it: words that left the queue and are not words the turn took in are the ones that came back, and only those
+   * are returned. When none did, Down puts back what the arrow did (see UP_KEY) and the person is told, with nothing changed. Nothing is
+   * pressed for a session that is over, one that has nothing queued, or one that waits on its screen for a question or a permission (the
+   * arrow would move its choice).
    */
-  async takeBackQueue(words: readonly string[]): Promise<void> {
+  async takeBackQueue(read: () => Promise<QueueRecord>): Promise<string[]> {
     if (this.over) throw new Error('That task is over.')
-    // Over a question or a permission on its screen the arrow would move its choice: nothing is pressed until that is answered.
     if (this.state === 'waiting' || this.waitingFor) throw new Error('It waits for you on its screen. Take the queue back when that is answered.')
     const screen = await this.screenForKeys(ESC_AFTER_MS)
     if (!screen) throw new Error(this.closed ?? 'Its screen could not be opened.')
+    const first = await read()
+    if (!first.queued.length) return []
     screen.write(UP_KEY)
-    await new Promise((resolve) => setTimeout(resolve, POP_MS))
-    screen.write(clearKeys(words))
+    let given: string[] = []
+    for (let waited = 0; waited < POP_CONFIRM_MS && !given.length; waited += 150) {
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      const now = await read()
+      const tookIn = gained(now.said, first.said)
+      given = first.queued.filter((words) => !now.queued.includes(words) && !tookIn.has(words))
+    }
     this.lastActive = Date.now()
     this.context.look()
+    if (!given.length) {
+      screen.write(DOWN_KEY)
+      throw new Error('Claude Code did not give its queue back: it may have taken it in by then. Nothing was changed.')
+    }
+    screen.write(clearKeys(first.queued))
+    return given
   }
 
   /**

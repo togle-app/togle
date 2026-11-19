@@ -633,7 +633,9 @@ test('Take back presses the Up arrow once on a screen that was closed, once it t
     await task.screen.hide()
     assert.equal(task.terminal, undefined)
     const words = ['first queued', 'second queued\nwith two lines']
-    await task.takeBackQueue(words)
+    // The record: the queue as it is when the screen takes keys, and empty once the arrow reached the session (what it shows when the arrow gave it back).
+    const read = async () => ({ queued: job(home, jobId).ups ? [] : words, said: ['Fix it'] })
+    assert.deepEqual(await task.takeBackQueue(read), words, 'the words came back, in the order they were queued')
     assert.ok(task.terminal, 'its screen was opened out of sight')
     const keys = T.clearKeys(words)
     const count = (key) => keys.split(key).length - 1
@@ -643,8 +645,51 @@ test('Take back presses the Up arrow once on a screen that was closed, once it t
     assert.equal(seen.homes, count('\x01'))
     assert.equal(seen.backspaces, count('\x7f'))
     assert.equal(seen.escapes, undefined, 'no Esc')
+    assert.equal(seen.downs, 0, 'and no Down: the arrow did give the queue back')
     assert.equal(task.state, 'working', 'the turn goes on')
     assert.equal(alive(seen.pid), true)
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Take back that the record does not confirm puts back what the arrow did and says nothing was changed: the prompt is not emptied, it may hold what a person typed', { timeout: 60_000 }, async () => {
+  const { backend, home } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'long', title: 'Not given back' })
+    const jobId = task.screen.job
+    await until(() => task.state === 'working', 'the turn to be at work')
+    await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
+    // The record still shows the queue after the arrow: the turn had taken it in already, or the key was lost.
+    await assert.rejects(task.takeBackQueue(async () => ({ queued: ['one'], said: [] })), /did not give its queue back/)
+    await until(() => job(home, jobId).downs === 1, 'Down to reach the session')
+    await sleep(300)
+    const seen = job(home, jobId)
+    assert.equal(seen.ups, 1, 'the arrow was pressed once')
+    assert.equal(seen.downs, 1, 'and Down put back what it did (an earlier prompt, or the cursor)')
+    assert.ok(!seen.kills && !seen.backspaces, 'nothing was cleared')
+    assert.equal(task.state, 'working', 'the turn goes on')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Take back returns only words that came back: what the turn took in meanwhile is in the conversation, not in the box; with nothing queued nothing is pressed', { timeout: 60_000 }, async () => {
+  const { backend, home } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'long', title: 'Taken in' })
+    const jobId = task.screen.job
+    await until(() => task.state === 'working', 'the turn to be at work')
+    await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
+    // Nothing waits: the arrow is not pressed.
+    assert.deepEqual(await task.takeBackQueue(async () => ({ queued: [], said: ['Fix it'] })), [])
+    await sleep(300)
+    assert.equal(job(home, jobId).ups, undefined, 'no key was pressed')
+    // Two wait; by the time the arrow reaches it the turn has taken "One" in (it is said now), and "Two" came back.
+    const read = async () => (job(home, jobId).ups ? { queued: [], said: ['Fix it', 'One'] } : { queued: ['One', 'Two'], said: ['Fix it'] })
+    assert.deepEqual(await task.takeBackQueue(read), ['Two'])
+    const kills = T.clearKeys(['One', 'Two']).split('\x0b').length - 1
+    await until(() => job(home, jobId).kills === kills, 'the prompt to be emptied, for what was queued when the arrow was pressed')
   } finally {
     await backend.close()
   }
@@ -658,7 +703,7 @@ test('Take back presses nothing while a question or a permission waits on the sc
     await until(() => task.terminal.read().text.includes('fake claude ready'), 'the screen to be connected')
     type(task, 'run a')
     await until(() => task.pending.length === 1, 'the request')
-    await assert.rejects(task.takeBackQueue(['one']), /waits for you on its screen/)
+    await assert.rejects(task.takeBackQueue(async () => ({ queued: ['one'], said: [] })), /waits for you on its screen/)
     await sleep(300)
     assert.equal(job(home, jobId).ups, undefined, 'no key was pressed')
     assert.equal(job(home, jobId).kills, undefined)

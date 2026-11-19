@@ -249,8 +249,9 @@ async function session(job) {
     let line = ''
     const connected = Date.now()
     const ready = Number(process.env.FAKE_CLAUDE_READY_MS ?? 0)
-    // The keys that edit the prompt, counted in the job file: the Up arrow (it gives a queue back to the prompt), Ctrl+A, Ctrl+K and Backspace.
-    const edits = { ups: 0, homes: 0, kills: 0, backspaces: 0 }
+    // The keys that edit the prompt, counted in the job file: the Up arrow (it gives a queue back to the prompt), the Down arrow (it puts back what
+    // Up did when nothing was queued), Ctrl+A, Ctrl+K and Backspace.
+    const edits = { ups: 0, downs: 0, homes: 0, kills: 0, backspaces: 0 }
     socket.on('data', (data) => {
       // A key that comes before the screen takes keys is lost.
       if (Date.now() - connected < ready) return
@@ -262,6 +263,7 @@ async function session(job) {
           // An arrow key is a sequence that starts with Esc: not the key.
           if (keys[at + 1] === '[' || keys[at + 1] === 'O') {
             if (keys[at + 2] === 'A') { edits.ups++; write(job, { ...edits }) }
+            else if (keys[at + 2] === 'B') { edits.downs++; write(job, { ...edits }) }
             at += 2
           } else esc()
           continue

@@ -13,7 +13,7 @@ import { ResizeHandle } from './ResizeHandle'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { withQuote, splitQuote } from '@shared/quote'
 import { splitPictures } from '@shared/pasted-pictures'
-import { placeSent, SENT_GIVE_UP_MS, tailDelivery, type SentMessage } from '@shared/sent-messages'
+import { knownWith, placeSent, SENT_GIVE_UP_MS, tailDelivery, type SentMessage } from '@shared/sent-messages'
 import { QuoteBar, QuoteBlock, QuoteFloat, useQuoteSpot } from './Quote'
 import { RequestCard } from './RequestCard'
 import { PictureChips, pastedPictures, pathWords, useAttached } from './ReplyPictures'
@@ -1295,9 +1295,9 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
     return message ? `${message} ${paths}` : `${pictures.length === 1 ? 'Picture' : 'Pictures'}: ${paths}`
   }
   /** A message just sent is drawn at the end of the conversation, with how far it got; a command of the agent's own is not a message and has no card. */
-  const newSent = (body: string): SentMessage => ({ id: sentCounter++, text: body, at: Date.now(), after: shown.reduce((most, entry) => Math.max(most, entry.id), 0), state: 'sending' })
+  const newSent = (body: string): SentMessage => ({ id: sentCounter++, text: body, at: Date.now(), known: knownWith(shown, body), state: 'sending' })
   const settle = (one: SentMessage, failed: string | null): SentMessage =>
-    failed === null ? { id: one.id, text: one.text, at: one.at, after: one.after, state: 'sent', ...(one.seen ? { seen: one.seen } : {}) } : { ...one, state: 'failed', error: failed }
+    failed === null ? { id: one.id, text: one.text, at: one.at, known: one.known, state: 'sent', ...(one.seen ? { seen: one.seen } : {}) } : { ...one, state: 'failed', error: failed }
   const goSend = async (id: number, body: string): Promise<void> => {
     const failed = await onSend(body)
     setSent((was) => was.map((one) => (one.id === id ? settle(one, failed) : one)))
@@ -1314,7 +1314,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const resend = (id: number): void => {
     const message = sent.find((one) => one.id === id)
     if (!message) return
-    setSent((was) => was.map((one) => (one.id === id ? { id: one.id, text: one.text, at: one.at, after: one.after, state: 'sending' } : one)))
+    setSent((was) => was.map((one) => (one.id === id ? { id: one.id, text: one.text, at: one.at, known: one.known, state: 'sending' } : one)))
     void goSend(id, message.text)
   }
   const forgetSent = (id: number): void => setSent((was) => was.filter((one) => one.id !== id))
@@ -1533,13 +1533,14 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
       <div className="task-status">
         <span className="state-chip" data-state={task.signedOut ? 'failed' : task.state}><StateMark kind={task.signedOut ? 'failed' : chipMark(task.state, task.schedule)} still />{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
         <span className="task-agent-name"><AgentMark runner={task.runner} name={agentOf(task)} /></span>
-        {changed > 0 && <span className="hint">{`${changed} ${changed === 1 ? 'file' : 'files'} changed`}</span>}
+        {/* What it started that still runs: only how many, right after how it stands (the commands are on the pointer). */}
         {task.shells && task.shells.length > 0 && (
           <span className="hint shells-hint" title={task.shells.map((shell) => shell.label).join('\n')}>
-            {`${task.shells.length} ${task.shells.length === 1 ? 'shell' : 'shells'} still running`}
-            {task.shells.length === 1 && task.shells[0].label ? ` · ${task.shells[0].label}` : ''}
+            {`${task.shells.length} ${task.shells.length === 1 ? 'shell' : 'shells'} running`}
           </span>
         )}
+        {/* The files changed are always the last thing before the switch of views, whatever else the line says. */}
+        {changed > 0 && <span className="hint files-hint">{`${changed} ${changed === 1 ? 'file' : 'files'} changed`}</span>}
         {twoViews && (
           <span className="segmented view-switch" role="group" aria-label="View">
             {(['cards', 'session'] as const).map((name) => (

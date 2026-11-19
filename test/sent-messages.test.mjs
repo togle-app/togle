@@ -7,7 +7,7 @@ workDir('sent-messages')
 const T = await import('./.build/togle.mjs')
 
 const now = Date.parse('2026-11-19T14:00:00Z')
-const sent = (id, text, extra = {}) => ({ id, text, at: now, after: 10, state: 'sent', ...extra })
+const sent = (id, text, extra = {}) => ({ id, text, at: now, known: [], state: 'sent', ...extra })
 const you = (id, text, at = now + 1_000) => ({ id, at, kind: 'you', text })
 const places = (result) => result.map((one) => one.place)
 
@@ -18,21 +18,26 @@ test('a message nobody has recorded yet is at the end of the conversation, with 
   assert.equal(T.tailDelivery(sent(3, 'x', { state: 'failed' })), 'failed')
 })
 
-test('once the agent\u2019s record has it as something the person said, newer than the press, it is in the conversation', () => {
+test('once the agent\u2019s record has an entry with its words that was not there when it was sent, it is in the conversation', () => {
   const entry = you(12, 'Fix the header')
-  const result = T.placeSent([sent(1, 'Fix the header')], [you(5, 'Fix the header', now - 3_600_000), entry], [], [])
-  assert.deepEqual(places(result), ['thread'], 'the older words that are the same are not it')
+  // The same words were said before (entry 5, known when the message was sent): that one is not it.
+  const result = T.placeSent([sent(1, 'Fix the header', { known: [5] })], [you(5, 'Fix the header', now - 3_600_000), entry], [], [])
+  assert.deepEqual(places(result), ['thread'])
   assert.equal(result[0].entry, entry)
+  assert.deepEqual(places(T.placeSent([sent(1, 'Fix the header', { known: [5] })], [you(5, 'Fix the header', now - 3_600_000)], [], [])), ['tail'], 'with only the old one, it is not in the conversation yet')
 })
 
-test('an entry with no time of its own is told by its place: it must be after what was there when the message was sent', () => {
-  const old = { id: 5, at: 0, kind: 'you', text: 'Fix the header' }
-  const fresh = { id: 11, at: 0, kind: 'you', text: 'Fix the header' }
-  assert.deepEqual(places(T.placeSent([sent(1, 'Fix the header', { after: 10 })], [old], [], [])), ['tail'])
-  assert.deepEqual(places(T.placeSent([sent(1, 'Fix the header', { after: 10 })], [old, fresh], [], [])), ['thread'])
+test('what is new is told by what was there, not by ids or time: Codex keeps hashes for ids, and the start of the turn for a message that steered it', () => {
+  // A Codex record: ids are hashes (no order), and the time of a message is when its turn began, which is long before the press.
+  const steered = { id: 3_405_691_582, at: now - 600_000, kind: 'you', text: 'Also keep the old link' }
+  const older = { id: 17, at: now - 900_000, kind: 'you', text: 'Fix the login' }
+  assert.deepEqual(places(T.placeSent([sent(1, 'Also keep the old link')], [older, steered], [], [])), ['thread'], 'a smaller id and an older time are no reason to refuse it')
+  // The same words said before, with a bigger id and a later time than the press could ever have: it was known, so it is not the message.
+  const before = { id: 4_000_000_000, at: now + 5_000, kind: 'you', text: 'Also keep the old link' }
+  assert.deepEqual(places(T.placeSent([sent(1, 'Also keep the old link', { known: [before.id] })], [before], [], [])), ['tail'])
 })
 
-test('words are compared as the agent keeps them: spaces as one, the marks and paths of pictures left out', () => {
+test('words are compared as the agent keeps them: spaces as one, the marks and paths of pictures left out, and no more than the agent keeps', () => {
   const file = 'C:\\Users\\someone\\AppData\\Roaming\\togle\\pasted\\paste-20261119-123644.png'
   assert.deepEqual(places(T.placeSent([sent(1, 'Fix  the\nheader')], [you(12, 'Fix the header')], [], [])), ['thread'], 'a line break is a space on the screen')
   assert.deepEqual(places(T.placeSent([sent(1, `Look at this ${file}`)], [you(12, `[Image #1] Look at this ${file}`)], [], [])), ['thread'])
@@ -40,6 +45,16 @@ test('words are compared as the agent keeps them: spaces as one, the marks and p
   // Two pictures and no words are two messages, not one.
   const other = file.replace('123644', '123700')
   assert.deepEqual(places(T.placeSent([sent(1, `Picture: ${file}`), sent(2, `Picture: ${other}`)], [you(12, `Picture: ${other}`)], [], [])), ['tail', 'thread'])
+  // A long message is kept cut by the agent's record: it is still that message.
+  const long = 'word '.repeat(6_000)
+  assert.ok(long.length > T.RECORD_WORDS_MOST)
+  assert.deepEqual(places(T.placeSent([sent(1, long)], [you(12, long.slice(0, T.RECORD_WORDS_MOST))], [], [])), ['thread'])
+})
+
+test('what is known when a message is sent is the ids of the entries with the same words', () => {
+  const entries = [you(5, 'Fix the header'), you(6, 'Something else'), { id: 7, at: now, kind: 'agent', text: 'Fix the header' }, you(8, 'Fix   the header')]
+  assert.deepEqual(T.knownWith(entries, 'Fix the header'), [5, 8], 'only what the person said, with the words as the agent keeps them')
+  assert.deepEqual(T.knownWith(entries, 'New words'), [])
 })
 
 test('what the agent has queued, and what Togle holds, is where the message is until the agent takes it in', () => {

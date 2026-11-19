@@ -26,8 +26,12 @@ export interface SentMessage {
   text: string
   /** When Send was pressed. */
   at: number
-  /** The id of the newest entry of the conversation then: what the agent writes after it has a bigger id. */
-  after: number
+  /**
+   * The ids of the entries of the conversation that said the same words when it was sent: they are not this message. Told by what was there,
+   * and not by time or by order, because neither can be trusted across agents (Codex's ids are hashes, and the time it keeps for a message is
+   * the start of the turn, which is older than the press when the message steers a turn that was already running).
+   */
+  known: readonly number[]
   /** `sending` until the window was told it went in; `failed` when it did not. */
   state: 'sending' | 'sent' | 'failed'
   /** Why it did not go in. */
@@ -46,25 +50,30 @@ export interface Placed {
   entry?: LogEntry
 }
 
-/** How much earlier than its press an entry's time may be and still be the message: the agent's clock is the computer's own. */
-const SLACK_MS = 10_000
-
-const realTime = (at: number | undefined): at is number => typeof at === 'number' && at > 946_684_800_000
+/** The most of a message an agent's record keeps (each reader cuts what the person said at this): a longer one is compared as far as that. */
+export const RECORD_WORDS_MOST = 20_000
 
 /**
  * What a message says, for telling it from another: its words with spaces as one, and the files of its pictures. The agent keeps what
- * was typed on its screen, which is one line (line breaks become spaces) without the marks Togle puts for a picture.
+ * was typed on its screen, which is one line (line breaks become spaces) without the marks Togle puts for a picture, and no more than
+ * RECORD_WORDS_MOST characters of it.
  */
 export function messageKey(text: string): string {
-  const said = splitPictures(text.replace(/\[Image #\d+\]\s*/g, ''))
+  const said = splitPictures(text.slice(0, RECORD_WORDS_MOST).replace(/\[Image #\d+\]\s*/g, ''))
   return `${said.words.replace(/\s+/g, ' ').trim()}\n${said.files.join('\n')}`
 }
 
+/** The ids of what the person said in these entries with the words of a message about to be sent: what `SentMessage.known` holds. */
+export function knownWith(entries: readonly LogEntry[], text: string): number[] {
+  const key = messageKey(text)
+  return entries.filter((entry) => entry.kind === 'you' && messageKey(entry.text) === key).map((entry) => entry.id)
+}
+
 /**
- * Where each sent message is: in the conversation (the agent's record has it as something the person said, newer than the press), in
- * the agent's own queue (`queued`), in what Togle holds for the agent (`held`), or nowhere yet (`tail`: the window draws it at the end
- * of the conversation, with the ticks of how far it got). An entry, a queued line or a held line is one message's only: a second message
- * with the same words finds the next one. A message that could not be sent stays at the end, failed.
+ * Where each sent message is: in the conversation (the agent's record has something the person said with its words that was not there
+ * when it was sent), in the agent's own queue (`queued`), in what Togle holds for the agent (`held`), or nowhere yet (`tail`: the window
+ * draws it at the end of the conversation, with the ticks of how far it got). An entry, a queued line or a held line is one message's
+ * only: a second message with the same words finds the next one. A message that could not be sent stays at the end, failed.
  */
 export function placeSent(sent: readonly SentMessage[], entries: readonly LogEntry[], queued: readonly string[], held: readonly string[]): Placed[] {
   const said = entries.filter((entry) => entry.kind === 'you')
@@ -74,8 +83,8 @@ export function placeSent(sent: readonly SentMessage[], entries: readonly LogEnt
   return sent.map((message): Placed => {
     if (message.state === 'failed') return { message, place: 'tail' }
     const key = messageKey(message.text)
-    // Newer than the press: by the entry's time when the agent kept one, else by its place in the conversation.
-    const entry = said.find((candidate) => !claimedEntries.has(candidate) && messageKey(candidate.text) === key && (realTime(candidate.at) ? candidate.at >= message.at - SLACK_MS : candidate.id > message.after))
+    // New since it was sent: not one of the entries that already said these words then (the agent's ids are told apart, not ordered).
+    const entry = said.find((candidate) => !claimedEntries.has(candidate) && !message.known.includes(candidate.id) && messageKey(candidate.text) === key)
     if (entry) {
       claimedEntries.add(entry)
       return { message, place: 'thread', entry }

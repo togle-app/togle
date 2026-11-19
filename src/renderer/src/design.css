@@ -485,11 +485,12 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-agent-name + .hint:not(:has(+ .view-switch))::before { content: '·'; }
 .task-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
 .task-actions:empty { display: none; }
-/* How it stands, at the start of its line. The switch between its two views is at the line's end, with how many files
-   changed before it, as the design draws them; without a switch, the files are said right after how it stands. */
+/* How it stands, at the start of its line, and what else runs (the shells it started) right after it. The switch between its two views is at
+   the line's end, with how many files changed before it, as the design draws them: always, whatever else the line says. Without a switch, the
+   files are said right after how it stands. */
 .task-status { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
-.task-status .hint:has(+ .view-switch) { margin-left: auto; }
-.task-status .hint + .view-switch { margin-left: 0; }
+.task-status .files-hint:has(+ .view-switch) { margin-left: auto; }
+.task-status .files-hint + .view-switch { margin-left: 0; }
 .task-status .hint { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--muted); font-size: 12px; }
 .task-status button.link { margin: 0; padding: 0; color: var(--muted); font-size: 12px; }
 .task-status button.link:hover { color: var(--ink); }
@@ -793,11 +794,14 @@ button.plan-head:hover:not(:disabled) { border-color: transparent; }
 .held-actions { display: inline-flex; flex: none; gap: 6px; }
 q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 /* A picture in what the person said: small, in a place of its own size from the start; it opens whole over the window. */
-.you-pictures { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.you-picture { display: block; width: 168px; height: 112px; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); cursor: zoom-in; }
+/* A picture is small in its card but keeps its own proportions: a wide strip is shown whole (as wide as its card lets it be, and at most 112px high),
+   not cut to a box that shows its middle. Before it comes, its place is 168 by 112. It is never made bigger than it is. */
+.you-pictures { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; margin-top: 4px; }
+.you-picture { display: block; min-width: 0; max-width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); cursor: zoom-in; }
+.you-picture.waiting { width: 168px; height: 112px; }
 .you-picture:hover:not(:disabled) { border-color: var(--togle); background: var(--bg); }
 .you-picture:disabled { cursor: default; }
-.you-picture img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.you-picture img { display: block; width: auto; height: auto; max-width: 100%; max-height: 112px; }
 .you-picture.gone { display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; color: var(--muted); font-size: 12px; cursor: default; }
 .picture-backdrop { position: fixed; inset: 36px 0 0; z-index: 90; background: rgba(8, 10, 14, 0.86); backdrop-filter: blur(4px); cursor: zoom-out; }
 /* The room the picture has: one that is bigger than it scrolls in it. `margin: auto` centers a picture that is smaller than the room, and
