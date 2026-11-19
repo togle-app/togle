@@ -431,6 +431,8 @@ export interface Settings {
   addedAgents: import('./runner').AddedAgent[]
   /** Agents Togle finds by itself that the person took off its lists (Settings → Agents → Remove). They stay installed. */
   hiddenAgents: string[]
+  /** How the window looks (Settings → Appearance): a light one, a dark one (the default), or the system's. */
+  appearance: { theme: import('./theme').ThemeChoice }
   /** How Togle's own updates go in (Settings → Updates). Every one is checked against the release key first, whatever this says. */
   updates: {
     /**

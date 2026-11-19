@@ -5,6 +5,7 @@ import { validateAIProfile } from '@shared/preferences'
 import { MICROPHONE_DEFAULTS } from '@shared/microphone'
 import { mergedVoiceAccount, type OldVoiceAccounts } from '@shared/speech'
 import { addedAgentsFrom, hiddenAgentsFrom } from '@shared/runner'
+import { DEFAULT_THEME, isThemeChoice } from '@shared/theme'
 import { holdsByDefault } from './typing-way'
 
 const FILE = 'settings.json'
@@ -64,7 +65,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // Agents found by themselves that the person removed from Togle's lists.
   hiddenAgents: [],
   // An update that has been checked and downloaded waits for "Restart to update" until the person says it may go in as Togle closes.
-  updates: { installOnQuit: false }
+  updates: { installOnQuit: false },
+  // The window is dark, as the product is drawn, until the person chooses a light one or the system's.
+  appearance: { theme: DEFAULT_THEME }
 }
 
 let current: Settings = DEFAULT_SETTINGS
@@ -116,6 +119,9 @@ function merge(base: Settings, patch: SettingsPatch): Settings {
       next[key] = { ...prev, ...Object.fromEntries(Object.entries(value).filter(([k, v]) => v !== undefined && fits(v, group[k]))) }
     } else next[key] = value
   }
+  // A word that is not one of the themes is the default one.
+  const appearance = next.appearance as Settings['appearance']
+  if (!isThemeChoice(appearance.theme)) next.appearance = { ...appearance, theme: DEFAULT_THEME }
   // A task opens as its agent's own screen or as cards: any other word is the default.
   const tasks = next.tasks as Settings['tasks']
   if (tasks.view !== 'session' && tasks.view !== 'cards') next.tasks = { ...tasks, view: 'session' }

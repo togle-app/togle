@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, net, Notification, screen, session, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeTheme, net, Notification, screen, session, shell, systemPreferences } from 'electron'
 import { ApiConnections } from './auth/api-connections'
 import { effectiveAI, effectiveSettings, validateAIProfile } from '@shared/preferences'
 import { routedProvider } from './providers/routed'
@@ -11,6 +11,7 @@ import { DictationVocabularyStore } from './dictation-vocabulary'
 import { correctSpeech, speechLesson, speechWords, withSpeechWord } from '@shared/speech-words'
 import type { DictationVocabularyEdit } from '@shared/dictation'
 import { DictationTargetBridge } from './dictation-target'
+import { applyTheme, themeColors } from './theme'
 import { Updates } from './updates'
 import { RELEASE_KEY } from './release-key'
 import type { HeldKeys } from './desktop-typing'
@@ -775,7 +776,7 @@ function createWindow(): void {
     minWidth: min.width,
     minHeight: min.height,
     frame: false,
-    backgroundColor: '#0f1115',
+    backgroundColor: themeColors().bg,
     title: 'Togle',
     icon: path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'build'), process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     show: false,
@@ -1157,6 +1158,7 @@ function registerIpc(): void {
     if (patch?.assist?.rememberCalls === false) { callTitles.pause(); titleQueue.clear() }
     // Right away, not after the save: dragging the opacity slider should feel live.
     applyWindowSettings()
+    if (patch?.appearance) { applyTheme(getSettings().appearance.theme); if (win && !win.isDestroyed()) win.setBackgroundColor(themeColors().bg) }
     if (patch?.dictation) refreshVoiceSettings()
     // Saving near the plan's limit may have been turned on or off.
     selectedChatGPT().provider.plan.update()
@@ -1735,6 +1737,9 @@ if (process.argv.includes('--togle-hook')) {
       { role: 'windowMenu' }
     ]))
     await Promise.all([loadSettings(), auth.load(), claude.load(), compat.load(), ...Object.values(speechApis).map((api) => api.load())])
+    // The theme before any window: none opens in the other one. The system's own change moves the window's first-paint color too.
+    applyTheme(getSettings().appearance.theme)
+    nativeTheme.on('updated', () => { if (win && !win.isDestroyed()) win.setBackgroundColor(themeColors().bg) })
     await accounts.load()
     await apiConnections.load()
     // Settings that name an account that is not there (the Claude sign-in an earlier Togle had) go back to the general account.

@@ -83,6 +83,8 @@ if (callNoticeSurface) document.body.classList.add('notice-surface', 'callnotice
 if (keysNoticeSurface) document.body.classList.add('notice-surface', 'callnotice-surface', 'keysnotice-surface')
 if (callStripSurface) document.body.classList.add('notice-surface', 'callstrip-surface')
 if (showSurface) document.body.classList.add('show-surface')
+// What floats over other apps keeps the dark palette, whichever theme the window has (design.css).
+if (surface && !taskBoxSurface) document.documentElement.dataset.hud = ''
 const root = createRoot(document.getElementById('root')!)
 if (dictationSurface) root.render(<DictationBar />)
 else if (noticeSurface) root.render(<TaskNoticeSurface />)

@@ -10,6 +10,7 @@ import { modelSourceId } from '@shared/model-selection'
 import { AI_TASKS } from '@shared/preferences'
 import { MANAGE_USAGE_URL } from '@shared/plan'
 import { isMicrophoneOn, microphoneNeedsSignIn, type TogleMicrophoneStatus } from '@shared/microphone'
+import { DEFAULT_THEME, isThemeChoice, THEME_CHOICES, type ThemeChoice } from '@shared/theme'
 import { AgentAvatar } from './AgentMark'
 import { useHotkeys } from './hotkeys'
 import { Shortcut } from './Shortcut'
@@ -82,6 +83,7 @@ export function SettingsPage({ settings, stt, at, onSave }: Props) {
             <div className="sets-part">
               <Agents settings={settings} save={save} />
               <Devices />
+              <Appearance settings={settings} save={save} />
               <Updates settings={settings} save={save} />
             </div>
           </div>
@@ -118,6 +120,28 @@ function Update() {
         </Row>
         : <Row label={false} name={state.phase === 'refused' ? 'An update was refused' : 'Togle couldn’t check for an update'} note={state.message} />}
       {failure && <p className="error" role="alert">{failure}</p>}
+    </Section>
+  )
+}
+
+const THEME_WORDS: Record<ThemeChoice, string> = { light: 'Light', dark: 'Dark', system: 'System' }
+
+/**
+ * How the window looks: a light one, a dark one (until chosen, as the product is drawn) or whichever the system has. A switch of
+ * three, the kind Settings uses for two; Togle's main process tells every page, and they change at once.
+ */
+function Appearance({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
+  const theme = isThemeChoice(settings.appearance?.theme) ? settings.appearance.theme : DEFAULT_THEME
+  return (
+    <Section id="settings-appearance" title="Appearance">
+      <Row label={false} name="Theme">
+        <span className="segmented view-switch" role="radiogroup" aria-label="Theme" title="Light or dark, or whichever your system has. What floats over other apps (the voice bar and the notices) stays dark, and so does an agent’s own screen in Terminal.">
+          {THEME_CHOICES.map((name) => {
+            const on = theme === name
+            return <button key={name} type="button" role="radio" aria-checked={on} className={on ? 'on' : ''} onClick={() => { if (!on) void save({ appearance: { theme: name } }) }}>{THEME_WORDS[name]}</button>
+          })}
+        </span>
+      </Row>
     </Section>
   )
 }

@@ -103,6 +103,7 @@ export { AcpBackend, commandIsAcp, commandWords, whereIs } from '../src/main/run
 export { addedBackend } from '../src/main/runners/register'
 export { cleanWords, refuseCommand, shimTarget, TerminalBackend, TerminalTask, windowsArg, withoutTaskWords } from '../src/main/runners/terminal'
 export { safeCut, TerminalModes } from '../src/main/runners/terminal-modes'
+export { DEFAULT_THEME, isThemeChoice, THEME_CHOICES, THEME_COLORS } from '../src/shared/theme'
 export { KNOWN_AGENTS, addedAgentProblem, addedAgentsFrom, agentIdOf, hiddenAgentsFrom } from '../src/shared/runner'
 export { Updates, assetFor, newer } from '../src/main/updates'
 export { Cpace, actText, canonical, deviceId, issuePass, lock, makeIdentity, normalCode, pairKey, pairingCode, passHolds, proofHolds, publicKeys, signWith, signedBy, unlock } from '../src/main/reach/crypto'

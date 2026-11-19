@@ -23,6 +23,8 @@
   --danger: #ff7a7a;
   --danger-soft: #3a2026;
   --raised: #1e2330;
+  /* A primary button under the pointer: the text's color, lighter still. */
+  --ink-hover: #ffffff;
   --font-display: 'Bricolage Grotesque Variable', 'Segoe UI', system-ui, sans-serif;
   /* Korean, Japanese and Chinese have their system fonts after the Latin ones, which lack them. */
   --font-body: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Malgun Gothic', 'Yu Gothic UI', 'Microsoft YaHei UI', 'Apple SD Gothic Neo', 'Hiragino Sans', 'PingFang SC', 'Noto Sans CJK KR', 'Noto Sans KR', sans-serif;
@@ -39,6 +41,37 @@
   --me: var(--ok);
   --mono: var(--font-mono);
   color-scheme: dark;
+}
+
+/*
+ * The light window: the same parts on a light palette, when the person chose Light in Settings (or System, and the system is light;
+ * Togle sets what the page is told, so this media query follows the choice). Every text color keeps 4.5:1 or more on what it sits
+ * on, and a symbol 3:1. What floats over other apps (the voice bar, the notices, the call strip: index.html's data-hud) keeps the dark
+ * palette, as does the agents' own screen (Terminal), which draws for the dark window it started on.
+ */
+@media (prefers-color-scheme: light) {
+  :root:not([data-hud]) {
+    --bg: #eef0f5;
+    --surface: #ffffff;
+    --stage: #dfe3ec;
+    --ink: #161a24;
+    --muted: #586076;
+    --line: #d3d8e2;
+    --togle: #4350cf;
+    --togle-soft: #e4e7ff;
+    --wait: #955c06;
+    --wait-soft: #fcefd3;
+    --ok: #08735c;
+    --ok-soft: #d6f0e7;
+    --shadow: rgba(26, 32, 52, 0.22);
+    --danger: #b92d2d;
+    --danger-soft: #fde0e0;
+    --raised: #e8ebf2;
+    --ink-hover: #2e3445;
+    color-scheme: light;
+  }
+  /* The call's avatars: a voice's pastel is for the dark window; on this one its letter is the color taken toward the text. */
+  :root:not([data-hud]) .live-line::before { color: color-mix(in srgb, var(--avatar) 42%, var(--ink)); }
 }
 
 body {
@@ -65,7 +98,7 @@ button {
 button:hover:not(:disabled) { border-color: var(--muted); }
 button.small { padding: 3px 9px; font-size: 12px; }
 button.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); font-weight: 600; }
-button.primary:hover:not(:disabled) { background: #ffffff; border-color: #ffffff; }
+button.primary:hover:not(:disabled) { background: var(--ink-hover); border-color: var(--ink-hover); }
 button.primary:disabled { opacity: 0.45; }
 button.primary.stop { background: var(--danger-soft); border-color: var(--danger-soft); color: var(--danger); }
 button.ghost { background: transparent; }

@@ -43,6 +43,21 @@ async function run() {
   const main = BrowserWindow.getAllWindows().find(win => win !== bar)
   const js = code => main.webContents.executeJavaScript(code)
   await wait(() => js("!!document.querySelector('.workspace-nav')"))
+  // The theme: dark until chosen. Settings send the choice, main tells every page (their media query follows it) and the window's own
+  // first-paint color follows too, so that a window opens in the colors of its theme.
+  assert.equal(invoke('settings:get').appearance.theme, 'dark')
+  assert.equal(electron.nativeTheme.themeSource, 'dark')
+  assert.equal(main.getBackgroundColor().slice(-6).toLowerCase(), '0f1115', 'the window opened in the dark window\'s color')
+  await invoke('settings:update', { appearance: { theme: 'light' } })
+  await wait(() => js("matchMedia('(prefers-color-scheme: light)').matches"))
+  assert.equal(electron.nativeTheme.themeSource, 'light')
+  assert.equal(main.getBackgroundColor().slice(-6).toLowerCase(), 'eef0f5', 'and its own color follows the choice')
+  assert.equal(await js("getComputedStyle(document.body).backgroundColor"), 'rgb(255, 255, 255)', 'the page is the light window')
+  assert.equal(await js("getComputedStyle(document.documentElement).getPropertyValue('--ink').trim()"), '#161a24')
+  await invoke('settings:update', { appearance: { theme: 'dark' } })
+  await wait(() => js("matchMedia('(prefers-color-scheme: dark)').matches"))
+  assert.equal(main.getBackgroundColor().slice(-6).toLowerCase(), '0f1115')
+  assert.equal(await js("getComputedStyle(document.body).backgroundColor"), 'rgb(23, 27, 35)', 'and back to the dark one')
   await js(`window.__microphoneRequests=0;
     Object.defineProperty(navigator.mediaDevices,'enumerateDevices',{value:async()=>[{kind:'audioinput',deviceId:'default',label:'Default'},{kind:'audioinput',deviceId:'headset',label:'USB headset'},{kind:'audioinput',deviceId:'desk',label:'Desk microphone'}],configurable:true});
     Object.defineProperty(navigator.mediaDevices,'getUserMedia',{value:()=>{window.__microphoneRequests++;throw Error('Settings must never open a microphone')},configurable:true});undefined`)

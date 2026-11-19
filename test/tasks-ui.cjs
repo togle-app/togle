@@ -944,6 +944,11 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual(await texts(ui, '#settings-agents .agent-label'), ['Claude Code', 'Codex', 'Hermes'])
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('#settings-agents .agent-name .av')].map(av=>av.dataset.agent+':'+(av.querySelector('svg')?'mark':av.textContent))"), ['claude:mark', 'codex:mark', 'hermes:mark'], 'each agent with the mark its maker made, not a letter')
   assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add an agent'])
+  // Appearance: a switch of three, Dark chosen until it is changed; a press sends the choice.
+  assert.deepEqual(await texts(ui, '#settings-appearance [role=radiogroup] button'), ['Light', 'Dark', 'System'])
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('#settings-appearance [role=radio]')].map(b=>b.getAttribute('aria-checked'))"), ['false', 'true', 'false'], 'dark until the person chooses')
+  await ui.click('#settings-appearance [role=radio]', 'Light')
+  await ui.wait("window.togleUITest.calls().some(call=>call.name==='updateSettings'&&call.args?.appearance?.theme==='light')")
   // Updates: one switch, off (an update waits for Restart to update, as it always did), and what is true of this build as a row's
   // value: with no release key Togle does not look for updates.
   assert.deepEqual(await texts(ui, '#settings-updates .setting .name'), ['Install updates when I quit', 'Update check'])
@@ -1016,7 +1021,7 @@ async function checkAgentSettings(T, agent) {
   // The groups are as wide as the place, in columns of their own: two as the design draws them (Keys, Meetings and Accounts
   // beside Voice and Agents), and three on a wide window (Keys, Meetings beside Accounts, Voice beside Agents). A wide window
   // once made five thin columns of them, then one small block in a corner, then one in the middle.
-  const groups = ['settings-keys', 'settings-voice', 'settings-meetings', 'settings-agents', 'settings-accounts', 'settings-updates']
+  const groups = ['settings-keys', 'settings-voice', 'settings-meetings', 'settings-agents', 'settings-accounts', 'settings-appearance', 'settings-updates']
   // Every row of Settings, each group's name and the line under the plan: where it is from the top of the groups, and how large.
   const rows = "(()=>{const top=document.querySelector('.sets').getBoundingClientRect().top;return [...document.querySelectorAll('.sets .setting, .sets .section-head, .sets .ai-plan-other')].filter(e=>!e.closest('.setting-detail')).map(e=>{const r=e.getBoundingClientRect();return [e.textContent.trim().slice(0,20),Math.round(r.left),Math.round(r.top-top),Math.round(r.width),Math.round(r.height)].join(' ')})})()"
   // A form to type in is a dialog: the card the design draws, no wider than drawn, in the middle of the window, whole in it, over a layer that dims the whole window under the title bar.
@@ -1026,8 +1031,8 @@ async function checkAgentSettings(T, agent) {
     ui.window.setContentSize(width, 900)
     await ui.wait('innerWidth===' + width)
     const at = await ui.evaluate(places)
-    const [keys, voice, meetings, agents, accounts, updates] = groups.map(id => at[id])
-    assert.ok(updates.left === agents.left && updates.top > agents.top, 'Updates under Agents, in the same column, at ' + width)
+    const [keys, voice, meetings, agents, accounts, appearance, updates] = groups.map(id => at[id])
+    assert.ok(appearance.left === agents.left && appearance.top > agents.top && updates.left === agents.left && updates.top > appearance.top, 'Appearance and Updates under Agents, in the same column, at ' + width)
     if (width < 1150) {
       assert.ok(voice.top === keys.top && voice.left >= keys.left + keys.width, 'Keys beside Voice, in two columns, at ' + width)
       assert.ok(meetings.left === keys.left && accounts.left === keys.left && agents.left === voice.left, 'Meetings and Accounts under Keys, Agents under Voice, at ' + width)
@@ -1092,9 +1097,9 @@ async function checkAgentSettings(T, agent) {
   assert.ok(await ui.evaluate("(()=>{const place=document.querySelector('.shell-content'),f=document.querySelector('form.ai-key-form').getBoundingClientRect();return place.scrollWidth<=place.clientWidth&&f.left>=15&&f.right<=innerWidth-15&&f.top>=36})()"), 'the key form fits a narrow window')
   await ui.click('form.ai-key-form button', 'Cancel')
   await ui.wait("!document.querySelector('form.ai-key-form')")
-  const stacked = ['settings-keys', 'settings-meetings', 'settings-accounts', 'settings-voice', 'settings-agents', 'settings-updates']
+  const stacked = ['settings-keys', 'settings-meetings', 'settings-accounts', 'settings-voice', 'settings-agents', 'settings-appearance', 'settings-updates']
   assert.ok(stacked.every((id, n) => narrow[id].left === narrow[stacked[0]].left && (n === 0 || narrow[id].top > narrow[stacked[n - 1]].top)), 'one column in a narrow window')
-  assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Meetings', 'Accounts', 'Voice', 'Agents', 'Updates'], 'and it is the order they are in the page')
+  assert.deepEqual(await texts(ui, '.settings-one section h3'), ['Keys', 'Meetings', 'Accounts', 'Voice', 'Agents', 'Appearance', 'Updates'], 'and it is the order they are in the page')
   // Removing an agent is quiet words on its row, not a button: the row reads as a name and how it stands.
   assert.equal(await ui.evaluate("[...document.querySelectorAll('#settings-agents button[aria-label^=\"Remove \"]')].every(b=>getComputedStyle(b).borderTopWidth==='0px'&&getComputedStyle(b).fontWeight==='400')"), true)
   // No place has a widest it can be: on a wide window To-do and a task are as wide as the room they have, from its left edge.
@@ -1577,6 +1582,49 @@ async function checkPlanWindow(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.plan-head .plan-now').textContent"), 'Step 28 of the plan', 'folded, it says what is being done')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
+}
+
+// The theme. Light makes the window and the task box light; what floats over other apps (the notices, the call strip, the keys notice)
+// keeps the dark palette, and so does the agents' own screen. (What Settings sends main turns into what pages are told, which is
+// what nativeTheme.themeSource stands in for here.) The marks of a task stay readable in the light window too.
+async function checkTheme(T, agent) {
+  const { nativeTheme } = require('electron')
+  const before = nativeTheme.themeSource
+  nativeTheme.themeSource = 'light'
+  try {
+    // (The built stylesheet writes #ffffff as #fff.)
+    const long = (hex) => /^#[0-9a-f]{3}$/i.test(hex) ? '#' + [...hex.slice(1)].map((c) => c + c).join('') : hex
+    const tokens = async (ui) => { const seen = await ui.evaluate("(()=>{const s=getComputedStyle(document.documentElement);return {bg:s.getPropertyValue('--bg').trim(),surface:s.getPropertyValue('--surface').trim(),scheme:s.colorScheme,hud:document.documentElement.hasAttribute('data-hud'),page:getComputedStyle(document.body).backgroundColor}})()"); return { ...seen, bg: long(seen.bg), surface: long(seen.surface) } }
+    const LIGHT = { bg: '#eef0f5', surface: '#ffffff', scheme: 'light', hud: false, page: 'rgb(255, 255, 255)' }
+    const main = await open(T, agent, 1024)
+    assert.deepEqual(await tokens(main), LIGHT, 'the window is light')
+    // The task box is a window of its own that follows the theme.
+    const box = await open(T, agent, 600, 'taskbox')
+    assert.deepEqual((({ page, ...rest }) => rest)(await tokens(box)), (({ page, ...rest }) => rest)(LIGHT), 'the task box is light')
+    box.window.destroy()
+    for (const [surface, width] of [['notice', 392], ['callnotice', 372], ['keysnotice', 372], ['callstrip', 380]]) {
+      const floating = await open(T, agent, width, surface)
+      const seen = await tokens(floating)
+      assert.deepEqual([seen.bg, seen.surface, seen.scheme, seen.hud], ['#0f1115', '#171b23', 'dark', true], surface + ' floats over other apps and stays dark in a light window')
+      floating.window.destroy()
+    }
+    // The agent's own screen stays dark in the light window (it drew for the dark one it started on).
+    await main.click('.workspace-nav button', 'Agents')
+    await main.wait("document.querySelectorAll('.task-row').length===5")
+    await main.evaluate("window.togleUITest.terminalTask({ key: 'term-aider:th1', runner: 'term-aider', agent: 'Aider', title: 'Rename the module', folder: 'C:\\\\work\\\\api-server', words: 'x' }, 'Aider v0.99\\r\\nready> ')")
+    await main.task('Rename the module')
+    await main.wait("document.querySelector('.terminal-view')?.textContent.includes('Aider v0.99')")
+    const dark = await main.evaluate("(()=>{const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle=getComputedStyle(document.querySelector('.terminal-view .xterm-viewport')||document.querySelector('.terminal-view')).backgroundColor;x.fillRect(0,0,1,1);const d=x.getImageData(0,0,1,1).data;return d[0]+d[1]+d[2]})()")
+    assert.ok(dark < 150, 'the agent\'s screen is dark in a light window: ' + dark)
+    assert.deepEqual(main.errors, [], 'no errors in the console')
+    main.window.destroy()
+  } finally {
+    nativeTheme.themeSource = before
+  }
+}
+
+async function checkMarksLight(T, agent) {
+  await checkMarks(T, agent, 'light')
 }
 
 // An agent signed out: its task's row is amber and says what signs it in again, here, in the task and on To-do.
@@ -2533,6 +2581,8 @@ app.whenReady().then(async () => {
     await go(checkCallStrip)
     await go(checkStoppedTasks)
     await go(checkMarks)
+    await go(checkMarksLight)
+    await go(checkTheme)
     await go(checkAgentMarks)
     await go(checkPlanWindow)
     await go(checkSignedOut)
