@@ -9,7 +9,9 @@ const TURNS_ALL = 400
 /**
  * The last turns of a conversation (all of them, up to a limit, with `all`). `cut` says that what came before `entries` was left
  * out already, so that there is more than these even when all of them are shown. A command (or a helper) with no result, when
- * something was asked after it, was cut short (its session ended under it): it is not shown as running.
+ * something was asked after it, was cut short (its session ended under it): it is not shown as running. Of the checklist steps only the
+ * newest keeps its list: the window draws the checklist of the turn at hand from that one alone, and a step of days of work that each
+ * held a long list would be most of what is sent every few seconds.
  */
 export function lastTurns(entries: readonly LogEntry[], all: boolean, cut = false): TaskHistory {
   const turns = all ? TURNS_ALL : TURNS_SHOWN
@@ -22,8 +24,13 @@ export function lastTurns(entries: readonly LogEntry[], all: boolean, cut = fals
   }
   const shown = entries.slice(start)
   const lastAsked = shown.map((entry) => entry.kind).lastIndexOf('you')
+  const lastPlan = shown.map((entry) => entry.kind === 'step' && entry.step === 'plan').lastIndexOf(true)
   return {
-    entries: shown.map((entry, index) => ((entry.kind === 'command' || entry.kind === 'step') && entry.status === 'running' && index < lastAsked ? { ...entry, status: 'failed' as const } : { ...entry })),
+    entries: shown.map((entry, index) => {
+      const copy: LogEntry = (entry.kind === 'command' || entry.kind === 'step') && entry.status === 'running' && index < lastAsked ? { ...entry, status: 'failed' as const } : { ...entry }
+      if (copy.plan && index !== lastPlan) delete copy.plan
+      return copy
+    }),
     more: start > 0 || cut
   }
 }

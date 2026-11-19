@@ -183,12 +183,12 @@ test('what else it did: files read, searches, the web, helpers, other tools and 
   assert.equal(history.entries.some((entry) => entry.more), false, 'none of these has anything to open')
 })
 
-test('a checklist that has grown for days is kept short: the latest finished things and every one still open, in every step that shows it', async () => {
+test('a checklist that has grown for days is kept from growing without end: one step holds its list, which is whole until it is far past what a person looks at', async () => {
   const { PLAN_DONE_KEPT, PLAN_OPEN_KEPT } = T
   const lines = [line(asked(11, 'Keep working through the backlog.'))]
   let second = 1
   // Three hundred things, each put on the checklist, started and finished with other work in between; the last eight are left
-  // (four being done, four to do).
+  // (four being done, four to do). The list is let go of only past what a person looks at (PLAN_DONE_KEPT finished and PLAN_OPEN_KEPT open).
   for (let n = 1; n <= 300; n++) {
     lines.push(line(said(11, [call('c' + n, 'TaskCreate', { subject: 'Thing ' + n, description: 'x', activeForm: 'Doing' })], { timestamp: at(second++) })))
     lines.push(line(answer(11, 'c' + n, 'Task #' + n + ' created successfully: Thing ' + n, second++, { toolUseResult: { task: { id: String(n), subject: 'Thing ' + n, description: 'x' } } })))
@@ -205,11 +205,15 @@ test('a checklist that has grown for days is kept short: the latest finished thi
   const history = await claudeConversation(id(11))
   const plans = history.entries.filter((entry) => entry.step === 'plan')
   assert.ok(plans.length > 100, 'a step of its own for each change between other work: ' + plans.length)
-  assert.ok(plans.every((entry) => entry.plan.length <= PLAN_DONE_KEPT + PLAN_OPEN_KEPT), 'no step holds more than the most that is kept: ' + Math.max(...plans.map((entry) => entry.plan.length)))
+  assert.ok(plans.slice(0, -1).every((entry) => entry.plan === undefined), 'only the newest checklist step holds its list: the window draws the card from it alone')
   const last = plans.at(-1)
-  assert.deepEqual(last.plan.map((entry) => entry.text), [...Array.from({ length: PLAN_DONE_KEPT }, (_, n) => 'Thing ' + (285 + n)), ...Array.from({ length: 8 }, (_, n) => 'Thing ' + (293 + n))], 'the latest finished, then everything still open')
-  assert.deepEqual(last.plan.map((entry) => entry.state), [...Array(PLAN_DONE_KEPT).fill('done'), 'doing', 'doing', 'doing', 'doing', 'todo', 'todo', 'todo', 'todo'])
-  assert.equal(last.text, PLAN_DONE_KEPT + ' of 16 done', 'its words count what is on it')
+  assert.ok(last.plan.length <= PLAN_DONE_KEPT + PLAN_OPEN_KEPT, 'no more than the most that is kept: ' + last.plan.length)
+  assert.deepEqual(last.plan.slice(-8).map((entry) => entry.text), Array.from({ length: 8 }, (_, n) => 'Thing ' + (293 + n)), 'everything still open is on it, in order')
+  const finished = last.plan.filter((entry) => entry.state === 'done')
+  assert.ok(finished.length >= PLAN_DONE_KEPT, 'at least the latest finished things are on it, none left out of what a person looks at: ' + finished.length)
+  assert.deepEqual(finished.map((entry) => entry.text), Array.from({ length: finished.length }, (_, n) => 'Thing ' + (293 - finished.length + n)), 'the finished things are the latest ones, with none missing between')
+  assert.deepEqual(last.plan.slice(finished.length).map((entry) => entry.state), ['doing', 'doing', 'doing', 'doing', 'todo', 'todo', 'todo', 'todo'])
+  assert.equal(last.text, finished.length + ' of ' + last.plan.length + ' done', 'its words count what is on it')
   assert.ok(JSON.stringify(history).length < 700_000, 'what is sent to the window does not grow with the days: ' + JSON.stringify(history).length)
 })
 
