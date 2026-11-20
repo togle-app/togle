@@ -599,6 +599,51 @@ test('an ACP agent that can list its sessions has them listed: those it kept bef
   }
 })
 
+test('an ACP agent that wants the person signed in first says so, offers the ways it signs them in, and starts the task once they are', { timeout: 30_000 }, async () => {
+  const calls = path.join(scratch(), 'calls.jsonl')
+  const backend = hermes({ FAKE_AUTH: '1', FAKE_CALLS: calls })
+  const authenticated = () => callsOf(calls).filter((call) => call.method === 'authenticate').map((call) => call.methodId)
+  try {
+    assert.deepEqual(backend.signInChoices(), [], 'nothing is offered until the agent refuses a task')
+    await assert.rejects(backend.start({ folder: os.tmpdir(), prompt: 'say ok' }), /^Error: Hermes needs you to sign in first\.$/, 'a plain sentence, not the agent’s RpcError')
+    assert.deepEqual(backend.signInChoices(), [{ id: 'browser', name: 'Sign in with the browser' }, { id: 'plan', name: 'Sign in with a plan' }], 'the two it signs in itself; the one that has the client run a terminal is left out')
+    // Picking up a session of its own says the same.
+    await assert.rejects(backend.resume('old-1', { folder: os.tmpdir() }), /Hermes needs you to sign in first/)
+    // A way it did not offer, and the one left to a terminal, are refused before the agent is asked anything.
+    await assert.rejects(backend.signIn('nope'), /no such way to sign in/)
+    await assert.rejects(backend.signIn('terminal'), /no such way to sign in/)
+    assert.deepEqual(authenticated(), [])
+    await backend.signIn('plan')
+    assert.deepEqual(authenticated(), ['plan'], 'the agent was asked to sign in the way that was picked')
+    assert.deepEqual(backend.signInChoices(), [], 'signed in: nothing more to offer')
+    const task = await backend.start({ folder: os.tmpdir(), prompt: 'say ok' })
+    assert.ok(task.id, 'and the task starts')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('a sign-in the person does not finish is an error and the ways stay; an agent that asks for none offers none', { timeout: 30_000 }, async () => {
+  const cancelled = hermes({ FAKE_AUTH: '1', FAKE_AUTH_FAILS: '1' })
+  try {
+    await assert.rejects(cancelled.start({ folder: os.tmpdir(), prompt: 'say ok' }), /needs you to sign in first/)
+    await assert.rejects(cancelled.signIn('browser'), /Sign-in was cancelled/)
+    assert.equal(cancelled.signInChoices().length, 2, 'they can try again')
+    await assert.rejects(cancelled.start({ folder: os.tmpdir(), prompt: 'say ok' }), /needs you to sign in first/, 'and the task still waits for it')
+  } finally {
+    await cancelled.close()
+  }
+  const plain = hermes()
+  try {
+    const task = await plain.start({ folder: os.tmpdir(), prompt: 'say ok' })
+    assert.ok(task.id)
+    assert.deepEqual(plain.signInChoices(), [])
+    await assert.rejects(plain.signIn('browser'), /no such way to sign in/)
+  } finally {
+    await plain.close()
+  }
+})
+
 test('an ACP agent that offers no list, or cannot give it, lists none, and is not asked again at once', { timeout: 30_000 }, async () => {
   const dir = scratch()
   const kept = JSON.stringify([{ sessionId: 'old-1', cwd: dir, title: 'Kept', updatedAt: '2026-11-18T10:00:00Z' }])

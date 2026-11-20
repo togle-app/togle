@@ -390,8 +390,18 @@ module.exports = function install(fixture) {
     return typeof text === 'string' ? clone({ text, cut: text.length > 24000 }) : null
   }
   let failTask = false
+  // An agent that wants the person signed in first (Cline): it refuses a task, and offers its ways of signing in, until one is used.
+  let signIn = null, signInFails = false
+  api.agentSignInChoices = async runner => (signIn && signIn.runner === runner ? clone(signIn.choices) : [])
+  api.signInAgent = async (runner, method) => {
+    record('signInAgent', [runner, method])
+    if (!signIn || signIn.runner !== runner || !signIn.choices.some(choice => choice.id === method)) throw new Error('No such way to sign in.')
+    if (signInFails) throw new Error('Sign-in was cancelled')
+    signIn = null
+  }
   api.startRunnerTask = async request => {
     record('startRunnerTask', [request])
+    if (signIn && signIn.runner === request.runner) throw new Error(signIn.name + ' needs you to sign in first.')
     if (failTask) { failTask = false; throw new Error('That folder is not there.') }
     const started = task('claude:new' + ++sequence, { title: request.prompt.slice(0, 40), folder: request.folder, runner: request.runner, state: 'working', mine: true, line: 'Working…', log: [{ id: 100 + sequence, at: Date.now(), kind: 'you', text: request.prompt }] })
     started.key = request.runner + ':new' + sequence
@@ -609,6 +619,8 @@ module.exports = function install(fixture) {
     catalogMany: on => { fixture.catalogMany = on },
     // What the window is told of Claude Code's connection to Togle, changed by hand.
     failNextTask: () => { failTask = true },
+    signInNeeded: (runner, name, choices) => { signIn = { runner, name, choices: clone(choices) } },
+    signInFails: on => { signInFails = on },
     microphone: status => { microphone = clone(status); microphoneChanged() },
     failNextShowMicrophone: message => { showFails = message },
     calls: () => clone(calls), emit, settings: () => clone(fixture.settings),

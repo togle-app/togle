@@ -1875,6 +1875,9 @@ if (process.argv.includes('--togle-hook')) {
       // A task in a terminal of Togle's own is seen and answered only there: Togle opens on it.
       started: (task, request) => { void putOnTodo(task, request); if (task.terminal) showTask(task.key) }
     })
+    // Which agents are on this computer is looked up now, so that the task box's list of agents is there the first time it opens
+    // (asking each agent for its version takes a second and more: Hermes's takes 1.4 s here).
+    void runners.status().catch(() => undefined)
     // Reach: this computer among the person's devices, its tasks shared with them, and Refuse and Stop from them.
     const hubForReach = runners
     reach = registerReach({

@@ -26,7 +26,7 @@ import type { NoiseReport, TogleMicrophoneStatus } from './microphone'
 import type { MicrophoneLinkPage } from './microphone-link'
 import type { CloseWarning } from './close-warning'
 import type { TodoList, TodoRef } from './todo'
-import type { AgentCatalog, CallAgents, Decision, GiveCall, GiveResult, RunnerStatus, StartRequest, TaskDetail, TaskNotice, TaskView } from './runner'
+import type { AgentCatalog, CallAgents, Decision, GiveCall, GiveResult, RunnerStatus, SignInChoice, StartRequest, TaskDetail, TaskNotice, TaskView } from './runner'
 
 export type Unsubscribe = () => void
 
@@ -170,6 +170,10 @@ export interface TogleApi {
   addCodingAgent(name: string, command: string): Promise<RunnerStatus[]>
   /** The agents Add another agent lists: the ones on this computer, and more from the ACP registry (empty when it cannot be read). */
   agentCatalog(): Promise<AgentCatalog>
+  /** The ways to sign in to an agent that would not start a task until the person does, as it offered them (none when it did not ask). */
+  agentSignInChoices(runner: string): Promise<SignInChoice[]>
+  /** Signs in to an agent one of those ways: the agent does it itself, in its own page, and this answers when the person is done there. */
+  signInAgent(runner: string, method: string): Promise<void>
   /**
    * Changes the command of an agent that was added, and nothing else (its name and how it runs stay). Its tasks that run stop.
    * Answers with every agent as it is now.

@@ -11,6 +11,9 @@
 // FAKE_NO_RESUME takes session/resume away so that session/load is used; FAKE_PID_FILE gets the long command's pid;
 // FAKE_NO_COMMANDS makes it an agent that tells no commands of its own; FAKE_NO_LIST takes the session list away (no `list` among its
 // session capabilities), FAKE_ACP_SESSIONS gives it sessions it kept before (JSON), FAKE_ACP_PAGE pages its list.
+// FAKE_AUTH makes it an agent like Cline that wants the person signed in first: it offers `authMethods` (two it signs in itself, one that
+// has the client run a terminal), refuses session/new, session/resume and session/load with -32000 ("Authentication required") until
+// `authenticate` has been called with one of them; FAKE_AUTH_FAILS makes `authenticate` an error (the person closed the page).
 import { spawn } from 'node:child_process'
 import { appendFileSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
@@ -25,6 +28,7 @@ const calls = (what) => process.env.FAKE_CALLS && appendFileSync(process.env.FAK
 const update = (sessionId, body) => out({ method: 'session/update', params: { sessionId, update: body } })
 const sessions = new Map()
 let nextSession = 1
+let signedIn = false
 let nextAsk = 100
 const waiting = new Map()
 const ask = (params) => new Promise((resolve) => {
@@ -109,9 +113,16 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   const { id, method, params } = message
   const reply = (result) => out({ id, result })
   const fail = (text) => out({ id, error: { code: -32600, message: text } })
+  const mustSignIn = () => process.env.FAKE_AUTH && !signedIn
+  const unsigned = () => out({ id, error: { code: -32000, message: 'Authentication required: Call authenticate before starting a session' } })
   switch (method) {
     case 'initialize':
-      return reply({ protocolVersion: 1, agentInfo: { name: 'hermes-agent', version: 'fake' }, agentCapabilities: { loadSession: true, sessionCapabilities: { ...(process.env.FAKE_NO_LIST ? {} : { list: {} }), ...(process.env.FAKE_NO_RESUME ? {} : { resume: {}, fork: {} }) } } })
+      return reply({ protocolVersion: 1, agentInfo: { name: 'hermes-agent', version: 'fake' }, agentCapabilities: { loadSession: true, sessionCapabilities: { ...(process.env.FAKE_NO_LIST ? {} : { list: {} }), ...(process.env.FAKE_NO_RESUME ? {} : { resume: {}, fork: {} }) } }, ...(process.env.FAKE_AUTH ? { authMethods: [{ id: 'browser', name: 'Sign in with the browser' }, { id: 'terminal', name: 'Sign in in a terminal', type: 'terminal', args: ['login'] }, { id: 'plan', name: 'Sign in with a plan', type: 'agent' }] } : {}) })
+    case 'authenticate':
+      calls({ method, methodId: params?.methodId })
+      if (process.env.FAKE_AUTH_FAILS) return out({ id, error: { code: -32603, message: 'Sign-in was cancelled' } })
+      signedIn = true
+      return reply({})
     case 'session/list': {
       // The sessions the agent keeps: those FAKE_ACP_SESSIONS names (as JSON: sessionId, cwd, title, updatedAt), then those made here;
       // FAKE_ACP_PAGE is how many go in one answer, the rest behind a cursor. FAKE_LIST_FAILS makes it an error.
@@ -123,6 +134,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       return reply({ sessions: kept.slice(from, from + size), ...(from + size < kept.length ? { nextCursor: String(from + size) } : {}) })
     }
     case 'session/new': {
+      if (mustSignIn()) return unsigned()
       const session = { id: `s${nextSession++}`, cwd: params.cwd }
       sessions.set(session.id, session)
       calls({ method, cwd: params.cwd })
@@ -133,6 +145,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     }
     case 'session/resume':
     case 'session/load': {
+      if (mustSignIn()) return unsigned()
       const session = sessions.get(params.sessionId) ?? { id: params.sessionId, cwd: params.cwd }
       sessions.set(session.id, session)
       calls({ method, sessionId: params.sessionId, cwd: params.cwd })

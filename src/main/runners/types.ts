@@ -1,6 +1,6 @@
 // What the rest of the app can do with a coding agent, whichever agent it is. One backend per agent implements it:
 // see its tasks, start one, answer what it waits for, stop it, and pick it up again later.
-import type { BackgroundShell, Decision, ModelInfo, PendingRequest, RunnerKind, StepDetail, TaskEvent, TaskHistory, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
+import type { BackgroundShell, Decision, ModelInfo, PendingRequest, RunnerKind, SignInChoice, StepDetail, TaskEvent, TaskHistory, TaskInfo, TaskOffers, TaskState } from '@shared/runner'
 
 export interface StartOptions {
   /** The folder the task works in. */
@@ -166,6 +166,13 @@ export interface Backend {
    * the agent tells neither (yet). Left out by an agent that keeps none Togle can read.
    */
   modelOf?(id: string): Promise<ModelInfo | null>
+  /**
+   * The ways to sign in to an agent that refused to start a task until the person does (ACP agents that ask for `authenticate`), as
+   * it told them; none when it did not ask. Left out by an agent that never asks.
+   */
+  signInChoices?(): SignInChoice[]
+  /** Signs in the way the agent offered (one of `signInChoices`): the agent does it, in its own page, and answers when it is done. */
+  signIn?(methodId: string): Promise<void>
   /** Stops using the agent's program. Tasks that run in the background go on. */
   close(): Promise<void>
 }

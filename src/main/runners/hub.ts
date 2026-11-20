@@ -3,7 +3,7 @@
 // the ones Togle runs (with what happened in each, so the window can show it), and the actions on a task by its key.
 import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
-import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Decision, type LogEntry, type ModelInfo, type RunnerKind, type RunnerStatus, type StartRequest, type StepDetail, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
+import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Decision, type LogEntry, type ModelInfo, type RunnerKind, type RunnerStatus, type SignInChoice, type StartRequest, type StepDetail, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
 import { ownGroupOf } from '@shared/task-groups'
 import { carriedFlags } from './claude-job'
@@ -242,6 +242,18 @@ export class RunnerHub {
   /** Whether Togle works with this agent. */
   has(runner: RunnerKind): boolean {
     return this.options.backends.some((backend) => backend.runner === runner)
+  }
+
+  /** The ways to sign in to an agent that refused to start a task until the person does (none for an agent that did not ask). */
+  signInChoices(runner: RunnerKind): SignInChoice[] {
+    return this.options.backends.find((backend) => backend.runner === runner)?.signInChoices?.() ?? []
+  }
+
+  /** Signs in to an agent the way it offered (one of `signInChoices`): the agent does it, and this answers when it is done. */
+  async signIn(runner: RunnerKind, methodId: string): Promise<void> {
+    const backend = this.backend(runner)
+    if (!backend.signIn) throw new Error(`${this.nameOf(runner)} has no sign-in to do here.`)
+    await backend.signIn(methodId)
   }
 
   /**

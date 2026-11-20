@@ -13,7 +13,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { TASK_WORDS, type AgentCommand, type AgentModel, type PendingRequest, type TaskInfo, type TaskOffers } from '@shared/runner'
+import { TASK_WORDS, type AgentCommand, type AgentModel, type PendingRequest, type SignInChoice, type TaskInfo, type TaskOffers } from '@shared/runner'
 import { type Id, JsonRpcPeer, RpcError, list, rec, text } from './jsonrpc'
 import { TaskBase } from './task-base'
 import type { Backend, Detected, ResumeOptions, StartOptions, TaskHandle } from './types'
@@ -379,6 +379,11 @@ class AcpServer {
   resumes = false
   /** Whether the agent can list the sessions it keeps (`session/list`). */
   lists = false
+  /**
+   * The ways the agent lets the person sign in (`authMethods`) that Togle can do: the agent signs itself in, in its own page. A method
+   * that has Togle run a command in a terminal, or set a variable, is left out (`type` is not "agent"): Togle does neither.
+   */
+  signIns: SignInChoice[] = []
 
   constructor(
     readonly runner: string,
@@ -412,6 +417,10 @@ class AcpServer {
       const sessions = rec(rec(init.agentCapabilities).sessionCapabilities)
       this.resumes = 'resume' in sessions
       this.lists = 'list' in sessions
+      this.signIns = list(init.authMethods).map(rec).flatMap((method): SignInChoice[] => {
+        const id = text(method.id), name = oneLine(text(method.name)), type = text(method.type)
+        return id && name && id.length <= 100 && (!type || type === 'agent') ? [{ id, name: name.slice(0, 80) }] : []
+      })
     } catch (error) {
       const why = this.peer.errors.join('').trim().split('\n').pop()
       throw new Error(`${this.name} did not start${why ? `: ${why}` : '.'}`, { cause: error })
@@ -444,6 +453,8 @@ class AcpServer {
   }
 }
 
+/** How long the agent is given to sign the person in (it waits for them in its own page), in milliseconds. */
+const SIGN_IN_MS = 5 * 60_000
 /** How long an agent that could not be asked for its list is left alone, in milliseconds. */
 const LIST_RETRY_MS = 60_000
 /** The most pages of its list that are read (an agent may keep many sessions). */
@@ -520,9 +531,34 @@ export class AcpBackend implements Backend {
     }
   }
 
+  /** The ways to sign in that the agent offered when it refused a task for want of one (none after it was signed in, or if it never asked). */
+  private mustSignIn: SignInChoice[] = []
+
+  signInChoices(): SignInChoice[] {
+    return this.mustSignIn
+  }
+
+  /** Signs in the way the agent offered: the agent does it itself (it opens its own page), and answers when the person is done there. */
+  async signIn(methodId: string): Promise<void> {
+    const server = await this.connect()
+    if (!server.signIns.some((choice) => choice.id === methodId)) throw new Error(`${this.name} has no such way to sign in.`)
+    await server.peer.request('authenticate', { methodId }, SIGN_IN_MS)
+    this.mustSignIn = []
+  }
+
+  /**
+   * What an agent's refusal for want of a sign-in becomes: a plain sentence, and the ways to sign in kept for `signInChoices`. ACP's
+   * error is -32000 ("Authentication required: Call authenticate before starting a session"). Any other error is not one.
+   */
+  private signInProblem(server: AcpServer, error: unknown): Error | undefined {
+    if (!(error instanceof RpcError) || !(error.code === -32000 || /authenticat/i.test(error.message))) return undefined
+    this.mustSignIn = server.signIns
+    return new Error(server.signIns.length ? `${this.name} needs you to sign in first.` : `${this.name} needs you to sign in first, in a way Togle cannot do. Sign in in ${this.name}'s own program, then start the task again.`, { cause: error })
+  }
+
   async start(options: StartOptions): Promise<TaskHandle> {
     const server = await this.connect()
-    const created = rec(await server.peer.request('session/new', { cwd: options.folder, mcpServers: [] }, 120_000))
+    const created = rec(await server.peer.request('session/new', { cwd: options.folder, mcpServers: [] }, 120_000).catch((error: unknown) => { throw this.signInProblem(server, error) ?? error }))
     const id = text(created.sessionId)
     if (!id) throw new Error(`${this.name} did not start the task.`)
     const task = await this.prepare(server, new AcpTask(server, id, options.folder, options.title ?? oneLine(options.prompt)), created, options.asks)
@@ -544,7 +580,7 @@ export class AcpBackend implements Backend {
       return await this.prepare(server, task, picked, options.asks)
     } catch (error) {
       server.tasks.delete(id)
-      throw error
+      throw this.signInProblem(server, error) ?? error
     } finally {
       task.replaying = false
     }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEve
 import { AgentMark } from './AgentMark'
 import { Icon } from './Icon'
 import { Menu } from './Menu'
-import { asksEveryTime, type RunnerKind, type RunnerStatus, type TaskBoxOpen } from '@shared/runner'
+import { asksEveryTime, type RunnerKind, type RunnerStatus, type SignInChoice, type TaskBoxOpen } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
 import { useHotkeys } from './hotkeys'
 
@@ -52,6 +52,9 @@ export function TaskBox() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [loaded, setLoaded] = useState(false)
+  // An agent that would not start the task until the person signs in: the ways it offered, for that agent, and the one in progress.
+  const [signIns, setSignIns] = useState<{ runner: string; choices: SignInChoice[] } | null>(null)
+  const [signingIn, setSigningIn] = useState('')
   const input = useRef<HTMLTextAreaElement>(null)
   const form = useRef<HTMLFormElement>(null)
   const dictate = useHotkeys().find((key) => key.id === 'dictate')
@@ -92,12 +95,17 @@ export function TaskBox() {
   })
 
   const load = useCallback(async () => {
+    // The task list is the slow one (seconds on a first look: every agent is asked for its tasks) and it only gives the folders
+    // to pick from, so it never holds up the agents: the box waited for both, and its list of agents was empty meanwhile.
+    void api.runnerTasks().then(
+      (tasks) => setFolders([...new Set((Array.isArray(tasks) ? tasks : []).map((task) => task.folder).filter(Boolean))].slice(0, 6)),
+      () => undefined
+    )
     try {
-      const [found, tasks] = await Promise.all([api.runnerStatus(), api.runnerTasks()])
+      const found = await api.runnerStatus()
       const here = (Array.isArray(found) ? found : []).filter((status) => status.installed)
       setInstalled(here)
       setAnyRemoved((Array.isArray(found) ? found : []).some((status) => status.removed))
-      setFolders([...new Set((Array.isArray(tasks) ? tasks : []).map((task) => task.folder).filter(Boolean))].slice(0, 6))
       // The agent last used if it is still there, else the first one.
       setRunner((current) => (current && here.some((status) => status.runner === current) ? current : here[0]?.runner))
     } catch {
@@ -155,8 +163,27 @@ export function TaskBox() {
       api.closeTaskBox()
     } catch (caught) {
       setError(errorText(caught))
+      // An agent that asks to be signed in first (Cline) offers its ways: they are shown under what it said.
+      void api.agentSignInChoices(runner).then((choices) => setSignIns(Array.isArray(choices) && choices.length ? { runner, choices } : null), () => setSignIns(null))
     } finally {
       setBusy(false)
+    }
+  }
+
+  // The agent signs the person in itself, in its own page, and answers when they are done there: then the task starts, as Start asked.
+  const signIn = async (choice: SignInChoice): Promise<void> => {
+    if (!runner || signingIn) return
+    setSigningIn(choice.id)
+    setError('')
+    try {
+      await api.signInAgent(runner, choice.id)
+      setSignIns(null)
+      setSigningIn('')
+      await start()
+    } catch (caught) {
+      setError(errorText(caught))
+    } finally {
+      setSigningIn('')
     }
   }
 
@@ -179,7 +206,7 @@ export function TaskBox() {
         <>
           <div className="taskbox-pick">
             <Menu className="pick-chip" ariaLabel="Agent" title="The agent that does it" label={pickedAgent ? <AgentMark runner={pickedAgent.runner} name={pickedAgent.name} /> : 'Pick an agent'}
-              items={installed.map((status) => ({ label: <AgentMark runner={status.runner} name={status.name} />, checked: status.runner === runner, onSelect: () => setRunner(status.runner) }))} />
+              items={loaded ? installed.map((status) => ({ label: <AgentMark runner={status.runner} name={status.name} />, checked: status.runner === runner, onSelect: () => setRunner(status.runner) })) : [{ label: 'Looking for agents…', disabled: true, onSelect: () => undefined }]} />
             <Menu className="pick-chip" ariaLabel="Folder" title={folder || 'The folder it works in'} label={folder ? label(folder) : 'Pick a folder'}
               items={[
                 ...options.map((path) => ({ label: label(path), detail: path, checked: path === folder, onSelect: () => setFolder(path) })),
@@ -224,6 +251,15 @@ export function TaskBox() {
             <p className="taskbox-error" role="alert">
               {error}
             </p>
+          )}
+          {signIns && signIns.runner === runner && (
+            <div className="taskbox-signin">
+              {signIns.choices.map((choice) => (
+                <button key={choice.id} type="button" className="pick-chip" disabled={!!signingIn || busy} onClick={() => void signIn(choice)}>
+                  {signingIn === choice.id ? 'Waiting for you to sign in…' : choice.name}
+                </button>
+              ))}
+            </div>
           )}
         </>
       )}

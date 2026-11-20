@@ -842,6 +842,25 @@ const pickFrom = async (ui, chip, label) => {
 }
 const menuLabels = (ui) => ui.evaluate("[...document.querySelectorAll('.menu [role^=menuitem] .label')].map(e=>e.textContent.trim())")
 
+// The task list is the slow answer when the box opens (every agent is asked for its tasks: seconds on a first look, 4 s on this PC) and it
+// only gives the folders: the list of agents is not held up by it, and says what it is waiting for while it waits.
+async function checkTaskBoxWaits(T, agent) {
+  const ui = await open(T, agent, 600, 'taskbox', { slow: { runnerStatus: 250, runnerTasks: 2200 } })
+  await ui.click('.pick-chip', 'Agent')
+  await ui.wait("document.querySelectorAll('.menu [role^=menuitem]').length===1")
+  assert.deepEqual(await menuLabels(ui), ['Looking for agents…'], 'not an empty list')
+  assert.equal(await ui.evaluate("document.querySelector('.menu [role^=menuitem]').disabled"), true, 'and a line that cannot be picked')
+  await ui.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+  await ui.wait("document.querySelectorAll('.pick-chip')[0].textContent==='Claude Code'")
+  assert.equal(await ui.evaluate("document.querySelectorAll('.pick-chip')[1].textContent"), 'Pick a folder', 'the agents are there while the folders are still being asked for')
+  await ui.click('.pick-chip', 'Agent')
+  await ui.wait("document.querySelectorAll('.menu [role^=menuitem]').length===2")
+  assert.deepEqual(await menuLabels(ui), ['Claude Code', 'Codex'], 'the list of agents is full before the task list has answered')
+  await ui.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+  await ui.wait("document.querySelectorAll('.pick-chip')[1].textContent==='api-server'")
+  ui.window.destroy()
+}
+
 async function checkTaskBox(T, agent) {
   const ui = await open(T, agent, 600, 'taskbox')
   // As the design draws it: the agent and the folder as two chips, then the words with Start beside them.
@@ -893,6 +912,29 @@ async function checkTaskBox(T, agent) {
   await ui.window.webContents.reload()
   await ui.wait("document.querySelectorAll('.pick-chip').length===2 && document.querySelectorAll('.pick-chip')[1].textContent==='chosen-for-box'")
   assert.deepEqual(await texts(ui, '.pick-chip'), ['Codex', 'chosen-for-box'], 'the agent and the folder used last')
+
+  // An agent that wants the person signed in first (Cline, for one): what it said, and under it the ways it offered, as chips like the
+  // agent's. A sign-in that is cancelled says so and leaves the chips; one that is done starts the task, as Start asked.
+  const enter = "document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))"
+  await ui.evaluate("window.togleUITest.signInNeeded('codex', 'Codex', [{ id: 'browser', name: 'Sign in with the browser' }, { id: 'plan', name: 'Sign in with a plan' }])")
+  await ui.fill('.taskbox textarea', 'Check the build')
+  await ui.evaluate(enter)
+  await ui.wait("!!document.querySelector('.taskbox-signin')")
+  assert.equal((await texts(ui, '.taskbox-error'))[0], 'Codex needs you to sign in first.')
+  assert.deepEqual(await texts(ui, '.taskbox-signin button'), ['Sign in with the browser', 'Sign in with a plan'])
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').value"), 'Check the build', 'what was typed is still there')
+  await ui.capture('task-box-sign-in')
+  await ui.evaluate("window.togleUITest.signInFails(true)")
+  await ui.click('.taskbox-signin button', 'Sign in with the browser')
+  await ui.wait("document.querySelector('.taskbox-error')?.textContent==='Sign-in was cancelled'")
+  assert.deepEqual(await texts(ui, '.taskbox-signin button'), ['Sign in with the browser', 'Sign in with a plan'], 'cancelled: they can try again')
+  await ui.evaluate("window.togleUITest.signInFails(false)")
+  await ui.click('.taskbox-signin button', 'Sign in with a plan')
+  await ui.wait("document.querySelector('.taskbox textarea').value===''")
+  assert.deepEqual((await ui.calls('signInAgent')).map(call => call.args), [['codex', 'browser'], ['codex', 'plan']], 'the cancelled one, then the one that worked')
+  assert.deepEqual((await ui.calls('startRunnerTask')).slice(-2).map(call => call.args[0].prompt), ['Check the build', 'Check the build'], 'refused once, and started after the sign-in')
+  assert.equal(await ui.evaluate("!!document.querySelector('.taskbox-signin')"), false, 'signed in: the chips go')
+  assert.equal(await ui.evaluate("!!document.querySelector('.taskbox-error')"), false)
 
   // Opened from a to-do item: its words, a chip naming the item, and the task started for it carries the item.
   await ui.evaluate("window.togleUITest.emit('onTaskBoxShown',{prompt:'Review the onboarding copy',todo:{line:0,text:'Review the onboarding copy'},runner:'claude',folder:'C:\\\\work\\\\website'})")
@@ -3369,6 +3411,7 @@ app.whenReady().then(async () => {
     await go(checkNotice)
     await go(checkTodo)
     await go(checkNoChanges)
+    await go(checkTaskBoxWaits)
     await go(checkTaskBox)
     await go(checkCallNotice)
     await go(checkKeysNotice)

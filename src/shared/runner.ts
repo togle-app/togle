@@ -167,6 +167,15 @@ export interface RunnerStatus {
 }
 
 /**
+ * One way to sign in to an agent that asks for it before it starts a task (ACP `authMethods`): its id, and the words the agent gives it
+ * ("Sign in with ChatGPT Subscription"). The agent does the signing in itself, in its own way (it opens its page in the browser).
+ */
+export interface SignInChoice {
+  id: string
+  name: string
+}
+
+/**
  * An agent Settings offers to add: what it is called, a line about it, and the command that starts it. The person types none
  * of it. `needs` is a program the command starts through that this computer does not have (`npx` or `uvx`): Add waits for it.
  */

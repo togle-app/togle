@@ -1349,6 +1349,9 @@ body.taskbox-surface { background: var(--surface); color: var(--ink); overflow: 
 .taskbox textarea { flex: 1; align-self: center; min-width: 0; max-height: 140px; padding: 2px 0; border: 0; border-radius: 0; background: transparent; resize: none; font-size: 13px; line-height: 1.4; overflow-y: auto; }
 .taskbox textarea:focus { outline: none; }
 .taskbox-error { margin: 0; color: var(--danger); font-size: 12px; }
+/* An agent that wants the person signed in before it starts a task: each way it offers is a chip like the agent's and the folder's. */
+.taskbox-signin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.taskbox-signin .hint { margin: 0; color: var(--muted); font-size: 12px; }
 .taskbox-none { margin: 0; padding: 12px 2px; color: var(--muted); font-size: 13px; }
 .taskbox-attach, .taskbox-todo { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--muted); font-size: 12px; }
 .taskbox-attach span, .taskbox-todo span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

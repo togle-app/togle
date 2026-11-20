@@ -210,6 +210,14 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     hub.addBackend(addedBackend(agent, deps.version, told))
     return statusOf()
   })
+  // An agent that refused a task until the person signs in (Cline, for one): the ways it offered, and Sign in, which the agent does
+  // itself in its own page and answers when the person is done there.
+  handle('runners:sign-in-choices', (runner) => (typeof runner === 'string' ? hub.signInChoices(runner) : []))
+  handle('runners:sign-in', async (runner, method) => {
+    if (typeof runner !== 'string' || !hub.has(runner)) throw new Error('Pick an agent.')
+    if (typeof method !== 'string' || !method) throw new Error('Pick a way to sign in.')
+    await hub.signIn(runner, method)
+  })
   // Settings → Agents → Add another agent: the agents on this computer and the ones of the ACP registry, with their commands.
   handle('runners:agent-catalog', () => agentCatalog({ added: deps.added?.() ?? [], fetchRegistry: deps.catalog?.registry ?? fetchRegistry, ...(deps.catalog?.whereIs ? { whereIs: deps.catalog.whereIs } : {}) }))
   // Edit, on an agent the person added: its command and nothing else. It keeps its name and its id, so how it runs stays what it

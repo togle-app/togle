@@ -1693,6 +1693,46 @@ test('agents the person adds are checked, saved, worked with, and removed', asyn
   }
 })
 
+test('an agent that wants the person signed in first: the handlers give the ways it offered and sign in the way that is picked', async () => {
+  const handlers = new Map()
+  class Asking extends FakeBackend {
+    ways = [{ id: 'browser', name: 'Sign in with the browser' }]
+    signedWith = []
+    signInChoices() { return this.ways }
+    async signIn(method) {
+      if (method === 'bad') throw new Error('Sign-in was cancelled')
+      this.signedWith.push(method)
+      this.ways = []
+    }
+  }
+  const cline = new Asking('acp-cline')
+  const hub = T.registerRunners({
+    handle: (channel, listener) => handlers.set(channel, listener),
+    send: () => {},
+    titles: memoryTitles(),
+    pickFolder: async () => null,
+    version: '9.9.9',
+    backends: [new FakeBackend('claude'), cline]
+  })
+  try {
+    assert.deepEqual(await handlers.get('runners:sign-in-choices')('acp-cline'), [{ id: 'browser', name: 'Sign in with the browser' }])
+    assert.deepEqual(await handlers.get('runners:sign-in-choices')('claude'), [], 'an agent that asks for nothing offers nothing')
+    assert.deepEqual(await handlers.get('runners:sign-in-choices')('acp-nope'), [])
+    assert.deepEqual(await handlers.get('runners:sign-in-choices')(7), [])
+    await assert.rejects(handlers.get('runners:sign-in')('acp-cline', 'bad'), /Sign-in was cancelled/, 'what the agent says reaches the window')
+    assert.deepEqual(cline.signedWith, [])
+    await handlers.get('runners:sign-in')('acp-cline', 'browser')
+    assert.deepEqual(cline.signedWith, ['browser'])
+    assert.deepEqual(await handlers.get('runners:sign-in-choices')('acp-cline'), [], 'signed in: nothing more to offer')
+    await assert.rejects(handlers.get('runners:sign-in')('claude', 'browser'), /Claude Code has no sign-in to do here/)
+    await assert.rejects(handlers.get('runners:sign-in')('acp-nope', 'browser'), /Pick an agent/)
+    await assert.rejects(handlers.get('runners:sign-in')('acp-cline', ''), /Pick a way to sign in/)
+    await assert.rejects(handlers.get('runners:sign-in')('acp-cline', 5), /Pick a way to sign in/)
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('Add another agent: the handler lists what is found here and more from the registry, without what was added', async () => {
   const handlers = new Map()
   // Only npx and uvx entries, so that the answer is the same on every system (a binary is for one system).
