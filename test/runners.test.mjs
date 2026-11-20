@@ -952,6 +952,8 @@ test('someone who starts listening late hears what already happened, in order', 
     const task = await backend.start({ folder: scratch(), prompt: 'say ok' })
     const early = watch(task)
     await until(() => task.state === 'idle', 'the turn to end')
+    // The state says idle a moment before the last of what was said and the end of the turn have been heard (a slow runner showed it).
+    await until(() => early.some((e) => e.type === 'message') && early.some((e) => e.type === 'turn-ended'), 'what was said and the end of the turn to be heard')
     const late = watch(task)
     assert.deepEqual(late.map((e) => e.type), early.map((e) => e.type), 'what is heard late is what was heard as it happened, in the same order')
     assert.ok(late.some((e) => e.type === 'message') && late.some((e) => e.type === 'turn-ended'), 'what was said, and the end of the turn')
