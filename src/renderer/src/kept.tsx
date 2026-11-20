@@ -39,6 +39,8 @@ export function useKeptState<T>(name: string, initial: T): [T, (next: T | ((prev
 
 /** The agents found on this computer (runners:status), kept by the Agents screen and by Settings alike. */
 export const AGENTS_FOUND = 'agents.status'
+/** What Add another agent listed last (runners:agent-catalog): shown at once the next time it opens, and asked for again behind it. */
+export const AGENT_CATALOG = 'agents.catalog'
 /** The tasks on this computer (runners:list), kept by the Agents screen and read by the window from its start. */
 export const TASKS_LISTED = 'agents.tasks'
 

@@ -11,7 +11,34 @@ export interface QuoteSpot {
 }
 
 /** The one message a node is in: what holds `data-quotable` (what the agent said, or the person's own words). */
-const messageOf = (node: Node | null): Element | null => ((node instanceof Element ? node : node?.parentElement) ?? null)?.closest('[data-quotable]') ?? null
+export const messageOf = (node: Node | null): Element | null => ((node instanceof Element ? node : node?.parentElement) ?? null)?.closest('[data-quotable]') ?? null
+
+/** The words the person has selected inside one message, or null when nothing is selected in it (or the selection goes beyond it). */
+export function selectionIn(message: Element): string | null {
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return null
+  const range = selection.getRangeAt(0)
+  if (messageOf(range.startContainer) !== message || messageOf(range.endContainer) !== message) return null
+  return selection.toString().trim() || null
+}
+
+/**
+ * All the words of one message as they read (line breaks where its paragraphs and lines are), without the quote a reply of the person's
+ * carries above it: for a Reply to the whole message and for Copy. Read from a copy laid out out of sight, since the line breaks
+ * are the layout's.
+ */
+export function wordsOfMessage(message: Element): string {
+  const copy = message.cloneNode(true) as HTMLElement
+  copy.querySelectorAll('blockquote.you-quote').forEach((quote) => quote.remove())
+  const holder = document.createElement('div')
+  holder.setAttribute('aria-hidden', 'true')
+  holder.style.cssText = 'position:fixed;left:-99999px;top:0;width:640px;pointer-events:none'
+  holder.append(copy)
+  document.body.append(holder)
+  const words = holder.innerText
+  holder.remove()
+  return words.trim()
+}
 
 /**
  * The part of one message the person has selected inside `place`, once the selection is made (not while the mouse is still down),

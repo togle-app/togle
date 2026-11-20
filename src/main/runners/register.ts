@@ -4,7 +4,7 @@ import path from 'node:path'
 import { addedAgentProblem, agentIdOf, KNOWN_AGENTS, runsInTerminal, type AddedAgent, type RunnerKind, type RunnerStatus, type StartRequest, type TaskView } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
 import { AcpBackend, commandIsAcp, commandWords, whereIs } from './acp'
-import { agentCatalog, fetchRegistry } from './agent-catalog'
+import { agentCatalog, fetchRegistry, rememberedWhere } from './agent-catalog'
 import { ClaudeBackend } from './claude'
 import { CodexBackend } from './codex'
 import { HermesBackend } from './hermes'
@@ -61,8 +61,11 @@ export interface RunnerDeps {
   /** The agents the person added (any that speaks ACP), and keeping a changed list. */
   added?(): AddedAgent[]
   saveAdded?(agents: AddedAgent[]): Promise<void>
-  /** What Add another agent reads: the ACP registry (from the network when left out) and where a program is on this computer. */
-  catalog?: { registry?(): Promise<unknown>; whereIs?(program: string): Promise<string | null> }
+  /**
+   * What Add another agent reads: the ACP registry (from the network when left out, with a copy kept in `registryFile` so that the list
+   * does not wait for the network each time Togle starts) and where a program is on this computer.
+   */
+  catalog?: { registry?(): Promise<unknown>; registryFile?: string; whereIs?(program: string): Promise<string | null> }
   /** The agents Togle finds by itself that the person took off its lists, and keeping a changed list. */
   hidden?(): string[]
   saveHidden?(ids: string[]): Promise<void>
@@ -219,7 +222,9 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     await hub.signIn(runner, method)
   })
   // Settings → Agents → Add another agent: the agents on this computer and the ones of the ACP registry, with their commands.
-  handle('runners:agent-catalog', () => agentCatalog({ added: deps.added?.() ?? [], fetchRegistry: deps.catalog?.registry ?? fetchRegistry, ...(deps.catalog?.whereIs ? { whereIs: deps.catalog.whereIs } : {}) }))
+  // Where a program is, remembered for a minute: the list is opened again and again, and each lookup starts a program.
+  const lookup = rememberedWhere(deps.catalog?.whereIs ?? whereIs, 60_000)
+  handle('runners:agent-catalog', () => agentCatalog({ added: deps.added?.() ?? [], fetchRegistry: deps.catalog?.registry ?? (() => fetchRegistry(deps.catalog?.registryFile)), whereIs: lookup }))
   // Edit, on an agent the person added: its command and nothing else. It keeps its name and its id, so how it runs stays what it
   // was: a command that would run it the other way (as a conversation, or in a terminal) is refused, and the agent is added again.
   // Its tasks that run stop with its program, and stay in the list as stopped, as when it is removed.

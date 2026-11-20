@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, type LogEntry, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
 import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
 import { useReach } from './Devices'
@@ -11,10 +11,10 @@ import { DETAIL_MIN, LIST_COLLAPSE_BELOW, LIST_MAX, LIST_MIN, setPanes, usePanes
 import { PointMenu, type Point } from './PointMenu'
 import { ResizeHandle } from './ResizeHandle'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
-import { withQuote, splitQuote } from '@shared/quote'
+import { cleanQuote, withQuote, splitQuote } from '@shared/quote'
 import { splitPictures } from '@shared/pasted-pictures'
 import { knownWith, placeSent, SENT_GIVE_UP_MS, tailDelivery, type SentMessage } from '@shared/sent-messages'
-import { QuoteBar, QuoteBlock, QuoteFloat, useQuoteSpot } from './Quote'
+import { messageOf, QuoteBar, QuoteBlock, QuoteFloat, selectionIn, useQuoteSpot, wordsOfMessage } from './Quote'
 import { RequestCard } from './RequestCard'
 import { PictureChips, pastedPictures, pathWords, useAttached } from './ReplyPictures'
 import { StateMark, type MarkKind } from './StateMark'
@@ -173,7 +173,20 @@ function useRemoteTasks(): DeviceTasks[] {
 const chipMark = (state: TaskView['state'], schedule?: string): MarkKind => (state === 'idle' ? (schedule ? 'resting' : 'done') : state)
 /** How a task's mark shows it: what needs you first (it asks, or it stopped with a reply to give), then what it does. A
  *  scheduled job between its runs rests: it is not done. */
-const markOf = (task: TaskView): MarkKind => (needsYou(task) ? 'waiting' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'failed' : task.state === 'stopped' ? 'stopped' : task.schedule ? 'resting' : 'done')
+const markOf = (task: TaskView): MarkKind => (needsYou(task) ? 'waiting' : watching(task) ? 'watching' : task.state === 'working' ? 'working' : task.state === 'failed' ? 'failed' : task.state === 'stopped' ? 'stopped' : task.schedule ? 'resting' : 'done')
+/** What a task waits on that it started, in a few words ("1 monitor and 1 shell"): its monitors, then its shells. Nothing when it waits on none. */
+const waitsOn = (task: TaskView): string => {
+  const monitors = task.monitors?.length ?? 0
+  const shells = task.shells?.length ?? 0
+  return [monitors ? `${monitors} ${monitors === 1 ? 'monitor' : 'monitors'}` : '', shells ? `${shells} ${shells === 1 ? 'shell' : 'shells'}` : ''].filter(Boolean).join(' and ')
+}
+/**
+ * A task that does nothing itself now and waits on something it started: its turn is over and a shell still runs, or only a monitor keeps it
+ * going (`turnOver`). It is neither working (no turn runs) nor asking for the person: its own mark, and "Waiting on 1 shell" in its words.
+ */
+const watching = (task: TaskView): boolean => !needsYou(task) && !task.signedOut && waitsOn(task) !== '' && (task.state === 'idle' || (task.state === 'working' && !!task.turnOver))
+/** What is waited on, one to a line, for the pointer (a monitor's description, a shell's command). */
+const waitsOnLabels = (task: TaskView): string => [...(task.monitors ?? []), ...(task.shells ?? [])].map((one) => one.label).join('\n')
 const isFresh = (task: TaskView): boolean => task.fresh === true && !needsYou(task) && task.state !== 'working' && task.state !== 'waiting'
 /** Where a task stands, in the order a subject lists them: it needs you, it works, it finished and you have not opened it, it is done. */
 const standing = (task: TaskView): number => (needsYou(task) ? 0 : task.state === 'working' ? 1 : isFresh(task) ? 2 : 3)
@@ -210,7 +223,7 @@ interface Counted {
   working: number
   fresh: number
 }
-const countsOf = (tasks: TaskView[]): Counted => ({ waiting: tasks.filter(needsYou).length, working: tasks.filter((task) => task.state === 'working').length, fresh: tasks.filter(isFresh).length })
+const countsOf = (tasks: TaskView[]): Counted => ({ waiting: tasks.filter(needsYou).length, working: tasks.filter((task) => task.state === 'working' && !watching(task)).length, fresh: tasks.filter(isFresh).length })
 interface TaskGroup {
   key: string
   kind: GroupKind
@@ -948,7 +961,10 @@ function TaskRow({ task, now, old, selected, withFolder, dragging, onSelect, onT
   const shells = task.shells?.length ?? 0
   // A monitor it started still watches (the CI runs it waits on, say): it goes on by itself when there is something, so it is working, and the row says what for.
   const monitors = task.monitors?.length ?? 0
-  const detail = [standing, monitors && !elsewhere && !stoppedHere ? `waiting on ${monitors} ${monitors === 1 ? 'monitor' : 'monitors'}` : '', shells && !elsewhere && !stoppedHere ? `${shells} ${shells === 1 ? 'shell' : 'shells'} running` : ''].filter(Boolean).join(' · ')
+  // Not working and not idle, but waiting on what it started: the row says only that ("waiting on 1 shell"), and the mark is its own.
+  const detail = watching(task) && !elsewhere && !stoppedHere
+    ? `waiting on ${waitsOn(task)}`
+    : [standing, monitors && !elsewhere && !stoppedHere ? `waiting on ${monitors} ${monitors === 1 ? 'monitor' : 'monitors'}` : '', shells && !elsewhere && !stoppedHere ? `${shells} ${shells === 1 ? 'shell' : 'shells'} running` : ''].filter(Boolean).join(' · ')
   // A scheduled job's row is the job: its schedule, when it runs next (or that it runs now), and its last run when that failed.
   const job = task.schedule ? [task.state === 'failed' ? 'last run failed' : '', task.schedule, task.state === 'working' ? 'running now' : task.nextRun ? `next ${nextTime(task.nextRun, now)}` : ''].filter(Boolean).join(' · ') : ''
   // Its project is the heading over it, so the line leaves out the folder, unless the person moved it to another group. The agent
@@ -1396,6 +1412,23 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
     window.getSelection()?.removeAllRanges()
     replyText.current?.focus()
   }
+  // A message right-clicked, the person's own or the agent's: a short menu to reply to it (the part of it that is selected, else all of it)
+  // or copy it. What is quoted is cut as any quote is; what is copied is not.
+  const [messageMenu, setMessageMenu] = useState<{ at: Point; selected: boolean; quote: string; copy: string } | null>(null)
+  const rightClicked = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    if (!answers || question) return
+    const message = messageOf(event.target as Node)
+    if (!message || !event.currentTarget.contains(message)) return
+    const chosen = selectionIn(message)
+    const copy = chosen ?? wordsOfMessage(message)
+    const forQuote = cleanQuote(copy)
+    // A picture or a step has no words to reply to: the right click is left as it was.
+    if (!forQuote) return
+    event.preventDefault()
+    const box = message.getBoundingClientRect()
+    // From the menu key there is no pointer: the menu opens by the message.
+    setMessageMenu({ at: event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : { x: box.left + 24, y: box.top + 24 }, selected: !!chosen, quote: forQuote, copy })
+  }
   // An agent that can only be written to on its screen and takes no words while it works (an agent the person added, in a terminal) takes
   // them when its turn has ended: what is sent while it works waits, and goes in then. The box takes words all the while.
   // Claude Code and Hermes take words while they work (Claude Code's own queue holds them and takes them in as it goes, Hermes puts them in the
@@ -1420,11 +1453,25 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
     setText(text.trim() ? `${text.trimEnd()}\n\n${back}` : back)
     replyText.current?.focus()
   }
-  const takeBackButton = canTakeBack && (
-    <button type="button" className="small" disabled={!!pressed} onClick={press('take-back', takeBack)} title="Takes what is queued back to the box, to change it and send it again">
-      {pressed === 'take-back' ? 'Taking back…' : 'Take back'}
-    </button>
-  )
+  // A message Togle holds, back in the box to change (the box is empty): its quote and its pictures come with it.
+  const editHeld = (index: number): void => {
+    const words = held[index]
+    if (words === undefined) return
+    const split = splitQuote(words)
+    const said = splitPictures(split ? split.reply : words)
+    if (split) setQuoted(split.quote)
+    setText(said.words)
+    for (const file of said.files) void attachAgain(file)
+    void onHeld('drop', index)
+    replyText.current?.focus()
+  }
+  // The Up arrow in the empty box edits what waits to go in, as it does on the agent's own screen: all of Claude Code's own queue (as its
+  // screen gives it back), or else the last message Togle holds. There is no button: the queue's foot says "Hit ↑ to edit".
+  const canEditByKey = !text && !pictures.length && (canTakeBack || held.length > 0)
+  const editByKey = (): void => {
+    if (canTakeBack) press('take-back', takeBack)()
+    else editHeld(held.length - 1)
+  }
   const heldWaitsForYou = !!task.heldPaused || task.state === 'stopped' || task.state === 'failed'
   const heldLine = task.heldNote ? `It did not go in: ${task.heldNote}` : heldWaitsForYou ? 'Not sent: the task stopped.' : `Goes in when ${agentOf(task)} finishes this turn.`
   useEffect(() => {
@@ -1487,6 +1534,10 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
         event.preventDefault()
         event.stopPropagation()
         setQuoted(null)
+      } else if (event.key === 'ArrowUp' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && canEditByKey && !pressed && event.currentTarget instanceof HTMLTextAreaElement) {
+        // Up in the empty box brings back what waits to go in, to change it (the queue's foot says so).
+        event.preventDefault()
+        editByKey()
       }
       return
     }
@@ -1538,18 +1589,23 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
         </div>
       </header>
       <div className="task-status">
-        <span className="state-chip" data-state={task.signedOut ? 'failed' : task.state}><StateMark kind={task.signedOut ? 'failed' : chipMark(task.state, task.schedule)} still />{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>
+        {/* Waiting on what it started (its turn is over, and a shell runs or a monitor watches): not "Working" and not "Idle", but what it waits on,
+            with its own mark; what for is on the pointer (the commands, a monitor's description). */}
+        {watching(task)
+          ? <span className="state-chip" data-state="watching" title={waitsOnLabels(task)}><StateMark kind="watching" still />{`Waiting on ${waitsOn(task)}`}</span>
+          : <span className="state-chip" data-state={task.signedOut ? 'failed' : task.state}><StateMark kind={task.signedOut ? 'failed' : chipMark(task.state, task.schedule)} still />{task.signedOut ? 'Signed out' : STATE_WORDS[task.state]}</span>}
         <span className="task-agent-name"><AgentMark runner={task.runner} name={agentOf(task)} /></span>
         {/* Which model it works with and how hard it thinks, right after its name, as its own record says it (an agent that tells neither has none). */}
         {modelWords && <span className="hint status-model" title={modelTitle(model)}>{modelWords}</span>}
-        {/* What it waits on, for it to go on with: only how many, and what for on the pointer (a monitor's description says it). */}
-        {task.monitors && task.monitors.length > 0 && (
+        {/* What it waits on, for it to go on with: only how many, and what for on the pointer (a monitor's description says it). The chip says it
+            already when nothing else happens. */}
+        {!watching(task) && task.monitors && task.monitors.length > 0 && (
           <span className="hint monitors-hint" title={task.monitors.map((monitor) => monitor.label).join('\n')}>
             {`waiting on ${task.monitors.length} ${task.monitors.length === 1 ? 'monitor' : 'monitors'}`}
           </span>
         )}
         {/* What it started that still runs: only how many, right after how it stands (the commands are on the pointer). */}
-        {task.shells && task.shells.length > 0 && (
+        {!watching(task) && task.shells && task.shells.length > 0 && (
           <span className="hint shells-hint" title={task.shells.map((shell) => shell.label).join('\n')}>
             {`${task.shells.length} ${task.shells.length === 1 ? 'shell' : 'shells'} running`}
           </span>
@@ -1652,6 +1708,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
           role="log"
           aria-label="The conversation"
           ref={logBox}
+          onContextMenu={rightClicked}
           onScroll={(event) => {
             const box = event.currentTarget
             const left = box.scrollHeight - box.scrollTop - box.clientHeight
@@ -1674,6 +1731,17 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
           {task.state === 'working' && !task.turnOver && !stepRuns && <NowLine since={newTurn ? turnStart(shown) : undefined} />}
         </div>
         {spot && <QuoteFloat spot={spot} onQuote={() => quote(spot.text)} />}
+        {messageMenu && (
+          <PointMenu
+            at={messageMenu.at}
+            label="This message"
+            items={[
+              { label: messageMenu.selected ? 'Reply to selection' : 'Reply', onSelect: () => quote(messageMenu.quote) },
+              { label: messageMenu.selected ? 'Copy selection' : 'Copy', onSelect: () => void navigator.clipboard.writeText(messageMenu.copy).catch(() => undefined) }
+            ]}
+            onClose={() => setMessageMenu(null)}
+          />
+        )}
         {railShown && <ThreadRail key={task.key} prompts={prompts} log={logBox} onEarlier={history?.more && !all ? showEarlierTurns : undefined} onLeaveEnd={() => { stick.current = false }} />}
         {away && (
           <button
@@ -1744,13 +1812,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                         <span className="held-row-actions">
                           {/* Back in the box to change, when the box is empty. */}
                           {!text && (
-                            <button type="button" className="ghost small held-edit" aria-label={`Edit queued message ${index + 1}`} title="Put it back in the box to change it" onClick={() => {
-                              if (split) setQuoted(split.quote)
-                              setText(said.words)
-                              for (const file of said.files) void attachAgain(file)
-                              void onHeld('drop', index)
-                              replyText.current?.focus()
-                            }}>Edit</button>
+                            <button type="button" className="ghost small held-edit" aria-label={`Edit queued message ${index + 1}`} title="Put it back in the box to change it" onClick={() => editHeld(index)}>Edit</button>
                           )}
                           <button type="button" className="ghost small held-remove" aria-label={`Remove queued message ${index + 1}`} title="Take it back" onClick={() => void onHeld('drop', index)}><Icon name="close" size={12} /></button>
                         </span>
@@ -1761,20 +1823,16 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                 <div className="held-foot">
                   {held.length > 0 ? (
                     <>
-                      <span className={task.heldNote ? 'held-line bad' : 'held-line'}>{heldLine}</span>
+                      <span className={task.heldNote ? 'held-line bad' : 'held-line'}>{heldLine}{canEditByKey ? ' Hit ↑ to edit.' : ''}</span>
                       <span className="held-actions">
                         {heldWaitsForYou
                           ? <button type="button" className="small" disabled={!!pressed} onClick={press('held-send', () => onHeld('send'))}>{pressed === 'held-send' ? 'Sending…' : 'Send now'}</button>
                           : <button type="button" className="small" disabled={!!pressed} onClick={press('held-interrupt', () => onHeld('interrupt'))} title={`Stops what ${agentOf(task)} is doing and sends what is queued now`}>{pressed === 'held-interrupt' ? 'Interrupting…' : 'Interrupt and send'}</button>}
                         {held.length > 1 && <button type="button" className="ghost small" onClick={() => void onHeld('drop')}>Remove all</button>}
-                        {takeBackButton}
                       </span>
                     </>
                   ) : (
-                    <>
-                      <span className="held-line">{agentOf(task)} takes {inQueue.length === 1 ? 'it' : 'these'} in as it works.</span>
-                      {takeBackButton && <span className="held-actions">{takeBackButton}</span>}
-                    </>
+                    <span className="held-line">{agentOf(task)} takes {inQueue.length === 1 ? 'it' : 'these'} in as it works.{canEditByKey ? ' Hit ↑ to edit.' : ''}</span>
                   )}
                 </div>
               </div>

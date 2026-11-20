@@ -405,6 +405,11 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .state-mark[data-mark='waiting']:not(.still)::before { animation: mark-call 2.2s ease-out infinite; }
 .state-mark[data-mark='waiting']::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--wait); }
 @keyframes mark-call { from { transform: scale(1); opacity: 0.55; } 75%, to { transform: scale(2); opacity: 0; } }
+/* Waiting on something it started (a shell, a monitor): a ring that holds still, with a dot in it that slowly fades and comes back. It is
+   not the turning ring of work and not the calling amber dot of a task that asks for the person. */
+.state-mark[data-mark='watching']::before { content: ''; box-sizing: border-box; width: 14px; height: 14px; border: 1.75px solid color-mix(in srgb, var(--togle) 55%, transparent); border-radius: 50%; }
+.state-mark[data-mark='watching']::after { content: ''; position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--togle); animation: mark-watch 2.6s ease-in-out infinite; }
+@keyframes mark-watch { 50% { opacity: 0.25; } }
 .state-mark[data-mark='done'] { background: var(--ok-soft); color: var(--ok); }
 .state-mark[data-mark='failed'] { background: var(--danger-soft); color: var(--danger); }
 /* A stop symbol: a square the color of the text on a faint disc of the same. The square is the brightest thing in the mark column,
@@ -418,6 +423,8 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .state-chip > .state-mark svg, .todo-chip > .state-mark svg { width: 12px; height: 12px; }
 .state-chip > .state-mark[data-mark='working']::after, .todo-chip > .state-mark[data-mark='working']::after { width: 10px; height: 10px; border-width: 1.75px; }
 .state-chip > .state-mark[data-mark='resting']::after, .todo-chip > .state-mark[data-mark='resting']::after { width: 8px; height: 8px; }
+.state-chip > .state-mark[data-mark='watching']::before, .todo-chip > .state-mark[data-mark='watching']::before { width: 10px; height: 10px; border-width: 1.5px; }
+.state-chip > .state-mark[data-mark='watching']::after, .todo-chip > .state-mark[data-mark='watching']::after { width: 4px; height: 4px; }
 .state-chip > .state-mark[data-mark='waiting']::before, .todo-chip > .state-mark[data-mark='waiting']::before { display: none; }
 .state-chip > .state-mark[data-mark='waiting']::after, .todo-chip > .state-mark[data-mark='waiting']::after { width: 6px; height: 6px; }
 @media (prefers-reduced-motion: reduce) { .state-mark[data-mark]::before, .state-mark[data-mark]::after { animation: none !important; } }
@@ -504,6 +511,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .view-switch button { flex: none; padding: 3px 11px; font-size: 12px; }
 .state-chip[data-state='waiting'] { background: var(--wait-soft); color: var(--wait); }
 .state-chip[data-state='working'] { background: var(--togle-soft); color: var(--togle); }
+.state-chip[data-state='watching'] { background: var(--togle-soft); color: var(--togle); }
 .state-chip[data-state='idle'] { background: var(--ok-soft); color: var(--ok); }
 .state-chip[data-state='failed'] { background: var(--danger-soft); color: var(--danger); }
 /* Where it stands, then its steps folded under one quiet line, what it asks, and the reply box. */
@@ -1171,7 +1179,7 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 /* Add another agent, as the design draws it: a list of agents, each a mark, its name over one line about it, and its Add button.
    The list of more agents is long (a few dozen), so a list scrolls in its own box and the dialog keeps the size of the others.
    Both lists keep the room of a scrollbar (where there is one), so that their rows end at the same place whether or not one shows. */
-.agent-choices { display: flex; flex-direction: column; gap: 6px; max-height: min(40vh, 20rem); overflow-y: auto; scrollbar-gutter: stable; }
+.agent-choices { display: flex; flex-direction: column; gap: 6px; max-height: min(34vh, 17rem); overflow-y: auto; scrollbar-gutter: stable; }
 .agent-choice { display: flex; flex: none; align-items: center; gap: 10px; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .agent-choice .av { display: inline-grid; flex: none; place-items: center; width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 11px; font-weight: 700; }
 .agent-choice-text { display: flex; flex: 1 1 0; flex-direction: column; min-width: 0; font-size: 13px; }

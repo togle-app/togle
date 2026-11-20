@@ -1866,6 +1866,8 @@ if (process.argv.includes('--togle-hook')) {
         return chosen.canceled ? null : (chosen.filePaths[0] ?? null)
       },
       version: app.getVersion(),
+      // Add another agent: the ACP registry's last copy is kept here, so that the list is there at once the next time Togle starts.
+      catalog: { registryFile: path.join(app.getPath('userData'), 'agent-registry.json') },
       // Agents added in Settings: kept with the other settings.
       added: () => getSettings().addedAgents,
       saveAdded: async (agents) => { await updateSettings({ addedAgents: agents }) },

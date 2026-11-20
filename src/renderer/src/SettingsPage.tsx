@@ -22,7 +22,7 @@ import { VocabularyEditor } from './DictationVocabulary'
 import { Devices, SignIn, useReach } from './Devices'
 import { useRememberedVoices } from './VoiceMemory'
 import type { SettingsPart } from './open-settings'
-import { AGENTS_FOUND, keepAnswer, keptAnswer, useKeptState } from './kept'
+import { AGENT_CATALOG, AGENTS_FOUND, keepAnswer, keptAnswer, useKeptState } from './kept'
 
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -439,50 +439,59 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
  * in the command, and the main process decides how it runs. A command typed in is under a link, for an agent that is not listed.
  */
 function AddAgent({ onList, onClose }: { onList: (agents: RunnerStatus[]) => void; onClose: () => void }) {
-  const [catalog, setCatalog] = useState<AgentCatalog | null>(null)
+  // The list as it was last time shows at once, and the one that is asked for now replaces it: opening it again never waits.
+  const [catalog, setCatalog] = useState<AgentCatalog | null>(() => keptAnswer<AgentCatalog>(AGENT_CATALOG) ?? null)
   const [byCommand, setByCommand] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  // What was added while the list is open leaves it, and the list stays for the next one.
-  const [taken, setTaken] = useState<string[]>([])
+  const [query, setQuery] = useState('')
+  const search = useRef<HTMLInputElement>(null)
+  const take = (value: AgentCatalog): void => { keepAnswer(AGENT_CATALOG, value); setCatalog(value) }
   useEffect(() => {
     let current = true
-    void api.agentCatalog().then((value) => { if (current) setCatalog(value) }, () => { if (current) setCatalog({ found: [], more: [], registry: false }) })
+    void api.agentCatalog().then((value) => { if (current) take(value) }, () => { if (current) setCatalog((was) => was ?? { found: [], more: [], registry: false }) })
     return () => { current = false }
   }, [])
-  // The keys go to the first agent that can be added when the list arrives, and again after one is added (its row leaves, and the
-  // keys would be nowhere): the next one is a press away.
-  const firstAdd = useRef<HTMLButtonElement>(null)
-  const refocus = useRef(true)
-  useEffect(() => {
-    if (!refocus.current || busy || !catalog) return
-    refocus.current = false
-    firstAdd.current?.focus({ preventScroll: true })
-  }, [catalog, taken, busy])
   if (byCommand) return <AddByCommand onAdded={(list) => { onList(list); onClose() }} onCancel={onClose} />
+  // What was added leaves the list (and the kept one), and the list stays for the next one; the keys go back to the search, where the
+  // button that was pressed has left.
   const add = (choice: AgentChoice): void => {
     setBusy(choice.id); setError('')
-    void api.addCodingAgent(choice.name, choice.command).then((list) => { onList(list); refocus.current = true; setTaken((ids) => [...ids, choice.id]) }, (failure) => setError(errorText(failure))).finally(() => setBusy(''))
+    void api.addCodingAgent(choice.name, choice.command).then(
+      (list) => {
+        onList(list)
+        if (catalog) take({ ...catalog, found: catalog.found.filter((one) => one.id !== choice.id), more: catalog.more.filter((one) => one.id !== choice.id) })
+        setQuery('')
+        search.current?.focus({ preventScroll: true })
+      },
+      (failure) => setError(errorText(failure))
+    ).finally(() => setBusy(''))
   }
-  const found = catalog ? catalog.found.filter((choice) => !taken.includes(choice.id)) : []
-  const more = catalog ? catalog.more.filter((choice) => !taken.includes(choice.id)) : []
-  const first = [...found, ...more].find((choice) => !choice.needs)?.id
+  // A search is words that all appear in an agent's name or in the line about it, in any order.
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  const wanted = (choice: AgentChoice): boolean => words.every((word) => `${choice.name} ${choice.description}`.toLowerCase().includes(word))
+  const found = catalog ? catalog.found.filter(wanted) : []
+  const more = catalog ? catalog.more.filter(wanted) : []
   const rows = (choices: AgentChoice[]): ReactNode =>
     choices.map((choice) => (
       <div key={choice.id} className="agent-choice">
         <AgentAvatar runner={`acp-${choice.id}`} name={choice.name} />
         <span className="agent-choice-text"><b>{choice.name}</b><span className="cut">{choice.description}</span></span>
-        <button ref={choice.id === first ? firstAdd : undefined} type="button" className="small" aria-label={`Add ${choice.name}`} disabled={!!busy || !!choice.needs} title={choice.needs ? `Needs ${choice.needs === 'npx' ? 'Node.js (npx)' : 'uv (uvx)'} on this computer` : `Starts with: ${choice.command}`} onClick={() => add(choice)}>{busy === choice.id ? 'Adding…' : 'Add'}</button>
+        <button type="button" className="small" aria-label={`Add ${choice.name}`} disabled={!!busy || !!choice.needs} title={choice.needs ? `Needs ${choice.needs === 'npx' ? 'Node.js (npx)' : 'uv (uvx)'} on this computer` : `Starts with: ${choice.command}`} onClick={() => add(choice)}>{busy === choice.id ? 'Adding…' : 'Add'}</button>
       </div>
     ))
+  // Enter in the search adds the one agent it has narrowed the list to (when it can be added).
+  const only = words.length ? [...found, ...more] : []
+  const searching = words.length > 0
   return (
-    <FormOver className="add-agent pick" label="Add another agent" busy={!!busy} onClose={onClose} onSubmit={() => undefined}>
+    <FormOver className="add-agent pick" label="Add another agent" busy={!!busy} onClose={onClose} onSubmit={() => { if (!busy && only.length === 1 && !only[0].needs) add(only[0]) }}>
       <span className="tasks-label">Add another agent</span>
+      <Field name="Search"><input ref={search} type="search" aria-label="Search agents" placeholder="Name or what it does" spellCheck={false} maxLength={80} value={query} onChange={(event) => setQuery(event.target.value)} /></Field>
       {catalog === null ? <p className="hint">Looking for agents…</p> : (
         <>
-          <span className="tasks-label">Found on this computer</span>
-          {found.length ? <div className="agent-choices">{rows(found)}</div> : <p className="hint">No other agent that Togle knows how to start was found here.</p>}
-          <span className="tasks-label">More agents</span>
+          {(!searching || found.length > 0) && <span className="tasks-label">Found on this computer</span>}
+          {found.length ? <div className="agent-choices">{rows(found)}</div> : !searching && <p className="hint">No other agent that Togle knows how to start was found here.</p>}
+          {(!searching || more.length > 0 || !catalog.registry) && <span className="tasks-label">More agents</span>}
           {!catalog.registry
             ? <p className="hint">The list of more agents could not be loaded. Check the connection, or add one by its command.</p>
             : more.length
@@ -490,7 +499,8 @@ function AddAgent({ onList, onClose }: { onList: (agents: RunnerStatus[]) => voi
                   <div className="agent-choices">{rows(more)}</div>
                   <p className="hint">These start with npx or uvx, which fetch the agent the first time.</p>
                 </>
-              : <p className="hint">Nothing more to add from the list.</p>}
+              : !searching && <p className="hint">Nothing more to add from the list.</p>}
+          {searching && !found.length && !more.length && <p className="hint">No agent matches “{query.trim()}”. Check the spelling, or add it by its command.</p>}
         </>
       )}
       <p className="hint">Something else? <button type="button" className="quiet-action" onClick={() => setByCommand(true)}>Add by command…</button></p>

@@ -992,7 +992,8 @@ async function checkSettings(T, agent) {
   assert.deepEqual(await texts(ui, 'form.add-agent.pick .agent-choice b'), ['Gemini CLI', 'Aider', 'goose', 'OpenCode', 'Mistral Vibe'])
   assert.deepEqual(await texts(ui, 'form.add-agent.pick .agent-choice .cut'), ["Google's official CLI for Gemini", 'AI pair programming in your terminal', 'A local, extensible, open source AI agent', 'The open source coding agent', "Mistral's coding agent"])
   assert.equal(await ui.evaluate("document.querySelectorAll('form.add-agent.pick .agent-choice .av').length"), 5, 'each has its mark')
-  assert.equal(await ui.evaluate("!!document.querySelector('form.add-agent.pick input')"), false, 'nothing to type')
+  assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('form.add-agent.pick input')].map(input=>input.type+':'+input.getAttribute('aria-label'))"), ['search:Search agents'], 'one field to type in: a search')
+  assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Search agents', 'the keys are in it when the list opens')
   assert.ok((await ui.evaluate("document.querySelector('form.add-agent.pick').textContent")).includes('These start with npx or uvx, which fetch the agent the first time.'), 'what the more agents need')
   assert.equal(await ui.evaluate("document.querySelector('form.add-agent.pick button[aria-label=\"Add Mistral Vibe\"]').disabled"), true, 'one that needs uvx, here without it, cannot be added')
   assert.ok((await ui.evaluate("document.querySelector('form.add-agent.pick button[aria-label=\"Add Mistral Vibe\"]').title")).includes('uv'), 'and says what it needs')
@@ -1001,13 +1002,38 @@ async function checkSettings(T, agent) {
   assert.equal(new Set(ends.rows).size, 1, 'the rows of both lists end at the same place: ' + JSON.stringify(ends))
   assert.equal(new Set(ends.buttons).size, 1, 'and so do their buttons: ' + JSON.stringify(ends))
   await ui.capture('settings-add-agent')
+  // Search: words that all appear in an agent's name or in the line about it, in any order. A list with no match leaves, and its heading with it.
+  const searchBox = 'form.add-agent.pick input[aria-label="Search agents"]'
+  const submit = "document.querySelector('form.add-agent.pick').requestSubmit()"
+  await ui.fill(searchBox, 'google')
+  assert.deepEqual(await texts(ui, 'form.add-agent.pick .agent-choice b'), ['Gemini CLI'], 'the line about an agent is searched as well as its name')
+  assert.deepEqual(await texts(ui, 'form.add-agent.pick .tasks-label'), ['Add another agent', 'Found on this computer'])
+  await ui.fill(searchBox, 'SOURCE open')
+  assert.deepEqual(await texts(ui, 'form.add-agent.pick .agent-choice b'), ['goose', 'OpenCode'], 'any order, any case')
+  assert.deepEqual(await texts(ui, 'form.add-agent.pick .tasks-label'), ['Add another agent', 'More agents'])
+  await ui.fill(searchBox, 'zzzz')
+  assert.equal(await ui.evaluate("document.querySelectorAll('form.add-agent.pick .agent-choice').length"), 0)
+  assert.ok((await ui.evaluate("document.querySelector('form.add-agent.pick').textContent")).includes('No agent matches “zzzz”.'), 'and it says when nothing does')
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('form.add-agent.pick button')].some(button=>button.textContent==='Add by command…')"), true, 'the way to add by command is still there')
+  // Enter adds the one agent the search has narrowed the list to, unless it cannot be added here (Mistral Vibe needs uvx).
+  const addsBefore = (await ui.calls('addCodingAgent')).length
+  await ui.fill(searchBox, 'mistral')
+  await ui.evaluate(submit)
+  await ui.paint()
+  assert.equal((await ui.calls('addCodingAgent')).length, addsBefore, 'Enter adds nothing that cannot be added')
+  await ui.fill(searchBox, '')
+  assert.equal(await ui.evaluate("document.querySelectorAll('form.add-agent.pick .agent-choice').length"), 5, 'an empty search is the whole list')
   // One found here: Togle gives its command, and how it runs follows from it. The dialog stays, and the agent leaves its list.
   await ui.click('form.add-agent.pick button', 'Add Gemini CLI')
   await ui.wait("(" + agentNames + ").includes('Gemini CLI')")
   assert.deepEqual(await ui.calls('addCodingAgent'), [['Gemini CLI', 'gemini --acp']], 'a name and the command Togle knows for it')
   assert.equal(await ui.evaluate(agentValue('Gemini CLI')), 'Added · conversation', 'a command for ACP opens as a conversation')
   assert.deepEqual(await texts(ui, 'form.add-agent.pick .agent-choice b'), ['Aider', 'goose', 'OpenCode', 'Mistral Vibe'], 'the one added is not offered again')
-  await ui.click('form.add-agent.pick button', 'Add Aider')
+  // The keys went back to the search when the agent left the list, and the search is empty again: typing narrows the list at once.
+  assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Search agents', 'the keys are in the search again')
+  assert.equal(await ui.evaluate("document.querySelector('form.add-agent.pick input[aria-label=\"Search agents\"]').value"), '', 'and what was searched is gone')
+  await ui.fill(searchBox, 'pair programming')
+  await ui.evaluate(submit)
   await ui.wait("(" + agentNames + ").includes('Aider')")
   assert.deepEqual((await ui.calls('addCodingAgent')).at(-1), ['Aider', 'aider'])
   assert.equal(await ui.evaluate(agentValue('Aider')), 'Added · terminal', 'any other command opens as a terminal, and the row says so')
@@ -1026,9 +1052,13 @@ async function checkSettings(T, agent) {
     await ui.wait("!(" + agentNames + ").includes(" + JSON.stringify(name) + ")")
     assert.deepEqual((await ui.calls('removeCodingAgent')).at(-1), [id])
   }
-  // Removed, they are offered again.
+  // Removed, they are offered again. The list as it was when it was closed shows at once while the list is asked for again (slow here),
+  // and the fresh one replaces it.
+  await ui.evaluate("window.togleUITest.slow('agentCatalog', 1500)")
   await ui.click('#settings-agents button', 'Add another agent')
-  await ui.wait("!!document.querySelector('form.add-agent.pick .agent-choice')")
+  assert.ok((await ui.evaluate("document.querySelectorAll('form.add-agent.pick .agent-choice').length")) > 0, 'the last list is there at once, not "Looking for agents…"')
+  await ui.wait("document.querySelectorAll('form.add-agent.pick .agent-choice').length===5")
+  await ui.evaluate("window.togleUITest.slow('agentCatalog', 0)")
   assert.deepEqual(await texts(ui, 'form.add-agent.pick .agent-choice b'), ['Gemini CLI', 'Aider', 'goose', 'OpenCode', 'Mistral Vibe'])
   // Something not listed: a name and a command, under a link. The form says how its words get to it, and how an ACP one is told.
   await ui.click('form.add-agent.pick button', 'Add by command…')
@@ -1081,7 +1111,7 @@ async function checkSettings(T, agent) {
     await ui.wait("document.querySelectorAll('form.add-agent.pick .agent-choice').length>20")
     const long = await ui.evaluate("(()=>{const list=[...document.querySelectorAll('form.add-agent.pick .agent-choices')].at(-1),close=[...document.querySelectorAll('form.add-agent.pick button')].find(b=>b.textContent==='Close').getBoundingClientRect();return {scrolls:list.scrollHeight>list.clientHeight,listHeight:Math.round(list.clientHeight),windowHeight:innerHeight,closeBottom:Math.round(close.bottom),ends:" + rowEnds + "}})()")
     assert.equal(long.scrolls, true, 'a long list scrolls in its own box: ' + JSON.stringify(long))
-    assert.ok(long.listHeight <= 20 * 16, 'and it has a height of its own: ' + JSON.stringify(long))
+    assert.ok(long.listHeight <= 17 * 16, 'and it has a height of its own: ' + JSON.stringify(long))
     assert.ok(long.closeBottom <= long.windowHeight, 'Close can be reached without scrolling the dialog: ' + JSON.stringify(long))
     assert.equal(new Set(long.ends.rows).size, 1, 'the rows of both lists end at the same place, scrolling or not: ' + JSON.stringify(long.ends))
     assert.equal(new Set(long.ends.buttons).size, 1, 'and so do their buttons: ' + JSON.stringify(long.ends))
@@ -1096,7 +1126,7 @@ async function checkSettings(T, agent) {
   // Offline, the registry of more agents is not there: what is found here is listed, and the link to a command stays.
   await ui.evaluate("window.togleUITest.catalogOffline(true)")
   await ui.click('#settings-agents button', 'Add another agent')
-  await ui.wait("!!document.querySelector('form.add-agent.pick .agent-choice')")
+  await ui.wait("document.querySelectorAll('form.add-agent.pick .agent-choice').length===2")
   assert.deepEqual(await texts(ui, 'form.add-agent.pick .agent-choice b'), ['Gemini CLI', 'Aider'])
   assert.ok((await ui.evaluate("document.querySelector('form.add-agent.pick').textContent")).includes('The list of more agents could not be loaded.'), 'it says so')
   assert.equal(await ui.evaluate("[...document.querySelectorAll('form.add-agent.pick button')].some(button=>button.textContent==='Add by command…')"), true)

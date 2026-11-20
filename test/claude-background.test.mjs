@@ -761,7 +761,8 @@ test('Stop where the screen cannot be used ends the session instead, and opening
     const pid = job(home, jobId).pid
     await task.stop()
     await until(() => !alive(pid), 'the program to end')
-    assert.equal(task.state, 'stopped')
+    // The task hears of it a moment after the program is gone (it is told by the list or the file, not by the program).
+    await until(() => task.state === 'stopped', 'the task to say it stopped')
     assert.equal(job(home, jobId).escapes, undefined, 'no Esc could reach it')
   } finally {
     await backend.close()
@@ -778,7 +779,7 @@ test('End it ends the session and closes its screen; opening it brings the same 
     await connected(task)
     await task.endCommands()
     await until(() => !alive(pid), 'the program to end')
-    assert.equal(task.state, 'stopped')
+    await until(() => task.state === 'stopped', 'the task to say it stopped')
     assert.equal(task.screen.open, false, 'its screen was a client of the session that is gone')
     assert.equal(task.pending.length, 0)
     const again = await backend.resume(id, { folder: task.folder, job: task.screen.job })

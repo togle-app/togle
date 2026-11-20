@@ -489,7 +489,7 @@ async function checkTasks(T, agent) {
   await ui.click('.task-reply button', 'Send when it finishes')
   await ui.wait("!!document.querySelector('.held-reply')")
   assert.deepEqual(await texts(ui, '.held-text'), ['Also the header'], 'it waits, as it will be said')
-  assert.equal(await ui.evaluate("document.querySelector('.held-line').textContent"), 'Goes in when Claude Code finishes this turn.')
+  assert.equal(await ui.evaluate("document.querySelector('.held-line').textContent"), 'Goes in when Claude Code finishes this turn. Hit ↑ to edit.', 'and the foot says how to change it')
   assert.deepEqual(await texts(ui, '.held-actions button'), ['Interrupt and send'], 'it goes in by itself, or now with an interrupt')
   assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), '', 'the box is empty again')
   await centred(ui, '.held-remove', 'the cross of a queued message')
@@ -515,7 +515,7 @@ async function checkTasks(T, agent) {
   await ui.wait("!!document.querySelector('.held-reply')")
   assert.deepEqual(await texts(ui, '.task-actions button'), ['Hand back'], 'in Chat the header has no Stop: it is the reply box\'s round button')
   await ui.click('.task-reply .reply-send', 'Stop')
-  await ui.wait("document.querySelector('.held-line')?.textContent==='Not sent: the task stopped.'")
+  await ui.wait("document.querySelector('.held-line')?.textContent==='Not sent: the task stopped. Hit ↑ to edit.'")
   assert.deepEqual(await texts(ui, '.held-actions button'), ['Send now'], 'stopped: the person sends it')
   await ui.click('.held-actions button', 'Send now')
   await ui.wait("!document.querySelector('.held-reply')")
@@ -1120,11 +1120,11 @@ async function checkAgentSettings(T, agent) {
     await ui.wait("!!document.querySelector('form.add-agent .agent-choice')")
     assert.deepEqual(await ui.evaluate(rows), before, 'every row stays where it was when the form that adds an agent opens at ' + width)
     assert.equal(await ui.evaluate(dialog('form.add-agent')), true, 'the form that adds an agent is a dialog in the middle of the window at ' + width)
-    // The keys go to the first agent to add: it is a list to pick from, with nothing to type.
-    await ui.wait("document.activeElement?.getAttribute('aria-label')==='Add Gemini CLI'")
+    // The keys go to the search, where a few letters narrow the list.
+    await ui.wait("document.activeElement?.getAttribute('aria-label')==='Search agents'")
     // The keys stay in the form: Tab from its last button goes to its first stop, not to a row under the form.
     await ui.evaluate("(()=>{const last=[...document.querySelectorAll('form.add-agent button')].filter(b=>!b.disabled).at(-1);last.focus();last.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}))})()")
-    assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Add Gemini CLI', 'Tab past the last button comes back to the first stop at ' + width)
+    assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Search agents', 'Tab past the last button comes back to the first stop at ' + width)
     await ui.evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true}))")
     assert.equal(await ui.evaluate("document.activeElement?.textContent"), 'Close', 'and Shift+Tab from the first stop goes to the last button at ' + width)
     await ui.evaluate("document.querySelector('form.add-agent .agent-choice button').focus()")
@@ -1749,14 +1749,19 @@ async function checkShells(T, agent) {
   const row = "[...document.querySelectorAll('.task-row')].find(r=>r.querySelector('strong').textContent==='Rebuild the pricing page')"
   await set({ state: 'idle', shells: [{ id: 'b0000001', label: 'npm run dev', since: Date.now() - 60_000 }] })
   await ui.task('Rebuild the pricing page')
-  await ui.wait(row + ".textContent.includes('idle · 1 shell running')", 'the row to say a shell runs')
-  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Idle', 'the task is idle, not working')
-  assert.equal(await ui.evaluate("document.querySelector('.task-status .shells-hint').textContent.trim()"), '1 shell running', 'how many, and not what it runs')
-  assert.equal(await ui.evaluate("document.querySelector('.task-status .shells-hint').title"), 'npm run dev', 'the command is on the pointer')
+  // It waits on the shell: its own mark (a ring with a slow dot in it, not the turning ring of work and not the amber dot that asks for the person),
+  // and its words say what for: "Waiting on 1 shell". The commands are on the pointer.
+  await ui.wait(row + ".textContent.includes('waiting on 1 shell')", 'the row to say a shell is waited on')
+  assert.equal(await ui.evaluate(row + ".textContent.includes('idle') || " + row + ".textContent.includes('working')"), false, 'neither idle nor working in the row')
+  assert.equal(await ui.evaluate(row + ".querySelector('.state-mark').dataset.mark"), 'watching', 'its own mark in the list')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Waiting on 1 shell', 'the chip says what it waits on')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip .state-mark').dataset.mark"), 'watching', 'and has the same mark')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').title"), 'npm run dev', 'the command is on the pointer')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-status .shells-hint')"), false, 'the chip says it: no second line about the shell')
   await set({ shells: [{ id: 'b0000001', label: 'npm run dev' }, { id: 'b0000002', label: 'sleep 600' }] })
-  await ui.wait("document.querySelector('.task-status .shells-hint')?.textContent.trim()==='2 shells running'", 'the count of two')
-  assert.equal(await ui.evaluate("document.querySelector('.task-status .shells-hint').title"), 'npm run dev\nsleep 600', 'each command on the pointer')
-  assert.ok((await ui.evaluate(row + ".textContent")).includes('idle · 2 shells running'))
+  await ui.wait("document.querySelector('.task-status .state-chip')?.textContent.trim()==='Waiting on 2 shells'", 'the count of two')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').title"), 'npm run dev\nsleep 600', 'each command on the pointer')
+  assert.ok((await ui.evaluate(row + ".textContent")).includes('waiting on 2 shells'))
   // Working, it says so too; with nothing running there is no line.
   await set({ state: 'working' })
   await ui.wait(row + ".textContent.includes('working · 2 shells running')", 'working, with its shells')
@@ -1772,6 +1777,19 @@ async function checkShells(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Working', 'waiting on a monitor is working, not idle')
   assert.equal(await ui.evaluate("document.querySelector('.task-status .monitors-hint').textContent.trim()"), 'waiting on 1 monitor', 'how many, and not what for')
   assert.equal(await ui.evaluate("document.querySelector('.task-status .monitors-hint').title"), watch, 'what it waits for is on the pointer')
+  // The turn over (only the monitor keeps it going): it is not working. It watches: its own mark, and the chip and the row say what for.
+  await set({ turnOver: true })
+  await ui.wait(row + ".textContent.includes('waiting on 1 monitor') && !" + row + ".textContent.includes('working')", 'the row to stop saying it works')
+  assert.equal(await ui.evaluate(row + ".querySelector('.state-mark').dataset.mark"), 'watching')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Waiting on 1 monitor')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').title"), watch, 'what it waits for is on the pointer')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').dataset.state"), 'watching')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-status .monitors-hint')"), false, 'the chip says it')
+  await ui.capture('task-watching')
+  await set({ monitors: [{ id: 'bmon00001', label: watch }], shells: [{ id: 'b0000001', label: 'npm run dev' }] })
+  await ui.wait("document.querySelector('.task-status .state-chip')?.textContent.trim()==='Waiting on 1 monitor and 1 shell'", 'a monitor and a shell')
+  await set({ turnOver: false })
+  await ui.wait(row + ".textContent.includes('working · waiting on 1 monitor')", 'a turn runs again: working')
   await set({ monitors: [{ id: 'bmon00001', label: watch }, { id: 'bmon00002', label: 'Watch the build' }], shells: [{ id: 'b0000001', label: 'npm run dev' }] })
   await ui.wait("document.querySelector('.task-status .monitors-hint')?.textContent.trim()==='waiting on 2 monitors'", 'the count of two')
   assert.equal(await ui.evaluate("document.querySelector('.task-status .monitors-hint').title"), watch + '\nWatch the build', 'each on the pointer')
@@ -2598,6 +2616,53 @@ async function checkQuote(T, agent) {
   await ui.wait("!!document.querySelector('.quote-bar')")
   await ui.click('.quote-bar button', 'Remove the quote')
   await ui.wait("!document.querySelector('.quote-bar')")
+  // Right-click any message, the agent's or the person's own: a short menu, and Reply puts all of that message over the reply box (the part of it
+  // that is selected, when something is). Anything else that is right-clicked has no such menu.
+  const rightClick = async (x, y) => {
+    await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'right', buttons: 2, clickCount: 1 })
+    await cdp.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'right', buttons: 0, clickCount: 1 })
+  }
+  const menu = '[role=menu][aria-label="This message"]'
+  const middle = async (scope, inside) => { const [l, t, r, b] = await rect(scope, inside); return [(l + r) / 2, (t + b) / 2] }
+  await ui.evaluate("document.querySelector('.task-log.thread').scrollTop=0")
+  await ui.paint()
+  await rightClick(...(await middle('.task-agent', 'Then I changed the markup')))
+  await ui.wait("!!document.querySelector('" + menu + "')")
+  assert.deepEqual(await texts(ui, menu + ' button'), ['Reply', 'Copy'], 'a message has Reply and Copy')
+  await ui.click(menu + ' button', 'Reply')
+  await ui.wait("!!document.querySelector('.quote-bar')")
+  assert.equal(await ui.evaluate("document.querySelector('.quote-bar-words span').textContent"), 'Here is how I read it. First, the table keeps two plans. Second, the prices come from one place. Third, the page reads the same on a phone and on a desk. Then I changed the markup and ran the checks.', 'all of the message, as it reads')
+  assert.equal(await ui.evaluate("!!document.querySelector('" + menu + "')"), false, 'the menu goes when one is picked')
+  assert.equal(await ui.evaluate("document.activeElement.tagName+':'+document.activeElement.getAttribute('aria-label')"), 'TEXTAREA:Reply to the agent', 'and the keys are in the reply box')
+  await ui.evaluate("document.querySelector('.task-reply textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))")
+  await ui.wait("!document.querySelector('.quote-bar')")
+  // The person's own message is one too.
+  await rightClick(...(await middle('.task-you', 'Rebuild the pricing page.')))
+  await ui.wait("!!document.querySelector('" + menu + "')")
+  await ui.click(menu + ' button', 'Reply')
+  await ui.wait("document.querySelector('.quote-bar-words span')?.textContent==='Rebuild the pricing page.'")
+  await ui.click('.quote-bar button', 'Remove the quote')
+  // With words selected in the message, the menu is about them.
+  await pick('.task-agent', words)
+  await ui.wait("!!" + float)
+  await rightClick(...(await middle('.task-agent', words)))
+  await ui.wait("!!document.querySelector('" + menu + "')")
+  assert.deepEqual(await texts(ui, menu + ' button'), ['Reply to selection', 'Copy selection'])
+  await ui.click(menu + ' button', 'Reply to selection')
+  await ui.wait("document.querySelector('.quote-bar-words span')?.textContent===" + JSON.stringify(words))
+  await ui.click('.quote-bar button', 'Remove the quote')
+  // Copy puts the words on the clipboard and nothing else happens.
+  await ui.evaluate("getSelection().removeAllRanges()")
+  await rightClick(...(await middle('.task-agent', 'Then I changed the markup')))
+  await ui.wait("!!document.querySelector('" + menu + "')")
+  await ui.click(menu + ' button', 'Copy')
+  await ui.wait("!document.querySelector('" + menu + "')")
+  assert.equal(await ui.evaluate("!!document.querySelector('.quote-bar')"), false, 'Copy quotes nothing')
+  // The reply box, and the empty space of the conversation, have no such menu.
+  const box = await ui.evaluate("(()=>{const b=document.querySelector('.task-reply textarea').getBoundingClientRect();return [b.left+b.width/2,b.top+b.height/2]})()")
+  await rightClick(box[0], box[1])
+  await ui.paint()
+  assert.equal(await ui.evaluate("!!document.querySelector('" + menu + "')"), false, 'no menu over the reply box')
   // A selection scrolled out of the conversation has no button (it would land on the reply box), and has it again once it is back.
   await set({ log: log(8) })
   await ui.wait("document.querySelectorAll('.task-agent').length===8")
@@ -2671,10 +2736,13 @@ async function checkInterrupt(T, agent) {
   await ui.wait("document.querySelectorAll('.held-row').length===2")
   assert.deepEqual(await texts(ui, '.held-text'), ['first', 'third'])
   assert.deepEqual((await calls('heldRunnerReply')).at(-1), ['claude:s2', 'drop', 1])
-  // Edit puts the message back in the box to change; it needs an empty box (no Edit while words are typed).
-  await ui.click('.held-edit', 'Edit queued message 1')
+  // The Up arrow in the empty box puts the last message Togle holds back in it, to change (Edit does that for any one of them, and needs an
+  // empty box as well: no Edit while words are typed). The foot says so.
+  assert.equal(await ui.evaluate("document.querySelector('.held-line').textContent"), 'Goes in when Claude Code finishes this turn. Hit ↑ to edit.')
+  await ui.evaluate(box + ".dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}))")
   await ui.wait("document.querySelectorAll('.held-row').length===1")
-  assert.equal(await ui.evaluate(box + ".value"), 'first', 'its words are in the box')
+  assert.deepEqual((await calls('heldRunnerReply')).at(-1), ['claude:s2', 'drop', 1], 'the last one went back to the box')
+  assert.equal(await ui.evaluate(box + ".value"), 'third', 'its words are in the box')
   assert.equal(await ui.evaluate("!!document.querySelector('.held-edit')"), false, 'and with words typed there is no Edit')
   assert.equal(await ui.evaluate("document.activeElement===" + box), true, 'the keys are in the box')
   // Interrupt, with Ctrl+Enter: stopped, then the words now. The words leave the box, and what is queued waits.
@@ -2683,7 +2751,7 @@ async function checkInterrupt(T, agent) {
   await ui.wait("[...document.querySelectorAll('.you-row')].at(-1)?.textContent.includes('No, use the other approach')")
   assert.deepEqual((await calls('interruptRunnerTask')).at(-1), ['claude:s2', 'No, use the other approach'])
   assert.equal(await ui.evaluate(box + ".value"), '', 'they went in: the box is empty')
-  assert.deepEqual(await texts(ui, '.held-text'), ['third'], 'what was queued waits')
+  assert.deepEqual(await texts(ui, '.held-text'), ['first'], 'what was queued waits')
   // Interrupt by its button, with words that cannot go in: they stay in the box, and the person is told.
   await ui.fill('.task-reply textarea', 'Wrong way')
   await ui.evaluate("window.togleUITest.failNext('interruptRunnerTask')")
@@ -2698,7 +2766,7 @@ async function checkInterrupt(T, agent) {
   await ui.click('.held-actions button', 'Interrupt and send')
   await ui.wait("!document.querySelector('.held-reply')")
   assert.deepEqual((await calls('heldRunnerReply')).at(-1), ['claude:s2', 'interrupt'])
-  assert.ok(await ui.evaluate("[...document.querySelectorAll('.you-row')].at(-1).textContent.includes('third')"), 'what was queued went in')
+  assert.ok(await ui.evaluate("[...document.querySelectorAll('.you-row')].at(-1).textContent.includes('first')"), 'what was queued went in')
   // A quote goes with an interrupt as it does with any reply (and a command goes alone).
   await ui.evaluate("(()=>{const w=document.createTreeWalker(document.querySelector('.task-agent')||document.body,NodeFilter.SHOW_TEXT);return !!w})()")
   // Not at all when the agent is not at work, or asks something: Enter sends and there is nothing to stop.
@@ -2978,11 +3046,19 @@ async function checkSentTicks(T, agent) {
   await ui.wait("document.querySelector('.task-title h2')?.textContent==='Queue task'")
   if (await ui.evaluate("!document.querySelector('.task-reply textarea')")) await ui.click('.view-switch button', 'Chat')
   await ui.wait("document.querySelectorAll('.held-row').length===2")
-  assert.deepEqual(await texts(ui, '.held-foot button'), ['Take back'], 'one button for the agent\u2019s own queue')
+  // No button: the Up arrow in the empty box does it, and the foot says so (only while the box is empty: the key moves the cursor in words).
+  assert.deepEqual(await texts(ui, '.held-foot button'), [], 'no Take back button: the Up arrow does it')
+  assert.equal(await ui.evaluate("document.querySelector('.held-foot .held-line').textContent"), 'Claude Code takes these in as it works. Hit \u2191 to edit.')
+  const up = "document.querySelector('.task-reply textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true,cancelable:true}))"
   await ui.fill('.task-reply textarea', 'Typed before')
-  await ui.click('.held-foot button', 'Take back')
+  assert.equal(await ui.evaluate("document.querySelector('.held-foot .held-line').textContent"), 'Claude Code takes these in as it works.', 'with words in the box the key is theirs, and the foot does not say it')
+  await ui.evaluate(up)
+  await ui.paint()
+  assert.equal((await ui.calls('takeBackRunnerQueue')).length, 0, 'Up with words in the box takes nothing back')
+  await ui.fill('.task-reply textarea', '')
+  await ui.evaluate(up)
   await ui.wait("document.querySelectorAll('.held-row').length===0")
-  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), 'Typed before\n\nAlso the footer\nAnd a dark mode', 'the words are in the box, in the order they were queued')
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), 'Also the footer\nAnd a dark mode', 'the words are in the box, in the order they were queued')
   assert.deepEqual((await ui.calls('takeBackRunnerQueue')).map((call) => call.args), [['claude:t3']], 'main was asked once')
   assert.equal(await ui.evaluate("document.activeElement === document.querySelector('.task-reply textarea')"), true, 'and the keys are in the box')
   // What Togle holds for an agent that cannot take it yet (a question waits on its screen): a clock, in the same card, and not a card in the conversation.
@@ -3161,8 +3237,8 @@ async function checkReplyDock(T, agent) {
   assert.equal(await ui.evaluate("!!document.querySelector('.task-now')"), true, 'a turn runs: the line that says it works is there')
   await ui.evaluate('window.togleUITest.setTask("claude:s2", { monitors: [{ id: "bmon00001", label: "Watch the CI runs" }], turnOver: true })')
   await ui.wait("!!document.querySelector('.task-reply .reply-send') && !document.querySelector('.task-reply .reply-send').classList.contains('stop')", 'no Stop while only a monitor keeps it working')
-  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Working', 'it still reads Working')
-  assert.equal(await ui.evaluate("document.querySelector('.task-status .monitors-hint')?.textContent.trim()"), 'waiting on 1 monitor', 'and says what for')
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .state-chip').textContent.trim()"), 'Waiting on 1 monitor', 'it does not read Working: it watches, and says what for')
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-status .monitors-hint')"), false, 'the chip says it')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-now')"), false, 'no "Working…" line: no turn runs')
   await ui.fill('.task-reply textarea', 'How are the CI runs?')
   assert.deepEqual(await ui.evaluate("[" + round + ".classList.contains('primary')," + round + ".disabled,!!document.querySelector('.reply-interrupt')]"), [true, false, false], 'words typed: Send, and no Interrupt: there is no turn to interrupt')
@@ -3171,7 +3247,7 @@ async function checkReplyDock(T, agent) {
   await ui.wait("document.querySelector('.task-reply .reply-send')?.classList.contains('stop')", 'Stop again once a turn runs next to the monitor')
   assert.equal(await ui.evaluate("!!document.querySelector('.task-now')"), true, 'and the line that says it works is back')
   await ui.evaluate('window.togleUITest.setTask("claude:s2", { monitors: [] })')
-  await ui.wait("!document.querySelector('.task-status .monitors-hint')", 'the monitor gone')
+  await ui.wait("!document.querySelector('.task-status .monitors-hint') && document.querySelector('.task-status .state-chip')?.textContent.trim()==='Working'", 'the monitor gone')
 
   // A picture pasted into the box: a chip, kept as a file, and nothing else.
   const png = Array.from(nativeImage.createFromBuffer(Buffer.alloc(80 * 60 * 4, 0x9a), { width: 80, height: 60 }).toPNG())
@@ -3266,9 +3342,10 @@ async function checkReplyDock(T, agent) {
   await ui.wait("document.querySelectorAll('.held-reply .held-row').length===2")
   assert.deepEqual(await texts(ui, '.held-text'), ['Also the header, please.', 'And the footer.'], 'what the agent has queued, in the order typed')
   assert.equal(await ui.evaluate("document.querySelector('.held-reply .held-count').textContent"), '2')
-  assert.equal(await ui.evaluate("document.querySelector('.held-foot .held-line').textContent"), 'Claude Code takes these in as it works.')
-  // It is the agent's queue: no Edit and no cross of Togle's on a message (Claude Code gives back all of it or none), only Take back for all of it.
-  assert.deepEqual(await texts(ui, '.held-reply button'), ['Take back'], 'it is the agent\'s queue: one button, for all of it')
+  assert.equal(await ui.evaluate("document.querySelector('.held-foot .held-line').textContent"), 'Claude Code takes these in as it works. Hit ↑ to edit.')
+  // It is the agent's queue: no Edit and no cross of Togle's on a message (Claude Code gives back all of it or none), and no button for all of
+  // it either: the Up arrow in the empty box does that, as on its screen.
+  assert.deepEqual(await texts(ui, '.held-reply button'), [], 'it is the agent\'s queue: no buttons')
   assert.equal(await ui.evaluate("!!document.querySelector('.you-row .task-you') && [...document.querySelectorAll('.task-you')].some(e=>e.textContent==='Also the header, please.')"), false, 'and it is not in the conversation until the agent takes it in')
   // Sent from here while it only works: typed at once (its own queue takes it, as on its screen), and Togle holds nothing of it.
   assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').placeholder"), 'Reply, or hold F9 and talk', 'it takes words now: no "when it finishes"')

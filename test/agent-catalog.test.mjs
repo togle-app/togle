@@ -1,9 +1,12 @@
 // What Add another agent lists (src/main/runners/agent-catalog.ts): the agents on this computer, and more from the ACP registry, each with
 // the command that starts it. The registry is data from the network, so every word that ends up in a command is checked.
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { test } from 'node:test'
 
-const { agentCatalog, commandIsAcp, commandOf, KNOWN_TO_START, registryEntries, registryPlatform } = await import('./.build/togle.mjs')
+const { agentCatalog, commandIsAcp, commandOf, KNOWN_TO_START, registryEntries, registryPlatform, rememberedWhere, RegistryKeeper } = await import('./.build/togle.mjs')
 
 /** The registry as it gives its agents (the shape of cdn.agentclientprotocol.com/registry/v1/latest/registry.json), a few of them. */
 const registry = {
@@ -90,6 +93,90 @@ test('offline, what Togle knows is still listed, and more is empty', async () =>
   assert.deepEqual(catalog.more, [])
   const empty = await agentCatalog({ added: [], fetchRegistry: async () => 'not a registry', whereIs: where() })
   assert.deepEqual([empty.registry, empty.found, empty.more], [true, [], []], 'a list that is not a registry holds no agent, and is not an error')
+})
+
+test('the programs are looked for together and once each: a few dozen lookups one after the other took a second and a half', async () => {
+  let active = 0
+  let most = 0
+  const asked = []
+  const slow = async (program) => {
+    asked.push(program)
+    active++
+    most = Math.max(most, active)
+    await new Promise((resolve) => setTimeout(resolve, 15))
+    active--
+    return program === 'npx' ? 'C:\\tools\\npx.cmd' : null
+  }
+  const catalog = await agentCatalog({ added: [], fetchRegistry: async () => registry, whereIs: slow, platform: 'windows-x86_64' })
+  assert.equal(new Set(asked).size, asked.length, 'each program once, though several entries start through npx')
+  assert.ok(asked.includes('npx') && asked.includes('uvx') && asked.includes('goose') && asked.includes('aider'))
+  assert.ok(most > 1, `more than one lookup at a time (most ${most})`)
+  assert.ok(most <= 8, `and not a flood of them (most ${most})`)
+  assert.deepEqual(catalog.more.map((choice) => [choice.name, choice.needs]), [['Amp', undefined], ['Gemini CLI', undefined], ['Mistral Vibe', 'uvx']])
+})
+
+test('where a program is, remembered for a while: each answer once in that time, and an answer that failed is asked again', async () => {
+  let clock = 1000
+  const asked = []
+  let failing = true
+  const where = rememberedWhere(async (program) => {
+    asked.push(program)
+    if (program === 'flaky' && failing) throw new Error('could not look')
+    return program === 'here' ? 'C:\\tools\\here.exe' : null
+  }, 60_000, () => clock)
+  assert.equal(await where('here'), 'C:\\tools\\here.exe')
+  assert.equal(await where('here'), 'C:\\tools\\here.exe')
+  assert.equal(await where('missing'), null)
+  assert.equal(await where('missing'), null, 'nothing found is remembered as well')
+  assert.deepEqual(asked, ['here', 'missing'], 'two lookups for four questions')
+  clock += 61_000
+  await where('here')
+  assert.deepEqual(asked, ['here', 'missing', 'here'], 'a minute later it is looked for again: something may have been installed')
+  await assert.rejects(where('flaky'), /could not look/)
+  failing = false
+  assert.equal(await where('flaky'), null, 'a failed lookup is not kept')
+  assert.equal(asked.filter((program) => program === 'flaky').length, 2)
+})
+
+test('the registry: the first read waits for the network and is kept on disk; after a restart the copy answers at once and a fresh one is read behind it', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'togle-registry-'))
+  const file = path.join(dir, 'agent-registry.json')
+  try {
+    let clock = 1_000
+    let reads = 0
+    let online = true
+    const net = async () => {
+      reads++
+      if (!online) throw new Error('offline')
+      return new Response(JSON.stringify(registry), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    const first = new RegistryKeeper(file, net, () => clock)
+    assert.deepEqual(await first.registry(), registry, 'the first time it waits for the network')
+    assert.equal(reads, 1)
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), registry, 'and a copy is kept on disk')
+    await first.registry()
+    assert.equal(reads, 1, 'read lately: no second read')
+    // Togle starts again, and the network is slow to answer: the copy on disk answers at once.
+    let release
+    const slowNet = () => new Promise((resolve) => { release = () => resolve(net()) })
+    const second = new RegistryKeeper(file, slowNet, () => clock)
+    assert.deepEqual(await second.registry(), registry, 'the list is there without the network')
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    clock += 7 * 60 * 60_000
+    // Old in memory: it answers with what it has, and reads again behind.
+    online = false
+    assert.deepEqual(await second.registry(), registry, 'offline, an old copy still answers')
+    // Nothing on disk and no network: an error, so that the list says it could not be loaded.
+    const none = new RegistryKeeper(path.join(dir, 'none.json'), net, () => clock)
+    await assert.rejects(none.registry(), /offline/)
+    // A copy on disk that is not a registry's JSON is no copy.
+    fs.writeFileSync(path.join(dir, 'broken.json'), '{ not json')
+    const broken = new RegistryKeeper(path.join(dir, 'broken.json'), net, () => clock)
+    await assert.rejects(broken.registry(), /offline/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('the commands Togle knows for its own list are for ACP, except the one terminal agent', () => {
