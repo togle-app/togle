@@ -1168,6 +1168,19 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .agent-name .av, .first-found .av { display: inline-grid; flex: none; place-items: center; width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 11px; font-weight: 700; }
 .agent-name .agent-label { min-width: 0; overflow-wrap: anywhere; }
 .settings .sets .setting.add-row { display: flex; padding: 6px 0 2px; border-bottom: 0; }
+/* Add another agent, as the design draws it: a list of agents, each a mark, its name over one line about it, and its Add button.
+   The list of more agents is long (a few dozen), so a list scrolls in its own box and the dialog keeps the size of the others.
+   Both lists keep the room of a scrollbar (where there is one), so that their rows end at the same place whether or not one shows. */
+.agent-choices { display: flex; flex-direction: column; gap: 6px; max-height: min(40vh, 20rem); overflow-y: auto; scrollbar-gutter: stable; }
+.agent-choice { display: flex; flex: none; align-items: center; gap: 10px; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.agent-choice .av { display: inline-grid; flex: none; place-items: center; width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 11px; font-weight: 700; }
+.agent-choice-text { display: flex; flex: 1 1 0; flex-direction: column; min-width: 0; font-size: 13px; }
+.agent-choice-text b { font-weight: 600; }
+.agent-choice-text .cut { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-choice > button { flex: none; }
+/* A name that cannot change (an agent's, in the form that edits its command): in the field's own box, at its end, in the ink of what is typed. */
+.field .field-fixed { flex: 1 1 0; min-width: 0; padding: 7px 0; color: var(--ink); font-size: 13px; text-align: right; overflow-wrap: anywhere; }
+.settings .setting-detail .hint .quiet-action { margin-left: 0; font-size: inherit; }
 /* The keys as keys. */
 .settings .sets .shortcut { display: grid; }
 .settings .sets .shortcut-what { min-width: 0; }

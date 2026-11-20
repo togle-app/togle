@@ -158,10 +158,35 @@ export interface RunnerStatus {
   name: string
   installed: boolean
   version?: string
-  /** One the person added, which they can remove. */
+  /** One the person added, which they can edit and remove. */
   added?: boolean
+  /** The command that starts an added agent, so that its Edit form shows it. */
+  command?: string
   /** An agent Togle knows that the person took off its lists: Settings lists it so that it can be added back. */
   removed?: boolean
+}
+
+/**
+ * An agent Settings offers to add: what it is called, a line about it, and the command that starts it. The person types none
+ * of it. `needs` is a program the command starts through that this computer does not have (`npx` or `uvx`): Add waits for it.
+ */
+export interface AgentChoice {
+  id: string
+  name: string
+  description: string
+  command: string
+  needs?: 'npx' | 'uvx'
+}
+
+/**
+ * What Add another agent lists. `found`: agents that are on this computer. `more`: agents that start through `npx` or `uvx`,
+ * which fetch them the first time, from the ACP registry. `registry` is false when the registry could not be read (offline):
+ * `more` is empty then, and `found` is what Togle knows by name.
+ */
+export interface AgentCatalog {
+  found: AgentChoice[]
+  more: AgentChoice[]
+  registry: boolean
 }
 
 /**

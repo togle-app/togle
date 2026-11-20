@@ -103,6 +103,7 @@ export { caughtOnEnter, CLEAR_LINE, commandIn, hasGuard, isLeftArrow, keptBy, le
 export { mergedPath, outputOf, pathFolders, savedPathFolders, shellPath } from '../src/main/runners/search-path'
 export { codeEditorOf, frontEditor, frontProgram, linuxEditorOf, lsappinfoBundle, macEditorOf, xpropActiveWindow, xpropClasses } from '../src/main/front-program'
 export { AcpBackend, commandIsAcp, commandWords, whereIs } from '../src/main/runners/acp'
+export { agentCatalog, commandOf, KNOWN_TO_START, registryEntries, registryPlatform } from '../src/main/runners/agent-catalog'
 export { addedBackend } from '../src/main/runners/register'
 export { cleanWords, refuseCommand, shimTarget, TerminalBackend, TerminalTask, windowsArg, withoutTaskWords } from '../src/main/runners/terminal'
 export { safeCut, TerminalModes } from '../src/main/runners/terminal-modes'

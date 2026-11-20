@@ -1693,6 +1693,92 @@ test('agents the person adds are checked, saved, worked with, and removed', asyn
   }
 })
 
+test('Add another agent: the handler lists what is found here and more from the registry, without what was added', async () => {
+  const handlers = new Map()
+  // Only npx and uvx entries, so that the answer is the same on every system (a binary is for one system).
+  const registry = { agents: [
+    { id: 'gemini', name: 'Gemini CLI', description: 'Google\'s official CLI for Gemini', distribution: { npx: { package: '@google/gemini-cli@0.70.0', args: ['--acp'] } } },
+    { id: 'amp-acp', name: 'Amp', description: 'Amp, through its ACP adapter', distribution: { npx: { package: '@sourcegraph/amp-acp@1.2.3' } } },
+    { id: 'mistral-vibe', name: 'Mistral Vibe', description: 'Mistral\'s coding agent', distribution: { uvx: { package: 'mistral-vibe', args: ['--acp'] } } }
+  ] }
+  let online = true
+  const asked = []
+  const hub = T.registerRunners({
+    handle: (channel, listener) => handlers.set(channel, listener),
+    send: () => {},
+    titles: memoryTitles(),
+    pickFolder: async () => null,
+    version: '9.9.9',
+    backends: [new FakeBackend('claude')],
+    added: () => [{ id: 'acp-gemini-cli', name: 'Gemini CLI', command: 'gemini --acp' }],
+    saveAdded: async () => {},
+    catalog: {
+      registry: async () => { asked.push('registry'); if (!online) throw new Error('offline'); return registry },
+      whereIs: async (program) => (['aider', 'npx'].includes(program) ? `/usr/bin/${program}` : null)
+    }
+  })
+  try {
+    let catalog = await handlers.get('runners:agent-catalog')()
+    assert.equal(catalog.registry, true)
+    assert.deepEqual(catalog.found.map((choice) => [choice.name, choice.command]), [['Aider', 'aider']])
+    assert.deepEqual(catalog.more.map((choice) => [choice.name, choice.command, choice.needs]), [
+      ['Amp', 'npx -y @sourcegraph/amp-acp@1.2.3', undefined],
+      ['Mistral Vibe', 'uvx mistral-vibe --acp', 'uvx']
+    ], 'Gemini CLI was added; Mistral Vibe needs uvx, which is not here')
+    online = false
+    catalog = await handlers.get('runners:agent-catalog')()
+    assert.deepEqual([catalog.registry, catalog.found.map((choice) => choice.name), catalog.more], [false, ['Aider'], []], 'offline: what is found here, and none of the rest')
+    assert.deepEqual(asked, ['registry', 'registry'])
+  } finally {
+    await hub.dispose()
+  }
+})
+
+test('an agent the person added can have its command edited: the same agent, with the name and the way it runs kept', async () => {
+  const handlers = new Map()
+  const goose = { id: 'acp-goose', name: 'Goose', command: 'goose acp' }
+  const aider = { id: 'term-aider', name: 'Aider', command: 'aider --message {task}' }
+  let saved = [goose, aider]
+  const hub = T.registerRunners({
+    handle: (channel, listener) => handlers.set(channel, listener),
+    send: () => {},
+    titles: memoryTitles(),
+    pickFolder: async () => null,
+    version: '9.9.9',
+    backends: [new FakeBackend('claude')],
+    added: () => saved,
+    saveAdded: async (agents) => { saved = agents }
+  })
+  try {
+    // The window is told each added agent's command, to show it for editing.
+    let status = await handlers.get('runners:status')()
+    assert.deepEqual(status.filter((agent) => agent.added).map((agent) => [agent.runner, agent.command]), [['acp-goose', 'goose acp'], ['term-aider', 'aider --message {task}']])
+    assert.equal(status.find((agent) => agent.runner === 'claude').command, undefined, 'an agent Togle finds by itself has none to edit')
+    status = await handlers.get('runners:edit-agent')('acp-goose', '  goose acp --verbose  ')
+    assert.deepEqual(saved, [{ ...goose, command: 'goose acp --verbose' }, aider], 'saved trimmed, in the same place, the other one untouched')
+    assert.deepEqual(status.filter((agent) => agent.added).map((agent) => [agent.runner, agent.name, agent.command]), [['acp-goose', 'Goose', 'goose acp --verbose'], ['term-aider', 'Aider', 'aider --message {task}']])
+    assert.equal(hub.has('acp-goose'), true, 'it is still one of Togle\'s agents')
+    assert.equal(hub.nameOf('acp-goose'), 'Goose')
+    status = await handlers.get('runners:edit-agent')('term-aider', 'aider --yes --message {task}')
+    assert.equal(saved[1].command, 'aider --yes --message {task}')
+    assert.equal(status.find((agent) => agent.runner === 'term-aider').command, 'aider --yes --message {task}')
+    // What would run it the other way is refused, and nothing is saved: the agent is removed and added again for that.
+    const before = JSON.stringify(saved)
+    await assert.rejects(handlers.get('runners:edit-agent')('acp-goose', 'goose serve'), /would run in a terminal, not as a conversation\. Remove it and add it again/)
+    await assert.rejects(handlers.get('runners:edit-agent')('term-aider', 'aider --acp'), /would be a conversation, not a terminal\. Remove it and add it again/)
+    await assert.rejects(handlers.get('runners:edit-agent')('acp-goose', 'goose {task}'), /would run in a terminal/, '{task} makes any command a terminal one')
+    // The same checks as when it was added, and only an added agent.
+    await assert.rejects(handlers.get('runners:edit-agent')('acp-goose', 'goose\nacp'), /one line/)
+    await assert.rejects(handlers.get('runners:edit-agent')('acp-goose', '   '), /command/i)
+    await assert.rejects(handlers.get('runners:edit-agent')('claude', 'claude acp'), /not on Togle’s lists/)
+    await assert.rejects(handlers.get('runners:edit-agent')('acp-nope', 'goose acp'), /not on Togle’s lists/)
+    await assert.rejects(handlers.get('runners:edit-agent')(5, 'goose acp'), /not on Togle’s lists/)
+    assert.equal(JSON.stringify(saved), before, 'a refused edit saves nothing')
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('an agent Togle finds by itself can be taken off its lists, stays listed as removed, and is added back with its tasks', async () => {
   assert.deepEqual(T.hiddenAgentsFrom(['claude', 'claude', 'acp-goose', 'hermes', 3, null]), ['claude', 'hermes'], 'each agent Togle knows, once')
   assert.deepEqual(T.hiddenAgentsFrom('nope'), [])

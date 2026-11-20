@@ -1,7 +1,7 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { SettingsPatch } from '@shared/api'
 import type { AIProfile, ApiConnection, LocalModelId, LocalSpeechState, ModelOption, Settings, SttStatus, SubscriptionAccount } from '@shared/types'
-import { runsInTerminal, type RunnerStatus } from '@shared/runner'
+import { runsInTerminal, type AgentCatalog, type AgentChoice, type RunnerStatus } from '@shared/runner'
 import { CALL_APPS, isCallAppMode, type CallApp, type CallAppMode } from '@shared/call-apps'
 import { localModelsFor, PARAKEET_LANGUAGES, SPEECH_LANGUAGES, speechLanguageCode, speechLanguageName } from '@shared/speech'
 import { voiceAccountId } from '@shared/dictation'
@@ -364,6 +364,8 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
   const [found, setFound] = useState<RunnerStatus[] | null>(() => keptAnswer<RunnerStatus[]>(AGENTS_FOUND) ?? null)
   const take = (list: RunnerStatus[]): void => { keepAnswer(AGENTS_FOUND, list); setFound(list) }
   const [adding, setAdding] = useOneOpen()
+  // The agent whose command is being edited, by its id.
+  const [editing, setEditing] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   useEffect(() => {
@@ -388,8 +390,13 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
             {/* Quiet, as the design draws the row (a name and how it stands): removing an agent is rare, and is not what the screen is about. */}
             {agent.removed
               ? <button className="quiet-action" aria-label={`Add back ${agent.name}`} disabled={!!busy} onClick={() => void restore(agent)}>{busy === agent.runner ? 'Adding…' : 'Add back'}</button>
-              : <button className="quiet-action" aria-label={`Remove ${agent.name}`} disabled={!!busy} onClick={() => { if (agent.added) void remove(agent); else setConfirming(agent.runner) }}>{busy === agent.runner ? 'Removing…' : 'Remove'}</button>}
+              : <>
+                  {/* An agent that was added can have its command changed later: a command from a list can be wrong for this computer. */}
+                  {agent.added && <button className="quiet-action" aria-label={`Edit ${agent.name}`} disabled={!!busy} onClick={() => { setError(''); setEditing(agent.runner) }}>Edit</button>}
+                  <button className="quiet-action" aria-label={`Remove ${agent.name}`} disabled={!!busy} onClick={() => { if (agent.added) void remove(agent); else setConfirming(agent.runner) }}>{busy === agent.runner ? 'Removing…' : 'Remove'}</button>
+                </>}
           </Row>
+          {editing === agent.runner && <EditAgent agent={agent} onSaved={(list) => { take(list); setEditing('') }} onCancel={() => setEditing('')} />}
           {confirming === agent.runner && (
             <div ref={openedInView} className="setting-detail" role="group" aria-label={`Remove ${agent.name} from Togle?`}>
               <p className="hint">Togle stops showing {agent.name}’s tasks. They keep running in {agent.name}, which stays installed, and you can add it back here.</p>
@@ -419,10 +426,77 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
           checked={settings.tasks.sortBySubject === true} onChange={(event) => void save({ tasks: { sortBySubject: event.target.checked } })} />
       </Row>
       {/* The button stays where it is while its form is open under it, over the page. */}
-      <div className="setting add-row"><button className="small" aria-expanded={adding} title="Any other agent: one that speaks ACP, or any that runs in a terminal" onClick={() => { setError(''); setAdding(!adding) }}>Add an agent</button></div>
-      {adding && <AddAgent onAdded={(list) => { take(list); setAdding(false) }} onCancel={() => setAdding(false)} />}
+      <div className="setting add-row"><button className="small" aria-expanded={adding} title="Pick an agent from a list, or add one by the command that starts it" onClick={() => { setError(''); setAdding(!adding) }}>Add another agent</button></div>
+      {adding && <AddAgent onList={take} onClose={() => setAdding(false)} />}
       {error && <p className="error" role="alert">{error}</p>}
     </Section>
+  )
+}
+
+/**
+ * Add another agent: a list to pick from, so that nobody has to know a command. The agents found on this computer come first, then
+ * more from the ACP registry (they start through npx or uvx, which fetch them the first time). Each has one Add button: Togle fills
+ * in the command, and the main process decides how it runs. A command typed in is under a link, for an agent that is not listed.
+ */
+function AddAgent({ onList, onClose }: { onList: (agents: RunnerStatus[]) => void; onClose: () => void }) {
+  const [catalog, setCatalog] = useState<AgentCatalog | null>(null)
+  const [byCommand, setByCommand] = useState(false)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  // What was added while the list is open leaves it, and the list stays for the next one.
+  const [taken, setTaken] = useState<string[]>([])
+  useEffect(() => {
+    let current = true
+    void api.agentCatalog().then((value) => { if (current) setCatalog(value) }, () => { if (current) setCatalog({ found: [], more: [], registry: false }) })
+    return () => { current = false }
+  }, [])
+  // The keys go to the first agent that can be added when the list arrives, and again after one is added (its row leaves, and the
+  // keys would be nowhere): the next one is a press away.
+  const firstAdd = useRef<HTMLButtonElement>(null)
+  const refocus = useRef(true)
+  useEffect(() => {
+    if (!refocus.current || busy || !catalog) return
+    refocus.current = false
+    firstAdd.current?.focus({ preventScroll: true })
+  }, [catalog, taken, busy])
+  if (byCommand) return <AddByCommand onAdded={(list) => { onList(list); onClose() }} onCancel={onClose} />
+  const add = (choice: AgentChoice): void => {
+    setBusy(choice.id); setError('')
+    void api.addCodingAgent(choice.name, choice.command).then((list) => { onList(list); refocus.current = true; setTaken((ids) => [...ids, choice.id]) }, (failure) => setError(errorText(failure))).finally(() => setBusy(''))
+  }
+  const found = catalog ? catalog.found.filter((choice) => !taken.includes(choice.id)) : []
+  const more = catalog ? catalog.more.filter((choice) => !taken.includes(choice.id)) : []
+  const first = [...found, ...more].find((choice) => !choice.needs)?.id
+  const rows = (choices: AgentChoice[]): ReactNode =>
+    choices.map((choice) => (
+      <div key={choice.id} className="agent-choice">
+        <AgentAvatar runner={`acp-${choice.id}`} name={choice.name} />
+        <span className="agent-choice-text"><b>{choice.name}</b><span className="cut">{choice.description}</span></span>
+        <button ref={choice.id === first ? firstAdd : undefined} type="button" className="small" aria-label={`Add ${choice.name}`} disabled={!!busy || !!choice.needs} title={choice.needs ? `Needs ${choice.needs === 'npx' ? 'Node.js (npx)' : 'uv (uvx)'} on this computer` : `Starts with: ${choice.command}`} onClick={() => add(choice)}>{busy === choice.id ? 'Adding…' : 'Add'}</button>
+      </div>
+    ))
+  return (
+    <FormOver className="add-agent pick" label="Add another agent" busy={!!busy} onClose={onClose} onSubmit={() => undefined}>
+      <span className="tasks-label">Add another agent</span>
+      {catalog === null ? <p className="hint">Looking for agents…</p> : (
+        <>
+          <span className="tasks-label">Found on this computer</span>
+          {found.length ? <div className="agent-choices">{rows(found)}</div> : <p className="hint">No other agent that Togle knows how to start was found here.</p>}
+          <span className="tasks-label">More agents</span>
+          {!catalog.registry
+            ? <p className="hint">The list of more agents could not be loaded. Check the connection, or add one by its command.</p>
+            : more.length
+              ? <>
+                  <div className="agent-choices">{rows(more)}</div>
+                  <p className="hint">These start with npx or uvx, which fetch the agent the first time.</p>
+                </>
+              : <p className="hint">Nothing more to add from the list.</p>}
+        </>
+      )}
+      <p className="hint">Something else? <button type="button" className="quiet-action" onClick={() => setByCommand(true)}>Add by command…</button></p>
+      <div className="row"><button type="button" className="ghost" onClick={onClose}>Close</button></div>
+      {error && <p className="error" role="alert">{error}</p>}
+    </FormOver>
   )
 }
 
@@ -430,22 +504,48 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
  * The name an agent is shown by and the command that starts it, as its own docs give it, and nothing else: a command for ACP
  * is talked to directly and any other runs in a terminal of Togle's own (the main process tells which).
  */
-function AddAgent({ onAdded, onCancel }: { onAdded: (agents: RunnerStatus[]) => void; onCancel: () => void }) {
+function AddByCommand({ onAdded, onCancel }: { onAdded: (agents: RunnerStatus[]) => void; onCancel: () => void }) {
   const [name, setName] = useState('')
   const [command, setCommand] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   return (
-    <FormOver className="add-agent" label="Add an agent" busy={busy} onClose={onCancel} onSubmit={() => {
+    <FormOver className="add-agent" label="Add an agent by its command" busy={busy} onClose={onCancel} onSubmit={() => {
       setBusy(true); setError('')
       void api.addCodingAgent(name, command).then(onAdded, (failure) => setError(errorText(failure))).finally(() => setBusy(false))
     }}>
-      <span className="tasks-label">Add an agent</span>
+      <span className="tasks-label">Add an agent by its command</span>
       <Field name="Name"><input aria-label="Agent name" required maxLength={40} value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /></Field>
       <Field name="Command"><input aria-label="Command" required maxLength={500} spellCheck={false} value={command} disabled={busy} onChange={(event) => setCommand(event.target.value)} /></Field>
-      <p className="hint">Togle runs it in a terminal of its own, where you see it and answer it. {'{task}'} stands for the task's words. A command for ACP, such as gemini --experimental-acp, is talked to directly, and Togle shows its conversation.</p>
+      <p className="hint">Togle runs it in a terminal of its own, where you see it and answer it. {'{task}'} stands for the task's words. A command for ACP, such as gemini --acp, is talked to directly, and Togle shows its conversation.</p>
       <div className="row">
         <button className="primary" disabled={busy || !name.trim() || !command.trim()}>{busy ? 'Adding…' : 'Add'}</button>
+        <button type="button" className="ghost" disabled={busy} onClick={onCancel}>Cancel</button>
+      </div>
+      {error && <p className="error" role="alert">{error}</p>}
+    </FormOver>
+  )
+}
+
+/**
+ * Edit, on an agent that was added: its command, and nothing else. Its name stays, and so does how it runs (a conversation or a
+ * terminal): a command that would run it the other way is refused, and the agent is added again. Its tasks that run stop.
+ */
+function EditAgent({ agent, onSaved, onCancel }: { agent: RunnerStatus; onSaved: (agents: RunnerStatus[]) => void; onCancel: () => void }) {
+  const [command, setCommand] = useState(agent.command ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  return (
+    <FormOver className="add-agent edit-agent" label={`Edit ${agent.name}`} busy={busy} onClose={onCancel} onSubmit={() => {
+      setBusy(true); setError('')
+      void api.editCodingAgent(agent.runner, command).then(onSaved, (failure) => setError(errorText(failure))).finally(() => setBusy(false))
+    }}>
+      <span className="tasks-label">Edit {agent.name}</span>
+      <Field name="Name"><span className="field-fixed">{agent.name}</span></Field>
+      <Field name="Command"><input aria-label="Command" required maxLength={500} spellCheck={false} value={command} disabled={busy} onChange={(event) => setCommand(event.target.value)} /></Field>
+      <p className="hint">Tasks running in it will stop. A command with acp in it is talked to directly, and Togle shows its conversation. Any other command runs in a terminal of Togle’s own.</p>
+      <div className="row">
+        <button className="primary" disabled={busy || !command.trim() || command.trim() === agent.command}>{busy ? 'Saving…' : 'Save'}</button>
         <button type="button" className="ghost" disabled={busy} onClick={onCancel}>Cancel</button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}

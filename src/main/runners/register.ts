@@ -4,6 +4,7 @@ import path from 'node:path'
 import { addedAgentProblem, agentIdOf, KNOWN_AGENTS, runsInTerminal, type AddedAgent, type RunnerKind, type RunnerStatus, type StartRequest, type TaskView } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
 import { AcpBackend, commandIsAcp, commandWords, whereIs } from './acp'
+import { agentCatalog, fetchRegistry } from './agent-catalog'
 import { ClaudeBackend } from './claude'
 import { CodexBackend } from './codex'
 import { HermesBackend } from './hermes'
@@ -60,6 +61,8 @@ export interface RunnerDeps {
   /** The agents the person added (any that speaks ACP), and keeping a changed list. */
   added?(): AddedAgent[]
   saveAdded?(agents: AddedAgent[]): Promise<void>
+  /** What Add another agent reads: the ACP registry (from the network when left out) and where a program is on this computer. */
+  catalog?: { registry?(): Promise<unknown>; whereIs?(program: string): Promise<string | null> }
   /** The agents Togle finds by itself that the person took off its lists, and keeping a changed list. */
   hidden?(): string[]
   saveHidden?(ids: string[]): Promise<void>
@@ -125,10 +128,23 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   void hub.restore()
   const { handle } = deps
   // What Togle works with, and the agents it finds that were taken off its lists, so that Settings can add them back.
-  const statusOf = async (): Promise<RunnerStatus[]> => [
-    ...(await hub.status()),
-    ...hidden().filter((runner) => runner in KNOWN_AGENTS && !hub.has(runner)).map((runner): RunnerStatus => ({ runner, name: KNOWN_AGENTS[runner], installed: false, removed: true }))
-  ]
+  const statusOf = async (): Promise<RunnerStatus[]> => {
+    const added = deps.added?.() ?? []
+    // An added agent says its command, so that its Edit form can show it.
+    const listed = (await hub.status()).map((status) => {
+      const own = status.added ? added.find((agent) => agent.id === status.runner) : undefined
+      return own ? { ...status, command: own.command } : status
+    })
+    // The added ones keep the order they were added in, whatever order their programs were started in (an edit starts its again,
+    // after the others): they take the places they had, in the order of the saved list.
+    const places = listed.flatMap((status, at) => (status.added ? [at] : []))
+    const inOrder = listed.filter((status) => status.added).sort((a, b) => added.findIndex((agent) => agent.id === a.runner) - added.findIndex((agent) => agent.id === b.runner))
+    places.forEach((at, n) => { listed[at] = inOrder[n] })
+    return [
+      ...listed,
+      ...hidden().filter((runner) => runner in KNOWN_AGENTS && !hub.has(runner)).map((runner): RunnerStatus => ({ runner, name: KNOWN_AGENTS[runner], installed: false, removed: true }))
+    ]
+  }
   handle('runners:status', () => statusOf())
   handle('runners:list', () => hub.list())
   handle('runners:detail', (key) => hub.detail(word(key, 'The task')))
@@ -192,6 +208,27 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     const agent: AddedAgent = { id, name: given, command: (command as string).trim() }
     await deps.saveAdded?.([...added, agent])
     hub.addBackend(addedBackend(agent, deps.version, told))
+    return statusOf()
+  })
+  // Settings → Agents → Add another agent: the agents on this computer and the ones of the ACP registry, with their commands.
+  handle('runners:agent-catalog', () => agentCatalog({ added: deps.added?.() ?? [], fetchRegistry: deps.catalog?.registry ?? fetchRegistry, ...(deps.catalog?.whereIs ? { whereIs: deps.catalog.whereIs } : {}) }))
+  // Edit, on an agent the person added: its command and nothing else. It keeps its name and its id, so how it runs stays what it
+  // was: a command that would run it the other way (as a conversation, or in a terminal) is refused, and the agent is added again.
+  // Its tasks that run stop with its program, and stay in the list as stopped, as when it is removed.
+  handle('runners:edit-agent', async (id, command) => {
+    const added = deps.added?.() ?? []
+    const agent = typeof id === 'string' ? added.find((one) => one.id === id) : undefined
+    if (!agent) throw new Error('That agent is not on Togle’s lists.')
+    const problem = addedAgentProblem(agent.name, command)
+    if (problem) throw new Error(problem)
+    const line = (command as string).trim()
+    if (commandIsAcp(line) === runsInTerminal(agent.id)) {
+      throw new Error(commandIsAcp(line) ? `With that command ${agent.name} would be a conversation, not a terminal. Remove it and add it again with that command.` : `With that command ${agent.name} would run in a terminal, not as a conversation. Remove it and add it again with that command.`)
+    }
+    const edited: AddedAgent = { ...agent, command: line }
+    await deps.saveAdded?.(added.map((one) => (one.id === agent.id ? edited : one)))
+    await hub.removeBackend(agent.id)
+    hub.addBackend(addedBackend(edited, deps.version, told))
     return statusOf()
   })
   // Remove: an agent the person added is forgotten. One Togle finds by itself is taken off its lists: it stays installed, its

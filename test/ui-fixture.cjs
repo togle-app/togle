@@ -320,7 +320,27 @@ module.exports = function install(fixture) {
   const knownAgents = () => (['tasks', 'confirm-names'].includes(fixture.scenario) || fixture.agentsFound ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []).map(agent => removedKnown.has(agent.runner) ? { runner: agent.runner, name: agent.name, installed: false, removed: true } : agent)
   api.runnerStatus = async () => [...knownAgents(), ...clone(addedAgents)]
   // The main process tells how it runs from the command: one for ACP is talked to, any other runs in a terminal (here: with acp in it, and no {task}).
-  api.addCodingAgent = async (name, command) => { record('addCodingAgent', [name, command]); const acp = !command.includes('{task}') && /(^|[^a-z])acp([^a-z]|$)/i.test(command); addedAgents.push({ runner: (acp ? 'acp-' : 'term-') + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, installed: true, added: true }); return api.runnerStatus() }
+  const acpCommand = command => !command.includes('{task}') && /(^|[^a-z])acp([^a-z]|$)/i.test(command)
+  api.addCodingAgent = async (name, command) => { record('addCodingAgent', [name, command]); addedAgents.push({ runner: (acpCommand(command) ? 'acp-' : 'term-') + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, installed: true, added: true, command }); return api.runnerStatus() }
+  // Edit: an added agent's command. How it runs stays: a command that would run it the other way is refused, as the main process does.
+  api.editCodingAgent = async (id, command) => {
+    record('editCodingAgent', [id, command])
+    const agent = addedAgents.find(item => item.runner === id)
+    if (!agent) throw new Error('That agent was not added in Togle.')
+    if (acpCommand(command) !== id.startsWith('acp-')) throw new Error(`With that command ${agent.name} would be ${acpCommand(command) ? 'a conversation, not a terminal' : 'a terminal, not a conversation'}. Remove it and add it again with that command.`)
+    agent.command = command
+    return api.runnerStatus()
+  }
+  // What Add another agent lists: some found here, more from the registry (that start through npx), or none of the more when offline.
+  api.agentCatalog = async () => {
+    record('agentCatalog', [])
+    const taken = name => addedAgents.some(agent => agent.name === name)
+    const found = [{ id: 'gemini', name: 'Gemini CLI', description: 'Google\'s official CLI for Gemini', command: 'gemini --acp' }, { id: 'aider', name: 'Aider', description: 'AI pair programming in your terminal', command: 'aider' }]
+    const more = [{ id: 'goose', name: 'goose', description: 'A local, extensible, open source AI agent', command: 'npx -y goose-acp@1.0.0' }, { id: 'opencode', name: 'OpenCode', description: 'The open source coding agent', command: 'npx -y opencode-ai@1.0.0 acp' }, { id: 'mistral-vibe', name: 'Mistral Vibe', description: 'Mistral\'s coding agent', command: 'uvx mistral-vibe --acp', needs: 'uvx' }]
+    // (`fixture.catalogMany`: the registry's real length, a few dozen, so that its list has to scroll.)
+    const extra = fixture.catalogMany ? Array.from({ length: 24 }, (_, n) => ({ id: 'extra-' + n, name: 'Extra agent ' + (n + 1), description: 'One more agent of the list, with a line about it that is long enough to be cut off at the end of its row', command: 'npx -y extra-acp-' + n + '@1.0.0' })) : []
+    return clone({ found: found.filter(choice => !taken(choice.name)), more: fixture.catalogOffline ? [] : [...more, ...extra].filter(choice => !taken(choice.name)), registry: !fixture.catalogOffline })
+  }
   api.removeCodingAgent = async id => { record('removeCodingAgent', [id]); if (['claude', 'codex', 'hermes'].includes(id)) removedKnown.add(id); else addedAgents.splice(addedAgents.findIndex(agent => agent.runner === id), 1); return api.runnerStatus() }
   api.restoreCodingAgent = async id => { record('restoreCodingAgent', [id]); removedKnown.delete(id); return api.runnerStatus() }
   // Reach (Togle Studio), when a check asks for it: this computer, a MacBook and a server whose task waits on a command.
@@ -584,6 +604,9 @@ module.exports = function install(fixture) {
     giveFails: (key, problem) => { fixture.giveFails = { ...(fixture.giveFails ?? {}), [key]: problem } },
     // Agents found on this computer, in a scenario that has none by default (Claude Code and Codex).
     agentsFound: on => { fixture.agentsFound = on },
+    // The registry of more agents cannot be reached (no connection): Add another agent lists only what is found here.
+    catalogOffline: on => { fixture.catalogOffline = on },
+    catalogMany: on => { fixture.catalogMany = on },
     // What the window is told of Claude Code's connection to Togle, changed by hand.
     failNextTask: () => { failTask = true },
     microphone: status => { microphone = clone(status); microphoneChanged() },

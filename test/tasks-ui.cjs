@@ -962,7 +962,7 @@ async function checkAgentSettings(T, agent) {
   await ui.wait("document.querySelectorAll('#settings-agents .setting').length===6")
   assert.deepEqual(await texts(ui, '#settings-agents .agent-label'), ['Claude Code', 'Codex', 'Hermes'])
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('#settings-agents .agent-name .av')].map(av=>av.dataset.agent+':'+(av.querySelector('svg')?'mark':av.textContent))"), ['claude:mark', 'codex:mark', 'hermes:mark'], 'each agent with the mark its maker made, not a letter')
-  assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add an agent'])
+  assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add another agent'])
   // Appearance: a switch of three, Dark chosen until it is changed; a press sends the choice.
   assert.deepEqual(await texts(ui, '#settings-appearance [role=radiogroup] button'), ['Light', 'Dark', 'System'])
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('#settings-appearance [role=radio]')].map(b=>b.getAttribute('aria-checked'))"), ['false', 'true', 'false'], 'dark until the person chooses')
@@ -1072,17 +1072,20 @@ async function checkAgentSettings(T, agent) {
     // A form to type in (an agent to add, a key) is a dialog over the window: every row of the page keeps its exact place,
     // and the button that opened it stays. It once took the place of its button, moved its group and pushed the others.
     const before = await ui.evaluate(rows)
-    await ui.evaluate("(()=>{const b=[...document.querySelectorAll('#settings-agents button')].find(b=>b.textContent.trim()==='Add an agent');b.focus();b.click()})()")
+    await ui.evaluate("(()=>{const b=[...document.querySelectorAll('#settings-agents button')].find(b=>b.textContent.trim()==='Add another agent');b.focus();b.click()})()")
     await ui.wait("!!document.querySelector('form.add-agent')")
+    // The list of agents arrives a moment later (the dialog opens at once, with "Looking for agents…").
+    await ui.wait("!!document.querySelector('form.add-agent .agent-choice')")
     assert.deepEqual(await ui.evaluate(rows), before, 'every row stays where it was when the form that adds an agent opens at ' + width)
     assert.equal(await ui.evaluate(dialog('form.add-agent')), true, 'the form that adds an agent is a dialog in the middle of the window at ' + width)
-    assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Agent name', 'the keys go to its first field')
-    // The keys stay in the form: Tab from its last button goes to its first field, not to a row under the form.
+    // The keys go to the first agent to add: it is a list to pick from, with nothing to type.
+    await ui.wait("document.activeElement?.getAttribute('aria-label')==='Add Gemini CLI'")
+    // The keys stay in the form: Tab from its last button goes to its first stop, not to a row under the form.
     await ui.evaluate("(()=>{const last=[...document.querySelectorAll('form.add-agent button')].filter(b=>!b.disabled).at(-1);last.focus();last.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}))})()")
-    assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Agent name', 'Tab past the last button comes back to the first field at ' + width)
+    assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Add Gemini CLI', 'Tab past the last button comes back to the first stop at ' + width)
     await ui.evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true}))")
-    assert.equal(await ui.evaluate("document.activeElement?.textContent"), 'Cancel', 'and Shift+Tab from the first field goes to the last button at ' + width)
-    await ui.evaluate("document.querySelector('form.add-agent input').focus()")
+    assert.equal(await ui.evaluate("document.activeElement?.textContent"), 'Close', 'and Shift+Tab from the first stop goes to the last button at ' + width)
+    await ui.evaluate("document.querySelector('form.add-agent .agent-choice button').focus()")
     assert.equal(await ui.evaluate("(()=>{const back=document.querySelector('form.add-agent').closest('.form-backdrop');return back.getAttribute('role')==='dialog'&&back.getAttribute('aria-modal')==='true'&&/rgba\\(8, 10, 14, 0\\.8/.test(getComputedStyle(back).backgroundColor)&&getComputedStyle(document.querySelector('.shell-content')).overflowY==='hidden'})()"), true, 'the window under the dialog is dimmed and does not scroll')
     // One form at a time: the key form closes the one that adds an agent, and nothing under it moves either.
     await ui.click('.ai-plan-other button', 'Use a key')
@@ -1098,16 +1101,22 @@ async function checkAgentSettings(T, agent) {
     assert.deepEqual(await ui.evaluate(rows), before, 'and closed, the page is as it was at ' + width)
   }
   // Escape gives the keys back to the button that opened the form.
-  await ui.evaluate("(()=>{const b=[...document.querySelectorAll('#settings-agents button')].find(b=>b.textContent.trim()==='Add an agent');b.focus();b.click()})()")
-  await ui.wait("!!document.querySelector('form.add-agent')")
+  await ui.evaluate("(()=>{const b=[...document.querySelectorAll('#settings-agents button')].find(b=>b.textContent.trim()==='Add another agent');b.focus();b.click()})()")
+  await ui.wait("!!document.querySelector('form.add-agent .agent-choice')")
   await ui.evaluate("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))")
   await ui.wait("!document.querySelector('form.add-agent')")
-  await ui.wait("document.activeElement?.textContent==='Add an agent'")
-  // In a low window the form opens under the window's edge: the page moves just far enough to show it whole, buttons and all.
+  await ui.wait("document.activeElement?.textContent==='Add another agent'")
+  // In a low window the list opens under the window's edge: it is a dialog that scrolls in the dimmed layer, and its Close button can be reached.
   ui.window.setContentSize(1024, 480)
   await ui.wait('innerHeight===480')
-  await ui.click('#settings-agents button', 'Add an agent')
-  await ui.wait("!!document.querySelector('form.add-agent')")
+  await ui.click('#settings-agents button', 'Add another agent')
+  await ui.wait("!!document.querySelector('form.add-agent .agent-choice')")
+  await ui.evaluate("[...document.querySelectorAll('form.add-agent button')].find(b=>b.textContent==='Close').scrollIntoView({block:'nearest'})")
+  assert.ok(await ui.evaluate("(()=>{const close=[...document.querySelectorAll('form.add-agent button')].find(b=>b.textContent==='Close').getBoundingClientRect();return close.bottom<=innerHeight+1&&close.top>=36})()"), 'the list that opens in a low window can be scrolled to its Close button')
+  // The form that adds an agent by its command opens in place of the list and fits: the page moves just far enough to show it whole, buttons and all.
+  await ui.click('form.add-agent button', 'Add by command…')
+  await ui.wait("!!document.querySelector('form.add-agent input[aria-label=Command]')")
+  assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Agent name', 'the keys go to its first field')
   assert.ok(await ui.evaluate("(()=>{const form=document.querySelector('form.add-agent').getBoundingClientRect();return form.height<innerHeight-36&&form.bottom<=innerHeight+1&&form.top>=36})()"), 'the form that opens in a low window is in view')
   await ui.click('form.add-agent button', 'Cancel')
   await ui.wait("!document.querySelector('form.add-agent')")
