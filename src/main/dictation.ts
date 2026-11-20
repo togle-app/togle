@@ -16,7 +16,8 @@ interface DictationOptions {
   now?: () => number
   completed?(receipt: DictationReceipt, speech: DictationEngine): void
   /** Puts words on the clipboard, for a box Togle cannot type into. */
-  copy?(text: string): void
+  copy?(text: string): void | Promise<void>
+  copyPicture?(file: string, words: string, terminal?: boolean): Promise<void>
 }
 interface Job {
   id: string; target: DictationTarget; controller: AbortController; queue: Promise<void>; parts: string[]
@@ -26,6 +27,7 @@ interface Job {
   speech: DictationEngine
   /** F8 Show: the picture saved for this dictation, which lands with its words. */
   picture?: string
+  show?: { target: Promise<DictationTarget>; picture: Promise<string | null> }
 }
 
 /** Dictation is independent of agents and calls. A cancelled job can never deliver into a later target. */
@@ -46,15 +48,20 @@ export class Dictation {
     if (this.active) return
     await this.start()
   }
-  async start(hold = false): Promise<void> {
+  async start(hold = false, show?: Job['show']): Promise<void> {
     if (this.active) return
     const id = randomUUID(), start = this.now()
     this.job?.controller.abort(); this.job?.speech.dispose?.()
     this.job = undefined
     let speech: DictationEngine
     try { speech = this.options.speech() }
-    catch (error) { this.set({ phase: 'error', id, text: undefined, message: (error as Error).message, preparing: false }); return }
-    const job: Job = this.job = { id, speech, target: { label: 'Your text box' }, controller: new AbortController(), queue: Promise.resolve(), targetReady: Promise.resolve(), parts: [], samples: 0, pending: 0, start }
+    catch (error) {
+      const message = (error as Error).message
+      this.set({ phase: 'error', id, show: !!show, picture: undefined, text: undefined, outcome: undefined, message, preparing: false })
+      if (show) void this.recoverPicture(id, show, message)
+      return
+    }
+    const job: Job = this.job = { id, speech, show, target: { label: 'Your text box' }, controller: new AbortController(), queue: Promise.resolve(), targetReady: Promise.resolve(), parts: [], samples: 0, pending: 0, start }
     this.intervals.push({ start }); this.intervals = this.intervals.slice(-32)
     // Capture immediately. Setup runs in parallel; the bounded audio queue preserves early words.
     // Install the readiness barrier before notifying the renderer so even an immediate chunk waits for it.
@@ -66,15 +73,17 @@ export class Dictation {
     }).catch(error => {
       if (this.job === job && !job.controller.signal.aborted) this.failed(id, error?.name === 'TimeoutError' ? 'Speech setup took too long. Check your connection or subscription in Settings.' : (error as Error).message)
     })
-    this.set({ phase: 'recording', id, hold, streaming: !!speech.streaming, text: undefined, outcome: undefined, message: undefined, destination: undefined, preparing: true, microphoneId: this.options.microphone?.() || '', startedAt: start, inCall: this.options.inCall() })
-    this.timer = setTimeout(() => this.stop(), 120_000)
-    this.timer.unref?.()
+    this.set({ phase: 'recording', id, hold, show: !!show, picture: undefined, streaming: !!speech.streaming, text: undefined, outcome: undefined, message: undefined, destination: undefined, preparing: true, microphoneId: this.options.microphone?.() || '', startedAt: start, inCall: this.options.inCall() })
+    if (!show) {
+      this.timer = setTimeout(() => this.stop(), 120_000)
+      this.timer.unref?.()
+    }
     await Promise.all([job.queue, job.targetReady])
   }
   private captureTarget(job: Job): Promise<void> {
     const revision = job.targetRevision = (job.targetRevision ?? 0) + 1
     job.targetResolved = false
-    return abortable(Promise.resolve().then(() => { job.controller.signal.throwIfAborted(); return this.options.target.capture() }), job.controller.signal)
+    return abortable(job.show?.target ?? Promise.resolve().then(() => { job.controller.signal.throwIfAborted(); return this.options.target.capture() }), job.controller.signal)
       .catch(() => ({ label: 'Your text box', reason: 'Automatic insertion is unavailable. Your text will be ready to copy.' }))
       .then(target => {
         if (this.job !== job || job.controller.signal.aborted || job.targetRevision !== revision) return
@@ -103,7 +112,7 @@ export class Dictation {
     const job = this.job
     if (!job || id !== job.id || !['recording', 'finishing'].includes(this.current.phase) || job.finalizing) return
     if (!(pcm instanceof Float32Array) || pcm.length > 30 * 16000 || !pcm.length || !pcm.every(Number.isFinite)) return
-    if (job.samples + pcm.length > 125 * 16000 || job.pending >= (job.speech.streaming ? 150 : 8)) { this.failed(id, 'Dictation could not keep up. Try a shorter phrase.'); return }
+    if ((!job.show && job.samples + pcm.length > 125 * 16000) || job.pending >= (job.speech.streaming ? 150 : 8)) { this.failed(id, 'Dictation could not keep up. Try a shorter phrase.'); return }
     job.samples += pcm.length; job.pending++
     const input = pcm.slice()
     job.queue = job.queue.then(async () => {
@@ -114,14 +123,6 @@ export class Dictation {
     }).catch(error => {
       if (this.job === job && !job.controller.signal.aborted) { job.failed = (error as Error).message; this.failed(id, job.failed) }
     }).finally(() => { job.pending-- })
-  }
-  /** The box the dictation going on now noted, if it noted one. */
-  noted(): DictationTarget | undefined {
-    return this.job?.target
-  }
-  /** F8 Show: the picture that goes with the words being said now. */
-  attachPicture(file: string): void {
-    if (this.job && this.current.phase === 'recording') this.job.picture = file
   }
   async finish(id: string): Promise<void> {
     const job = this.job
@@ -134,9 +135,20 @@ export class Dictation {
       catch (error) { this.failed(id, (error as Error).message); return }
     }
     if (this.job !== job || job.controller.signal.aborted) return
+    if (job.show) {
+      const file = await job.show.picture
+      if (this.job !== job || job.controller.signal.aborted) return
+      if (!file) { this.cancel(); return }
+      job.picture = file
+    }
     const raw = job.parts.join(' ').trim()
     // A picture with nothing said still lands.
-    if (!raw && job.picture) { await this.deliverPicture(job); return }
+    if (!raw && job.picture) {
+      job.speech.dispose?.()
+      await job.targetReady
+      if (this.job === job && !job.controller.signal.aborted) await this.deliverShow(id, job.target, job.picture, '')
+      return
+    }
     if (!raw) {
       job.speech.dispose?.()
       this.set({ phase: 'ready', message: 'No speech heard. Try again.', text: undefined })
@@ -158,55 +170,92 @@ export class Dictation {
     if (this.job !== job || job.controller.signal.aborted) return
     job.speech.dispose?.()
     this.set({ text, lastText: text })
-    // A window Togle cannot type into (one that runs as administrator, or any on a Wayland desktop or a Mac that has not
-    // allowed it yet): the words are copied, to paste there. Into a terminal as one line, as Togle types into one:
-    // pasted, each line would run as a command.
-    if (!job.target.token && job.target.copy && this.options.copy) {
+    if (job.picture) {
+      const inserted = await this.deliverShow(id, job.target, job.picture, text, job.speech.asHeard || asHeard)
+      if (this.job === job) this.receipt(job, raw, text, inserted ? 'inserted' : 'ready')
+      return
+    }
+    let insertionProblem: string | undefined
+    if (job.target.token) {
+      this.set({ phase: 'inserting', message: 'Entering text…' })
+      let result: DictationInsertion
+      try { result = await this.options.target.insert(job.target.token, text) }
+      catch { result = { inserted: false, message: 'Could not confirm insertion. Check your text box before pasting.' } }
+      if (this.job !== job) return
+      if (result.inserted) {
+        this.set({ phase: 'done', outcome: 'inserted', message: result.message || job.speech.asHeard || asHeard || (job.original ? 'Original words entered' : 'Text entered') })
+        this.receipt(job, raw, text, 'inserted')
+        return
+      }
+      insertionProblem = result.message || 'The original text field is unavailable.'
+    }
+    // An unavailable destination gets one clipboard copy. Terminal pastes must stay on one line.
+    if (this.options.copy) {
       const words = job.target.terminal ? text.replace(/\s*[\r\n]+\s*/g, ' ').replace(/\t/g, ' ').trim() : text
       const why = job.target.copyReason ?? "that window runs as administrator, so Togle can't type there."
       try {
-        this.options.copy(words)
-        this.set({ phase: 'done', outcome: 'copied', text: words, lastText: words, message: `Copied: ${why} Press ${process.platform === 'darwin' ? '⌘V' : 'Ctrl+V'} to paste.` })
+        await this.options.copy(words)
+        if (this.job !== job) return
+        const paste = `Press ${process.platform === 'darwin' ? '⌘V' : 'Ctrl+V'} to paste.`
+        const message = job.target.copy ? `Copied: ${why} ${paste}` : insertionProblem ? 'Check the original field before pasting. ' + paste : paste
+        this.set({ phase: job.target.copy ? 'done' : 'ready', outcome: 'copied', text: words, lastText: words, message })
       } catch {
-        this.set({ phase: 'ready', text: words, lastText: words, message: job.target.copyReason
+        if (this.job !== job) return
+        this.set({ phase: 'ready', text: words, lastText: words, message: !job.target.copy || job.target.copyReason
           ? "The clipboard didn't take the words. Copy them from here."
           : "That window runs as administrator, so Togle can't type there, and the clipboard didn't take the words. Copy them from here." })
       }
       this.receipt(job, raw, words, 'ready')
       return
     }
-    if (!job.target.token) { this.set({ phase: 'ready', message: job.target.reason || 'Text is ready. Copy it into your text box.' }); this.receipt(job, raw, text, 'ready'); return }
-    this.set({ phase: 'inserting', message: 'Entering text…' })
-    // Once insertion begins it is a single commit, never retried by a late callback or another shortcut.
+    this.set({ phase: 'ready', message: insertionProblem || job.target.reason || 'Text is ready. Copy it into your text box.' })
+    this.receipt(job, raw, text, 'ready')
+  }
+  /** Settle one F8 capture once. An unavailable field leaves the complete result on the clipboard and in the bar. */
+  private async deliverShow(id: string, target: DictationTarget, file: string, words: string, enteredMessage?: string, speechError?: string): Promise<boolean> {
+    if (this.current.id !== id) return false
+    this.set({ phase: 'inserting', message: target.token ? 'Inserting screenshot…' : 'Copying screenshot…' })
+    let pictureEntered = false
+    if (target.token && this.options.target.insertPicture && !(speechError && words)) {
+      try {
+        pictureEntered = (await this.options.target.insertPicture(target.token, file)).inserted
+        if (this.current.id !== id) return false
+        if (pictureEntered && (!words || (await this.options.target.insert(target.token, words)).inserted)) {
+          if (this.current.id !== id) return false
+          this.set({ phase: 'done', outcome: 'inserted', message: [enteredMessage || (words ? 'Screenshot and text entered' : 'Picture entered'), speechError].filter(Boolean).join('. ') })
+          return true
+        }
+      } catch { /* The saved capture is still available when the destination disappears. */ }
+    }
+    if (this.current.id !== id) return false
+    let copied = false
     try {
-      // F8 Show: the picture first, then the words, in the same box. A picture that did not go in keeps the words back too.
-      if (job.picture) {
-        const shown = await this.pictureInto(job)
-        if (this.job !== job) return
-        if (!shown.inserted) { this.set({ phase: 'ready', message: shown.message || 'The picture could not go in. It is saved; your words are ready to copy.' }); this.receipt(job, raw, text, 'ready'); return }
-      }
-      const result = await this.options.target.insert(job.target.token, text)
-      if (this.job !== job) return
-      // With no AI to clean the words up, they went in as heard, and the bar says why.
-      this.set({ phase: result.inserted ? 'done' : 'ready', outcome: result.inserted ? 'inserted' : undefined, message: result.inserted ? result.message || job.speech.asHeard || asHeard || (job.original ? 'Original words entered' : 'Text entered') : result.message || 'Text ready. The destination changed; copy it where you need it.' })
-      this.receipt(job, raw, text, result.inserted ? 'inserted' : 'ready')
-    } catch { if (this.job === job) { this.set({ phase: 'ready', message: 'Could not confirm insertion. Check your text box before copying.' }); this.receipt(job, raw, text, 'ready') } }
+      if (this.options.copyPicture) { await this.options.copyPicture(file, words, target.terminal); copied = true }
+    } catch { /* The bar keeps the same file and words for a retry. */ }
+    if (this.current.id !== id) return false
+    const paste = process.platform === 'darwin' ? '⌘V' : 'Ctrl+V'
+    const instruction = copied ? `Press ${paste} to paste.` : 'The clipboard is unavailable. Use Copy to try again.'
+    this.set({ phase: 'ready', picture: file, text: words || undefined, ...(words ? { lastText: words } : {}),
+      outcome: copied ? 'copied' : undefined, message: [pictureEntered ? 'The screenshot was already sent to the original field.' : '', speechError, instruction].filter(Boolean).join(' ') })
+    return false
   }
-  /** The picture into the box the dictation noted. */
-  private async pictureInto(job: Job): Promise<DictationInsertion> {
-    if (!job.target.token || !this.options.target.insertPicture) return { inserted: false, message: `The picture is saved at ${job.picture}.` }
-    try { return await this.options.target.insertPicture(job.target.token, job.picture!) }
-    catch (error) { return { inserted: false, message: (error as Error).message } }
+  /** A manual copy dismisses this result only once the clipboard accepts both parts. */
+  async copyHeldPicture(): Promise<void> {
+    const { id, picture, text } = this.current
+    if (this.current.phase !== 'ready' || !picture || !this.options.copyPicture) throw new Error('There is no screenshot ready to copy.')
+    this.set({ phase: 'inserting', message: 'Copying screenshot…' })
+    try { await this.options.copyPicture(picture, text || '', this.job?.target.terminal) }
+    catch (error) {
+      if (this.current.id === id && this.current.picture === picture) this.set({ phase: 'ready', outcome: undefined, message: 'The clipboard is unavailable. Use Copy to try again.' })
+      throw error
+    }
+    if (this.current.id === id && this.current.picture === picture) this.set({ phase: 'done', picture: undefined, outcome: 'copied', message: 'Copied to clipboard.' })
   }
-  /** F8 Show with nothing said: only the picture goes in. */
-  private async deliverPicture(job: Job): Promise<void> {
-    job.speech.dispose?.()
-    await job.targetReady
-    if (this.job !== job || job.controller.signal.aborted) return
-    this.set({ phase: 'inserting', message: 'Putting the picture in…', text: undefined })
-    const shown = await this.pictureInto(job)
-    if (this.job !== job) return
-    this.set({ phase: shown.inserted ? 'done' : 'ready', outcome: shown.inserted ? 'inserted' : undefined, message: shown.inserted ? 'Picture entered' : shown.message || 'The picture could not go in. It is saved.' })
+  /** If speech fails, the second Show press can still deliver the finished screenshot and keep any partial words. */
+  private async recoverPicture(id: string, show: NonNullable<Job['show']>, message: string): Promise<void> {
+    const [file, target] = await Promise.all([show.picture, show.target])
+    if (!file || this.current.id !== id || this.current.phase !== 'error') return
+    await this.deliverShow(id, target, file, this.current.text || '', undefined, message)
   }
   private receipt(job: Job, originalText: string, text: string, outcome: DictationReceipt['outcome']): void {
     // History is outside the insertion path; saving can never delay delivery or retry insertion.
@@ -223,16 +272,21 @@ export class Dictation {
       this.set({ phase: 'done', outcome: 'copied', message: `Copied. Press ${process.platform === 'darwin' ? '⌘V' : 'Ctrl+V'} to paste.` })
     }
   }
+  pasted(id: string): void {
+    if (this.current.id === id && this.current.outcome === 'copied' && ['ready', 'done'].includes(this.current.phase)) this.dispose()
+  }
   copyFailed(id: string | undefined, text: string): void {
     if (!this.active && this.current.id === id && this.current.lastText === text) {
-      this.set({ phase: 'ready', text, message: 'Could not copy. Your text is still here; try again.' })
+      this.set({ phase: 'ready', outcome: undefined, text, message: 'Could not copy. Your text is still here; try again.' })
     }
   }
   failed(id: string, message: string): void {
-    if (!this.job || this.job.id !== id || !['recording', 'finishing'].includes(this.current.phase)) return
-    const text = this.job.parts.join(' ').trim()
-    this.job.controller.abort(); this.job.speech.dispose?.(); clearTimeout(this.timer); clearTimeout(this.captureDeadline); this.endInterval()
+    const job = this.job
+    if (!job || job.id !== id || !['recording', 'finishing'].includes(this.current.phase)) return
+    const text = job.parts.join(' ').trim()
+    job.controller.abort(); job.speech.dispose?.(); clearTimeout(this.timer); clearTimeout(this.captureDeadline); this.endInterval()
     this.set({ phase: 'error', message, preparing: false, ...(text ? { text, lastText: text } : {}) })
+    if (job.show) void this.recoverPicture(id, job.show, message)
   }
   cancel(): void {
     if (this.current.phase === 'inserting') return
@@ -242,6 +296,6 @@ export class Dictation {
   dispose(): void {
     this.job?.controller.abort(); this.job?.speech.dispose?.(); this.job = undefined
     clearTimeout(this.timer); clearTimeout(this.captureDeadline); this.endInterval()
-    this.set({ phase: 'idle', id: undefined, text: undefined, message: undefined, startedAt: undefined, preparing: false, outcome: undefined })
+    this.set({ phase: 'idle', id: undefined, show: false, picture: undefined, text: undefined, message: undefined, startedAt: undefined, preparing: false, outcome: undefined })
   }
 }

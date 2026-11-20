@@ -7,16 +7,18 @@ import { useHotkeys } from './hotkeys'
 import { Icon } from './Icon'
 import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, useKeptState, WaitLine } from './kept'
 import { AgentLead, AgentMark, agentOf } from './AgentMark'
+import { AccountLimits, AgentUsage, AgentUsageList } from './AgentUsage'
 import { DETAIL_MIN, LIST_COLLAPSE_BELOW, LIST_MAX, LIST_MIN, setPanes, usePanes } from './panes'
 import { PointMenu, type Point } from './PointMenu'
 import { ResizeHandle } from './ResizeHandle'
 import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { cleanQuote, withQuote, splitQuote } from '@shared/quote'
-import { splitPictures } from '@shared/pasted-pictures'
+import { attachmentCount, splitPictures } from '@shared/pasted-pictures'
 import { knownWith, placeSent, SENT_GIVE_UP_MS, tailDelivery, type SentMessage } from '@shared/sent-messages'
 import { messageOf, QuoteBar, QuoteBlock, QuoteFloat, selectionIn, useQuoteSpot, wordsOfMessage } from './Quote'
 import { RequestCard } from './RequestCard'
-import { PictureChips, pastedPictures, pathWords, useAttached } from './ReplyPictures'
+import { CodexQuestions } from './CodexQuestions'
+import { AttachButton, PictureChips, attachmentMessage, fileDrop, useAttached } from './ReplyPictures'
 import { StateMark, type MarkKind } from './StateMark'
 import { clock, currentPlan, lastTurnKey, PlanCard, promptsOf, Thread, turnStart, useHistory, useModel, type Sending } from './TaskThread'
 import { modelLine, modelTitle } from '@shared/model-words'
@@ -353,11 +355,14 @@ function useArrangement(): [TaskGroups, (change: GroupChange) => void] {
 
 /** The groups folded, kept in the page between runs, as the view picked for each task is. `fold` folds or opens one (by itself, the other of what it is). */
 const FOLDED = 'togle.foldedgroups'
+const groupFoldKey = (group: string, earlier: boolean): string => (earlier ? 'earlier:' : 'recent:') + group
 function useFolded(): [Set<string>, (key: string, fold?: boolean) => void] {
   const [folded, setFolded] = useState<Set<string>>(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(FOLDED) ?? '[]') as unknown
-      return new Set(Array.isArray(stored) ? stored.filter((key): key is string => typeof key === 'string') : [])
+      const keys = Array.isArray(stored) ? stored.filter((key): key is string => typeof key === 'string') : []
+      // Existing unscoped preferences applied to both sections.
+      return new Set(keys.flatMap(key => /^(recent|earlier):/.test(key) ? [key] : [groupFoldKey(key, false), groupFoldKey(key, true)]))
     } catch {
       return new Set()
     }
@@ -369,7 +374,7 @@ function useFolded(): [Set<string>, (key: string, fold?: boolean) => void] {
       if (next.has(key)) next.delete(key)
       else next.add(key)
       try {
-        localStorage.setItem(FOLDED, JSON.stringify([...next].slice(-200)))
+        localStorage.setItem(FOLDED, JSON.stringify([...next].slice(-400)))
       } catch {
         // Not kept: it opens unfolded next time.
       }
@@ -420,7 +425,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   const [arrangement, changeGroups] = useArrangement()
   const [folded, toggleFold] = useFolded()
   const [dragging, setDragging] = useState<string>()
-  const [dropAt, setDropAt] = useState<{ group: string; subject: string }>()
+  const [dropAt, setDropAt] = useState<{ group: string; subject: string; earlier: boolean }>()
   const [sprung, setSprung] = useState<Set<string>>(() => new Set())
   const [renaming, setRenaming] = useState<string>()
   const [rowMenu, setRowMenu] = useState<{ at: Point; key: string } | null>(null)
@@ -574,8 +579,8 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   }
   // A group and a subject take a dropped task (not Scheduled: only scheduled jobs are there). Folded, one opens when the
   // task stays over it a moment (and folds again if the task goes elsewhere), and one the task is dropped in opens for good.
-  const dropOn = (group: string, subject = '') => {
-    const here = (was: { group: string; subject: string } | undefined): boolean => was?.group === group && was.subject === subject
+  const dropOn = (group: string, earlier: boolean, subject = '') => {
+    const here = (was: typeof dropAt): boolean => was?.group === group && was.subject === subject && was.earlier === earlier
     return group === 'scheduled'
       ? {}
       : {
@@ -584,7 +589,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             event.preventDefault()
             event.stopPropagation()
             event.dataTransfer.dropEffect = 'move'
-            setDropAt((was) => (here(was) ? was : { group, subject }))
+            setDropAt((was) => (here(was) ? was : { group, subject, earlier }))
           },
           onDragLeave: (event: ReactDragEvent) => {
             if (!(event.currentTarget as Node).contains(event.relatedTarget as Node)) setDropAt((was) => (here(was) ? undefined : was))
@@ -598,14 +603,15 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             setSprung(new Set())
             if (!key) return
             dropTask(key, group, subject || undefined)
-            if (folded.has(group)) toggleFold(group, false)
-            if (subject && subjectFolded(arrangement, group, subject)) changeGroups({ kind: 'fold-subject', group, subject, folded: false })
+            toggleFold(groupFoldKey(group, earlier), false)
+            if (subject && subjectFolded(arrangement, group, subject, earlier)) changeGroups({ kind: 'fold-subject', group, subject, earlier, folded: false })
           }
         }
   }
   // Where a dragged task is, when that is a folded box or heading: it opens there after a moment.
-  const overSpot = dragging && dropAt ? spot(dropAt.group, dropAt.subject) : undefined
-  const overFolded = !!dropAt && (dropAt.subject ? subjectFolded(arrangement, dropAt.group, dropAt.subject) : folded.has(dropAt.group))
+  const overGroup = dropAt ? groupFoldKey(dropAt.group, dropAt.earlier) : ''
+  const overSpot = dragging && dropAt ? spot(overGroup, dropAt.subject) : undefined
+  const overFolded = !!dropAt && (dropAt.subject ? subjectFolded(arrangement, dropAt.group, dropAt.subject, dropAt.earlier) : folded.has(overGroup))
   useEffect(() => {
     if (!overSpot || !overFolded || sprung.has(overSpot)) return
     const timer = setTimeout(() => setSprung((was) => new Set(was).add(overSpot)), SPRING_MS)
@@ -656,10 +662,12 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
   // A subject heading in it folds the same way: it says how many tasks it holds and, folded, what waits, works and is new
   // in them; it still takes a dropped task, and it shows when the task open is in it. Its tasks hang from it on a line.
   const groupBox = (group: TaskGroup, old: boolean): ReactNode => {
-    const isFolded = folded.has(group.key) && !sprung.has(spot(group.key))
+    const foldKey = groupFoldKey(group.key, old)
+    const isFolded = folded.has(foldKey) && !sprung.has(spot(foldKey))
+    const over = overGroup === foldKey
     const hasOpen = isFolded && [...group.loose, ...group.subjects.flatMap((subject) => subject.tasks)].some((task) => task.key === selected)
     return (
-      <section key={group.key} className={`task-project ${group.kind}${isFolded ? ' folded' : ''}${dropAt?.group === group.key && !dropAt.subject ? ' drop' : ''}${hasOpen ? ' has-open' : ''}`} aria-label={group.name} {...dropOn(group.key)}>
+      <section key={group.key} className={`task-project ${group.kind}${isFolded ? ' folded' : ''}${over && !dropAt?.subject ? ' drop' : ''}${hasOpen ? ' has-open' : ''}`} aria-label={group.name} {...dropOn(group.key, old)}>
         <div
           className="task-project-head"
           onContextMenu={old || renaming === group.key ? undefined : (event) => {
@@ -669,7 +677,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             setGroupMenu({ key: group.key, at: event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : { x: box.left + 24, y: box.bottom - 4 } })
           }}
         >
-          {renaming === group.key ? (
+          {!old && renaming === group.key ? (
             <span className="group-renaming">
               <GroupMark group={group} />
               <input
@@ -689,7 +697,7 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             </span>
           ) : (
             // The counts' words are on all of the head (its title); its menu is a right-click.
-            <button type="button" className="group-fold" aria-expanded={!isFolded} title={old ? undefined : countWords(group.counts) || undefined} onClick={() => toggleFold(group.key)}>
+            <button type="button" className="group-fold" aria-expanded={!isFolded} title={old ? undefined : countWords(group.counts) || undefined} onClick={() => toggleFold(foldKey)}>
               <span className="fold-chevron" aria-hidden="true"><Icon name="chevron" size={12} /></span>
               <GroupMark group={group} />
               <span className="task-project-title">
@@ -709,12 +717,12 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
           <>
             {!!group.loose.length && <div className="task-list" role="list">{group.loose.map((task) => row(task, old))}</div>}
             {group.subjects.map((subject) => {
-              const subjectIsFolded = subjectFolded(arrangement, group.key, subject.name) && !sprung.has(spot(group.key, subject.name))
+              const subjectIsFolded = subjectFolded(arrangement, group.key, subject.name, old) && !sprung.has(spot(foldKey, subject.name))
               const holdsOpen = subjectIsFolded && subject.tasks.some((task) => task.key === selected)
               const held = `${subject.tasks.length} tasks`
               return (
-                <div key={subject.name} className={`task-subject${subjectIsFolded ? ' folded' : ''}${dropAt?.group === group.key && dropAt.subject === subject.name ? ' drop' : ''}${holdsOpen ? ' has-open' : ''}`} role="group" aria-label={subject.name} {...dropOn(group.key, subject.name)}>
-                  <button type="button" className="subject-fold" aria-expanded={!subjectIsFolded} onClick={() => changeGroups({ kind: 'fold-subject', group: group.key, subject: subject.name, folded: !subjectIsFolded })}>
+                <div key={subject.name} className={`task-subject${subjectIsFolded ? ' folded' : ''}${over && dropAt?.subject === subject.name ? ' drop' : ''}${holdsOpen ? ' has-open' : ''}`} role="group" aria-label={subject.name} {...dropOn(group.key, old, subject.name)}>
+                  <button type="button" className="subject-fold" aria-expanded={!subjectIsFolded} onClick={() => changeGroups({ kind: 'fold-subject', group: group.key, subject: subject.name, earlier: old, folded: !subjectIsFolded })}>
                     <span className="fold-chevron" aria-hidden="true"><Icon name="chevron" size={11} /></span>
                     <span className="task-subject-name" title={subject.name}>{subject.name}</span>
                     <span className="subject-count" role="img" aria-label={held} title={held}>{subject.tasks.length}</span>
@@ -770,13 +778,14 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
           <span className="tasks-label">This computer</span>
           <span className="tasks-head-actions">
             <button className="ghost small icon-only" aria-label="New group" title="New group: a box of your own, to drag tasks into" onClick={() => newGroup()}>
-              <Icon name="folderPlus" size={15} />
+              <Icon name="folderPlus" size={18} />
             </button>
             <button className="primary small" disabled={!installed.length} onClick={() => void api.openTaskBox({}).catch((caught) => setError(errorText(caught)))}>
               New task
             </button>
           </span>
         </div>
+        <AgentUsageList agents={installed} />
         {rowMenu && menuTask && <PointMenu at={rowMenu.at} label={`Move ${menuTask.title}`} items={menuItems} onClose={() => setRowMenu(null)} />}
         {groupMenu && menuGroup && <PointMenu at={groupMenu.at} label={`Change ${menuGroup.name}`} items={groupItems} onClose={() => setGroupMenu(null)} />}
         {loaded && !installed.length && (status.some((agent) => agent.removed) ? <p className="empty">No agent is on Togle’s lists. Add one back in Settings.</p> : <NoAgents />)}
@@ -856,7 +865,10 @@ export function Tasks({ focus }: { focus?: { key: string; seq: number } }) {
             onSend={async (text) => {
               let failed: string | null = null
               await act(async () => {
-                try { await api.sendToRunnerTask(detail.task.key, text) } catch (caught) { failed = errorText(caught); throw caught }
+                try {
+                  if (!detail.task.mine && detail.task.runner === 'codex') await api.openRunnerTask(detail.task.key)
+                  await api.sendToRunnerTask(detail.task.key, text)
+                } catch (caught) { failed = errorText(caught); throw caught }
               })
               return failed
             }}
@@ -1142,15 +1154,15 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const thread = useRef<HTMLDivElement>(null)
   const replyText = useRef<HTMLTextAreaElement>(null)
   // Pictures pasted into the reply box go with the words, as files (ReplyPictures.tsx).
-  const { pictures, attach, again: attachAgain, remove: removePicture, clear: clearPictures } = useAttached(task.key)
+  const { pictures, attach, again: attachAgain, paste, remove: removePicture, clear: clearPictures } = useAttached(task.key)
   const [pasteNote, setPasteNote] = useState<string | null>(null)
   useEffect(() => setPasteNote(null), [task.key])
+  const attachFiles = (files: File[]): void => { void attach(files).then(setPasteNote) }
   const pasteIn = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
-    const files = pastedPictures(event.clipboardData)
-    if (!files.length) return
-    event.preventDefault()
+    const saved = paste(event, setText)
+    if (!saved) return
     setPasteNote(null)
-    void attach(files).then(setPasteNote)
+    void saved.then(error => setPasteNote(error ? `The picture was not pasted. ${error}` : null))
   }
   // The reply part floats over the foot of the conversation (.task-dock): the conversation keeps room for it at its end.
   const dock = useRef<HTMLDivElement>(null)
@@ -1277,7 +1289,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const stepRuns = shown.slice(turnBegan + 1).some((entry) => entry.status === 'running')
   // The agent's own checklist for the turn at hand, by the reply box.
   const plan = currentPlan(shown)
-  const dockShown = task.mine || task.pending.length > 0 || !!plan
+  const dockShown = task.mine || task.pending.length > 0 || !!history?.questions?.length || !!plan
   useLayoutEffect(() => {
     const element = dock.current
     if (!element) {
@@ -1314,8 +1326,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const takesPictures = (message: string): boolean => pictures.length > 0 && !/^[/!]/.test(message)
   const goes = (message: string): string => {
     if (!takesPictures(message)) return message
-    const paths = pictures.map((picture) => pathWords(picture.path)).join(' ')
-    return message ? `${message} ${paths}` : `${pictures.length === 1 ? 'Picture' : 'Pictures'}: ${paths}`
+    return attachmentMessage(message, pictures)
   }
   /** A message just sent is drawn at the end of the conversation, with how far it got; a command of the agent's own is not a message and has no card. */
   const newSent = (body: string): SentMessage => ({ id: sentCounter++, text: body, at: Date.now(), known: knownWith(shown, body), state: 'sending' })
@@ -1553,7 +1564,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
   const where = place ? place.name : kindOf(task) === 'project' ? baseName(task.folder) : kindOf(task) === 'scheduled' ? 'Scheduled' : 'Everyday'
   const heading = place?.subjects.find((subject) => subject.tasks.some((one) => one.key === task.key))?.name
   return (
-    <div className="task-panel">
+    <div className="task-panel" {...(!sessionShown && !question ? fileDrop(attachFiles) : {})}>
       <header className="task-header">
         <button className="ghost small tasks-back" onClick={onBack} aria-label="Back to the list">
           <Icon name="back" size={14} />
@@ -1621,6 +1632,10 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
             ))}
           </span>
         )}
+        <span className="task-agent-usage" role="group" aria-label={`${agentOf(task)} usage`}>
+          <span className="usage-session"><span className="usage-caption"><Icon name="usage" size={13} />This session</span><AgentUsage key={task.key} runner={task.runner} sessionId={task.sessionId ?? task.id} /></span>
+          <AccountLimits runner={task.runner} />
+        </span>
       </div>
 
       {task.mine && task.signedOut && <SignedOut task={task} />}
@@ -1761,6 +1776,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
 
         {dockShown && (
           <div className="task-dock" ref={dock}>
+            {!!history?.questions?.length && <CodexQuestions taskKey={task.key} questions={history.questions} onSend={onSend} />}
             {task.pending.map((request) => (
               <RequestCard key={request.id} request={request} onAllow={() => onAnswer(request.id, 'allow-once')} onAlways={() => onAnswer(request.id, 'allow-always')} onRefuse={() => onAnswer(request.id, 'refuse')} onReply={(answer) => onReply(request.id, answer)} />
             ))}
@@ -1794,7 +1810,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                     const said = splitPictures(split ? split.reply : words)
                     return (
                       <li key={`queued-${index}`} className="held-row">
-                        <span className="held-text">{split && <QuoteBlock text={split.quote} />}{said.words}{!!said.files.length && <span className="held-pictures">{said.words ? ' · ' : ''}{said.files.length === 1 ? 'a picture' : `${said.files.length} pictures`}</span>}</span>
+                        <span className="held-text">{split && <QuoteBlock text={split.quote} />}{said.words}{!!said.files.length && <span className="held-pictures">{said.words ? ' · ' : ''}{attachmentCount(said.files)}</span>}</span>
                         {/* The agent has it, and takes it in as it works. */}
                         <Ticks state="delivered" />
                       </li>
@@ -1806,7 +1822,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                     const said = splitPictures(split ? split.reply : words)
                     return (
                       <li key={index} className="held-row">
-                        <span className="held-text">{split && <QuoteBlock text={split.quote} />}{said.words}{!!said.files.length && <span className="held-pictures">{said.words ? ' · ' : ''}{said.files.length === 1 ? 'a picture' : `${said.files.length} pictures`}</span>}</span>
+                        <span className="held-text">{split && <QuoteBlock text={split.quote} />}{said.words}{!!said.files.length && <span className="held-pictures">{said.words ? ' · ' : ''}{attachmentCount(said.files)}</span>}</span>
                         {/* Togle holds it: the agent does not have it yet. */}
                         <Ticks state="sending" title={`Waiting: it goes in when ${agentOf(task)} can take it`} />
                         <span className="held-row-actions">
@@ -1859,9 +1875,10 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
                 )}
                 {quoted && !question && <QuoteBar quote={quoted} onRemove={() => { setQuoted(null); replyText.current?.focus() }} />}
                 <form className="task-reply" onSubmit={send}>
-                  {pasteNote && <p className="reply-note" role="alert">The picture was not pasted. {pasteNote}</p>}
+                  {pasteNote && <p className="reply-note" role="alert">{pasteNote}</p>}
                   <PictureChips pictures={pictures} onRemove={(path) => { removePicture(path); replyText.current?.focus() }} />
                   <div className="reply-row">
+                    {!question && <AttachButton onFiles={attachFiles} />}
                     {/* A box that grows with what is typed: Enter sends, Shift+Enter starts a new line. A password is one line, and not shown. */}
                     {question?.questions?.[0]?.secret ? (
                       <input value={text} onChange={(event) => setText(event.target.value)} onKeyDown={keyed} placeholder={replyHint} aria-label="Reply to the agent" type="password" />
@@ -1985,7 +2002,7 @@ function RemotePanel({ device, task, now, onBack, act }: { device: DeviceTasks; 
       </header>
       <div className="task-status">
         <span className="state-chip" data-state={task.state}><StateMark kind={chipMark(task.state)} still />{STATE_WORDS[task.state]}</span>
-        <span className="task-agent-name">{task.agent}</span>
+        <span className="task-agent-name"><AgentMark name={task.agent} /></span>
         {!running && <span className="hint">{ago(task.updatedAt, now)}</span>}
       </div>
 

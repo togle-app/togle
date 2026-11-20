@@ -42,6 +42,11 @@ export interface DictationState {
   message?: string
   text?: string
   lastText?: string
+  /** The saved F8 screenshot held in the voice bar until copied again or dismissed. */
+  picture?: string
+  show?: boolean
+  /** The compact bar has finished acknowledging a copy. Opening it still shows the held result. */
+  waitingForPaste?: boolean
   startedAt?: number
   inCall?: boolean
   preparing?: boolean

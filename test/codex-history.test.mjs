@@ -2,7 +2,7 @@
 // stand-in for Codex's shared server (the newest turns with every step, older ones asked for, a thread it does not have).
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { after, test } from 'node:test'
@@ -11,6 +11,39 @@ import { workDir } from './helpers.mjs'
 workDir('codex-history')
 const T = await import('./.build/togle.mjs')
 const fake = path.join(import.meta.dirname, 'fake-codex.mjs')
+
+test('live Codex follow-ups stay open individually and Terminal answers read as questions and answers', () => {
+  const request = { type: 'agentMessage', id: 'call_123', delivery: 'async', questions: [
+    { title: 'Which VPS?', options: null }, { title: 'Which phone?', options: ['Android', 'iPhone'] }
+  ] }
+  const turn = { id: 'turn', status: 'inProgress', items: [request] }
+  const pending = () => T.pendingCodexQuestions([turn])
+  const [server, phone] = pending()
+  assert.deepEqual(server, { id: '["request_user_input_async","call_123",0]', title: 'Which VPS?', options: [] })
+  assert.deepEqual(phone.options, ['Android', 'iPhone'])
+  turn.items.push({ type: 'commandExecution', command: 'work continues' })
+  assert.equal(pending().length, 2)
+  const answer = T.answerCodexQuestion(server, 'ssh TSO')
+  const user = text => ({ type: 'userMessage', id: 'user', content: [{ type: 'text', text }] })
+  turn.items.push(user(answer))
+  assert.deepEqual(pending(), [phone])
+  const history = T.codexEntries([turn])
+  assert.match(history.at(-1).text, /Which VPS.*ssh TSO/s)
+  assert.doesNotMatch(history.at(-1).text, /send_user_message|questionItemId/)
+  const ide = '# Context from my IDE setup:\neditor\n## My request for Codex:\n' + answer
+  assert.deepEqual(T.codexQuestionReplies(ide), T.codexQuestionReplies(answer))
+  assert.equal(T.codexQuestionReplies('Example: ' + answer), null)
+  assert.equal(T.codexQuestionReplies('<send_user_message_question_reply>[{}]</send_user_message_question_reply>'), null)
+  const combined = [server, phone].map(q => ({ questionItemId: q.id, question: q.title, answer: 'my answer' }))
+  const entries = T.codexEntries([{ ...turn, items: [user('<send_user_message_question_reply>' + JSON.stringify(combined) + '</send_user_message_question_reply>')] }])
+  assert.equal(entries.length, 2)
+  assert.notEqual(entries[0].id, entries[1].id)
+  turn.status = 'completed'
+  assert.deepEqual(pending(), [], 'completed turns do not reopen their questions')
+  turn.status = 'inProgress'
+  turn.items.push(user('Here is another task'))
+  assert.deepEqual(pending(), [phone], 'unrelated messages can steer the active turn while its question awaits an answer')
+})
 
 const made = []
 const daemons = []
@@ -81,7 +114,7 @@ test('Codex turns become a conversation: what was asked, what it said, commands 
   ]
   const entries = T.codexEntries(turns)
   assert.deepEqual(entries.map((e) => [e.kind, e.text, e.status ?? null]), [
-    ['you', 'Add a status column.\n[picture]', null],
+    ['you', 'Add a status column.', null],
     ['command', 'npm test', 'finished'],
     ['command', 'rm -rf build', 'declined'],
     ['command', 'npm run lint', 'failed'],
@@ -93,12 +126,60 @@ test('Codex turns become a conversation: what was asked, what it said, commands 
   assert.deepEqual(entries[4].paths, ['C:\\work\\api\\orders.ts', 'C:\\work\\api\\orders.sql'])
   assert.equal(entries[5].step, 'web', 'a search of the web is a step; a thought with no words and no time is not told')
   assert.equal(entries[0].at, 1793852271500)
+  assert.equal(entries[0].images.length, 1)
   assert.equal(entries[7].at, 1793852300000, 'an item with no time of its own takes its turn')
   assert.equal(new Set(entries.map((e) => e.id)).size, entries.length)
   assert.deepEqual(T.codexEntries(turns).map((e) => e.id), entries.map((e) => e.id), 'the same item is the same id each time it is read')
   assert.deepEqual(T.turnsOf({ data: [1, 2], nextCursor: 'x' }), { turns: [1, 2], next: 'x' })
   assert.deepEqual(T.turnsOf({ data: [], nextCursor: null }), { turns: [], next: null })
   assert.deepEqual(T.turnsOf(undefined), { turns: [], next: null })
+})
+
+test('Chat reads the original terminal pictures and removes only attachment markers from the caption', async t => {
+  const backend = codex()
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'togle-terminal-picture-'))
+  made.push(dir)
+  mkdirSync(path.join(dir, 'pasted'))
+  const file = path.join(dir, 'pasted', 'paste-test.png')
+  const encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aO2kAAAAASUVORK5CYII='
+  writeFileSync(file, Buffer.from(encoded, 'base64'))
+  const label = '[Image #1]', before = '位置 📎 ', after = ' keep the literal [Image #1]'
+  const start = Buffer.byteLength(before)
+  try {
+    const { peer } = await backend.listing()
+    const thread = async () => (await peer.request('thread/start', { cwd: dir })).thread.id
+    const id = await thread()
+    await peer.request('turn/start', { threadId: id, input: [
+      { type: 'localImage', path: file },
+      { type: 'text', text: before + label + after + '\n\nAttached files\n' + file,
+        text_elements: [{ placeholder: label, byteRange: { start, end: start + label.length } }] },
+      { type: 'image', url: 'data:image/png;base64,' + encoded }
+    ] })
+    const entry = (await backend.history(id, false)).entries.find(e => e.kind === 'you')
+    assert.equal(entry.text, '位置 📎 keep the literal [Image #1]')
+    assert.equal(new Set(entry.images).size, 2)
+    assert.equal(JSON.stringify(entry).includes(encoded), false)
+    assert.equal(JSON.stringify(entry).includes(file), false)
+    assert.deepEqual(await Promise.all(entry.images.map(key => backend.picture(id, key))),
+      [0, 1].map(() => ({ type: 'image/png', data: encoded })))
+    assert.deepEqual((await backend.history(id, true)).entries[0].images, entry.images)
+    const request = peer.request.bind(peer)
+    const older = t.mock.method(peer, 'request', (method, ...args) => method === 'thread/items/list'
+      ? Promise.reject(new T.RpcError('Method not found', -32601)) : request(method, ...args))
+    assert.deepEqual(await backend.picture(id, entry.images[0]), { type: 'image/png', data: encoded })
+    older.mock.restore()
+    assert.equal(await backend.picture(await thread(), entry.images[0]), null)
+    assert.equal(await backend.picture(id, file), null)
+    rmSync(file)
+    assert.equal(await backend.picture(id, entry.images[0]), null)
+    assert.equal((await backend.picture(id, entry.images[1])).data, encoded)
+    await peer.request('turn/start', { threadId: id, input: [{ type: 'image', url: 'data:image/png;base64,' + encoded }] })
+    const last = (await backend.history(id, false)).entries.filter(e => e.kind === 'you').at(-1)
+    assert.equal(last.text, '')
+    assert.equal((await backend.picture(id, last.images[0])).data, encoded)
+  } finally {
+    await backend.close()
+  }
 })
 
 test('what else Codex did: its thinking, the web, a connector\'s tools, pictures it looked at; how long things took; what a step holds', () => {

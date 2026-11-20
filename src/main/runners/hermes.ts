@@ -33,6 +33,9 @@ import { exists, lines } from './acp'
 import { askedLine } from './claude-sessions'
 import { hermesEntries, hermesModel } from './hermes-history'
 import { lastTurns } from './history-turns'
+import type { RunnerUsage, UsageWindow } from '@shared/runner-usage'
+import { hermesHistoryUsage, hermesPlan, hermesSessionUsage } from './usage'
+import { hermesMeterProviders, hermesMeters, hermesProviderName, hermesUsageDb, hermesUsageFile } from './hermes-usage'
 import { detailOf, diffOf, isFileKey } from './step-detail'
 import { keepJson } from './keep'
 import { TaskBase } from './task-base'
@@ -566,9 +569,55 @@ export class HermesBackend implements Backend {
   private readonly conversations = new Map<string, { at: number; running?: Promise<LogEntry[] | null>; entries: LogEntry[] | null; details: Map<string, string> }>()
   /** The model and the effort each session was last seen with (from its last export), and when: asked again only after a while. */
   private readonly modelSeen = new Map<string, { at: number; info: ModelInfo | null }>()
+  private readonly planWindows = new Map<string, UsageWindow[]>()
   private loaded?: Promise<void>
 
   constructor(private readonly options: HermesOptions) {}
+
+  async limits() {
+    const [program, ...prefix] = await this.command()
+    const env = this.options.env ?? process.env
+    const file = hermesUsageFile(env, !!this.options.command)
+    const read = async (provider?: string) => {
+      const status = await exec(program, [...prefix, 'usage', '--json', ...(provider ? ['--provider', provider] : [])], { env, timeout: 20_000 })
+      if (status.ok) {
+        const reply = JSON.parse(status.out)
+        const key = typeof reply.provider === 'string' ? reply.provider : provider
+        return { key, windows: hermesPlan(reply).map(window => key ? { ...window, provider: hermesProviderName(key) } : window) }
+      }
+      if (/No account usage available for provider/i.test(status.text)) return { key: provider, windows: [] }
+      throw new Error('Hermes limits are unavailable')
+    }
+    const [current, providers] = await Promise.all([read().catch(() => undefined), hermesUsageDb(file, hermesMeterProviders)])
+    const requested = new Set(providers ?? [])
+    for (const provider of this.planWindows.keys()) if (provider) requested.add(provider)
+    if (current?.key) requested.delete(current.key)
+    const others = await Promise.allSettled([...requested].map(p => read(p)))
+    if (!current && !others.some(r => r.status === 'fulfilled')) throw new Error('Hermes limits are unavailable')
+    const remember = ({ key, windows }: { key: string | undefined; windows: UsageWindow[] }): void => {
+      if (windows.length) this.planWindows.set(key ?? '', windows)
+      else this.planWindows.delete(key ?? '')
+    }
+    if (current) remember(current)
+    for (const result of others) if (result.status === 'fulfilled') remember(result.value)
+    return [...this.planWindows.values()].flat()
+  }
+
+  async usage(id?: string): Promise<RunnerUsage> {
+    const env = this.options.env ?? process.env
+    if (id !== undefined) await this.ready()
+    const real = id === undefined ? undefined : this.sessionOf(id)
+    if (real !== undefined && !SESSION_WORD.test(real)) return { kind: 'unavailable', reason: 'unsupported' }
+    const meters = await hermesUsageDb(hermesUsageFile(env, !!this.options.command), db => hermesMeters(db, real))
+    if (meters) return meters
+    if (real !== undefined) {
+      return hermesSessionUsage(await exported(await this.command(), env, real), real)
+    }
+    const [program, ...prefix] = await this.command()
+    const days = String(Math.ceil(Date.now() / 86_400_000))
+    const history = await exec(program, [...prefix, 'insights', '--days', days], { env, timeout: 20_000 })
+    return history.ok ? hermesHistoryUsage(history.out) : { kind: 'unavailable', reason: 'temporary' }
+  }
 
   private async command(): Promise<string[]> {
     if (this.options.command?.length) return this.options.command

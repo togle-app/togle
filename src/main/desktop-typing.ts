@@ -2,11 +2,12 @@
 // on the clipboard is put back. A Mac asks once, under Accessibility, before Togle may press keys in other apps; until it
 // is allowed, the words are copied. On X11 the keys are pressed through the XTest extension. Neither way was tried on
 // those systems yet, so anything that fails leaves the words copied, never lost.
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
+import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import koffi from 'koffi'
-import { clipboard, ClipboardItem } from 'electron'
+import { BrowserWindow, clipboard, ClipboardItem } from 'electron'
 import type { DictationInsertion, DictationTarget } from '@shared/dictation'
 import { lsappinfoBundle, xpropActiveWindow, xpropClasses } from './front-program'
 import { isLinuxTerminal, isMacTerminal, macKeyCode, oneLine, shellQuoted, typingWay, x11Keysym, type TypingWay } from './typing-way'
@@ -14,7 +15,7 @@ import { isLinuxTerminal, isMacTerminal, macKeyCode, oneLine, shellQuoted, typin
 /** Reading whether a key is held, for hold-to-talk. */
 export interface HeldKeys { down(code: number): boolean; codeOf(keys: string): number | undefined }
 
-interface MacInput { trusted(ask: boolean): boolean; keyDown(code: number): boolean; paste(): void }
+interface MacInput { trusted(ask: boolean): boolean; editable(): boolean; keyDown(code: number): boolean; paste(): void }
 interface X11Input { keyDown(keysym: number): boolean; paste(terminal: boolean): void }
 
 let mac: MacInput | null | undefined
@@ -30,10 +31,27 @@ function macInput(): MacInput | null {
     const setFlags = services.func('void CGEventSetFlags(void *event, uint64_t flags)')
     const post = services.func('void CGEventPost(uint32_t tap, void *event)')
     const release = cf.func('void CFRelease(void *object)')
+    const cfString = cf.func('void *CFStringCreateWithCString(void *allocator, const char *text, uint32_t encoding)')
+    const equal = cf.func('uint8_t CFEqual(void *a, void *b)')
+    const system = services.func('void *AXUIElementCreateSystemWide()')
+    const attribute = services.func('int32_t AXUIElementCopyAttributeValue(void *element, void *key, _Out_ void **value)')
+    const settable = services.func('int32_t AXUIElementIsAttributeSettable(void *element, void *key, _Out_ uint8_t *value)')
+    const keys = Object.fromEntries(['AXFocusedUIElement', 'AXRole', 'AXSubrole', 'AXValue', 'AXSelectedText', 'AXSecureTextField', 'AXTextField', 'AXTextArea', 'AXComboBox'].map(key => [key, cfString(null, key, 0x08000100)]))
     const dictionary = cf.func('void *CFDictionaryCreate(void *allocator, void *keys, void *values, intptr_t count, void *keyCallBacks, void *valueCallBacks)')
     const valueOf = (lib: ReturnType<typeof koffi.load>, name: string): bigint => koffi.decode(lib.symbol(name), 'void *') as bigint
     const HID_STATE = 1, HID_TAP = 0, COMMAND = 0x100000, V = 0x09
     mac = {
+      editable() {
+        const root = system(), focused = [null], role = [null], subrole = [null], yes = [0]
+        try {
+          if (!root || attribute(root, keys.AXFocusedUIElement, focused) || !focused[0]) return false
+          if (!attribute(focused[0], keys.AXSubrole, subrole) && subrole[0] && equal(subrole[0], keys.AXSecureTextField)) return false
+          if (!settable(focused[0], keys.AXSelectedText, yes) && yes[0]) return true
+          return !attribute(focused[0], keys.AXRole, role) && !!role[0]
+            && ['AXTextField', 'AXTextArea', 'AXComboBox'].some(key => equal(role[0], keys[key]))
+            && !settable(focused[0], keys.AXValue, yes) && !!yes[0]
+        } finally { for (const ref of [subrole[0], role[0], focused[0], root]) if (ref) release(ref) }
+      },
       trusted(ask) {
         if (!ask) return !!isTrusted()
         // The system's own question: "Togle would like to control this computer using accessibility features."
@@ -109,7 +127,7 @@ function quick(file: string, args: string[]): string {
 }
 
 /** The app in front: an id that changes when another comes to the front, its name and whether it is a terminal. */
-interface Front { id: string; name?: string; terminal: boolean }
+interface Front { id: string; name?: string; terminal: boolean; checkShowField?: boolean }
 function front(way: TypingWay): Front | undefined {
   if (way === 'mac') {
     const app = quick('lsappinfo', ['front']).trim()
@@ -146,6 +164,61 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(
 // The app reads the clipboard when it handles the paste keys, a moment after they were pressed.
 const PASTE_SETTLE_MS = 450
 
+/** Togle's own renderers can identify the actual field even on desktops without an accessibility service. */
+export async function localShowField(): Promise<boolean | undefined> {
+  const win = BrowserWindow.getFocusedWindow()
+  if (!win) return undefined
+  return win.webContents.executeJavaScript(`(() => {
+    const field = document.activeElement
+    if (!field || field.matches(':disabled, [readonly], [aria-readonly="true"], [aria-disabled="true"]')) return false
+    return field.isContentEditable || field instanceof HTMLTextAreaElement ||
+      (field instanceof HTMLInputElement && ['text', 'search', 'url', 'tel', 'email'].includes(field.type))
+  })()`).catch(() => false)
+}
+
+// Look only for the focused editable control in the foreground X11 process. Some desktops do not expose AT-SPI.
+const x11Focus = `import gi, sys
+gi.require_version('Atspi', '2.0')
+from gi.repository import Atspi
+desktop = Atspi.get_desktop(0)
+def children(node):
+    return (node.get_child_at_index(i) for i in range(node.get_child_count()))
+app = next((node for node in children(desktop) if node and node.get_process_id() == int(sys.argv[1])), None)
+stack = [node for node in children(app) if node and node.get_state_set().contains(Atspi.StateType.ACTIVE)] if app else []
+while stack:
+    node = stack.pop()
+    states = node.get_state_set()
+    if states.contains(Atspi.StateType.FOCUSED) and states.contains(Atspi.StateType.EDITABLE) and node.get_role() != Atspi.Role.PASSWORD_TEXT:
+        print('editable')
+        break
+    stack.extend(child for child in children(node) if child)
+`
+const runFile = promisify(execFile)
+async function showField(way: TypingWay, noted: Front): Promise<boolean> {
+  const own = await localShowField()
+  if (own !== undefined) return own
+  if (noted.terminal) return true
+  if (way === 'mac') return macInput()?.editable() ?? false
+  const pid = /=\s*(\d+)\s*$/.exec(quick('xprop', ['-id', noted.id, '_NET_WM_PID']))?.[1]
+  if (!pid) return false
+  try { return (await runFile('python3', ['-c', x11Focus, pid], { timeout: 1000 })).stdout.trim() === 'editable' }
+  catch { return false }
+}
+
+/** One clipboard item that rich editors, image-only targets, and text fields can each paste. */
+export async function copyShowResult(file: string, words: string, terminal = false): Promise<string> {
+  const png = await readFile(file)
+  const text = '"' + file + '"' + (words ? ' ' + (terminal ? oneLine(words) : words) : '')
+  const caption = words.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replace(/\r\n|\r|\n/g, '<br>')
+  const html = '<img alt="Screenshot" src="data:image/png;base64,' + png.toString('base64') + '">' + (caption ? '<p>' + caption + '</p>' : '')
+  await clipboard.write([new ClipboardItem({
+    'image/png': new Blob([new Uint8Array(png)], { type: 'image/png' }),
+    'text/html': new Blob([html], { type: 'text/html' }),
+    'text/plain': new Blob([text], { type: 'text/plain' })
+  })])
+  return text
+}
+
 export class DesktopTyping {
   private noted = new Map<string, Front>()
   private asked = false
@@ -158,7 +231,7 @@ export class DesktopTyping {
     return undefined
   }
 
-  async capture(): Promise<DictationTarget> {
+  async capture(forShow = false): Promise<DictationTarget> {
     if (this.way === 'copy') return { label: 'Your text box', copy: true, copyReason: "on this desktop Togle can't type into other apps." }
     const now = front(this.way)
     const label = now?.name || 'Your text box'
@@ -173,6 +246,8 @@ export class DesktopTyping {
       }
     } else if (!x11Input()) return { label, copy: true, terminal, copyReason: "Togle couldn't type on this desktop." }
     if (!now) return { label, copy: true, terminal, copyReason: "Togle couldn't tell which window is in front." }
+    if (forShow && !await showField(this.way, now)) return { label, terminal }
+    now.checkShowField = forShow
     const token = randomUUID()
     this.noted.set(token, now)
     while (this.noted.size > 8) this.noted.delete(this.noted.keys().next().value!)
@@ -197,16 +272,17 @@ export class DesktopTyping {
     }
     let png: Buffer
     try { png = await readFile(file) } catch { return { inserted: false, message: `The picture is saved at ${file}.` } }
-    const picture = new ClipboardItem({ 'image/png': new Blob([new Uint8Array(png)], { type: 'image/png' }) })
+    const pathText = `"${file}" `
+    const picture = new ClipboardItem({ 'image/png': new Blob([new Uint8Array(png)], { type: 'image/png' }), 'text/plain': new Blob([pathText], { type: 'text/plain' }) })
     return this.paste(noted, () => clipboard.write([picture]), async () => {
       const [item] = await clipboard.read()
-      return !!item?.types.includes('image/png') && !item.types.some((type) => type.startsWith('text/'))
+      return !!item?.types.includes('image/png') && await clipboard.readText() === pathText
     }, file)
   }
 
   private async paste(noted: Front, write: () => Promise<void>, stillOurs: () => Promise<boolean>, picture?: string): Promise<DictationInsertion> {
     const kept = picture ? ` The picture is saved at ${picture}.` : ''
-    if (front(this.way)?.id !== noted.id) return { inserted: false, message: `Another window came to the front. Your words are ready to copy.${kept}` }
+    if (front(this.way)?.id !== noted.id || (noted.checkShowField && !await showField(this.way, noted))) return { inserted: false, message: `The original text box is unavailable. Your words are ready to copy.${kept}` }
     let saved: ClipboardItem[] = []
     try { saved = await saveClipboard() } catch { /* Nothing readable to put back. */ }
     try {

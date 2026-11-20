@@ -6,6 +6,24 @@ Togle is free and open source, under the [MIT license](LICENSE). It runs on your
 
 **Togle Studio**, a separate paid app (not open source), removes background noise from your voice in every call app. Togle works the same without it. See [Togle Studio](#togle-studio).
 
+## Install on Windows
+
+If you already downloaded the installer, open Command Prompt in its folder and run the following for version 0.1.0. Use the filename of your download.
+
+```cmd
+start "" /wait "Togle Setup 0.1.0.exe" /S
+```
+
+For a public Windows beta, open its GitHub release and use the Command Prompt line in the release notes. It downloads the signed installer directly from GitHub. [Togle Free releases](https://github.com/togle-app/togle/releases)
+
+Once the stable Windows release and website install script are published, you can also install from any folder with the following command.
+
+```cmd
+powershell -NoProfile -Command "iex (irm https://togle.app/install.ps1 -ErrorAction Stop)"
+```
+
+It checks the installer's signature and installs Togle for your Windows account. Open **Togle** from the Start menu. [Windows downloads](https://togle.app/#download)
+
 ## Four things, one app
 
 The window has three places, **To-do**, **Agents** and **Meetings**, and **Settings**. It opens on To-do.
@@ -18,11 +36,11 @@ Hold **F9** and talk. Togle types the words where your cursor is: a chat, an edi
 
 - Your AI plan cleans the words up: punctuation, filler words, and a correction you make halfway ("send it to Dario, no wait, to Marta"). Without a plan, or with cleanup off, Togle types the words as heard. Cleanup has eight seconds; if it fails, you get the words as heard, and the voice bar says why (no internet, the plan at its limit, too slow).
 - Speech is heard on this computer. Your plan gets words, never sound.
-- Togle never presses Enter or sends anything. In a terminal it types everything as one line. Windows lets no app type into a window that runs as administrator, so there Togle copies your words for you to paste. When it can't type into the box for another reason (a password field, a window that changed), the voice bar keeps your words for **Copy text**, and the tray menu lists your last ten dictations under **Copy a recent dictation**, in memory only.
+- In a terminal Togle enters the words on one line. You press Enter to send. If the original text field is missing or changes, Togle copies your dictation and keeps the words in the voice bar. Windows administrator windows also use the clipboard. When you paste the words, the bar returns to normal and the clipboard stays available. The tray keeps your last ten dictations in memory under **Copy a recent dictation**.
 - **Names and terms** (Settings): tell Togle once how a name or a word is spelled, or a phrase that stands for a longer text ("my work email"), and it writes it that way from then on.
 - The voice bar is a small strip that shows when the microphone listens. While idle, the microphone is off. You can hide the idle bar from the tray menu.
 
-**F8 Show.** Press F8 and the screen under the pointer stands still. Drag over the part to show (a dashed frame) and draw on it while you talk: a loop round something becomes a box, a straight stroke an arrow, and a click starts words typed there. **Enter** puts the picture into the box you were in, then your words; **Esc** leaves it. The picture is pasted through the clipboard, which gets back what it held right after. In a terminal, Togle types the picture's path instead, so an agent can read it. Pictures are kept in Togle's pictures folder. Pasting the picture works on Windows; elsewhere the picture is saved and the words are ready to copy.
+**F8 Show.** Press and release F8. Drag to crop, then drag again to draw a red arrow. You can speak while drawing or switch to Circle, Rectangle or Draw. Press F8 again. With a text box focused, the screenshot and your words go there. Togle Chat shows an image attachment. Text-only fields receive the saved PNG path. With no editable field, F8 copies the screenshot and your words to the clipboard. Open the voice bar to preview the result or copy it again. Pasting returns the bar to its resting state. Esc cancels while drawing.
 
 [How dictation reaches the box](docs/dictation-insertion.md).
 
@@ -53,14 +71,14 @@ Any other agent can be added in **Settings → Agents → Add another agent**. P
 
 ### To-do
 
-One list for the day, kept as a plain text file on your computer. What your agents need from you sits at the top, in amber. Every task you give an agent is on the list, says what the agent is doing (working, waiting for you, idle), and stays until you tick it. You add an item by typing or by holding F9. **From your calls** offers the notes' items that are yours and the calls with names to confirm.
+One list for the day, kept as a plain text file on your computer. What your agents need from you sits at the top, in amber. Every task you give an agent is on the list, says what the agent is doing (working, waiting for you, idle), and stays until you tick it. You add an item by typing or by holding F9. Remove a single item or use **Clear list**. Your meeting follow-ups appear in the meeting notes and under **From your calls**. Choose **Add** or **Dismiss** for each one.
 
 ## Keys
 
 | Key | Does |
 | --- | --- |
 | F9 | Talk: hold, talk, let go (on a Mac or Linux: press to start, again to stop) |
-| F8 | Show: drag over part of the screen and draw on it while you talk; Save (or Enter) puts the picture and your words in |
+| F8 | Release to crop. Draw a red arrow and speak, then press F8 again to insert both. |
 | F10 | Task: the box to give an agent a task |
 
 They work from any app. Settings can give each other keys: click it and press the keys you want. Keys that would stop working in every other app are refused with the reason. On most Mac keyboards, F keys need Fn held.

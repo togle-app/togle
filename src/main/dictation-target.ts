@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import type { DictationInsertion, DictationTarget } from '@shared/dictation'
-import { DesktopTyping, type HeldKeys } from './desktop-typing'
+import { DesktopTyping, localShowField, type HeldKeys } from './desktop-typing'
 
 /**
  * Where dictated words go. On Windows, UI Automation runs outside Electron so a slow application cannot block a call or
@@ -62,12 +62,13 @@ export class DictationTargetBridge {
       this.child?.stdin.write(JSON.stringify({ id, command, ...input }) + '\n')
     })
   }
-  async capture(): Promise<DictationTarget> {
+  async capture(forShow = false): Promise<DictationTarget> {
     if (this.desktop) {
-      try { return await this.desktop.capture() } catch { return { label: 'Your text box', reason: 'Automatic insertion is unavailable. Your text will be ready to copy.' } }
+      try { return await this.desktop.capture(forShow) } catch { return { label: 'Your text box', reason: 'Automatic insertion is unavailable. Your text will be ready to copy.' } }
     }
     if (process.platform !== 'win32') return { label: 'Your text box', reason: 'Copy your text when ready.' }
-    try { return await this.request('capture') } catch { return { label: 'Your text box', reason: 'Automatic insertion is unavailable. Your text will be ready to copy.' } }
+    if (forShow && await localShowField() === false) return { label: 'Togle' }
+    try { return await this.request('capture', { forShow }) } catch { return { label: 'Your text box', reason: 'Automatic insertion is unavailable. Your text will be ready to copy.' } }
   }
   async insert(token: string, text: string): Promise<DictationInsertion> {
     // Paragraphs/tabs are literal paste text in editors, never synthesized keys.
@@ -76,6 +77,16 @@ export class DictationTargetBridge {
     if (this.desktop) return this.desktop.insert(token, text)
     try { return await this.request('insert', { token, text }) }
     catch (error) { return { inserted: false, message: (error as Error).message || 'The text box did not respond. Your words are still available.' } }
+  }
+  /** Ignore shortcuts pressed on the Windows desktop or a non-editable control. */
+  async acceptsPasteShortcut(): Promise<boolean> {
+    if (process.platform !== 'win32') return true
+    try { return await this.request<boolean>('acceptsPasteShortcut') } catch { return false }
+  }
+  /** Ask about the clicked command's accessible role and label. The destination's contents stay in the other app. */
+  async pasteCommandAt(x: number, y: number): Promise<boolean> {
+    if (process.platform !== 'win32') return false
+    try { return await this.request<boolean>('pasteCommandAt', { x, y }) } catch { return false }
   }
   /** F8 Show: the picture into the noted box (pasted, keeping the clipboard), or its path typed into a terminal. */
   async insertPicture(token: string, file: string): Promise<DictationInsertion> {

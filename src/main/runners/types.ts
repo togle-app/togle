@@ -127,6 +127,8 @@ export interface TaskHandle {
 }
 
 export interface Backend {
+  usage?(sessionId?: string): Promise<import('@shared/runner-usage').RunnerUsage>
+  limits?(): Promise<import('@shared/runner-usage').UsageWindow[]>
   readonly runner: RunnerKind
   /** Its name as the person reads it, for an agent Togle does not know by name (one added in Settings). */
   readonly name?: string

@@ -5,6 +5,7 @@ import { Menu } from './Menu'
 import { asksEveryTime, type RunnerKind, type RunnerStatus, type SignInChoice, type TaskBoxOpen } from '@shared/runner'
 import type { TodoRef } from '@shared/todo'
 import { useHotkeys } from './hotkeys'
+import { AttachButton, PictureChips, attachmentMessage, fileDrop, useAttached } from './ReplyPictures'
 
 const api = window.togle
 
@@ -45,6 +46,8 @@ export function TaskBox() {
   const [runner, setRunner] = useState<RunnerKind | undefined>(() => remembered().runner)
   const [folder, setFolder] = useState(() => remembered().folder ?? '')
   const [text, setText] = useState('')
+  const attached = useAttached('new-task')
+  const attachFiles = (files: File[]): void => { void attached.attach(files).then(error => setError(error ?? '')) }
   // A saved call the box was opened from ("Give to an agent"): the task is told where it is.
   const [attach, setAttach] = useState<{ title: string; path: string } | null>(null)
   // The to-do item the box was opened from: the task is given to it rather than added as an item of its own.
@@ -146,7 +149,7 @@ export function TaskBox() {
 
   const start = async (event?: FormEvent): Promise<void> => {
     event?.preventDefault()
-    const prompt = text.trim()
+    const prompt = attachmentMessage(text.trim(), attached.pictures)
     if (busy || !runner || !folder || !prompt) return
     setBusy(true)
     setError('')
@@ -158,6 +161,7 @@ export function TaskBox() {
       await api.startRunnerTask({ runner, folder, prompt: told, ...(todo ? { todo } : {}), ...(attach ? { asks: true } : {}) })
       remember({ runner, folder })
       setText('')
+      attached.clear()
       setAttach(null)
       setTodo(null)
       api.closeTaskBox()
@@ -199,7 +203,7 @@ export function TaskBox() {
 
   const pickedAgent = installed.find((status) => status.runner === runner)
   return (
-    <form ref={form} className="taskbox" onSubmit={(event) => void start(event)} onKeyDown={(event) => event.key === 'Escape' && api.closeTaskBox()} aria-label="Start a task">
+    <form ref={form} className="taskbox" {...fileDrop(attachFiles)} onSubmit={(event) => void start(event)} onKeyDown={(event) => event.key === 'Escape' && api.closeTaskBox()} aria-label="Start a task">
       {loaded && !installed.length ? (
         <p className="taskbox-none">{anyRemoved ? 'No agent is on Togle’s lists. Add one back in Settings.' : 'No coding agent found. Install Claude Code, Codex or Hermes, and Togle finds it.'}</p>
       ) : (
@@ -230,7 +234,9 @@ export function TaskBox() {
               </button>
             </div>
           )}
+          <PictureChips pictures={attached.pictures} onRemove={attached.remove} />
           <div className="taskbox-field">
+            <AttachButton onFiles={attachFiles} />
             <textarea
               ref={input}
               aria-label="Task"
@@ -239,11 +245,12 @@ export function TaskBox() {
               autoFocus
               value={text}
               onChange={(event) => setText(event.target.value)}
+              onPaste={event => { void attached.paste(event, setText)?.then(problem => setError(problem ?? '')) }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) void start(event)
               }}
             />
-            <button className="primary" disabled={busy || !runner || !folder || !text.trim()} title={runner && asksEveryTime(runner) ? 'It asks before every command and every change.' : undefined}>
+            <button className="primary" disabled={busy || !runner || !folder || (!text.trim() && !attached.pictures.length)} title={runner && asksEveryTime(runner) ? 'It asks before every command and every change.' : undefined}>
               {busy ? 'Starting…' : 'Start'}
             </button>
           </div>

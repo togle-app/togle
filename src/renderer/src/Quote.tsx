@@ -13,13 +13,24 @@ export interface QuoteSpot {
 /** The one message a node is in: what holds `data-quotable` (what the agent said, or the person's own words). */
 export const messageOf = (node: Node | null): Element | null => ((node instanceof Element ? node : node?.parentElement) ?? null)?.closest('[data-quotable]') ?? null
 
+/** Chromium can put a paragraph selection's end just outside it to include the trailing line break. */
+function rangeIn(message: Element, range: Range): Range | null {
+  if (message.contains(range.startContainer) && message.contains(range.endContainer)) return range
+  if (!range.intersectsNode(message)) return null
+  const bounds = document.createRange()
+  bounds.selectNodeContents(message)
+  const inside = range.cloneRange()
+  if (range.compareBoundaryPoints(Range.START_TO_START, bounds) < 0) inside.setStart(message, 0)
+  if (range.compareBoundaryPoints(Range.END_TO_END, bounds) > 0) inside.setEnd(message, message.childNodes.length)
+  return !inside.collapsed && inside.toString().trim() === range.toString().trim() ? inside : null
+}
+
 /** The words the person has selected inside one message, or null when nothing is selected in it (or the selection goes beyond it). */
 export function selectionIn(message: Element): string | null {
   const selection = window.getSelection()
   if (!selection || selection.isCollapsed || !selection.rangeCount) return null
   const range = selection.getRangeAt(0)
-  if (messageOf(range.startContainer) !== message || messageOf(range.endContainer) !== message) return null
-  return selection.toString().trim() || null
+  return rangeIn(message, range) ? selection.toString().trim() || null : null
 }
 
 /**
@@ -54,55 +65,95 @@ export function useQuoteSpot(place: RefObject<HTMLElement | null>, enabled: bool
     }
     let frame = 0
     let pressing = false
+    let waitingForClick = 0
+    let anchor: { message: Element; x: number; y: number } | undefined
+    const clearWait = (): void => { window.clearTimeout(waitingForClick); waitingForClick = 0 }
     const look = (): void => {
       frame = 0
+      if (pressing || waitingForClick) return
       const selection = window.getSelection()
-      if (pressing || !selection || selection.isCollapsed || !selection.rangeCount) return setSpot(null)
-      const range = selection.getRangeAt(0)
-      const message = messageOf(range.startContainer)
-      if (!message || message !== messageOf(range.endContainer) || !box.contains(message)) return setSpot(null)
+      if (!selection || selection.isCollapsed || !selection.rangeCount) return setSpot(null)
+      const selected = selection.getRangeAt(0)
+      const message = messageOf(selected.startContainer) ?? anchor?.message ?? messageOf(selected.endContainer)
+      const range = message && box.contains(message) ? rangeIn(message, selected) : null
+      if (!range) return setSpot(null)
       const text = cleanQuote(selection.toString())
       const frame0 = box.getBoundingClientRect()
       // Only the lines in view count: a selection scrolled out of the conversation has no button, which would land on the reply box.
       const seen = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0 && rect.bottom > frame0.top + 4 && rect.top < frame0.bottom - 4)
       if (!text || !seen.length) return setSpot(null)
-      const first = seen[0]
-      const last = seen[seen.length - 1]
-      // Over the first line, centered on it; under the last line when there is no room over it; always inside the conversation's height.
+      let first = seen[0], last = seen[seen.length - 1]
+      let center = first.left + first.width / 2
+      // A word can become a whole paragraph on the next click. Keep the action on the original line.
+      if (anchor && anchor.message === message) {
+        const bounds = message.getBoundingClientRect()
+        const clickY = bounds.top + anchor.y
+        const line = seen.find(rect => rect.top <= clickY && rect.bottom >= clickY)
+        if (line) { first = last = line; center = bounds.left + anchor.x }
+      }
       const room = 36
       const below = first.top - frame0.top < room + 8
-      const x = Math.min(Math.max(first.left + first.width / 2 - frame0.left, 48), Math.max(48, frame0.width - 48))
+      const x = Math.min(Math.max(center - frame0.left, 48), Math.max(48, frame0.width - 48))
       const y = below ? Math.min(last.bottom - frame0.top, frame0.height - room - 4) : Math.max(first.top - frame0.top, room + 4)
       setSpot({ text, x, y, below })
     }
     const soon = (): void => {
-      if (!frame) frame = requestAnimationFrame(look)
+      if (!pressing && !waitingForClick && !frame) frame = requestAnimationFrame(look)
     }
     // Held back while the mouse is down (a selection being made), and shown when it is let go.
-    const press = (event: Event): void => {
-      if ((event.target as Element | null)?.closest?.('.quote-float')) return
+    const press = (event: MouseEvent | PointerEvent): void => {
+      if (event.button !== 0 || (event.target as Element | null)?.closest?.('.quote-float')) return
+      clearWait()
       pressing = true
-      setSpot(null)
+      if (event.detail < 2) { anchor = undefined; setSpot(null); return }
+      const message = messageOf(event.target as Node)
+      if (message && anchor?.message !== message) {
+        const rect = message.getBoundingClientRect()
+        anchor = { message, x: event.clientX - rect.left, y: event.clientY - rect.top }
+      }
     }
-    const release = (): void => {
+    const release = (event: MouseEvent | PointerEvent): void => {
       if (!pressing) return
       pressing = false
-      soon()
+      if (event.detail === 2 && anchor) {
+        // Leave time for the browser's third click before offering the word by itself.
+        waitingForClick = window.setTimeout(() => { clearWait(); soon() }, 500)
+      } else soon()
+    }
+    // Mouse events carry the native click count. Touch and pen use their pointer events.
+    const pointerDown = (event: PointerEvent): void => { if (event.pointerType !== 'mouse') press(event) }
+    const pointerUp = (event: PointerEvent): void => { if (event.pointerType !== 'mouse') release(event) }
+    const cancel = (): void => { pressing = false; anchor = undefined; clearWait(); soon() }
+    const keyboard = (event: KeyboardEvent): void => {
+      if (event.shiftKey || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a')) {
+        anchor = undefined
+        clearWait()
+        soon()
+      }
     }
     document.addEventListener('selectionchange', soon)
-    document.addEventListener('pointerup', release)
-    document.addEventListener('pointercancel', release)
-    box.addEventListener('pointerdown', press, true)
+    document.addEventListener('mouseup', release)
+    document.addEventListener('pointerup', pointerUp)
+    document.addEventListener('pointercancel', cancel)
+    document.addEventListener('keydown', keyboard)
+    box.addEventListener('mousedown', press, true)
+    box.addEventListener('pointerdown', pointerDown, true)
+    window.addEventListener('blur', cancel)
     // The conversation scrolling moves what is selected.
     box.addEventListener('scroll', soon, true)
     window.addEventListener('resize', soon)
     soon()
     return () => {
+      clearWait()
       cancelAnimationFrame(frame)
       document.removeEventListener('selectionchange', soon)
-      document.removeEventListener('pointerup', release)
-      document.removeEventListener('pointercancel', release)
-      box.removeEventListener('pointerdown', press, true)
+      document.removeEventListener('mouseup', release)
+      document.removeEventListener('pointerup', pointerUp)
+      document.removeEventListener('pointercancel', cancel)
+      document.removeEventListener('keydown', keyboard)
+      box.removeEventListener('mousedown', press, true)
+      box.removeEventListener('pointerdown', pointerDown, true)
+      window.removeEventListener('blur', cancel)
       box.removeEventListener('scroll', soon, true)
       window.removeEventListener('resize', soon)
     }

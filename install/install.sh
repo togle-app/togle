@@ -1,12 +1,12 @@
 #!/bin/sh
-# Installs Togle on a Mac or Linux for the person who runs it, with no administrator rights: the latest release from
+# Installs Togle on a Mac or Linux for the person who runs it, with no administrator rights: a release from
 # GitHub, checked against Togle's release key before it is installed. The key is written in when the script is
 # published; it is the same key every update is checked with.
 #   curl -fsSL https://togle.app/install.sh | sh
 #   curl -fsSL https://togle.app/install.sh | sh -s -- --connector     (a server: only the connector)
 set -eu
 
-RELEASES="${TOGLE_INSTALL_RELEASES:-https://api.github.com/repos/togle-app/togle/releases/latest}"
+RELEASES="${TOGLE_INSTALL_RELEASES:-https://api.github.com/repos/togle-app/togle/releases/__TOGLE_RELEASE_TARGET__}"
 PUBLIC_KEY='__TOGLE_RELEASE_PUBLIC_KEY__'
 
 connector=0

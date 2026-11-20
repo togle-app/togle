@@ -1,16 +1,35 @@
 import { createContext, createElement, Fragment, memo, useContext, useDeferredValue, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import type { Token, Tokens } from 'marked'
 import type { Source } from '@shared/types'
-import { externalUrl } from '@shared/links'
+import { externalUrl, localFilePath } from '@shared/links'
 import { richDocument, richInline, richText } from '@shared/rich-text'
+import { citationTimes, meetingCitation } from '@shared/meeting-citations'
 
 const NO_SOURCES: Source[] = []
 type Sources = ReadonlyMap<number, Source>
 const EMPTY_SOURCES: Sources = new Map()
+const LocalFilesContext = createContext(false)
 
-function Link({ href, children, title, label }: { href: string; children: ReactNode; title?: string | null; label?: string }): ReactNode {
+function FileLink({ href, file, text, title, children }: { href: string; file: string; text?: string; title?: string | null; children: ReactNode }): ReactNode {
+  const [missing, setMissing] = useState<string>()
+  const show = async (): Promise<void> => {
+    const shown = await window.togle.showChatFile(href).catch(() => false)
+    setMissing(shown ? undefined : href)
+  }
+  return <span className="md-file">
+    <button type="button" className="link md-file-link" title={`${title ? title + '\n' : ''}Show in folder\n${file}`} onClick={() => void show()}>{children}</button>
+    {text !== file && <span className="md-file-path"> ({file})</span>}
+    {missing === href && <span role="status" className="md-file-status"> Couldn’t locate this file on this computer.</span>}
+  </span>
+}
+
+function Link({ href, children, title, label, text }: { href: string; children: ReactNode; title?: string | null; label?: string; text?: string }): ReactNode {
+  const localFiles = useContext(LocalFilesContext)
   const url = externalUrl(href)
-  if (!url) return <>{children}</>
+  if (!url) {
+    const file = localFiles && localFilePath(href, window.togle.platform)
+    return file ? <FileLink href={href} file={file} text={text} title={title}>{children}</FileLink> : <>{children}</>
+  }
   const open = (event: MouseEvent<HTMLAnchorElement>): void => {
     if (event.type === 'auxclick' && event.button !== 1) return
     event.preventDefault()
@@ -37,20 +56,29 @@ function CodeBlock({ code, language = '' }: { code: string; language?: string })
 }
 
 /** Whether the times a call's notes cite ("[12:38]") are drawn as chips: the notes ask for it, an agent's answer does not. */
-const TimesContext = createContext(false)
-const TIME = /\[\d{1,2}:\d{2}(?::\d{2})?\]/
+type MeetingTimes = boolean | ((seconds: number) => void)
+const TimesContext = createContext<MeetingTimes>(false)
 
 function TimeText({ text, sources }: { text: string; sources: Sources }): ReactNode {
-  const chips = useContext(TimesContext)
-  if (!chips) return <>{plainCitations(text, sources)}</>
-  return <>{text.split(/(\[\d{1,2}:\d{2}(?::\d{2})?\])/g).map((part, index) => {
-    const time = /^\[(\d{1,2}:\d{2}(?::\d{2})?)\]$/.exec(part)?.[1]
-    return time ? <span key={index} className="md-time" title={`${time} in the call`}>{time}</span> : <Fragment key={index}>{plainCitations(part, sources)}</Fragment>
-  })}</>
+  const times = useContext(TimesContext)
+  if (!times) return <>{plainCitations(text, sources)}</>
+  const parts: ReactNode[] = []
+  let from = 0
+  for (const match of text.matchAll(meetingCitation)) {
+    parts.push(<Fragment key={'text-' + from}>{plainCitations(text.slice(from, match.index), sources)}</Fragment>)
+    citationTimes(match[0]).forEach(({ label, seconds }, i) => {
+      const key = match.index + '-' + i, title = 'Show transcript at ' + label
+      parts.push(typeof times === 'function'
+        ? <button key={key} type="button" className="md-time" title={title} aria-label={title} onClick={() => times(seconds)}>{label}</button>
+        : <span key={key} className="md-time">{label}</span>)
+    })
+    from = match.index + match[0].length
+  }
+  return <>{parts}{plainCitations(text.slice(from), sources)}</>
 }
 
 function citations(text: string, sources: Sources): ReactNode {
-  return text.includes('[') && TIME.test(text) ? <TimeText text={text} sources={sources} /> : plainCitations(text, sources)
+  return text.includes('[') && text.includes(':') ? <TimeText text={text} sources={sources} /> : plainCitations(text, sources)
 }
 
 function plainCitations(text: string, sources: Sources): ReactNode {
@@ -81,7 +109,7 @@ function inline(tokens: Token[] = [], sources: Sources, depth = 0, tail = false)
       case 'checkbox': content = <input className="md-checkbox" type="checkbox" checked={token.checked} disabled aria-label={token.checked ? 'Completed task' : 'Incomplete task'} />; break
       case 'link': {
         const label = token.autolink ? token.text : inline(token.tokens, sources, depth + 1)
-        content = token.autolink && atTail ? label : <Link href={token.autolink ? token.href : richText(token.href)} title={token.title}>{label}</Link>
+        content = token.autolink && atTail ? label : <Link href={token.autolink ? token.href : richText(token.href)} title={token.title} text={token.text}>{label}</Link>
         break
       }
       case 'image': content = <Link href={richText(token.href)} title={token.title}>Image: {richText(token.text) || 'Open image'}</Link>; break
@@ -138,10 +166,12 @@ const Content = memo(function Content({ text, sources, streaming }: { text: stri
 })
 
 /** Defer streamed formatting behind typing; completed blocks are memoized independently. */
-export const Markdown = memo(function Markdown({ text, sources = NO_SOURCES, streaming = false, times = false }: { text: string; sources?: Source[]; streaming?: boolean; times?: boolean }): ReactNode {
+export const Markdown = memo(function Markdown({ text, sources = NO_SOURCES, streaming = false, times = false, localFiles = false }: { text: string; sources?: Source[]; streaming?: boolean; times?: MeetingTimes; localFiles?: boolean }): ReactNode {
   const deferred = useDeferredValue(streaming ? text : '')
   const content = <Content text={streaming ? deferred : text} sources={sources} streaming={streaming} />
-  return times ? <TimesContext.Provider value>{content}</TimesContext.Provider> : content
+  return <LocalFilesContext.Provider value={localFiles}>
+    {times ? <TimesContext.Provider value={times}>{content}</TimesContext.Provider> : content}
+  </LocalFilesContext.Provider>
 })
 
 /** Evidence excerpts can contain links without inserting block elements into a paragraph. */

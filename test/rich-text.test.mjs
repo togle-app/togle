@@ -1,6 +1,21 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { externalUrl, richDocument, richPreview, richText } from './.build/togle.mjs'
+import { externalUrl, localFilePath, richDocument, richPreview, richText } from './.build/togle.mjs'
+
+test('a Codex installer link retains its full local destination including spaces', () => {
+  const path = 'C:/Users/Cool/togle-opensource/dist-agent-usage-files-dev/Togle Setup 0.1.0.exe'
+  const token = richDocument('[Togle Free Windows installer](</' + path + '>)').blocks[0].tokens[0]
+  assert.equal(token.type, 'link')
+  assert.equal(localFilePath(token.href, 'win32'), path.replaceAll('/', '\\'))
+  assert.equal(localFilePath('file:///C:/a/My%20Notes%23v2.txt', 'win32'), 'C:\\a\\My Notes#v2.txt')
+  assert.equal(localFilePath('C:\\dev\\page.tsx:18:2', 'win32'), 'C:\\dev\\page.tsx')
+  assert.equal(localFilePath('file:///home/user/r%C3%A9sum%C3%A9.pdf', 'linux'), '/home/user/résumé.pdf')
+  assert.equal(localFilePath('/Users/test/100% ready.txt', 'darwin'), '/Users/test/100% ready.txt')
+  for (const target of ['https://example.com/x','javascript:alert(1)','file://server/share/x','//server/share','%2F%2Fserver/share','relative.txt','file:///C:/a%00b']) {
+    assert.equal(localFilePath(target, 'win32'), undefined)
+    assert.equal(localFilePath(target, 'linux'), undefined)
+  }
+})
 
 const nested = tokens => tokens.flatMap(token => [token, ...nested(token.tokens ?? []), ...(token.items ?? []).flatMap(item => nested(item.tokens))])
 

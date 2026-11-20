@@ -230,7 +230,7 @@ function CallAnswer({ taskKey, asked, task, onDismiss }: { taskKey: string; aske
       </header>
       <p className="hint call-answer-question">You asked: {asked.question}</p>
       {said.text
-        ? <div className="task-agent"><Markdown text={said.text} /></div>
+        ? <div className="task-agent"><Markdown text={said.text} localFiles /></div>
         : <p className="hint">{!task ? 'That task is gone.' : finished ? 'It finished. Open it to read what it said.' : 'Working on it…'}</p>}
       {said.steps && <p className="hint">{said.steps}</p>}
       {task?.pending.map((request) => (

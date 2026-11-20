@@ -184,6 +184,19 @@ async function run() {
   await js(box, "document.querySelectorAll('.pick-chip')[1].click()")
   await wait(() => js(box, "!!document.querySelector('.menu-overlay')"), 'the list of folders')
   await wait(async () => box.getBounds().height > oneLine && await js(box, "(()=>{const list=document.querySelector('.menu-overlay');return !!list&&list.getBoundingClientRect().bottom<=innerHeight&&list.scrollHeight<=list.clientHeight+1&&list.scrollWidth<=list.clientWidth+1})()"), 'the box to grow until all of its list shows, with its long folder paths')
+  const points = await js(box, `(() => {
+    const menu = document.querySelector('.menu-overlay').getBoundingClientRect()
+    const form = document.querySelector('.taskbox').getBoundingClientRect()
+    const row = document.querySelector('.menu-overlay button').getBoundingClientRect()
+    return {
+      hover: { x: Math.floor(row.x + row.width / 2), y: Math.floor(row.y + row.height / 2) },
+      outside: { x: menu.left > innerWidth - menu.right ? 2 : innerWidth - 3, y: Math.floor((form.bottom + menu.bottom) / 2) }
+    }
+  })()`)
+  box.webContents.sendInputEvent({ type: 'mouseMove', ...points.hover })
+  const alpha = async point => (await box.webContents.capturePage({ ...point, width: 1, height: 1 })).toBitmap()[3]
+  assert.equal(await alpha(points.hover), 255, 'the open folder list stays opaque')
+  assert.equal(await alpha(points.outside), 0, 'the window beside the open list stays transparent')
   await js(box, "document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))")
   await wait(async () => !(await js(box, "!!document.querySelector('.menu-overlay')")) && box.getBounds().height === oneLine, 'the box to be one line tall again')
   await js(box, "(() => { const area = document.querySelector('.taskbox textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(area, 'run frombox'); area.dispatchEvent(new Event('input', { bubbles: true })) })()")

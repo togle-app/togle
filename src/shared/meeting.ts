@@ -1,5 +1,12 @@
 import type { Settings, TranscriptEntry } from './types'
 
+export const NOTES_ACCOUNT_UNAVAILABLE = 'The account saved for these meeting notes is unavailable.'
+
+/** Older saved notes contain the account service's error verbatim. */
+export function missingNotesAccount(message: string): boolean {
+  return message === NOTES_ACCOUNT_UNAVAILABLE || message.startsWith('This subscription account is unavailable.') || message.startsWith('This AI connection is unavailable.')
+}
+
 /**
  * What the person can tell the others on a call, so they know it is being written down: true for how this computer
  * hears it. With the speech models on this computer the sound never leaves it; with a speech service it goes there.

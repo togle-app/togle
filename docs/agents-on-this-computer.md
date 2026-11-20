@@ -4,6 +4,16 @@ Togle lists the tasks of the coding agents on your computer (Claude Code, Codex 
 
 ## Agents
 
+Open a task in **Chat** or **Terminal** to see **This session**. It shows the recorded token count or API cost for that conversation. **Account limits** shows the percentage used across the provider account and a countdown for each reset time the provider supplies. Agents using the same subscription can share these limits.
+
+Expand **Agent usage** in the sidebar to see totals for each installed agent. Codex and Claude Code show locally recorded tokens from the last seven days. Hermes lists each provider it used, including changes within a conversation. A task can show both ChatGPT subscription tokens and Kimi API cost. Togle marks estimated costs with ≈. Expand an agent’s **Account limits** to see its weekly and other longer subscription windows. Togle remembers which sections you opened across navigation and restarts. It checks limits in the background every three minutes. Visible usage and reset countdowns refresh every minute.
+
+For API-billed Claude Code and Codex tasks, Togle keeps the latest dollar amount reported for each task it starts with API billing. Tracking starts with this version. Added ACP agents can report cumulative session costs in their own currency. Estimates, partial totals and unavailable readings are labeled, and the totals survive restarting Togle.
+
+Use the paperclip or drop files into a local Chat, Terminal, or **New task**. Chat and New task let you review and remove files before sending. Terminal inserts their paths at the prompt for you to submit. Recordings, images, videos, logs and other files stay at their original paths. Each agent uses the formats and local file access it supports.
+
+Local file links in an agent’s Chat replies show the full path. Click the label to select the file in your file manager, or select the path to copy it.
+
 **Agents** in the sidebar opens the list. A task that waits for you comes first, with the command it wants to run shown in full.
 
 - **Allow once** lets that one command run. **Refuse** tells the agent no.

@@ -1,16 +1,17 @@
-# Installs Togle on Windows for the person who runs it, with no administrator rights: the latest release from GitHub,
+# Installs Togle on Windows for the person who runs it, with no administrator rights: a release from GitHub,
 # checked against Togle's release key before it runs. The key is written in when the script is published; it is the
 # same key every update is checked with.
+#   From cmd.exe: powershell -NoProfile -Command "iex (irm https://togle.app/install.ps1 -ErrorAction Stop)"
 #   irm https://togle.app/install.ps1 | iex
 & {
   $ErrorActionPreference = 'Stop'
   $ProgressPreference = 'SilentlyContinue'
   $Modulus = '__TOGLE_RELEASE_MODULUS__'
   $Exponent = '__TOGLE_RELEASE_EXPONENT__'
-  $Releases = if ($env:TOGLE_INSTALL_RELEASES) { $env:TOGLE_INSTALL_RELEASES } else { 'https://api.github.com/repos/togle-app/togle/releases/latest' }
+  $Releases = if ($env:TOGLE_INSTALL_RELEASES) { $env:TOGLE_INSTALL_RELEASES } else { 'https://api.github.com/repos/togle-app/togle/releases/__TOGLE_RELEASE_TARGET__' }
   $Headers = @{ 'User-Agent' = 'togle-install' }
 
-  if ($Modulus.StartsWith('__')) { throw 'This install script has no release key written in. Get it from https://togle.app/install.ps1' }
+  if ($Modulus.StartsWith('__')) { throw 'This install script has no release key written in. Get install.ps1 from a published Togle Free release.' }
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
   # RSA-3072, SHA-256, PKCS #1 v1.5: the signature release-key.mjs makes.
@@ -33,20 +34,22 @@
 
   $folder = Join-Path ([IO.Path]::GetTempPath()) ('togle-install-' + [Guid]::NewGuid())
   New-Item -ItemType Directory -Path $folder | Out-Null
+  $file = Join-Path $folder 'TogleSetup.exe'
+  $signatureFile = $file + '.sig'
   try {
-    $file = Join-Path $folder $installer.name
     Write-Host "Downloading Togle $($release.tag_name)..."
     Invoke-WebRequest -Uri $installer.browser_download_url -OutFile $file -Headers $Headers -UseBasicParsing
-    Invoke-WebRequest -Uri $signature.browser_download_url -OutFile ($file + '.sig') -Headers $Headers -UseBasicParsing
-    if (-not (Test-Signature ([IO.File]::ReadAllBytes($file)) ([IO.File]::ReadAllBytes($file + '.sig')))) {
+    Invoke-WebRequest -Uri $signature.browser_download_url -OutFile $signatureFile -Headers $Headers -UseBasicParsing
+    if (-not (Test-Signature ([IO.File]::ReadAllBytes($file)) ([IO.File]::ReadAllBytes($signatureFile)))) {
       throw 'The download does not match Togle''s release key, so nothing was installed.'
     }
     Write-Host 'Signature checked.'
     if ($env:TOGLE_INSTALL_DRY_RUN -eq '1') { Write-Host "Checked, not installed: $($installer.name)"; return }
-    $process = Start-Process -FilePath $file -ArgumentList '/S' -Wait -PassThru
+    $process = Start-Process -FilePath $file -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw "The installer stopped with code $($process.ExitCode)." }
     Write-Host 'Togle is installed. Open it from the Start menu, then hold F9 and talk.'
   } finally {
-    Remove-Item -Recurse -Force $folder -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $file, $signatureFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $folder -ErrorAction SilentlyContinue
   }
 }

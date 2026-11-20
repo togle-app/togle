@@ -37,6 +37,69 @@ const wait = async (check, label) => {
 const startup = performance.now()
 require('../out/main/index.js')
 
+// An archived call whose account was removed. Both connections terminate in this test process.
+async function checkNotesRecovery(evaluate) {
+  const posts = []
+  const server = http.createServer(async (req, res) => {
+    let body = ''
+    for await (const chunk of req) body += chunk
+    const input = JSON.parse(body)
+    const evidence = JSON.parse(input.messages.at(-1).content)
+    const note = Array.isArray(evidence.confirmed_speakers)
+    if (note) posts.push({ path: req.url, model: input.model, names: evidence.confirmed_speakers.map(person => person.name) })
+    const content = note ? '## Decisions\n- Keep the release date. [0:00]' : '{"title":"Release review"}'
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    res.end('data: ' + JSON.stringify({ choices: [{ delta: { content } }] }) + '\n\ndata: [DONE]\n\n')
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const connection = label => invoke('connections:add', { kind: 'local', label, baseUrl: 'http://127.0.0.1:' + server.address().port + '/' + label + '/v1', model: '' })
+    const profileFor = id => ({ tasks: Object.fromEntries(['quick', 'deep', 'vision', 'background'].map(lane => [lane, { sourceId: id, model: 'model-' + lane, effort: 'low' }])) })
+    const old = await connection('Original'), replacement = await connection('Replacement')
+    await invoke('settings:update', { ai: profileFor(old.id), assist: { autoNotes: false, rememberCalls: true } })
+    const live = await invoke('session:listening', true)
+    invoke('dev:transcript', 'me', 'We should keep the release date.')
+    invoke('dev:transcript', 'them', 'I agree.', 'restore-piece', 'voice:remote', 2)
+    await invoke('session:listening', false)
+    await invoke('calls:rename', live.id, 'Account recovery test')
+    const draft = await invoke('calls:notes-generate', live.id, 'concise')
+    assert.equal(draft.minutes.state, 'ready')
+    await invoke('session:clear')
+    await invoke('settings:update', { ai: profileFor(replacement.id), assist: { autoNotes: true } })
+    await invoke('connections:remove', old.id)
+    const named = await invoke('calls:speaker', live.id, 'me', 'Luka')
+    const waiting = named.confirm && !named.confirm.closed && named.confirm.voices.some(voice => voice.id === 'voice:remote' && voice.answered === undefined)
+    await invoke(waiting ? 'confirm:answer' : 'calls:speaker', live.id, 'voice:remote', 'Angell')
+    await wait(async () => (await invoke('calls:get', live.id)).minutes?.state === 'error', 'unavailable saved notes account')
+    const failed = await invoke('calls:get', live.id)
+    assert.equal(failed.summary, draft.summary)
+    assert.match(failed.minutes.error, /account saved for these meeting notes/)
+    assert.equal(posts.length, 1, 'choosing a new default did not send the saved meeting there')
+    const jsId = JSON.stringify(live.id)
+    await evaluate("document.querySelector('.workspace-nav button[aria-label=\"Meetings\"]').click()")
+    await wait(() => evaluate("!!document.querySelector('.meeting-row[data-call-id='+CSS.escape(" + jsId + ")+']')"), 'archived meeting in the list')
+    await evaluate("document.querySelector('.meeting-row[data-call-id='+CSS.escape(" + jsId + ")+']').click()")
+    await wait(() => evaluate("!!document.querySelector('.notes-recovery button')"), 'recovery action in the real meeting window')
+    const action = await evaluate("document.querySelector('.notes-recovery button').textContent")
+    assert.ok(['Update notes with Replacement', 'Update notes with…'].includes(action), action)
+    await evaluate("document.querySelector('.notes-recovery button').click()")
+    if (action.endsWith('…')) {
+      await wait(() => evaluate("[...document.querySelectorAll('.menu-overlay [role=menuitem]')].some(b=>b.textContent==='Replacement')"), 'replacement choice')
+      await evaluate("[...document.querySelectorAll('.menu-overlay [role=menuitem]')].find(b=>b.textContent==='Replacement').click()")
+    }
+    await wait(async () => (await invoke('calls:get', live.id)).minutes?.state === 'ready', 'real notes retry')
+    const saved = await invoke('calls:get', live.id)
+    assert.equal(saved.ai.tasks.background.sourceId, old.id)
+    assert.equal(saved.minutes.sourceId, replacement.id)
+    assert.deepEqual(posts[1], { path: '/Replacement/v1/chat/completions', model: 'model-background', names: ['Luka', 'Angell'] })
+    await evaluate("document.querySelector('.meeting-navigation .meeting-remove').click()")
+    await wait(() => evaluate("!!document.querySelector('.call-confirm .stop')"), 'visible meeting removal')
+    await evaluate("document.querySelector('.call-confirm .stop').click()")
+    await wait(async () => (await invoke('calls:get', live.id)) === null, 'confirmed removal from encrypted history')
+    console.log('Native meeting recovery: saved names, explicit replacement, configured background model, and removal through the real window passed.')
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
+}
+
 async function run() {
   await wait(() => handlers.has('dev:transcript') && BrowserWindow.getAllWindows().length, 'registered IPC')
   const window = BrowserWindow.getAllWindows().find(window => window.getTitle() !== 'Togle voice bar')
@@ -203,6 +266,7 @@ async function run() {
   assert.ok(saved.includes(empty.id))
   await wait(() => evaluate(`document.querySelectorAll('.meeting-row').length===${saved.length}`), 'every saved call in Meetings')
   console.log('Native main + renderer: a call pinned to its language, encrypted history, voices named and merged, names confirmed after the call, rename/export/give/search/delete, empty calls and Remember calls off passed.')
+  await checkNotesRecovery(evaluate)
   clearTimeout(timeout)
   app.exit(0)
 }

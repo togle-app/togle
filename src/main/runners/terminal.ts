@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { accessSync, constants, promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { IPty } from 'node-pty'
+import { filePathsForTerminal } from '@shared/pasted-pictures'
 import { TASK_WORDS, type RunnerKind, type TaskInfo } from '@shared/runner'
 import { commandWords, exists, forCmd, whereIs } from './acp'
 import { endTree } from './process-tree'
@@ -62,7 +63,7 @@ export const cleanWords = (text: string): string =>
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
 
 /** Text as one line, for a terminal: there, a line break would press Enter. */
-const oneLine = (text: string): string => cleanWords(text).replace(/\s*[\r\n]+\s*/g, ' ').replace(/\t/g, ' ').trim()
+const oneLine = (text: string): string => cleanWords(filePathsForTerminal(text)).replace(/\s*[\r\n]+\s*/g, ' ').replace(/\t/g, ' ').trim()
 
 /**
  * A reply sent to a screen that nobody looks at is only words: one that starts as a command of the agent's own ("/", "!") would

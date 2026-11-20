@@ -3,7 +3,7 @@ import type { LogEntry, ModelInfo, PlanItem, StepDetail, TaskHistory, TaskState,
 import { Icon, type IconName } from './Icon'
 import { splitQuote } from '@shared/quote'
 import { tidyPlan } from '@shared/plan-items'
-import { splitPictures } from '@shared/pasted-pictures'
+import { isChatPicture, splitPictures } from '@shared/pasted-pictures'
 import type { Delivery } from '@shared/sent-messages'
 import { useKeptState } from './kept'
 import { Markdown } from './Markdown'
@@ -658,7 +658,7 @@ function Fold({ keep, clauses, label, live = false, ticker, fresh, children }: {
 function Said({ entry, fresh }: { entry: LogEntry; fresh?: boolean }): ReactNode {
   return (
     <div className={fresh ? 'task-agent fresh' : 'task-agent'} data-quotable="">
-      <Markdown text={entry.text} />
+      <Markdown text={entry.text} localFiles />
     </div>
   )
 }
@@ -871,7 +871,9 @@ function YouCard({ entry, at, fresh, pinned, taskKey, sending }: { entry: LogEnt
       {!!(pictures.length || files.length) && (
         <div className="you-pictures">
           {pictures.map((picture, index) => <Picture key={picture} taskKey={taskKey} picture={picture} index={index} />)}
-          {files.map((file, index) => <Picture key={file} taskKey={taskKey} picture={file} index={pictures.length + index} pasted />)}
+          {files.map((file, index) => isChatPicture(file)
+            ? <Picture key={file} taskKey={taskKey} picture={file} index={pictures.length + index} pasted />
+            : <span key={file} className="sent-file" title={file}><Icon name="file" size={14} />{file.split(/[\\/]/).pop()}</span>)}
         </div>
       )}
       {sending?.delivery === 'failed' && (
@@ -935,7 +937,8 @@ const isPlan = (entry: LogEntry): boolean => entry.kind === 'step' && entry.step
  * are the paths of the pictures pasted into the reply box (those are drawn too: `youFiles`).
  */
 export function youWords(entry: LogEntry): string {
-  return splitPictures(entry.images?.length ? entry.text.replace(/\[Image #\d+\]\s*/g, '').trim() : entry.text).words
+  // Claude's stored captions include its terminal chips. Codex has already identified its chips by byte range.
+  return splitPictures(entry.images?.some(key => key.startsWith('image:')) ? entry.text.replace(/\[Image #\d+\]\s*/g, '').trim() : entry.text).words
 }
 
 /** The files of the pictures pasted into the reply box that went with what the person said. */
@@ -955,7 +958,10 @@ export function promptsOf(entries: readonly LogEntry[]): Prompt[] {
     if (!turn.you) continue
     // A question that quotes a part of a message is named by what was answered, not by the part quoted.
     const said = youWords(turn.you)
-    const text = (splitQuote(said)?.reply ?? said).replace(/\s+/g, ' ').trim() || (turn.you.images?.length || youFiles(turn.you).length ? 'A picture' : '')
+    const files = youFiles(turn.you)
+    const attachment = files.some(file => !isChatPicture(file)) ? files.map(file => file.split(/[\\/]/).pop()).join(', ')
+      : turn.you.images?.length || files.length ? 'A picture' : ''
+    const text = (splitQuote(said)?.reply ?? said).replace(/\s+/g, ' ').trim() || attachment
     if (text) prompts.push({ key: turn.key, text, ...(realTime(turn.you.at) ? { at: turn.you.at } : {}) })
   }
   return prompts

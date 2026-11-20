@@ -2,6 +2,8 @@
 // change reads the file again first and keeps every line it does not understand, so what was typed elsewhere is never
 // written over. An item given to an agent carries the task in a comment at the end of its line.
 import { promises as fs, watch, type FSWatcher } from 'node:fs'
+import { createHash } from 'node:crypto'
+import type { TodoOffer } from '@shared/call-todo'
 import path from 'node:path'
 import type { TodoItem, TodoRef } from '@shared/todo'
 import { writeFileAtomic } from './storage'
@@ -22,6 +24,8 @@ function parse(lines: readonly string[]): TodoItem[] {
 }
 
 const note = (task: string | undefined): string => (task ? ` <!-- togle:task=${task} -->` : '')
+const comparable = (text: string): string => clean(text).replace(/\.$/, '').normalize('NFC').toLowerCase()
+const reviewed = (call: string, text: string): string => `<!-- togle:reviewed=${createHash('sha256').update(call + '\0' + comparable(text)).digest('hex')} -->`
 
 export class TodoFile {
   private chain: Promise<unknown> = Promise.resolve()
@@ -33,6 +37,32 @@ export class TodoFile {
 
   async list(): Promise<TodoItem[]> {
     return parse(split(await this.read()).lines)
+  }
+
+  async pendingOffers(offers: TodoOffer[]): Promise<TodoOffer[]> {
+    const { lines } = split(await this.read())
+    const decisions = new Set(lines)
+    const listed = new Set(parse(lines).map(item => comparable(item.text)))
+    return offers.filter(offer => !listed.has(comparable(offer.text)) && !decisions.has(reviewed(offer.callId, offer.text)))
+  }
+
+  /** Record the decision and its optional checkbox in the same atomic edit, so retries and removal keep the decision. */
+  reviewOffer(call: string, text: string, action: 'add' | 'dismiss'): Promise<TodoItem[]> {
+    const marker = reviewed(call, text)
+    return this.change(lines => {
+      if (lines.includes(marker)) return
+      if (!lines.length) lines.push('# To do', '')
+      if (action === 'add' && !parse(lines).some(item => comparable(item.text) === comparable(text))) lines.push('- [ ] ' + clean(text).replace(/\.$/, ''))
+      lines.push(marker)
+    })
+  }
+
+  clear(refs: TodoRef[]): Promise<TodoItem[]> {
+    return this.change(lines => {
+      const listed = new Map(parse(lines).map(item => [item.line, item.text]))
+      if (refs.some(ref => listed.get(ref.line) !== ref.text)) throw new Error('The list changed. Review it and try again.')
+      for (const line of [...new Set(refs.map(ref => ref.line))].sort((a, b) => b - a)) lines.splice(line, 1)
+    })
   }
 
   /** Adds an item at the end; with `task`, already given to that task. */

@@ -270,6 +270,8 @@ export interface ViewRequest extends PendingRequest {
 
 /** A task as the window shows it. */
 export interface TaskView extends TaskInfo {
+  /** The active native conversation when the same task continues in a different session. */
+  sessionId?: string
   /** `runner:id`. */
   key: string
   /** Whether Togle runs it, so it can be answered, replied to and stopped here. */
@@ -399,6 +401,8 @@ export interface TaskDetail {
  */
 export interface TaskHistory {
   entries: LogEntry[]
+  /** Unanswered follow-up questions in the current Codex turn. The agent can keep working. */
+  questions?: import('./codex-questions').CodexQuestion[]
   /** Whether turns before these were left out: the rest can be asked for. */
   more: boolean
   /**

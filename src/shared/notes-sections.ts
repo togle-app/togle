@@ -34,13 +34,18 @@ const SECTION = /^##\s+(.+?)\s*#*\s*$/
 const REFERENCE = /^\s{0,3}\[[^\]]+\]:\s+\S/
 const TABLE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/
 // "Name: the task" at the start of an item: the name of the person who took it, said first.
-const OWNER = /^(\s*[-*]\s+(?:\[[ xX]\]\s+)?)((?:You|[A-Z][\w'’.-]*(?: [A-Z][\w'’.-]*){0,2})):\s+(?=\S)/
+const OWNER = /^(\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)(?:\*\*)?(You|\p{Lu}[\p{L}'’.-]*(?: \p{Lu}[\p{L}'’.-]*){0,2})(?:\*\*)?:(?:\*\*)?\s+(?=\S)/u
+
+/** Some saved notes spelled out a tentative microphone label inside the task owner. The owner is still explicitly You. */
+export function compactNoteOwner(text: string): string {
+  return text.replace(/^((?:\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?\**You\**)\s*\(speaker\s+label(?:l)?ed\s+[^()\n]{1,100}?,\s*(?:identity|name)\s+tentative\)(?=\**\s*:)/i, '$1')
+}
 
 /** Under To do, the name of who took each item is bold (and drawn as a chip, so its colon is left out), so that the items read by person. */
 function ownersFirst(body: string): string {
   return body
     .split('\n')
-    .map((line) => (OWNER.test(line) ? line.replace(OWNER, '$1**$2** ') : line))
+    .map(line => compactNoteOwner(line).replace(OWNER, '$1**$2** '))
     .join('\n')
 }
 

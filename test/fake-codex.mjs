@@ -169,11 +169,11 @@ function core() {
       for (const conn of thread.subscribers) sendRequest(conn, thread, pending)
     })
 
-  async function runTurn(thread, turn, prompt) {
+  async function runTurn(thread, turn, prompt, input) {
     setStatus(thread, 'active', [])
     toSubscribers(thread, 'turn/started', { threadId: thread.id, turn: { id: turn.id, status: 'inProgress', items: [] } })
     // What was asked is the turn's first item, as Codex keeps it.
-    thread.turns.at(-1)?.items.push({ id: `um${turn.id}`, type: 'userMessage', content: [{ type: 'text', text: prompt, text_elements: [] }] })
+    thread.turns.at(-1)?.items.push({ id: `um${turn.id}`, type: 'userMessage', content: input ?? [{ type: 'text', text: prompt, text_elements: [] }] })
     const finish = (status) => {
       thread.turn = null
       setStatus(thread, 'idle')
@@ -303,6 +303,14 @@ function core() {
         const thread = threads.get(params.threadId)
         return thread ? reply({ thread: info(thread, params.includeTurns === true) }) : fail('no such thread')
       }
+      case 'thread/items/list': {
+        const turn = threads.get(params.threadId)?.turns?.find(turn => turn.id === params.turnId)
+        if (!turn) return fail('no such turn')
+        const from = Number(params.cursor) || 0
+        const limit = Number(params.limit) || 25
+        const data = turn.items.slice(from, from + limit).map(item => ({ turnId: turn.id, item }))
+        return reply({ data, nextCursor: from + limit < turn.items.length ? String(from + limit) : null })
+      }
       case 'thread/turns/list': {
         // Newest first, a page at a time; a "summary" turn has only what was asked and the last thing said.
         const thread = threads.get(params.threadId)
@@ -340,7 +348,7 @@ function core() {
           return undefined
         }
         reply({ turn })
-        void runTurn(thread, turn, String(params.input?.[0]?.text ?? ''))
+        void runTurn(thread, turn, String(params.input?.[0]?.text ?? ''), params.input)
         return undefined
       }
       case 'turn/steer': {

@@ -1899,6 +1899,10 @@ test('a task’s conversation is asked of its agent by the session the task is i
     const view = await hub.open('claude:a')
     const owned = claude.resumed.find((task) => task.id === 'a')
     owned.sessionNow = 'a-after-clear'
+    claude.usage = async id => ({ kind: 'tokens', period: 'session', total: id === 'a-after-clear' ? 12 : 99 })
+    const detail = await hub.detail(view.key)
+    assert.equal(detail.task.sessionId, 'a-after-clear')
+    assert.equal((await hub.usage('claude', detail.task.sessionId)).total, 12)
     assert.deepEqual((await hub.history(view.key, false)).entries.map((e) => e.text), ['asked in a-after-clear'])
     assert.deepEqual(asked.at(-1), ['a-after-clear', false])
     // An agent that keeps no conversation to read, a task that is gone, and a failing read: nothing, not an error.

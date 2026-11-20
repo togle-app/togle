@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type { TogleApi, Unsubscribe } from '@shared/api'
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
@@ -10,6 +10,11 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
 // Whether the window is hidden or minimized, as main last said. Main says it first when the page has loaded, before the page
 // listens: a page that listens later is told at once.
 let away = false
+// Native paste events also cover the Edit menu and context menus. No clipboard contents leave the field.
+window.addEventListener('paste', event => {
+  if (!event.isTrusted || !(event.target instanceof HTMLElement)) return
+  if (event.target.isContentEditable || event.target.matches('textarea:read-write, input:read-write')) ipcRenderer.send('dictation:pasted')
+}, true)
 ipcRenderer.on('window:away', (_event, value) => { away = value === true })
 
 const api: TogleApi = {
@@ -45,11 +50,11 @@ const api: TogleApi = {
   setDictationPill: (width, height) => ipcRenderer.send('dictation:pill', width, height),
     dragDictation: (action, x, y) => ipcRenderer.send('dictation:drag', action, x, y),
   toggleDictation: () => ipcRenderer.invoke('dictation:toggle'),
-  cancelDictation: () => ipcRenderer.invoke('dictation:cancel'),
+  cancelDictation: id => ipcRenderer.invoke('dictation:cancel', id),
   pushDictationAudio: (id, pcm) => ipcRenderer.send('dictation:audio', id, pcm),
   finishDictationCapture: id => ipcRenderer.invoke('dictation:finish', id),
   dictationCaptureFailed: (id, message) => ipcRenderer.send('dictation:failed', id, message),
-  copyDictationText: () => ipcRenderer.invoke('dictation:copy'),
+  copyDictationText: id => ipcRenderer.invoke('dictation:copy', id),
   openDictationSettings: () => ipcRenderer.invoke('dictation:settings'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
@@ -75,11 +80,12 @@ const api: TogleApi = {
   callSessions: () => ipcRenderer.invoke('calls:list'),
   callSession: (id) => ipcRenderer.invoke('calls:get', id),
   searchCalls: (query) => ipcRenderer.invoke('calls:search', query),
-  meetingOffers: () => ipcRenderer.invoke('meetings:offers'),
+  meetingOffers: callId => ipcRenderer.invoke('meetings:offers', callId),
+  reviewMeetingTodo: (callId, text, action) => ipcRenderer.invoke('meetings:review-todo', callId, text, action),
   callAgents: (call) => ipcRenderer.invoke('calls:agents', call),
   setCallAgents: (call, keys) => ipcRenderer.invoke('calls:set-agents', call, keys),
   giveCall: (request) => ipcRenderer.invoke('calls:give', request),
-  generateCallNotes: (id, template, revision) => ipcRenderer.invoke('calls:notes-generate', id, template, revision),
+  generateCallNotes: (id, template, revision, sourceId) => ipcRenderer.invoke('calls:notes-generate', id, template, revision, sourceId),
   saveCallNotes: (id, revision, text) => ipcRenderer.invoke('calls:notes-save', id, revision, text),
   savePersonalCallNotes: (id, before, text) => ipcRenderer.invoke('calls:notes-personal', id, before, text),
   renameCallSession: (id, title) => ipcRenderer.invoke('calls:rename', id, title),
@@ -115,6 +121,9 @@ const api: TogleApi = {
 
 
   runnerStatus: () => ipcRenderer.invoke('runners:status'),
+  runnerUsage: (runner, sessionId) => ipcRenderer.invoke('runners:usage', runner, sessionId),
+  runnerLimits: runner => ipcRenderer.invoke('runners:limits', runner),
+  onRunnerLimitsChanged: cb => subscribe('runners:limits-changed', cb),
   addCodingAgent: (name, command) => ipcRenderer.invoke('runners:add-agent', name, command),
   agentCatalog: () => ipcRenderer.invoke('runners:agent-catalog'),
   agentSignInChoices: (runner) => ipcRenderer.invoke('runners:sign-in-choices', runner),
@@ -124,6 +133,7 @@ const api: TogleApi = {
   terminalWrite: (key, data) => ipcRenderer.invoke('runners:terminal-write', key, data),
   terminalResize: (key, cols, rows) => ipcRenderer.invoke('runners:terminal-resize', key, cols, rows),
   savePastedPicture: (bytes, type) => ipcRenderer.invoke('screen:paste-picture', bytes, type),
+  attachmentPath: (file) => webUtils.getPathForFile(file),
   pastedPicture: (file) => ipcRenderer.invoke('screen:pasted-picture', file),
   typeTerminalWords: (key) => ipcRenderer.invoke('runners:terminal-words', key),
   onTerminalData: cb => subscribe('runners:terminal-data', chunk => cb(chunk as { key: string; at: number; data: string; screen?: string })),
@@ -189,6 +199,8 @@ const api: TogleApi = {
   sizeTaskBox: height => ipcRenderer.send('taskbox:size', height),
   pickTaskBoxFolder: () => ipcRenderer.invoke('taskbox:pick-folder'),
   showPicture: () => ipcRenderer.invoke('show:picture'),
+  showReady: () => ipcRenderer.send('show:ready'),
+  onShowFinish: cb => subscribe('show:finish', cb),
   showDone: png => ipcRenderer.send('show:done', png),
   showCancel: () => ipcRenderer.send('show:cancel'),
   todoList: () => ipcRenderer.invoke('todo:list'),
@@ -196,6 +208,7 @@ const api: TogleApi = {
   setTodoDone: (item, done) => ipcRenderer.invoke('todo:set-done', item, done),
   editTodo: (item, text) => ipcRenderer.invoke('todo:edit', item, text),
   removeTodo: item => ipcRenderer.invoke('todo:remove', item),
+  clearTodos: items => ipcRenderer.invoke('todo:clear', items),
   linkTodo: (item, task) => ipcRenderer.invoke('todo:link', item, task),
   showTodoFile: () => ipcRenderer.invoke('todo:show-file'),
   onTodoChanged: cb => subscribe('todo:changed', () => cb()),
@@ -206,6 +219,7 @@ const api: TogleApi = {
   onHotkeysChanged: (cb) => subscribe('hotkeys:changed', cb),
   onHotkey: (cb) => subscribe('hotkey', cb),
   openExternal: (url) => ipcRenderer.send('shell:open', url),
+  showChatFile: (href) => ipcRenderer.invoke('shell:show-chat-file', href),
   platform: process.platform,
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),

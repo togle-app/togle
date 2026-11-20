@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 
 /**
  * What the window read last from Togle's main process, kept while its place is not on show: the window draws one place at a
@@ -9,6 +9,43 @@ const answers = new Map<string, unknown>()
 
 const states = new Map<string, unknown>()
 const watchers = new Map<string, Set<() => void>>()
+
+const localFolds = new Map<string, boolean>()
+
+/** Each screen or agent owns its disclosure preference, shared by every window and restored on launch. */
+export function useFoldPreference(name: string): [boolean, (next: boolean) => void] {
+  const key = 'togle.ui.fold:' + name
+  const subscribe = useCallback((notify: () => void) => {
+    const changed = (event: StorageEvent) => { if (event.key === key || event.key === null) notify() }
+    window.addEventListener('storage', changed)
+    return () => window.removeEventListener('storage', changed)
+  }, [key])
+  const open = useSyncExternalStore(subscribe, () => {
+    if (localFolds.has(key)) return localFolds.get(key)!
+    try { return localStorage.getItem(key) === 'open' } catch { return false }
+  })
+  const set = useCallback((next: boolean) => {
+    try {
+      if (next) localStorage.setItem(key, 'open')
+      else localStorage.removeItem(key)
+      localFolds.delete(key)
+    } catch { localFolds.set(key, next) }
+    // The browser fires storage in other windows only.
+    window.dispatchEvent(new StorageEvent('storage', { key }))
+  }, [key])
+  return [open, set]
+}
+
+/** Commit summary activation before navigation can unmount the native details element. */
+export function KeptDetails({ name, className, summary, children }: { name: string; className: string; summary: ReactNode; children: ReactNode }) {
+  const [open, set] = useFoldPreference(name)
+  return <details className={className} open={open} onToggle={event => {
+    if (event.target === event.currentTarget && event.currentTarget.open !== open) set(event.currentTarget.open)
+  }}>
+    <summary onClick={event => { event.preventDefault(); set(!open) }}>{summary}</summary>
+    {open && children}
+  </details>
+}
 
 /**
  * State of a place that stays while the window is open: the window draws one place at a time, so what a place had when it was

@@ -36,9 +36,10 @@ export class DictationWindow {
   setExpanded(expanded: boolean, explicit = false): void {
     if (this.stopped || this.unavailable) return
     if (expanded && this.dragging) return
-    if ((this.resting || this.state.phase === 'idle') && !this.showBar) return
+    if (!this.showBar && (this.state.phase === 'idle' || (this.resting && this.state.phase !== 'ready'))) return
     if (explicit) {
-      clearTimeout(this.collapseTimer); clearTimeout(this.expandTimer); this.expandTimer = undefined
+      clearTimeout(this.collapseTimer); this.collapseTimer = undefined
+      clearTimeout(this.expandTimer); this.expandTimer = undefined
       this.mustLeave = !expanded
       this.phaseCursor = undefined
       this.applyExpanded(expanded)
@@ -76,14 +77,14 @@ export class DictationWindow {
   private applyExpanded(value: boolean): void {
     if (this.expanded === value) return
     this.expanded = value
-    if (this.forwardMouse) this.window?.webContents.send('dictation:expanded', value)
+    if (this.forwardMouse && !(this.resting && this.state.phase === 'ready')) this.window?.webContents.send('dictation:expanded', value)
     else this.render()
   }
   private pointerInside(): boolean {
     const win = this.window
     if (!win || win.isDestroyed()) return false
     const b = win.getContentBounds(), point = this.cursor()
-    const phase = this.resting ? 'idle' : this.state.phase
+    const phase = this.resting && !(this.expanded && this.state.phase === 'ready') ? 'idle' : this.state.phase
     const recovery = phase === 'ready' || phase === 'error', status = phase !== 'idle' && phase !== 'recording'
     const width = Math.min(b.width, this.expanded ? recovery ? 352 : 280 : status ? 156 : this.pill.width)
     // Listening, the open panel may have a line under its title (the call hears you, the microphone is muted), and done,
@@ -142,6 +143,7 @@ export class DictationWindow {
   }
   update(state: DictationState): void {
     const newRecording = state.phase === 'recording' && state.id !== this.state.id
+    if (state.phase === 'idle' && this.state.phase !== 'idle') this.setExpanded(false, true)
     if (state.phase !== this.state.phase || state.id !== this.state.id) {
       clearTimeout(this.expandTimer); this.expandTimer = undefined
       if (!this.expanded) this.phaseCursor = this.cursor()
@@ -152,8 +154,8 @@ export class DictationWindow {
     // Keep the bar on one display during a dictation, regardless of later pointer movement.
     if (!this.placement && (state.phase === 'starting' || newRecording || this.displayId === undefined)) this.displayId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
     this.render()
-    if (state.phase === 'done') {
-      this.doneTimer = setTimeout(() => { this.resting = true; this.render() }, 1800)
+    if (state.phase === 'done' || (state.phase === 'ready' && state.outcome === 'copied')) {
+      this.doneTimer = setTimeout(() => { this.resting = true; this.render() }, state.phase === 'done' ? 1800 : 3500)
       this.doneTimer.unref?.()
     }
   }
@@ -167,7 +169,7 @@ export class DictationWindow {
   }
   private recover(): void {
     clearTimeout(this.recoveryTimer)
-    if (this.stopped || !this.showBar && (this.resting || this.state.phase === 'idle')) return
+    if (this.stopped || !this.showBar && (this.state.phase === 'idle' || (this.resting && this.state.phase !== 'ready'))) return
     this.recoveryTimer = setTimeout(() => {
       if (this.stopped) return
       this.unavailable = false
@@ -177,9 +179,11 @@ export class DictationWindow {
   }
   private render(): void {
     if (this.stopped || this.unavailable) return
-    const state = this.resting ? { ...this.state, phase: 'idle' as const } : this.state
-    if (state.phase === 'idle' && !this.showBar) {
-      clearTimeout(this.collapseTimer); clearTimeout(this.expandTimer); this.expandTimer = undefined
+    const waitingForPaste = this.state.phase === 'ready' && this.state.outcome === 'copied'
+    const state = this.resting && !(waitingForPaste && this.expanded) ? { ...this.state, phase: 'idle' as const, waitingForPaste } : this.state
+    if (state.phase === 'idle' && !this.showBar && !waitingForPaste) {
+      clearTimeout(this.collapseTimer); this.collapseTimer = undefined
+      clearTimeout(this.expandTimer); this.expandTimer = undefined
       clearInterval(this.pointerTimer); this.pointerTimer = undefined; this.expanded = false
       this.setPassthrough(true)
       if (this.window && !this.window.isDestroyed()) {

@@ -3,8 +3,52 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-const { splitPictures } = await import('./.build/togle.mjs')
+const { splitPictures, withFilePaths } = await import('./.build/togle.mjs')
 const win = 'C:\\Users\\someone\\AppData\\Roaming\\Togle\\pasted\\paste-20261118-120000.png'
+const shot = 'C:\\Users\\Some One\\AppData\\Roaming\\togle\\pictures\\show-2026-11-20T13-46-03-372Z.png'
+
+test('F8 pictures already in chat are displayed as attachments alongside their spoken words', () => {
+  const unix = '/home/me/.config/togle/pictures/show-2026-11-20T13-46-03-372Z.png'
+  assert.deepEqual(splitPictures('"' + shot + '" Look at the header.'), { words: 'Look at the header.', files: [shot] })
+  assert.deepEqual(splitPictures('Picture: ' + unix), { words: '', files: [unix] })
+  const mac = "/Users/O'Brien/Library/Application Support/togle/pictures/" + unix.split('/').at(-1)
+  assert.deepEqual(splitPictures("'" + mac.replaceAll("'", "'\\''") + "' Look here."), { words: 'Look here.', files: [mac] })
+  const apostrophe = shot.replace('Some One', "O'Brien")
+  assert.deepEqual(splitPictures('Attached ' + apostrophe), { words: 'Attached', files: [apostrophe] })
+  assert.deepEqual(splitPictures(withFilePaths('Review both', [shot, win])), { words: 'Review both', files: [shot, win] })
+  for (const text of [unix + '.log', 'https://example.com' + unix, '/tmp/pictures/show-notes.png']) assert.deepEqual(splitPictures(text), { words: text, files: [] })
+})
+
+test('arbitrary disk attachments round trip without changing words, spaces or punctuation in a filename', () => {
+  const words = 'Check  these files.\n\nAttached files\nwas the heading.'
+  const files = ['C:\\Sound Recordings\\Recording.m4a', '/home/me/logs/weird "file".log', '/tmp/video.mp4', '/tmp/frame.png']
+  assert.deepEqual(splitPictures(withFilePaths(words, files)), { words, files })
+  assert.deepEqual(splitPictures(withFilePaths('', files)), { words: '', files })
+  assert.deepEqual(splitPictures('Attached files\nnot a file'), { words: 'Attached files\nnot a file', files: [] })
+})
+
+test('file attachments survive Windows line endings and a trailing newline in an agent transcript', () => {
+  const words = 'First paragraph.\r\n\r\nPlease check  this.'
+  const files = ['C:\\release tools\\togle-release.pub', '\\\\server\\files\\notes.log']
+  for (const newline of ['\r\n', '\n']) {
+    const block = ['Attached files', ...files, '', ''].join(newline)
+    assert.deepEqual(splitPictures(words + newline + newline + block), { words, files })
+    assert.deepEqual(splitPictures(block), { words: '', files })
+  }
+  for (const text of ['Attached files\r\n', 'Attached files\r\nrelative.pub\r\n', 'Attached files\r\n/tmp/a\r\n\r\n/tmp/b']) {
+    assert.deepEqual(splitPictures(text), { words: text, files: [] })
+  }
+})
+
+test('one-line terminal attachment lists preserve paths and ignore ordinary text', () => {
+  const files = ['C:\\release tools\\togle-release.pub', '/tmp/a "quoted" name.log']
+  const list = 'Attached files: ' + JSON.stringify(files)
+  assert.deepEqual(splitPictures('Check  this ' + list), { words: 'Check  this', files })
+  assert.deepEqual(splitPictures(list), { words: '', files })
+  for (const text of ['Attached files: ["/tmp/x"] in the example', 'Attached files: ["relative"]', 'Attached files: ["/tmp/a",7]', 'Attached files: ["unfinished']) {
+    assert.deepEqual(splitPictures(text), { words: text, files: [] })
+  }
+})
 
 test('words with a picture after them are the words, and the picture is its file', () => {
   assert.deepEqual(splitPictures('Why is this cut? ' + win), { words: 'Why is this cut?', files: [win] })

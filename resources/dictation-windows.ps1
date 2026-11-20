@@ -18,6 +18,7 @@ public static class TogleTextInput {
   [StructLayout(LayoutKind.Explicit)] public struct Union { [FieldOffset(0)] public Keyboard keyboard; [FieldOffset(0)] public Mouse mouse; }
   [StructLayout(LayoutKind.Sequential)] public struct Input { public uint type; public Union data; }
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint process);
   public static string WindowClass(IntPtr hwnd) { var text=new StringBuilder(256); GetClassName(hwnd,text,256); return text.ToString(); }
@@ -104,6 +105,8 @@ public static class TogleTextInput {
       var data=new DataObject();
       using(var stream=new MemoryStream(bytes)) using(var image=Image.FromStream(stream)) data.SetImage(new Bitmap(image));
       data.SetData("PNG",false,new MemoryStream(bytes));
+      // A plain text editor takes the saved path from the same paste.
+      data.SetText("\"" + path + "\" ",TextDataFormat.UnicodeText);
       data.SetData(MarkerFormat,false,marker);
       data.SetData("CanIncludeInClipboardHistory",false,new MemoryStream(new byte[4]));
       data.SetData("CanUploadToCloudClipboard",false,new MemoryStream(new byte[4]));
@@ -122,7 +125,7 @@ public static class TogleTextInput {
 }
 '@ | Out-Null
 
-function Read-FocusedText {
+function Read-FocusedText([bool]$forShow = $false) {
   $front = [TogleTextInput]::GetForegroundWindow().ToInt64().ToString()
   if ($front -eq '0') { throw 'Choose a text box on your desktop first.' }
   $frontHandle = [TogleTextInput]::GetForegroundWindow()
@@ -144,6 +147,9 @@ function Read-FocusedText {
     return @{ front=$front; identity="terminal:$front"; kind='keys'; terminal=$true; label=(Get-Process -Id $processId).ProcessName }
   }
   if ($null -eq $element -or $element.Current.IsPassword -or !$element.Current.IsEnabled) { throw 'Choose an editable, non-password text box.' }
+  if ($forShow -and $element.Current.ControlType.ProgrammaticName -match '^ControlType\.(Button|CheckBox|Hyperlink|ListItem|MenuItem|RadioButton|ScrollBar|Slider|TabItem|TreeItem)$') {
+    throw 'Focus a text field to insert the screenshot.'
+  }
   $label = (Get-Process -Id $element.Current.ProcessId -ErrorAction Stop).ProcessName
   $keys = @{ front=$front; identity=($element.GetRuntimeId() -join ','); kind='keys'; label=$label }
   $terminal = $terminal -or ($label -match '^(WindowsTerminal|OpenConsole|conhost|cmd|powershell|pwsh|wezterm-gui|mintty|alacritty)$') -or ($element.Current.ClassName -match '(?i)xterm|terminal')
@@ -202,7 +208,17 @@ function Test-SameTarget($target, $current) {
   return $true
 }
 
+function Test-PasteCommand($properties) {
+  if (!$properties.IsEnabled -or $properties.ControlType.ProgrammaticName -notmatch '^ControlType\.(MenuItem|Button|SplitButton)$') { return $false }
+  $label = ($properties.Name -replace '\s+((Ctrl|Control|Strg)\+(Shift\+)?V|Shift\+Ins(ert)?)\s*$','').Replace('&','').Trim()
+  $shortcut = $properties.AcceleratorKey -replace '\s',''
+  return $label -eq $pasteLabel -or $label -match '^Paste( as plain text| and match style)?$' -or $shortcut -match '^((Ctrl|Control|Strg)\+(Shift\+)?V|Shift\+Ins(ert)?)$'
+}
+
 $targets = @{}
+$pasteLabel = 'Paste'
+try { [void][TogleTextInput]::SetThreadDpiAwarenessContext([IntPtr](-4)) } catch {}
+try { Add-Type -AssemblyName PresentationCore; $pasteLabel = [System.Windows.Input.ApplicationCommands]::Paste.Text.Replace('_','').Replace('&','') } catch {}
 [Console]::WriteLine('{"ready":true}')
 while ($null -ne ($line = [Console]::ReadLine())) {
   $request = $null
@@ -211,15 +227,45 @@ while ($null -ne ($line = [Console]::ReadLine())) {
     if ($request.command -eq 'capture') {
       $targets.Clear()
       try {
-        $target = Read-FocusedText
+        $target = Read-FocusedText ([bool]$request.forShow)
         if ($target.kind -eq 'admin') {
           $result = @{ label=$target.label; reason='That window runs as administrator, so Togle can''t type into it. Your words will be copied for you to paste.'; copy=$true; terminal=[bool]$target.terminal }
         } else {
           $token = [guid]::NewGuid().ToString()
           $targets[$token] = $target
-          $result = @{ token=$token; label=$target.label; windowHandle=$target.front }
+          $result = @{ token=$token; label=$target.label; windowHandle=$target.front; terminal=[bool]$target.terminal }
         }
       } catch { $result = @{ label='Your text box'; reason=$_.Exception.Message } }
+    } elseif ($request.command -eq 'acceptsPasteShortcut') {
+      $front = [TogleTextInput]::GetForegroundWindow()
+      $result = $front -ne [IntPtr]::Zero -and [TogleTextInput]::WindowClass($front) -notmatch '^(Progman|WorkerW|Shell_TrayWnd|Shell_SecondaryTrayWnd)$'
+      if ($result) {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($null -ne $focused) {
+          $result = $focused.Current.IsEnabled -and $focused.Current.ControlType.ProgrammaticName -notmatch '^ControlType\.(Button|CheckBox|Hyperlink|MenuBar|MenuItem|RadioButton|ScrollBar|Slider|TabItem)$'
+        }
+      }
+    } elseif ($request.command -eq 'pasteCommandAt') {
+      $result = $false
+      $point = New-Object System.Windows.Point ([double]$request.x),([double]$request.y)
+      $item = [System.Windows.Automation.AutomationElement]::FromPoint($point)
+      for ($i=0; $null -ne $item -and $i -lt 3; $i++) {
+        $properties = $item.Current
+        if ($properties.ControlType.ProgrammaticName -match '^ControlType\.(MenuItem|Button|SplitButton)$') {
+          $result = Test-PasteCommand $properties
+          break
+        }
+        # Some desktop menus expose their container to hit testing. Match the item under the pointer.
+        if ($properties.ControlType.ProgrammaticName -match '^ControlType\.(MenuBar|Menu)$') {
+          $filter = New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::ControlTypeProperty),([System.Windows.Automation.ControlType]::MenuItem)
+          foreach ($entry in $item.FindAll([System.Windows.Automation.TreeScope]::Descendants, $filter)) {
+            $candidate = $entry.Current
+            if ($candidate.BoundingRectangle.Contains($point) -and (Test-PasteCommand $candidate)) { $result = $true; break }
+          }
+          break
+        }
+        $item = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($item)
+      }
     } elseif ($request.command -eq 'insert') {
       $token = [string]$request.token; $text = [string]$request.text
       $target = $targets[$token]; $targets.Remove($token)
@@ -328,6 +374,16 @@ while ($null -ne ($line = [Console]::ReadLine())) {
           $result = @{ inserted=$inserted }
         } finally {
           try { $clipboard.Dispose() } catch { if ($inserted) { $result = @{ inserted=$true; message='Picture entered. The clipboard could not be restored.' } } }
+        }
+      }
+      if ($result.inserted) {
+        # The image or its path can advance the caret. The words must still go to the very same field.
+        $afterPicture = Read-FocusedText
+        if ($afterPicture.front -eq $target.front -and $afterPicture.identity -eq $target.identity -and $afterPicture.kind -eq $target.kind) {
+          $targets[$token] = $afterPicture
+        } else {
+          $targets.Remove($token)
+          $result = @{ inserted=$false; message="The picture was sent, but the text box changed. Your words are ready to copy." }
         }
       }
     } else { throw 'Unknown dictation operation.' }

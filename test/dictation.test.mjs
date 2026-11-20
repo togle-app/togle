@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { Dictation, DictationSpeech, abortable, asHeardBecause, getSettings, cleanTranscript } from './.build/togle.mjs'
+import { Dictation, DictationPaste, DictationSpeech, abortable, asHeardBecause, getSettings, cleanTranscript } from './.build/togle.mjs'
 import { Segmenter } from './.build/capture.mjs'
 
 const tick = () => new Promise(resolve => setImmediate(resolve))
@@ -22,9 +22,14 @@ test('F8 Show: the picture goes in first, then the words, into the same box', as
     speech: () => ({ ready: async () => {}, transcribe: async () => 'make this button wider', polish: async text => text + '.' }),
     changed: () => {}, inCall: () => false
   })
-  await job.start(false); const id = job.status().id
-  job.attachPicture('C:\\pictures\\show.png')
-  job.push(id, audio(1)); job.stop(); await job.finish(id)
+  const picture = Promise.withResolvers()
+  await job.start(false, { target: Promise.resolve({ token: 'box', label: 'Chat' }), picture: picture.promise }); const id = job.status().id
+  job.push(id, audio(1)); job.stop()
+  const finishing = job.finish(id)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(order, [], 'the transcript waits for the annotated screenshot')
+  picture.resolve('C:\\pictures\\show.png')
+  await finishing
   assert.deepEqual(order, [['picture', 'box', 'C:\\pictures\\show.png'], ['words', 'box', 'make this button wider.']])
   assert.equal(job.status().phase, 'done')
   job.dispose()
@@ -37,14 +42,52 @@ test('F8 Show: with nothing said the picture still goes in; a picture that canno
       speech: () => ({ ready: async () => {}, transcribe: async () => said, polish: async text => text }),
       changed: () => {}, inCall: () => false
     })
-    await job.start(false); const id = job.status().id
-    job.attachPicture('C:\\pictures\\show.png')
+    await job.start(false, { target: Promise.resolve({ token: 'box', label: 'Chat' }), picture: Promise.resolve('C:\\pictures\\show.png') }); const id = job.status().id
     job.push(id, audio(1)); job.stop(); await job.finish(id)
     assert.deepEqual(order, expected)
     if (pictured) assert.deepEqual([job.status().phase, job.status().message], ['done', 'Picture entered'])
-    else assert.deepEqual([job.status().phase, job.status().message, job.status().text], ['ready', 'The cursor moved. The picture is saved at C:\\pictures\\show.png.', 'the words'], 'the words wait to be copied')
+    else assert.deepEqual([job.status().phase, job.status().picture, job.status().text], ['ready', 'C:\\pictures\\show.png', 'the words'], 'both parts remain in the bar')
     job.dispose()
   }
+})
+test('F8 automatically copies a missing or lost target and holds the same result for another copy', async () => {
+  const file = 'C:\\pictures\\show.png'
+  for (const [token, words, pictureWentIn] of [[undefined, '', false], [undefined, 'spoken', false], ['gone', 'spoken', false], ['moved', 'spoken', true]]) {
+    const copied = [], inserted = []
+    let busy = true
+    const { job } = fixture({
+      target: { capture: async () => ({ label: 'unused' }), insertPicture: async () => { inserted.push('picture'); return { inserted: pictureWentIn } },
+        insert: async () => { inserted.push('words'); return { inserted: false } } },
+      transcribe: async () => words, polish: async text => text,
+      copyPicture: async (picture, text) => { if (busy && token === 'gone') throw Error('Clipboard busy'); copied.push([picture, text]) }
+    })
+    await job.start(false, { target: Promise.resolve({ label: 'Desktop', token }), picture: Promise.resolve(file) })
+    if (words) job.push(job.status().id, audio(1))
+    job.stop(); await job.finish(job.status().id)
+    const held = job.status()
+    assert.deepEqual([held.phase, held.picture, held.text, held.outcome], ['ready', file, words || undefined, token === 'gone' ? undefined : 'copied'])
+    assert.deepEqual(inserted, token ? pictureWentIn ? ['picture', 'words'] : ['picture'] : [])
+    assert.deepEqual(copied, token === 'gone' ? [] : [[file, words]])
+    busy = false
+    await job.copyHeldPicture()
+    assert.deepEqual(copied.at(-1), [file, words])
+    assert.deepEqual([job.status().phase, job.status().picture], ['done', undefined])
+    job.dispose()
+  }
+})
+test('F8 recovers the screenshot and partial words after a microphone error without typing a partial message', async () => {
+  const copied = []
+  const { job, inserted } = fixture({ transcribe: async () => 'words heard', copyPicture: async (...args) => { copied.push(args.slice(0, 2)) } })
+  const picture = deferred()
+  await job.start(false, { target: Promise.resolve({ token: 'box', label: 'Chat' }), picture: picture.promise })
+  job.push(job.status().id, audio(1)); await tick()
+  job.failed(job.status().id, 'Microphone disconnected')
+  picture.resolve('capture.png'); await tick()
+  assert.deepEqual(copied, [['capture.png', 'words heard']])
+  assert.deepEqual(inserted, [])
+  assert.match(job.status().message, /Microphone disconnected/)
+  job.cancel()
+  assert.deepEqual([job.status().phase, job.status().picture], ['idle', undefined])
 })
 test('a window that runs as administrator takes no typing: the words are copied, and the bar says to paste', async () => {
   const admin = { label: 'notepad', reason: 'That window runs as administrator, so Togle can\'t type into it. Your words will be copied for you to paste.', copy: true }
@@ -181,9 +224,63 @@ test('dictation: a slow text box does not block recognition; insertion still wai
 })
 test('dictation: changed focus recovers text without another insertion attempt', async () => {
   let attempts = 0
-  const { job } = fixture({ target: { capture: async () => ({ token: 'one', label: 'Chat' }), insert: async () => { attempts++; return { inserted: false, message: 'Cursor moved' } } } })
+  const copied = []
+  const { job } = fixture({ target: { capture: async () => ({ token: 'one', label: 'Chat' }), insert: async () => { attempts++; return { inserted: false, message: 'Cursor moved' } } }, copy: async words => { copied.push(words) } })
   const id = await recorded(job); await job.finish(id); await job.finish(id)
-  assert.equal(attempts, 1); assert.equal(job.status().phase, 'ready'); assert.equal(job.status().lastText, 'phrase 1.'); job.dispose()
+  assert.equal(attempts, 1); assert.equal(job.status().phase, 'ready'); assert.equal(job.status().lastText, 'phrase 1.')
+  assert.deepEqual(copied, ['phrase 1.'])
+  job.pasted(id); assert.equal(job.status().phase, 'idle')
+})
+test('dictation with no editable field copies the words automatically and keeps them in the bar', async () => {
+  const copied = []
+  const { job } = fixture({ target: { capture: async () => ({ label: 'Desktop' }), insert: assert.fail }, copy: async text => { copied.push(text) } })
+  await job.finish(await recorded(job))
+  assert.deepEqual(copied, [job.status().text])
+  assert.deepEqual([job.status().phase, job.status().outcome], ['ready', 'copied'])
+  job.pasted('another result'); assert.equal(job.status().phase, 'ready')
+  job.pasted(job.status().id); assert.equal(job.status().phase, 'idle')
+})
+test('a paste acknowledges only the copied item, including when the clipboard changes during a lookup', async () => {
+  let sequence = 3
+  const pasted = [], read = deferred()
+  let readText = async () => 'a different copy'
+  const watch = new DictationPaste({ sequence: () => sequence, readText: () => readText(), pasted: id => pasted.push(id) })
+  watch.remember('first', 'one')
+  sequence++; await watch.observed(); assert.deepEqual(pasted, [])
+  watch.remember('second', 'two')
+  await watch.observed(); assert.deepEqual(pasted, ['second'])
+  watch.remember('multiline', 'line 1\nline 2')
+  sequence++; readText = async () => 'line 1\r\nline 2'
+  await watch.observed(); assert.deepEqual(pasted, ['second', 'multiline'])
+  sequence = undefined
+  readText = () => read.promise
+  watch.remember('third', 'three')
+  const late = watch.observed()
+  watch.remember('fourth', 'four')
+  read.resolve('three'); await late
+  await watch.observed(); assert.deepEqual(pasted, ['second', 'multiline'])
+  watch.clear()
+})
+test('paste gestures require a destination or a click on Paste for the same pending dictation', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] })
+  const pasted = []
+  let keys = false, button = false, accepts = false, isPaste = false, point = { x: 0, y: 0 }
+  const watch = new DictationPaste({ sequence: () => 1, readText: assert.fail, pasted: id => pasted.push(id),
+    shortcut: () => keys, shortcutTarget: async () => accepts, mouse: () => button, pointer: () => point, pasteCommandAt: async () => isPaste })
+  watch.remember('words', 'copied text')
+  watch.update({ id: 'words', phase: 'ready', outcome: 'copied' })
+  const poll = async () => { t.mock.timers.tick(25); await tick() }
+  keys = true; await poll(); keys = false; await poll()
+  button = true; await poll(); button = false; await poll()
+  isPaste = true; button = true; await poll(); point = { x: 70, y: 70 }; button = false; await poll()
+  assert.deepEqual(pasted, [], 'unfocused shortcut, unrelated click, and drag')
+  button = true; await poll(); button = false; await poll()
+  assert.deepEqual(pasted, ['words'])
+  accepts = true; keys = true; await poll(); await poll()
+  assert.deepEqual(pasted, ['words', 'words'], 'holding a key counts once')
+  watch.update({ phase: 'idle' })
+  keys = false; await poll(); keys = true; await poll()
+  assert.equal(pasted.length, 2)
 })
 test('dictation: unsupported text fields retain text for Copy', async () => {
   const { job, inserted } = fixture({ target: { capture: async () => ({ label: 'Custom editor', reason: 'Copy into this editor.' }), insert: async () => { throw Error('Must not insert') } } })

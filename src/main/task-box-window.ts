@@ -1,6 +1,5 @@
 import { app, BrowserWindow, dialog, screen } from 'electron'
 import path from 'node:path'
-import { themeColors } from './theme'
 import type { TaskBoxOpen } from '@shared/runner'
 
 const WIDTH = 600
@@ -118,7 +117,7 @@ export class TaskBoxWindow {
     this.ready = false
     const win = (this.window = new BrowserWindow({
       width: WIDTH, height: LOWEST, show: false, frame: false, thickFrame: false, resizable: false, minimizable: false, maximizable: false, skipTaskbar: true, alwaysOnTop: true,
-      title: 'Togle task', backgroundColor: themeColors().surface, hasShadow: true,
+      title: 'Togle task', transparent: true, backgroundColor: '#00000000', hasShadow: false,
       webPreferences: { preload: path.join(this.builtMain, '../preload/index.js'), sandbox: true, contextIsolation: true, backgroundThrottling: false, offscreen: this.headless() }
     }))
     if (process.platform === 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })

@@ -3,8 +3,11 @@
 // took, files changed, its thinking, its searches of the web, the tools of its connectors); older ones with only what was asked and
 // the answer, which is all the server gives of them in one cheap call.
 import type { LogEntry } from '@shared/runner'
+import { codexQuestionReplies, type CodexQuestion } from '@shared/codex-questions'
+import { withQuote } from '@shared/quote'
 import { list, rec, text } from './jsonrpc'
 import { unwrapShell } from './process-tree'
+import { codexUserMessage } from './codex-pictures'
 
 type Json = Record<string, unknown>
 
@@ -30,14 +33,27 @@ function stable(value: string): number {
   return hash >>> 0
 }
 
-/** The words of a message the person sent: its text, and a mark for each picture. */
-function theirWords(item: Json): string {
-  const parts: string[] = []
-  for (const block of list(item.content).map(rec)) {
-    if (block.type === 'text') parts.push(text(block.text))
-    else if (block.type === 'localImage' || block.type === 'image') parts.push('[picture]')
+/** Requests live in agent messages independently of blocking tool requests. A reply from any client settles
+ * only the question IDs it actually answered. An older turn cannot reopen a prompt. */
+export function pendingCodexQuestions(turns: unknown[]): CodexQuestion[] {
+  const active = turns.map(rec).find(turn => turn.status === 'inProgress')
+  const pending = new Map<string, CodexQuestion>()
+  for (const item of list(active?.items).map(rec)) {
+    if (item.type === 'agentMessage' && text(item.id)) {
+      list(item.questions).forEach((raw, index) => {
+        const q = rec(raw)
+        const title = text(q.title).trim()
+        if (!title) return
+        const id = JSON.stringify(['request_user_input_async', item.id, index])
+        pending.set(id, { id, title, options: list(q.options).map(text).filter(Boolean) })
+      })
+    } else if (item.type === 'userMessage') {
+      const { words, images } = codexUserMessage(text(active?.id), item)
+      const replies = !images.length && codexQuestionReplies(words)
+      if (replies) for (const reply of replies) pending.delete(reply.questionItemId)
+    }
   }
-  return parts.join('\n').trim()
+  return [...pending.values()]
 }
 
 /** The words of a thought: its summary and its text, each a list of words or of parts that hold words. */
@@ -78,8 +94,11 @@ export function codexEntries(turns: unknown[], details?: Map<string, string>): L
       const timed = took !== undefined ? { took } : {}
       switch (text(item.type)) {
         case 'userMessage': {
-          const words = theirWords(item)
-          if (words) entries.push({ id, at, kind: 'you', text: words.slice(0, WORDS_MOST) })
+          const { words, images } = codexUserMessage(text(turn.id), item)
+          const replies = !images.length && codexQuestionReplies(words)
+          if (replies) {
+            replies.forEach((reply, i) => entries.push({ id: i ? stable(`${id}:reply:${i}`) : id, at, kind: 'you', text: withQuote(reply.question, reply.answer).slice(0, WORDS_MOST) }))
+          } else if (words || images.length) entries.push({ id, at, kind: 'you', text: words.slice(0, WORDS_MOST), ...(images.length ? { images } : {}) })
           break
         }
         case 'agentMessage': {

@@ -1,3 +1,12 @@
-// The public half of the key Togle's releases are signed with (scripts/release-key.mjs). Empty until the maintainer
-// makes the key and keeps its private half off every server: until then Togle doesn't look for updates.
-export const RELEASE_KEY = ''
+// Public key for verifying Togle Free releases and updates.
+export const RELEASE_KEY = `-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAjrG3LNas8oqsyscSaTyo
++lpkYkk8DId4RwTZ47fcFs8Cv9FeJKUxhG0+FWjX3Ajn9aYs2SNo8gh5J5M4OmdZ
+NRK3Qk4ua93IvUIzWm70Uq7BD7JGP/fgQrdK4WHBsymwW9ClNJBHbv44H0RWURBo
+JthGjHNYRn6s4tdTbTrWPjWcXBx1XBe7HvjJqsoihWGdS+00ORCXmKf6VO6uTwIR
+I2lz4m/1vBEa7xEb7rqF4tmOUM/G3oNMpWyOZdRWuecwfMiNcgPGDmmlGmWX8BsX
+KfMC6VFEjyC0pky0ViCRdeucT6fQQg7C0UbSuVpWj5mDk/zS0y+Q39NkUk/Emvtf
+nBu6iMOtLTZravT6jgTnLNIgUJsWo0Owbyav7Ewu2yd7u0BVFl0glN/bI9RcV5dC
+6xwL5IURkxyv1LlfHpyfiAtIL0C+z9OYaQMtERwSv1JDX//uHY0ypFRGlONATmOk
+0mF7SUEMwElcTw8uIIyS6p75ofyU+teCqkaR1Dr0+YyTAgMBAAE=
+-----END PUBLIC KEY-----`

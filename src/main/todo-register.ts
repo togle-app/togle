@@ -33,6 +33,10 @@ export function registerTodo(deps: TodoDeps): TodoFile {
   handle('todo:set-done', async (item, done) => (await todo.setDone(ref(item), done === true), list()))
   handle('todo:edit', async (item, text) => (await todo.edit(ref(item), words(text)), list()))
   handle('todo:remove', async (item) => (await todo.remove(ref(item)), list()))
+  handle('todo:clear', async items => {
+    if (!Array.isArray(items)) throw new Error('Choose the items to remove.')
+    return { items: await todo.clear(items.map(ref)), file: todo.file }
+  })
   handle('todo:link', async (item, task) => {
     if (task !== null && typeof task !== 'string') throw new Error('That task has no name.')
     await todo.link(ref(item), task)

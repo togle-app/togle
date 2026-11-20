@@ -4,6 +4,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { app, nativeImage } from 'electron'
+import { isChatPicture, isShowPicture, MAX_SHOW_PNG_BYTES } from '@shared/pasted-pictures'
 
 const FOLDER = 'pasted'
 /** How long a pasted picture is kept. */
@@ -39,19 +40,21 @@ export async function savePastedPicture(bytes: Uint8Array, type: string, now = D
 
 const MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
 
-/**
- * A picture kept by `savePastedPicture`, as a data URL for the window to draw (a message that went with it shows it small). Only a
- * file of that name directly in the folder is read: a path in what somebody wrote is no way to read any other file. Null when it is
- * not there any more (a week has passed).
- */
+/** Preview a clipboard or F8 image directly inside the corresponding folder of this Togle profile. */
 export async function readPastedPicture(file: string): Promise<string | null> {
+  if (!path.isAbsolute(file)) return null
   const wanted = path.resolve(file)
-  const kind = /^paste-[\w-]+\.(png|jpe?g|gif|webp)$/i.exec(path.basename(wanted))?.[1]?.toLowerCase()
-  if (!kind || path.dirname(wanted).toLowerCase() !== path.resolve(folder()).toLowerCase()) return null
-  const stat = await fs.stat(wanted).catch(() => null)
-  if (!stat?.isFile() || stat.size > MOST_BYTES) return null
-  const data = await fs.readFile(wanted).catch(() => null)
-  return data ? `data:${MIME[kind]};base64,${data.toString('base64')}` : null
+  if (!isChatPicture(wanted)) return null
+  const show = isShowPicture(wanted)
+  const directory = show ? 'pictures' : FOLDER
+  const root = app.getPath('userData')
+  if (path.relative(path.join(root, directory), path.dirname(wanted))) return null
+  try {
+    const [realRoot, realFile, stat] = await Promise.all([fs.realpath(root), fs.realpath(wanted), fs.lstat(wanted)])
+    if (!stat.isFile() || stat.size > (show ? MAX_SHOW_PNG_BYTES : MOST_BYTES) || path.relative(path.join(realRoot, directory), path.dirname(realFile))) return null
+    const data = await fs.readFile(realFile)
+    return `data:${MIME[path.extname(wanted).slice(1).toLowerCase()]};base64,${data.toString('base64')}`
+  } catch { return null }
 }
 
 /** Deletes the pictures pasted more than a week ago. */

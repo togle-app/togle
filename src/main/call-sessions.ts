@@ -160,6 +160,15 @@ export class CallSessions extends EventEmitter {
     return this.queue(async () => this.deleted.has(id) ? null : this.read(id))
   }
 
+  renameSpeaker(id: string, voiceId: string, name: string): Promise<CallSession> {
+    return this.update(id, record => {
+      const matches = (line: CallSession['transcript'][number]): boolean => (line.voiceId ?? (line.speaker === 'me' ? 'me' : undefined)) === voiceId
+      if (!record.transcript.some(matches)) throw new Error('That speaker is no longer in this call.')
+      return { ...record, transcript: record.transcript.map(line => matches(line)
+        ? { ...line, voiceId, voiceName: name, voiceNamedBy: 'user' as const, voiceIdentityId: line.voiceName === name ? line.voiceIdentityId : undefined } : line) }
+    })
+  }
+
   /** A capture update may not overwrite a title, summary, or learning result saved meanwhile. */
   capture(info: CallSessionInfo, frameSession: string, state: CallState): Promise<CallSession | null> {
     const owner = { ...info }

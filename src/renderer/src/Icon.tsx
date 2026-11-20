@@ -42,6 +42,7 @@ const SHAPES = {
   ),
   back: <path d="M19 12H5M12 19l-7-7 7-7" />,
   chevron: <path d="m6 9 6 6 6-6" />,
+  usage: <path d="M5 19V12m7 7V5m7 14v-9" />,
   check: <path d="M20 6 9 17l-5-5" />,
   plus: <path d="M12 5v14M5 12h14" />,
   minus: <path d="M5 12h14" />,

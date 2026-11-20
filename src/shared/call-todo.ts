@@ -1,3 +1,6 @@
+import { compactNoteOwner } from './notes-sections'
+import { meetingCitation } from './meeting-citations'
+
 /** A call that left something on the person's day: names to confirm, or notes that are ready. */
 export interface CallOffer {
   id: string
@@ -27,7 +30,6 @@ const OWNED = /^\**([^:*\n]{1,40}?)\**\s*:\**\s+(.+)$/
 const NAMELIKE = /^\p{Lu}[\p{L}'’-]*(?:\s+\p{Lu}[\p{L}'’-]*)?$/u
 // A name alone on a line, in bold: the items under it are that person's.
 const ALONE =/^\*\*([^*:\n]{1,40}):?\*\*:?$/
-const CITATION = /\s*\[\d{1,3}:\d{2}(?:\s*[-–,]\s*\d{1,3}:\d{2})*\]\s*/g
 const MAX_ITEMS = 8
 const MAX_LENGTH = 160
 
@@ -56,14 +58,14 @@ export function myTodoItems(notes: string, names: string[]): string[] {
     if (alone) { group = fold(alone[1]); continue }
     const item = ITEM.exec(line)?.[1]
     if (!item) continue
-    const owned = OWNED.exec(item)
+    const owned = OWNED.exec(compactNoteOwner(item))
     // Under a name, a line that says it is someone else's ("Marta: ...") is not.
     if (group && owned && !mine.has(fold(owned[1])) && NAMELIKE.test(owned[1].trim())) continue
     // Under a sub-heading or a name in bold, the whole line is the task; otherwise the name is at its start.
     const owner = group ?? (owned && fold(owned[1]))
     const task = group ? item : owned?.[2]
     if (!owner || !task || !mine.has(owner)) continue
-    const text = task.replace(CITATION, ' ').replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim()
+    const text = task.replace(meetingCitation, ' ').replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim()
     if (text && !found.some(other => fold(other) === fold(text))) found.push(text.length > MAX_LENGTH ? text.slice(0, MAX_LENGTH - 1).trimEnd() + '…' : text)
     if (found.length >= MAX_ITEMS) break
   }

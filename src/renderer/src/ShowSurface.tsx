@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type PointerEvent } from 'react'
+import { Icon } from './Icon'
 
 const api = window.togle
 
@@ -6,23 +7,26 @@ type Point = { x: number; y: number }
 type Area = { x: number; y: number; w: number; h: number }
 /** What is drawn on the picture: a box around something, an arrow to it, a few words, or a free line. */
 export type Mark =
-  | { kind: 'box'; x: number; y: number; w: number; h: number }
+  | ({ kind: 'box' } & Area)
+  | ({ kind: 'circle' } & Area)
   | { kind: 'arrow'; from: Point; to: Point }
   | { kind: 'text'; at: Point; text: string }
   | { kind: 'pen'; points: Point[] }
 
 /** A drag shorter than this is a click: without a part chosen, the whole screen goes; inside one, words are typed there. */
 const SMALLEST = 8
-// Togle's indigo, as the design draws the marks.
-const INK = '#98a5ff'
+const INK = '#e03131'
 const LINE = 2.5
 const TEXT = '600 15px "Inter Variable", "Segoe UI", system-ui, sans-serif'
 const RADIUS = 8
 
 const distance = (a: Point, b: Point): number => Math.hypot(b.x - a.x, b.y - a.y)
+const bounds = (a: Point, b: Point): Area => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) })
+const tools = { crop: 'Crop', arrow: 'Arrow', circle: 'Circle', box: 'Rectangle', draw: 'Draw' } as const
+type Tool = keyof typeof tools
 
 /**
- * A stroke, as what it was meant to be: one that goes round and comes back is a box around what it went round; one that
+ * A closed stroke follows its corners as a rectangle or ellipse. A stroke that
  * runs nearly straight is an arrow, its head where it ended; anything else stays as drawn.
  */
 export function markOf(points: Point[]): Mark {
@@ -33,7 +37,11 @@ export function markOf(points: Point[]): Mark {
   const diagonal = Math.hypot(w, h)
   let length = 0
   for (let at = 1; at < points.length; at++) length += distance(points[at - 1], points[at])
-  if (w >= 12 && h >= 12 && span < diagonal * 0.35 && length > diagonal * 1.5) return { kind: 'box', x: left, y: top, w, h }
+  if (w >= 12 && h >= 12 && span < diagonal * 0.35 && length > diagonal * 1.5) {
+    const corners = [[left, top], [left + w, top], [left, top + h], [left + w, top + h]]
+    const visited = corners.filter(([x, y]) => points.some(p => Math.abs(p.x - x) < w * 0.12 && Math.abs(p.y - y) < h * 0.12))
+    return { kind: visited.length >= 3 ? 'box' : 'circle', x: left, y: top, w, h }
+  }
   // How far the stroke strays from the straight line between its ends.
   const stray = Math.max(...points.map((point) => Math.abs((last.x - first.x) * (first.y - point.y) - (first.x - point.x) * (last.y - first.y)) / (span || 1)))
   if (span >= 24 && stray <= Math.max(8, span * 0.12)) return { kind: 'arrow', from: first, to: last }
@@ -60,12 +68,13 @@ function paint(ink: CanvasRenderingContext2D, marks: Mark[], part: Area, scale: 
   for (const mark of marks) {
     ink.beginPath()
     if (mark.kind === 'box') ink.roundRect((mark.x - part.x) * scale, (mark.y - part.y) * scale, mark.w * scale, mark.h * scale, RADIUS * scale)
+    else if (mark.kind === 'circle') ink.ellipse(...at({ x: mark.x + mark.w / 2, y: mark.y + mark.h / 2 }), mark.w * scale / 2, mark.h * scale / 2, 0, 0, Math.PI * 2)
     else if (mark.kind === 'arrow') {
       const [left, right] = arrowHead(mark.from, mark.to)
       ink.moveTo(...at(mark.from)); ink.lineTo(...at(mark.to))
       ink.moveTo(...at(left)); ink.lineTo(...at(mark.to)); ink.lineTo(...at(right))
     } else if (mark.kind === 'pen') mark.points.forEach((point, index) => (index ? ink.lineTo : ink.moveTo).call(ink, ...at(point)))
-    else {
+    else if (mark.kind === 'text') {
       ink.font = TEXT.replace('15px', `${15 * scale}px`)
       ink.textBaseline = 'top'
       ink.fillText(mark.text, ...at(mark.at))
@@ -76,19 +85,18 @@ function paint(ink: CanvasRenderingContext2D, marks: Mark[], part: Area, scale: 
 }
 
 /**
- * F8 Show, on the frozen screen, as the design has it: drag over the part to show (a dashed frame), and draw on it while
- * you talk. A loop round something becomes a box, a straight stroke an arrow; a click starts words typed there. Enter
- * puts the picture in with the words you said; Esc leaves it. A drag outside the part chooses another part.
+ * Draw on the full screen or crop it. The Show shortcut finishes the picture and the dictation together.
  */
 export function ShowSurface() {
-  const [shot, setShot] = useState<{ dataUrl: string; width: number; height: number } | null>(null)
+  const [shot, setShot] = useState<Awaited<ReturnType<typeof api.showPicture>>>(null)
+  const [tool, setTool] = useState<Tool>('crop')
   const [area, setArea] = useState<Area | null>(null)
   const [marks, setMarks] = useState<Mark[]>([])
   // The stroke being drawn, and the words being typed on the picture.
-  const [stroke, setStroke] = useState<Point[] | null>(null)
+  const [stroke, setStroke] = useState<Mark | null>(null)
   const [typing, setTyping] = useState<{ at: Point; text: string } | null>(null)
-  const [busy, setBusy] = useState(false)
-  const drag = useRef<{ kind: 'choose'; from: Point } | { kind: 'draw'; from: Point } | null>(null)
+  const busy = useRef(false)
+  const drag = useRef<{ tool: Tool; from: Point; pointerId: number; previousArea: Area | null } | null>(null)
   // The stroke and the words as they are this moment: a key or a move can come before the screen shows the one before.
   const points = useRef<Point[]>([])
   const words = useRef<{ at: Point; text: string } | null>(null)
@@ -100,33 +108,34 @@ export function ShowSurface() {
   }, [])
 
   const chosen = area && area.w >= SMALLEST && area.h >= SMALLEST ? area : null
-  /** The marks with the words being typed, if any. */
-  const allMarks = useCallback((): Mark[] => {
-    const now = words.current
-    return now?.text.trim() ? [...marks, { kind: 'text', at: now.at, text: now.text }] : marks
-  }, [marks])
-
-  const save = useCallback(async () => {
+  const save = async () => {
     const img = image.current
-    if (busy || !shot || !img?.complete) return
-    setBusy(true)
-    // The screen in device pixels: the part chosen (or all of it), with what was drawn on it.
-    const scale = shot.width / window.innerWidth
-    const part = chosen ?? { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight }
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(part.w * scale))
-    canvas.height = Math.max(1, Math.round(part.h * scale))
-    const ink = canvas.getContext('2d')!
-    ink.drawImage(img, part.x * scale, part.y * scale, part.w * scale, part.h * scale, 0, 0, canvas.width, canvas.height)
-    paint(ink, allMarks(), part, scale)
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
-    if (!blob) { setBusy(false); return }
-    api.showDone(new Uint8Array(await blob.arrayBuffer()))
-  }, [busy, shot, chosen, allMarks])
+    if (busy.current || !shot || !img?.naturalWidth) return
+    busy.current = true
+    try {
+      // The screen in device pixels: the part chosen (or all of it), with what was drawn on it.
+      const scale = shot.width / window.innerWidth
+      const part = chosen ?? { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight }
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(part.w * scale))
+      canvas.height = Math.max(1, Math.round(part.h * scale))
+      const ink = canvas.getContext('2d')!
+      ink.drawImage(img, part.x * scale, part.y * scale, part.w * scale, part.h * scale, 0, 0, canvas.width, canvas.height)
+      const drawn = [...marks]
+      if (stroke) drawn.push(stroke)
+      if (words.current?.text.trim()) drawn.push({ kind: 'text', ...words.current })
+      paint(ink, drawn, part, scale)
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+      if (!blob) throw new Error('Could not encode the screenshot')
+      api.showDone(new Uint8Array(await blob.arrayBuffer()))
+    } catch { busy.current = false; api.showCancel() }
+  }
+  const finish = useEffectEvent(() => { void save() })
 
   useEffect(() => {
+    const off = api.onShowFinish(finish)
     const key = (event: KeyboardEvent): void => {
-      if (event.key === 'Enter') { event.preventDefault(); void save(); return }
+      if (event.key === 'Enter' && !(event.target instanceof HTMLButtonElement)) { event.preventDefault(); finish(); return }
       const now = words.current
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -140,10 +149,14 @@ export function ShowSurface() {
       else if (event.key.length === 1) { event.preventDefault(); type({ ...now, text: now.text + event.key }) }
     }
     window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
-  }, [save])
+    return () => { off(); window.removeEventListener('keydown', key) }
+  }, [])
 
-  const inside = (point: Point): boolean => !!chosen && point.x >= chosen.x && point.x <= chosen.x + chosen.w && point.y >= chosen.y && point.y <= chosen.y + chosen.h
+  const shape = (which: Exclude<Tool, 'crop'>, start: Point, end: Point, drawn: Point[], final: boolean): Mark => {
+    if (which === 'draw') return final ? markOf(drawn) : { kind: 'pen', points: drawn }
+    if (which === 'arrow') return { kind: 'arrow', from: start, to: end }
+    return { kind: which, ...bounds(start, end) }
+  }
   /** The words typed so far become a mark of their own. */
   const keepTyping = (): void => {
     const now = words.current
@@ -151,53 +164,74 @@ export function ShowSurface() {
     type(null)
   }
   const down = (event: PointerEvent<HTMLDivElement>): void => {
-    if (event.button !== 0 || busy) return
+    if (event.button !== 0 || busy.current || drag.current) return
     const point = { x: event.clientX, y: event.clientY }
     // The drag goes on past the window's edge; a pointer that cannot be held is followed while it stays in the window.
     try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* see above */ }
     keepTyping()
-    if (inside(point)) {
-      drag.current = { kind: 'draw', from: point }
-      points.current = [point]
-      setStroke([point])
-      return
-    }
-    drag.current = { kind: 'choose', from: point }
-    setArea({ ...point, w: 0, h: 0 })
-    setMarks([])
+    drag.current = { tool, from: point, pointerId: event.pointerId, previousArea: area }
+    points.current = [point]
+    if (tool === 'crop') setArea({ ...point, w: 0, h: 0 })
   }
   const move = (event: PointerEvent<HTMLDivElement>): void => {
     const now = drag.current
-    if (!now) return
+    if (!now || now.pointerId !== event.pointerId) return
     const point = { x: event.clientX, y: event.clientY }
-    if (now.kind === 'draw') { points.current = [...points.current, point]; setStroke(points.current) }
-    else setArea({ x: Math.min(now.from.x, point.x), y: Math.min(now.from.y, point.y), w: Math.abs(point.x - now.from.x), h: Math.abs(point.y - now.from.y) })
+    if (now.tool === 'crop') setArea(bounds(now.from, point))
+    else {
+      if (now.tool === 'draw') points.current = [...points.current, point]
+      setStroke(shape(now.tool, now.from, point, points.current, false))
+    }
   }
   const up = (event: PointerEvent<HTMLDivElement>): void => {
     const now = drag.current
+    if (!now || now.pointerId !== event.pointerId) return
     drag.current = null
-    if (now?.kind === 'draw') {
-      const drawn = points.current
+    const end = { x: event.clientX, y: event.clientY }
+    if (now.tool !== 'crop') {
+      const drawn = [...points.current, end]
       points.current = []
       setStroke(null)
-      const end = { x: event.clientX, y: event.clientY }
       // A click on the part: words typed from there.
-      if (distance(now.from, end) < SMALLEST && drawn.every((point) => distance(now.from, point) < SMALLEST)) type({ at: { x: now.from.x, y: now.from.y - 9 }, text: '' })
-      else if (drawn.length > 1) setMarks((previous) => [...previous, markOf(drawn)])
+      if (drawn.every(point => distance(now.from, point) < SMALLEST)) {
+        if (now.tool === 'draw') type({ at: { x: now.from.x, y: now.from.y - 9 }, text: '' })
+      } else {
+        const mark = shape(now.tool, now.from, end, drawn, true)
+        setMarks(previous => [...previous, mark])
+      }
       return
     }
-    setArea((previous) => (previous && (previous.w < SMALLEST || previous.h < SMALLEST) ? null : previous))
+    const part = bounds(now.from, end)
+    if (part.w < SMALLEST || part.h < SMALLEST) { setArea(null); return }
+    setArea(part)
+    setTool('arrow')
+  }
+  const cancelDrag = (event: PointerEvent<HTMLDivElement>): void => {
+    const now = drag.current
+    if (!now || now.pointerId !== event.pointerId) return
+    if (now.tool === 'crop') setArea(now.previousArea)
+    drag.current = null
+    points.current = []
+    setStroke(null)
   }
 
   return (
-    <div className="show" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { drag.current = null; points.current = []; setStroke(null) }} aria-label="Show part of the screen. Drag over a part and draw on it. Enter puts it in, Esc leaves it.">
-      {shot && <img ref={image} className="show-shot" src={shot.dataUrl} alt="" draggable={false} />}
-      {chosen ? <div className="show-part" style={{ left: chosen.x, top: chosen.y, width: chosen.w, height: chosen.h }} /> : <div className="show-dim" />}
+    <div className="show" style={{ '--show-ink': INK } as CSSProperties} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={cancelDrag} aria-label="Annotate the screenshot while you speak">
+      {shot && <img ref={image} className="show-shot" src={shot.dataUrl} alt="" draggable={false} onLoad={() => api.showReady()} onError={() => api.showCancel()} />}
+      {chosen && <div className="show-part" style={{ left: chosen.x, top: chosen.y, width: chosen.w, height: chosen.h }} />}
       <svg className="show-ink" aria-hidden="true">
         {marks.map((mark, index) => <MarkShape key={index} mark={mark} />)}
-        {stroke && stroke.length > 1 && <MarkShape mark={{ kind: 'pen', points: stroke }} />}
+        {stroke && <MarkShape mark={stroke} />}
       </svg>
       {typing && <span className="show-typing" style={{ left: typing.at.x, top: typing.at.y }}>{typing.text}</span>}
+      <div className="show-controls" onPointerDown={event => event.stopPropagation()}>
+        <div className="show-tools" role="toolbar" aria-label="Screenshot tools" aria-describedby="show-voice-hint">
+          {(Object.keys(tools) as Tool[]).map(key => <button key={key} type="button" aria-pressed={tool === key} onClick={() => { keepTyping(); setTool(key) }}>{tools[key]}</button>)}
+          <button type="button" className="primary" onClick={() => void save()}>Finish <kbd>{shot?.shortcut || 'F8'}</kbd></button>
+          <button type="button" onClick={() => api.showCancel()}>Cancel</button>
+        </div>
+        <span className="show-voice-hint" id="show-voice-hint"><Icon name="mic" size={14} />Speak while you draw.</span>
+      </div>
     </div>
   )
 }
@@ -205,6 +239,7 @@ export function ShowSurface() {
 function MarkShape({ mark }: { mark: Mark }) {
   const line = { fill: 'none', stroke: INK, strokeWidth: LINE, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
   if (mark.kind === 'box') return <rect x={mark.x} y={mark.y} width={mark.w} height={mark.h} rx={RADIUS} {...line} />
+  if (mark.kind === 'circle') return <ellipse cx={mark.x + mark.w / 2} cy={mark.y + mark.h / 2} rx={mark.w / 2} ry={mark.h / 2} {...line} />
   if (mark.kind === 'arrow') {
     const [left, right] = arrowHead(mark.from, mark.to)
     return <path d={`M${mark.from.x} ${mark.from.y} L${mark.to.x} ${mark.to.y} M${left.x} ${left.y} L${mark.to.x} ${mark.to.y} L${right.x} ${right.y}`} {...line} />

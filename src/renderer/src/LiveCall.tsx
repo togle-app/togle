@@ -7,9 +7,9 @@ import { colorOf, initialOf } from './voices'
 import type { CaptureInputs } from './audio/capture'
 import { FirstCallNotice, TellOthers } from './TellOthers'
 import { CallAgentsRow } from './CallAgents'
+import { BackToMeetings, MeetingPeople } from './MeetingControls'
 
 const api = window.togle
-const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' })
 
 /** How long the call has been going: "12:41", "1:05:20". It ticks by itself. */
@@ -39,13 +39,14 @@ interface Props {
   onStop: () => void
   onReconnect: () => void
   onFirstCallSeen: () => void
+  onBack: () => void
 }
 
 /**
  * A call being written down: its words as people speak, who said them (a name with a question mark is a guess, to
  * confirm or change), the line to tell the others until it is ticked, Mark and Stop.
  */
-export function LiveCall({ settings, title, since, transcript, flags, inputs, callKey, levels, onMark, onStop, onReconnect, onFirstCallSeen }: Props) {
+export function LiveCall({ settings, title, since, transcript, flags, inputs, callKey, levels, onMark, onStop, onReconnect, onFirstCallSeen, onBack }: Props) {
   const [partials, setPartials] = useState<PartialTranscript[]>([])
   const finished = useRef(new Set<string>())
   useEffect(() => {
@@ -71,13 +72,6 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, ca
   const marked = useMemo(() => markedLineIds({ transcript, marks: flags.marks }), [transcript, flags.marks])
   // Which lines go on from the same voice's last one (they have no head of its own), the live captions after the lines included.
   const joins = useMemo(() => continuations([...transcript, ...partials]), [transcript, partials])
-  // Who has spoken: you first, then each voice of the call in the order it first spoke.
-  const people = useMemo(() => {
-    const voices = new Map<string, TranscriptEntry>()
-    for (const line of transcript) if (line.speaker === 'them' && line.voiceId && !voices.has(line.voiceId)) voices.set(line.voiceId, line)
-    for (const line of transcript) if (line.voiceId && voices.has(line.voiceId) && line.voiceName) voices.set(line.voiceId, line)
-    return [...voices.values()]
-  }, [transcript])
   const lines = useRef<HTMLDivElement>(null)
   const atEnd = useRef(true)
   useLayoutEffect(() => {
@@ -88,6 +82,7 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, ca
   const heard = (side: 'me' | 'them'): string => inputs[side].state === 'unavailable' ? 'off' : inputs[side].state === 'connecting' ? 'starting' : inputs[side].state === 'paused' ? 'paused' : 'on'
   return (
     <section className="live-call" aria-label="Call being written down">
+      <BackToMeetings onClick={onBack} />
       <header className="live-head">
         <h2>{title || `Call on ${new Date(since || Date.now()).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}</h2>
         <span className="live-clock" role="timer" aria-label="Time into the call">Live · <Elapsed since={since} /></span>
@@ -110,10 +105,7 @@ export function LiveCall({ settings, title, since, transcript, flags, inputs, ca
       )}
       {!settings.meetings.introSeen && <FirstCallNotice settings={settings} onDone={onFirstCallSeen} />}
       {!flags.toldOthers && <TellOthers transcription={settings.transcription} onTold={() => api.setToldOthers(true)} />}
-      <div className="live-people" aria-label="Who spoke">
-        <span className="person-chip ok">You</span>
-        {people.map((line) => <PersonChip key={line.voiceId} line={line} />)}
-      </div>
+      <MeetingPeople callId={callKey} transcript={transcript} showYou />
       {callKey && <CallAgentsRow call={callKey} live />}
       <div className={`live-lines${!transcript.length && !partials.length ? ' waiting' : ''}`} ref={lines} onScroll={(event) => { const box = event.currentTarget; atEnd.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40 }}>
         {!transcript.length && !partials.length && <p className="hint">Listening… The words appear as people speak.</p>}
@@ -144,39 +136,6 @@ const LiveLine = memo(function LiveLine({ line, since, marked, continues }: { li
     </div>
   )
 })
-
-/** One voice of the call: a click names it, or confirms the name guessed from what was said. */
-function PersonChip({ line }: { line: TranscriptEntry }) {
-  const label = speakerLabel(line)
-  const guessed = line.voiceNamedBy === 'suggested' || line.voiceNamedBy === 'remembered'
-  const [naming, setNaming] = useState(false)
-  const [name, setName] = useState('')
-  const [error, setError] = useState('')
-  const save = async (value: string): Promise<void> => {
-    if (!value.trim() || !line.voiceId) return
-    setError('')
-    try {
-      await api.renameVoice(line.voiceId, value.trim())
-      setNaming(false)
-    } catch (failure) {
-      setError(errorText(failure))
-    }
-  }
-  if (naming) {
-    return (
-      <form className="person-chip naming" onSubmit={(event) => { event.preventDefault(); void save(name) }}>
-        <input aria-label={`Name for ${label}`} autoFocus value={name} maxLength={60} placeholder="Who is this?" onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setNaming(false) }} />
-        <button className="primary small" disabled={!name.trim()}>Save</button>
-        {error && <span className="error">{error}</span>}
-      </form>
-    )
-  }
-  return (
-    <button className={`person-chip ${guessed ? 'guess' : line.voiceName ? 'ok' : 'unnamed'}`} title={guessed ? 'A guess from what was said: click to confirm or change it' : 'Click to name this voice'} onClick={() => { setName(line.voiceName ?? ''); setNaming(true) }}>
-      {label}
-    </button>
-  )
-}
 
 /** How loud one side is, as four bars, read a few times a second. Off or paused, the bars stay dark. */
 function Meter({ label, title, state, level }: { label: string; title: string; state: string; level: () => number | undefined }) {

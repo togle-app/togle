@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DictationVocabulary as Vocabulary, DictationVocabularyEdit } from '@shared/dictation'
 import { Field, openedInView } from './Rows'
+import { useKeptState } from './kept'
 
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 type Draft = { kind: 'word' | 'snippet'; id?: string; phrase: string; value: string }
 
 export function VocabularyEditor({ accountId, accountName }: { accountId: string; accountName?: string }) {
-  const [vocabulary, setVocabulary] = useState<Vocabulary>()
-  const [draft, setDraft] = useState<Draft>()
+  const [vocabulary, setVocabulary] = useKeptState<Vocabulary | undefined>('settings.vocabulary:' + accountId, undefined)
+  const [draft, setDraft] = useKeptState<Draft | undefined>('settings.vocabulary.draft:' + accountId, undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
@@ -19,13 +20,15 @@ export function VocabularyEditor({ accountId, accountName }: { accountId: string
     setError('')
     void window.togle.dictationVocabulary(accountId).then(value => { if (current) setVocabulary(value) }, error => { if (current) setError(errorText(error)) })
     return () => { current = false; alive.current = false }
-  }, [accountId, retry])
+  }, [accountId, retry, setVocabulary])
   const save = async (edit: DictationVocabularyEdit): Promise<void> => {
     if (saving.current) return
     saving.current = true; setBusy(true); setError(''); setStatus('')
     try {
       const next = await window.togle.editDictationVocabulary(accountId, edit)
-      if (alive.current) { setVocabulary(next); setDraft(undefined); setStatus(edit.kind === 'remove' ? 'Removed.' : 'Saved. Applies to your next dictation.') }
+      setVocabulary(next)
+      setDraft(current => current === draft ? undefined : current)
+      if (alive.current) setStatus(edit.kind === 'remove' ? 'Removed.' : 'Saved. Applies to your next dictation.')
     } catch (error) { if (alive.current) setError(errorText(error)) }
     finally { saving.current = false; if (alive.current) setBusy(false) }
   }

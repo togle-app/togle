@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { SettingsPatch } from '@shared/api'
+import { AgentUsage } from './AgentUsage'
 import type { AIProfile, ApiConnection, LocalModelId, LocalSpeechState, ModelOption, Settings, SttStatus, SubscriptionAccount } from '@shared/types'
 import { runsInTerminal, type AgentCatalog, type AgentChoice, type RunnerStatus } from '@shared/runner'
 import { CALL_APPS, isCallAppMode, type CallApp, type CallAppMode } from '@shared/call-apps'
@@ -15,14 +16,14 @@ import { AgentAvatar } from './AgentMark'
 import { useHotkeys } from './hotkeys'
 import { Shortcut } from './Shortcut'
 import { Field, FormOver, openedInView, Row, Section, Toggle, useOneOpen } from './Rows'
-import { useAccounts } from './Accounts'
+import { useAccounts, useKeyConnections } from './Accounts'
 import { Menu } from './Menu'
 import { Choice, Opens } from './Choice'
 import { VocabularyEditor } from './DictationVocabulary'
 import { Devices, SignIn, useReach } from './Devices'
 import { useRememberedVoices } from './VoiceMemory'
 import type { SettingsPart } from './open-settings'
-import { AGENT_CATALOG, AGENTS_FOUND, keepAnswer, keptAnswer, useKeptState } from './kept'
+import { AGENT_CATALOG, AGENTS_FOUND, keepAnswer, keptAnswer, useFoldPreference } from './kept'
 
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -276,7 +277,7 @@ function RecentDictations({ accountId }: { accountId: string }) {
 /** Names and terms Togle spells right, and phrases that stand for a longer text: how many, and a way to change them. */
 function NamesAndTerms({ accountId }: { accountId: string }) {
   // A row that is open stays open when the window goes to another place and back to Settings.
-  const [open, setOpen] = useKeptState('settings.names.open', false)
+  const [open, setOpen] = useFoldPreference('settings.names')
   // The count read last shows at once while it is read again (see kept.tsx).
   const [count, setCount] = useState<number | undefined>(() => keptAnswer<number>(`vocabulary.${accountId}`))
   useEffect(() => {
@@ -331,7 +332,7 @@ function Meetings({ settings, save }: { settings: Settings; save: (patch: Settin
 /** Whose voices Togle knows from one call to the next: nobody's, until the person turns it on. */
 function RememberedVoices({ settings, save }: { settings: Settings; save: (patch: SettingsPatch) => Promise<void> }) {
   const { people, error: loadError } = useRememberedVoices()
-  const [open, setOpen] = useKeptState('settings.voices.open', false)
+  const [open, setOpen] = useFoldPreference('settings.voices')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   return (
@@ -385,8 +386,14 @@ function Agents({ settings, save }: { settings: Settings; save: (patch: Settings
     <Section id="settings-agents" title="Agents">
       {found === null ? <Row label={false} name="Looking…" /> : !found.length ? <Row label={false} name="No agent found" /> : found.map((agent) => (
         <Fragment key={agent.runner}>
-          <Row label={false} className="agent-row" name={<span className="agent-name"><AgentAvatar runner={agent.runner} name={agent.name} /><span className="agent-label">{agent.name}</span></span>}>
-            <span className={`setting-value ${agent.installed ? 'found' : ''}`}>{agent.removed ? 'Removed' : agent.installed ? (agent.added ? `Added · ${runsInTerminal(agent.runner) ? 'terminal' : 'conversation'}` : 'Found') : 'Not found'}</span>
+          <Row label={false} className="agent-row" name={
+            <span className="agent-name">
+              <AgentAvatar runner={agent.runner} name={agent.name} />
+              <span className="agent-label">{agent.name}</span>
+            </span>
+          }>
+            {agent.installed && !agent.removed && <AgentUsage runner={agent.runner} hideUnavailable />}
+            {(agent.removed || !agent.installed || !agent.added) && <span className="setting-value">{agent.removed ? 'Removed' : agent.installed ? 'Found' : 'Not found'}</span>}
             {/* Quiet, as the design draws the row (a name and how it stands): removing an agent is rare, and is not what the screen is about. */}
             {agent.removed
               ? <button className="quiet-action" aria-label={`Add back ${agent.name}`} disabled={!!busy} onClick={() => void restore(agent)}>{busy === agent.runner ? 'Adding…' : 'Add back'}</button>
@@ -475,7 +482,7 @@ function AddAgent({ onList, onClose }: { onList: (agents: RunnerStatus[]) => voi
   const rows = (choices: AgentChoice[]): ReactNode =>
     choices.map((choice) => (
       <div key={choice.id} className="agent-choice">
-        <AgentAvatar runner={`acp-${choice.id}`} name={choice.name} />
+        <AgentAvatar runner={choice.id} name={choice.name} />
         <span className="agent-choice-text"><b>{choice.name}</b><span className="cut">{choice.description}</span></span>
         <button type="button" className="small" aria-label={`Add ${choice.name}`} disabled={!!busy || !!choice.needs} title={choice.needs ? `Needs ${choice.needs === 'npx' ? 'Node.js (npx)' : 'uv (uvx)'} on this computer` : `Starts with: ${choice.command}`} onClick={() => add(choice)}>{busy === choice.id ? 'Adding…' : 'Add'}</button>
       </div>
@@ -553,7 +560,7 @@ function EditAgent({ agent, onSaved, onCancel }: { agent: RunnerStatus; onSaved:
       <span className="tasks-label">Edit {agent.name}</span>
       <Field name="Name"><span className="field-fixed">{agent.name}</span></Field>
       <Field name="Command"><input aria-label="Command" required maxLength={500} spellCheck={false} value={command} disabled={busy} onChange={(event) => setCommand(event.target.value)} /></Field>
-      <p className="hint">Tasks running in it will stop. A command with acp in it is talked to directly, and Togle shows its conversation. Any other command runs in a terminal of Togle’s own.</p>
+      <p className="hint">Tasks open in {runsInTerminal(agent.runner) ? 'Terminal' : 'Chat'}. Saving a new command stops this agent’s running tasks.</p>
       <div className="row">
         <button className="primary" disabled={busy || !command.trim() || command.trim() === agent.command}>{busy ? 'Saving…' : 'Save'}</button>
         <button type="button" className="ghost" disabled={busy} onClick={onCancel}>Cancel</button>
@@ -575,18 +582,6 @@ function useAI(settings: Settings): { kind: 'plan'; account: SubscriptionAccount
   // The plan signed in without being chosen (a key chosen before was removed): it is the AI.
   const chatgpt = accounts.find((item) => item.provider === 'chatgpt' && item.signedIn)
   return chatgpt && settings.provider === 'chatgpt' ? { kind: 'plan', account: chatgpt } : { kind: 'none' }
-}
-
-function useKeyConnections(): ApiConnection[] {
-  const [connections, setConnections] = useState<ApiConnection[]>([])
-  useEffect(() => {
-    let current = true
-    const refresh = (): void => { void api.apiConnections().then((list) => { if (current) setConnections(list) }, () => undefined) }
-    refresh()
-    const off = api.onApiConnectionsChanged(refresh)
-    return () => { current = false; off() }
-  }, [])
-  return connections
 }
 
 /** The services a key can come from: Claude's own API, and the others at their OpenAI-compatible addresses. */

@@ -70,11 +70,11 @@ export interface TogleApi {
   setDictationPill(width: number, height: number): void
   dragDictation(action: 'start' | 'move' | 'end', x: number, y: number): void
   toggleDictation(): Promise<void>
-  cancelDictation(): Promise<void>
+  cancelDictation(id?: string): Promise<void>
   pushDictationAudio(id: string, pcm: Float32Array): void
   finishDictationCapture(id: string): Promise<void>
   dictationCaptureFailed(id: string, message: string): void
-  copyDictationText(): Promise<void>
+  copyDictationText(id?: string): Promise<void>
   openDictationSettings(): Promise<void>
   getSettings(): Promise<Settings>
   updateSettings(patch: SettingsPatch): Promise<Settings>
@@ -107,7 +107,8 @@ export interface TogleApi {
   /** The saved calls with these words in what was said, in their notes or title, with the first lines that have them. */
   searchCalls(query: string): Promise<import('./types').CallSearchHit[]>
   /** What calls left for the person's day: names to confirm, notes that are ready, and the to-dos in them that are theirs. */
-  meetingOffers(): Promise<{ calls: import('./call-todo').CallOffer[]; items: import('./call-todo').TodoOffer[] }>
+  meetingOffers(callId?: string): Promise<{ calls: import('./call-todo').CallOffer[]; items: import('./call-todo').TodoOffer[] }>
+  reviewMeetingTodo(callId: string, text: string, action: 'add' | 'dismiss'): Promise<TodoList>
   /** The agent tasks connected to a call (the one going on or about to start, or a saved one), and when each was last sent it. */
   callAgents(call: string): Promise<CallAgents>
   /** Connects tasks to a call, or takes them off it: the list as it should be. */
@@ -121,7 +122,7 @@ export interface TogleApi {
   renameCallSession(id: string, title: string): Promise<CallSession>
   deleteCallSession(id: string): Promise<void>
   exportCallSession(id: string): Promise<string | null>
-  generateCallNotes(id: string, template: import('./types').MeetingNoteTemplate, revision?: string): Promise<CallSession>
+  generateCallNotes(id: string, template: import('./types').MeetingNoteTemplate, revision?: string, sourceId?: string): Promise<CallSession>
   saveCallNotes(id: string, revision: string | undefined, text: string): Promise<CallSession>
   savePersonalCallNotes(id: string, before: string, text: string): Promise<CallSession>
   onCallSessions(cb: (change: { id?: string }) => void): Unsubscribe
@@ -163,6 +164,9 @@ export interface TogleApi {
 
   /** The coding agents on this PC (Codex, Claude Code), and whether each is installed. */
   runnerStatus(): Promise<RunnerStatus[]>
+  runnerUsage(runner: string, sessionId?: string): Promise<import('./runner-usage').RunnerUsage>
+  runnerLimits(runner: string): Promise<import('./runner-usage').UsageWindow[]>
+  onRunnerLimitsChanged(cb: (event: { runner: string; windows: import('./runner-usage').UsageWindow[] }) => void): Unsubscribe
   /**
    * Adds an agent by its name and the command that starts it. A command for ACP is talked to directly; any other runs in a
    * terminal of Togle's own. Answers with every agent as it is now.
@@ -190,6 +194,7 @@ export interface TogleApi {
    * whose path goes into the terminal for the agent to attach. The path comes back.
    */
   savePastedPicture(bytes: Uint8Array, type: string): Promise<string>
+  attachmentPath(file: File): string
   /** A picture kept that way, read back by its file as a data URL, to show it small where a message that went with it is; null when it is gone. */
   pastedPicture(file: string): Promise<string | null>
   /** Types the task's words into its terminal, without Enter. */
@@ -329,7 +334,9 @@ export interface TogleApi {
   /** Asks for a folder for a task, in a dialog that belongs to the task box. Null when it is closed without a choice. */
   pickTaskBoxFolder(): Promise<string | null>
   /** F8 Show's overlay: the frozen screen to show (device pixels), or null for any other window. */
-  showPicture(): Promise<{ dataUrl: string; width: number; height: number } | null>
+  showPicture(): Promise<{ dataUrl: string; width: number; height: number; shortcut?: string } | null>
+  showReady(): void
+  onShowFinish(cb: () => void): Unsubscribe
   /** The picture made, as PNG bytes: it goes in with the words. */
   showDone(png: Uint8Array): void
   showCancel(): void
@@ -340,6 +347,7 @@ export interface TogleApi {
   setTodoDone(item: TodoRef, done: boolean): Promise<TodoList>
   editTodo(item: TodoRef, text: string): Promise<TodoList>
   removeTodo(item: TodoRef): Promise<TodoList>
+  clearTodos(items: TodoRef[]): Promise<TodoList>
   /** Gives an item to an agent task (by its key), or takes it back (null). */
   linkTodo(item: TodoRef, task: string | null): Promise<TodoList>
   /** Shows the list's file in the file manager. */
@@ -355,6 +363,7 @@ export interface TogleApi {
   onHotkeysChanged(cb: (hotkeys: HotkeyInfo[]) => void): Unsubscribe
   onHotkey(cb: (action: HotkeyAction) => void): Unsubscribe
   openExternal(url: string): void
+  showChatFile(href: string): Promise<boolean>
   /** The system Togle runs on: "win32", "darwin" (macOS) or "linux". */
   platform: string
   minimize(): void

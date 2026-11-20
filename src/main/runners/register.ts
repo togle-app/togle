@@ -19,11 +19,12 @@ import type { Backend } from './types'
  * An agent the person added: started by their command, its program found the way a terminal would find it. One that runs
  * in a terminal of Togle's own tells what it prints through `told`.
  */
-export function addedBackend(agent: AddedAgent, version: string, told?: (chunk: TerminalChunk) => void): Backend {
+export function addedBackend(agent: AddedAgent, version: string, told?: (chunk: TerminalChunk) => void, keepIn?: string): Backend {
   if (runsInTerminal(agent.id)) return new TerminalBackend({ runner: agent.id, name: agent.name, command: agent.command }, told)
   return new AcpBackend({
     runner: agent.id,
     name: agent.name,
+    costFile: keepIn ? path.join(keepIn, `agent-usage-${encodeURIComponent(agent.id)}.json`) : undefined,
     version,
     command: async () => {
       const [program, ...args] = commandWords(agent.command)
@@ -100,10 +101,11 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
           : undefined
   const hidden = (): string[] => deps.hidden?.() ?? []
   const hub = new RunnerHub({
+    limitsChanged: (runner, windows) => deps.send('runners:limits-changed', { runner, windows }),
     backends: [
       // The ones the person took off Togle's lists are not started.
       ...(deps.backends ?? Object.keys(KNOWN_AGENTS).filter((runner) => !hidden().includes(runner)).map((runner) => known(runner) as Backend)),
-      ...(deps.added?.() ?? []).map((agent) => addedBackend(agent, deps.version, told))
+      ...(deps.added?.() ?? []).map((agent) => addedBackend(agent, deps.version, told, deps.keepIn))
     ],
     changed: () => {
       deps.send('runners:changed', null)
@@ -149,6 +151,11 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     ]
   }
   handle('runners:status', () => statusOf())
+  handle('runners:limits', runner => hub.limits(word(runner, 'The agent')))
+  handle('runners:usage', (runner, sessionId) => {
+    if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId.length || sessionId.length > 512)) throw new Error('Invalid session ID.')
+    return hub.usage(word(runner, 'The agent'), sessionId)
+  })
   handle('runners:list', () => hub.list())
   handle('runners:detail', (key) => hub.detail(word(key, 'The task')))
   handle('runners:history', (key, all) => hub.history(word(key, 'The task'), all === true))
@@ -210,7 +217,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     for (let n = 2; hub.has(id) || added.some((agent) => agent.id === id); n++) id = `${base}-${n}`
     const agent: AddedAgent = { id, name: given, command: (command as string).trim() }
     await deps.saveAdded?.([...added, agent])
-    hub.addBackend(addedBackend(agent, deps.version, told))
+    hub.addBackend(addedBackend(agent, deps.version, told, deps.keepIn))
     return statusOf()
   })
   // An agent that refused a task until the person signs in (Cline, for one): the ways it offered, and Sign in, which the agent does
@@ -241,7 +248,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
     const edited: AddedAgent = { ...agent, command: line }
     await deps.saveAdded?.(added.map((one) => (one.id === agent.id ? edited : one)))
     await hub.removeBackend(agent.id)
-    hub.addBackend(addedBackend(edited, deps.version, told))
+    hub.addBackend(addedBackend(edited, deps.version, told, deps.keepIn))
     return statusOf()
   })
   // Remove: an agent the person added is forgotten. One Togle finds by itself is taken off its lists: it stays installed, its

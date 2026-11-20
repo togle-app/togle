@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { needsYou, type RunnerStatus, type TaskView, type ViewRequest } from '@shared/runner'
 import { canAllowHere, shownPart } from '@shared/runner-command'
 import type { TodoItem, TodoList } from '@shared/todo'
@@ -7,6 +7,8 @@ import { meetingTitle } from './MeetingsPage'
 import { AGENTS_FOUND, keepAnswer, keptAnswer, TASKS_LISTED, useKeptState } from './kept'
 import { AgentLead, agentOf } from './AgentMark'
 import { StateMark, type MarkKind } from './StateMark'
+import { MeetingTodo } from './MeetingTodo'
+import { Icon } from './Icon'
 
 const api = window.togle
 
@@ -72,6 +74,8 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
   const [draft, setDraft] = useKeptState('todo.draft', '')
   const [editing, setEditing] = useState<{ line: number; text: string } | null>(null)
   const [error, setError] = useState('')
+  const [clearing, setClearing] = useState<TodoItem[] | null>(null)
+  const offersRead = useRef(0)
 
   const refreshList = useCallback(async () => {
     try {
@@ -100,9 +104,10 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
   }, [])
 
   const refreshOffers = useCallback(async () => {
+    const read = ++offersRead.current
     try {
       const found = await api.meetingOffers()
-      if (found && Array.isArray(found.calls) && Array.isArray(found.items)) {
+      if (read === offersRead.current && found && Array.isArray(found.calls) && Array.isArray(found.items)) {
         keepAnswer(KEPT_OFFERS, found)
         setOffers(found)
       }
@@ -116,7 +121,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
     void refreshTasks()
     void refreshOffers()
     const offCalls = api.onCallSessions(() => void refreshOffers())
-    const offList = api.onTodoChanged(() => void refreshList())
+    const offList = api.onTodoChanged(() => { void refreshList(); void refreshOffers() })
     const offTasks = api.onRunnersChanged(() => void refreshTasks())
     const timer = setInterval(() => void refreshTasks(), REFRESH_MS)
     const again = (): void => {
@@ -182,7 +187,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
     if (!editing || editing.line !== item.line) return
     const next = editing.text.trim()
     setEditing(null)
-    // Its words cleared, the item goes: a row has no delete button.
+    // Clearing an item in its editor also removes it.
     if (!next) await change(() => api.removeTodo({ line: item.line, text: item.text }))
     else if (next !== item.text) await change(() => api.editTodo({ line: item.line, text: item.text }, next))
   }
@@ -242,6 +247,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
               Give to an agent
             </button>
           )}
+          <button className="ghost icon-only todo-remove" aria-label={`Remove ${item.text}`} title="Remove from To-do" onClick={() => void change(() => api.removeTodo({ line: item.line, text: item.text }))}><Icon name="close" size={16} /></button>
         </div>
       </div>
     )
@@ -310,7 +316,14 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
         </section>
       )}
       <section className="todo-group" aria-label="To do">
-        <h3 className="tasks-label">To do</h3>
+        <div className="todo-list-head"><h3 className="tasks-label">To do</h3>
+          {!!items.length && !clearing && <button className="quiet-action" onClick={() => setClearing(items)}>Clear list</button>}
+        </div>
+        {clearing && <div className="todo-row" role="group" aria-label="Clear to-do list">
+          <span className="todo-grow">Remove {clearing.length} {clearing.length === 1 ? 'item' : 'items'} from your list?</span>
+          <button className="small" onClick={() => setClearing(null)}>Cancel</button>
+          <button className="small" onClick={() => { void change(() => api.clearTodos(clearing)).then(() => setClearing(null)) }}>Remove all</button>
+        </div>}
         <div role="list">
           {open.map(row)}
           {ticked.map(row)}
@@ -335,14 +348,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
                 </button>
               </div>
             ))}
-            {fromCalls.map((offer) => (
-              <div key={offer.callId + offer.text} className="todo-row" role="listitem" title={`From ${meetingTitle({ title: offer.title, startedAt: offer.startedAt })}`}>
-                <span className="todo-grow todo-offer">{offer.text.replace(/\.$/, '')}</span>
-                <button className="small" onClick={() => void change(() => api.addTodo(offer.text.trim().replace(/\.$/, ''))).then(() => refreshOffers())}>
-                  Add
-                </button>
-              </div>
-            ))}
+            {fromCalls.map(offer => <MeetingTodo key={offer.callId + offer.text} offer={offer} onReviewed={next => { setList(next); void refreshOffers() }} />)}
           </div>
         </section>
       )}

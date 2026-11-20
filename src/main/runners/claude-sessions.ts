@@ -448,6 +448,24 @@ export async function claudeWrittenAt(id: string): Promise<number | undefined> {
   return (await fs.stat(file).catch(() => null))?.mtimeMs
 }
 
+/** Claude's latest cost checkpoint is cumulative for this session. */
+export async function claudeSessionCost(id: string): Promise<import('./usage').ReportedCost | undefined> {
+  if (await claudeWrittenAt(id) === undefined) return
+  const file = sessionFiles.get(id)
+  if (!file) return
+  const { size } = await fs.stat(file)
+  for (const bytes of TAIL_BYTES) {
+    const tail = await readEnd(file, size, 'tail', bytes)
+    for (const line of tail.lines.reverse()) {
+      if (!line.includes('"cost-state"')) continue
+      const row = parse(line)
+      if (row?.type !== 'cost-state' || row.sessionId !== id || typeof row.totalCostUSD !== 'number' || !Number.isFinite(row.totalCostUSD) || row.totalCostUSD < 0) continue
+      return { currency: 'USD', amount: row.totalCostUSD, estimated: true, partial: row.hasUnknownModelCost === true }
+    }
+    if (bytes >= size) break
+  }
+}
+
 // ---- A session's conversation, for the Chat view ----
 
 // The most of a session's file read (its end, when it is longer), the longest words or command kept, and the most entries held.

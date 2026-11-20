@@ -48,10 +48,27 @@ test('what was kept or sent is cleaned: odd ids, empty names, a place in Schedul
     made: [{ id: 'g3abc', name: 'Team' }],
     names: { everyday: 'Home' },
     placed: { b: { group: 'made:g3abc', subject: 'Plans' } },
-    folded: [{ group: 'everyday', subject: 'Email' }]
+    folded: [{ group: 'everyday', subject: 'Email' }],
+    earlierFolded: [{ group: 'everyday', subject: 'Email' }]
   })
   assert.deepEqual(T.cleanGroups('not this'), T.NO_GROUPS)
   assert.deepEqual(T.cleanGroups({ made: [], names: {}, placed: {} }).folded, [], 'kept before headings folded: none is')
+})
+
+test('Earlier and recent subject headings can be opened independently after upgrading and renaming', () => {
+  const group = 'everyday', subject = 'Code review'
+  let groups = T.cleanGroups({ folded: [{ group, subject }] })
+  const open = { kind: 'fold-subject', group, subject, folded: false }
+  groups = T.applyGroupChange(groups, { ...open, earlier: true })
+  assert.equal(T.subjectFolded(groups, group, subject), true)
+  assert.equal(T.subjectFolded(groups, group, subject, true), false)
+  groups = T.applyGroupChange(groups, open)
+  groups = T.applyGroupChange(groups, { ...open, earlier: true, folded: true })
+  groups = T.applyGroupChange(groups, { kind: 'rename-subject', group, from: subject, to: 'Review' })
+  const saved = T.cleanGroups(JSON.parse(JSON.stringify(groups)))
+  assert.equal(T.subjectFolded(saved, group, 'Review'), false)
+  assert.equal(T.subjectFolded(saved, group, 'Review', true), true)
+  assert.equal(T.subjectFolded(saved, group, subject, true), false)
 })
 
 test('a subject heading folded stays folded, under its new name too, and goes with the group it is in', () => {

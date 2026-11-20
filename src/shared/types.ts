@@ -235,6 +235,8 @@ export interface CallMinutes {
   state: 'idle' | 'generating' | 'ready' | 'error'
   template: MeetingNoteTemplate
   revision: string
+  /** Account or connection explicitly chosen to update these notes after the original became unavailable. */
+  sourceId?: string
   sourceKey?: string
   edited?: boolean
   generatedAt?: number
