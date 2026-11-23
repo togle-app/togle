@@ -130,6 +130,9 @@ export class AttachScreen extends TerminalTask {
     super('claude', id, title, folder, 'Claude Code', term, undefined, told, gone)
   }
 
+  // Claude Code asks that a paste is marked as one, and takes a long reply whole that way (a long burst of keys it cuts into pieces, mid-word).
+  protected override readonly pastesLongReplies: boolean = true
+
   protected override get tag(): string {
     return this.screenId
   }
@@ -214,6 +217,22 @@ export function clearKeys(words: readonly string[]): string {
   const all = words.join('\n')
   const steps = all.split('\n').length + Math.ceil(all.length / NARROWEST_COLUMNS) + 2
   return ONE_LINE_BACK.repeat(steps) + '\x01\x0b'
+}
+
+/** How many of the clearing keys go in one write, and how long the next write waits. */
+const CLEAR_PIECE = 30
+const CLEAR_GAP_MS = 25
+
+/**
+ * Keys written in small pieces, a moment apart. Claude Code takes a long run of keys in one write as pasted text, and a key in pasted text is not
+ * pressed: the 239 keys that empty a prompt holding a long reply (it is a pasted-text chip, "[Pasted text #1 +28 lines]") left the chip there (measured
+ * on 2.1.330); the same keys, 15 or 30 in a write and 25 ms apart, emptied it. A key is one character, so the cut can fall anywhere.
+ */
+export async function typeApart(write: (keys: string) => void, keys: string, piece = CLEAR_PIECE, gapMs = CLEAR_GAP_MS): Promise<void> {
+  for (let at = 0; at < keys.length; at += piece) {
+    if (at) await new Promise((resolve) => setTimeout(resolve, gapMs))
+    write(keys.slice(at, at + piece))
+  }
 }
 
 const NOTICED_ELSEWHERE = /opened in another window/i
@@ -582,7 +601,7 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
       screen.write(DOWN_KEY)
       throw new Error('Claude Code did not give its queue back: it may have taken it in by then. Nothing was changed.')
     }
-    screen.write(clearKeys(first.queued))
+    await typeApart((keys) => screen.write(keys), clearKeys(first.queued))
     return given
   }
 

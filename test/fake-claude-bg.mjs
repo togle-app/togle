@@ -25,6 +25,8 @@
 // another Esc closes it. A key that reaches the screen before it is ready is lost: FAKE_CLAUDE_READY_MS (default 0) is how long a
 // screen takes keys after it connected. The Esc keys the session was given are counted in its job file (`escapes`). FAKE_CLAUDE_AGENTS_MS
 // (default 0) makes `agents` wait before it reads the sessions, as a program that starts late on a slow runner does.
+// A screen asks for bracketed paste when it connects, as Claude Code's does (FAKE_CLAUDE_NO_PASTE=1: it does not), and takes what is pasted as text with
+// its line breaks (an Enter inside a paste does not submit). The pastes it was given are counted in its job file (`pastes`).
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
@@ -257,13 +259,34 @@ async function session(job) {
     const ready = Number(process.env.FAKE_CLAUDE_READY_MS ?? 0)
     // The keys that edit the prompt, counted in the job file: the Up arrow (it gives a queue back to the prompt), the Down arrow (it puts back what
     // Up did when nothing was queued), Ctrl+A, Ctrl+K and Backspace.
-    const edits = { ups: 0, downs: 0, homes: 0, kills: 0, backspaces: 0 }
+    const edits = { ups: 0, downs: 0, homes: 0, kills: 0, backspaces: 0, pastes: 0 }
+    // A paste, as Claude Code's screen takes it (2.1.330: it asks for bracketed paste when it starts): between ESC [ 200 ~ and ESC [ 201 ~ every key is
+    // text, a carriage return among them (a terminal sends one for each line break), and an Enter inside it does not submit. The sequences may arrive
+    // cut between two writes. FAKE_CLAUDE_NO_PASTE=1: it does not ask for bracketed paste (a program that does not).
+    const PASTE_START = '\x1b[200~'
+    const PASTE_END = '\x1b[201~'
+    let pasting = false
+    let carry = ''
+    if (!process.env.FAKE_CLAUDE_NO_PASTE) socket.write('\x1b[?2004h')
     socket.on('data', (data) => {
       // A key that comes before the screen takes keys is lost.
       if (Date.now() - connected < ready) return
-      const keys = [...data.toString('utf8')]
+      const keys = [...carry + data.toString('utf8')]
+      carry = ''
       for (let at = 0; at < keys.length; at++) {
         const key = keys[at]
+        if (key === '\x1b') {
+          const marker = keys.slice(at, at + 6).join('')
+          if (!pasting && marker === PASTE_START) { pasting = true; edits.pastes++; write(job, { ...edits }); at += 5; continue }
+          if (pasting && marker === PASTE_END) { pasting = false; at += 5; continue }
+          // The start of one of them at the end of what arrived: the rest comes next. (A lone Esc is a key of its own, and is not held back.)
+          if (marker.length >= 2 && marker.length < 6 && at + marker.length === keys.length && (PASTE_START.startsWith(marker) || PASTE_END.startsWith(marker))) { carry = marker; break }
+        }
+        if (pasting) {
+          line += key === '\r' ? '\n' : key
+          socket.write(key === '\r' ? '\r\n' : key)
+          continue
+        }
         if (key === '\x03') continue
         if (key === '\x1b') {
           // An arrow key is a sequence that starts with Esc: not the key.
@@ -286,6 +309,8 @@ async function session(job) {
         if (key === '\r' || key === '\n') {
           const said = line
           line = ''
+          // What it heard, as the line it was given (line breaks of a paste among them): the screen's text is wrapped and rewritten on its way.
+          write(job, { lastHeard: said })
           socket.write('\r\n')
           if (typed && (said === 'y' || said === 'n')) typed(said === 'y')
           else if (typed && (said === '1' || said === '2')) typed(said === '1')

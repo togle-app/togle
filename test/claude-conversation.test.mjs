@@ -411,6 +411,35 @@ test('a long reply typed from Chat, which Claude Code took as pasted text and cu
   assert.deepEqual(await saidIn(93), [['you', 'Ping it.'], ['you', typed]])
 })
 
+test('a long reply handed to the screen as one paste is one block with its paragraphs: read as it was sent, in the queue and in the conversation', async () => {
+  // As measured on 2.1.330 with Togle's own reply: one block (the tag with its id, a line break, the words with their own line breaks, a line break, the
+  // closing tag with the same id). A message that waits in the queue is that block alone; a turn's own message has two line breaks before it and one after.
+  const sent = ['Check the plan below. Reply with the single word done.', ...Array.from({ length: 6 }, (_, n) => `Paragraph ${n + 1}: the quick brown fox jumps over the lazy dog.`)].join('\n\n')
+  const block = `<pasted_content id="910b">\n${sent}\n</pasted_content id="910b">`
+  const message = { id: 1, text: sent, at: Date.now(), known: [], state: 'sent' }
+  write(98, line(asked(98, 'Ping it.')) + line(enqueue(98, block, 3)))
+  const waiting = await claudeConversation(id(98))
+  assert.deepEqual(waiting.queued, [sent], 'queued: the words as they were sent, paragraphs and all')
+  assert.deepEqual(T.placeSent([message], waiting.entries, waiting.queued, []).map((one) => one.place), ['queued'])
+  appendFileSync(file(98), line(remove(98, block, 6)) + line(takenIn(98, block, 3)))
+  const taken = await claudeConversation(id(98))
+  assert.deepEqual(taken.entries.map((entry) => [entry.kind, entry.text]), [['you', 'Ping it.'], ['you', sent]])
+  assert.deepEqual(T.placeSent([message], taken.entries, [], []).map((one) => one.place), ['thread'])
+  // The agent was idle: a turn of its own, with its block between line breaks.
+  write(99, line(asked(99, `\n\n${block}\n`)))
+  const idle = await claudeConversation(id(99))
+  assert.deepEqual(idle.entries.map((entry) => [entry.kind, entry.text]), [['you', sent]])
+  assert.deepEqual(T.placeSent([message], idle.entries, [], []).map((one) => one.place), ['thread'])
+  // A quoted reply (the quote on one line, the reply with its paragraphs) is read back as a quote and a reply, and is the message that was sent.
+  const reply = 'Make it cheaper.\n\nAnd say why the first plan was dropped.'
+  const quoted = T.withQuote('Two plans\nit is.', reply)
+  write(89, line(asked(89, `\n\n<pasted_content id="910b">\n${quoted}\n</pasted_content id="910b">\n`)))
+  const history = await claudeConversation(id(89))
+  assert.deepEqual(history.entries.map((entry) => entry.text), [quoted])
+  assert.deepEqual(T.splitQuote(history.entries[0].text), { quote: 'Two plans it is.', reply })
+  assert.deepEqual(T.placeSent([{ ...message, text: quoted }], history.entries, [], []).map((one) => one.place), ['thread'])
+})
+
 test('text the person pasted on the screen: one line of it stays in the line it went into, several lines stand on lines of their own, and words that only name the tag stay', async () => {
   // A long address pasted between typed words: it is part of their line.
   write(94, line(asked(94, 'See \n' + pasted('https://example.test/a/long/address', 'a1') + '\n and tell me.')))

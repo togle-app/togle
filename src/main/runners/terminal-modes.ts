@@ -38,6 +38,11 @@ export class TerminalModes {
     }
   }
 
+  /** Whether the program has this mode on now: it set it, and has not cleared it (or reset the terminal) since. */
+  has(mode: number): boolean {
+    return this.on.has(mode)
+  }
+
   /** The sequences that set the modes again on a terminal that has none set: the other screen first, as the program draws on it. */
   restore(): string {
     const other = OTHER_SCREEN.some((mode) => this.on.has(mode))

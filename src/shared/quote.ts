@@ -1,6 +1,7 @@
 // Quote and reply, as a chat app has it: part of a message quoted above what the person answers. What goes to the agent is one
 // line that starts with a word, since a screen takes a line break as Enter and refuses a line that starts with "/" or "!"
-// (runners/terminal.ts). The record the agent keeps of it reads back as a quote and a reply, so Chat can draw it as one.
+// (runners/terminal.ts). The quoted part is always one line; the reply keeps its line breaks, which a screen takes as Enter unless the whole is a
+// paste (a long one to Claude Code's screen is). The record the agent keeps of it reads back as a quote and a reply, so Chat can draw it as one.
 
 /** The most of a quoted part that is sent. A longer part is cut, and the cut shows. */
 export const QUOTE_MOST = 500

@@ -3,11 +3,14 @@
 // (raw mode), as agents in a terminal do.
 const args = process.argv.slice(2)
 process.stdout.write(`started with ${JSON.stringify(args)}\r\n`)
+// --asks-for-paste: it asks that a paste is marked as one (ESC [ ? 2004 h), as Claude Code's screen does. It does not understand one, and says when one arrives.
+if (args.includes('--asks-for-paste')) process.stdout.write('\x1b[?2004h')
 process.stdout.write('ready> ')
 let line = ''
 process.stdin.setEncoding('utf8')
 if (process.stdin.isTTY) process.stdin.setRawMode(true)
 process.stdin.on('data', (chunk) => {
+  if (chunk.includes('\x1b[200~')) process.stdout.write('\r\n[a paste arrived]\r\n')
   for (const key of chunk) {
     if (key === '\x03') {
       process.stdout.write('^C\r\n')

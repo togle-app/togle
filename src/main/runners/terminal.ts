@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { accessSync, constants, promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { IPty } from 'node-pty'
+import { splitPictures } from '@shared/pasted-pictures'
 import { TASK_WORDS, type RunnerKind, type TaskInfo } from '@shared/runner'
 import { commandWords, exists, forCmd, whereIs } from './acp'
 import { endTree } from './process-tree'
@@ -63,6 +64,32 @@ export const cleanWords = (text: string): string =>
 
 /** Text as one line, for a terminal: there, a line break would press Enter. */
 const oneLine = (text: string): string => cleanWords(text).replace(/\s*[\r\n]+\s*/g, ' ').replace(/\t/g, ' ').trim()
+/** The mode a program sets to ask that a paste is marked as one (ESC [ 200 ~ before it, ESC [ 201 ~ after). */
+const BRACKETED_PASTE = 2004
+
+/**
+ * From this many characters a reply to a screen that takes pastes is handed over as one paste. Typed in a burst, a long reply reaches Claude Code
+ * as pasted text anyway (from about 800 characters, measured on 2.1.330), cut in pieces of 1,024 bytes where its input fills, inside a word too,
+ * and with its line breaks gone. A paste arrives whole and keeps its paragraphs. A short reply is typed as before: a short paste shows as typed
+ * words, so nothing is gained there. Well under 800, so that a version that counts differently still finds the long ones.
+ */
+export const PASTE_FROM = 400
+
+/** How long Enter waits after a paste: the program takes the whole paste in first (on Claude Code 2.1.330 an Enter 300 ms after it was taken every time, idle and while a turn ran). */
+const PASTE_THEN_ENTER_MS = 300
+
+/**
+ * What goes to a screen for a reply: the words as one line, or from PASTE_FROM characters one bracketed paste with the line breaks they had
+ * (a terminal sends each as a carriage return, and a program that took the paste in does not press Enter for it). What is pasted is cleaned as
+ * what is typed is (cleanWords takes out escape sequences and control characters), so that nothing in the words can end the paste early and
+ * have what follows read as keys. A reply with files is always typed: how a program treats a paste that names a file is not measured.
+ */
+export function replyKeys(text: string, bracketed: boolean): { keys: string; pasted: boolean } {
+  const line = oneLine(text)
+  if (!bracketed || line.length < PASTE_FROM || splitPictures(text).files.length) return { keys: line, pasted: false }
+  const body = cleanWords(text).replace(/\r\n?|\n/g, '\r').replace(/\t/g, ' ').trim()
+  return { keys: `\x1b[200~${body}\x1b[201~`, pasted: true }
+}
 
 /**
  * A reply sent to a screen that nobody looks at is only words: one that starts as a command of the agent's own ("/", "!") would
@@ -210,6 +237,13 @@ export class TerminalTask extends TaskBase implements TerminalSide {
   private printed = 0
   // The modes the program had set where what is kept begins (what went before it is not kept, and the program sets them once).
   private readonly modesBefore = new TerminalModes()
+  // The modes the program has set now (all it printed is read for them): whether it asked that a paste is marked as one.
+  private readonly modesNow = new TerminalModes()
+  /**
+   * Whether a long reply from Chat is pasted into this screen (see `replyKeys`). Only for a program whose way with a paste was measured: Claude Code's
+   * screen. Another program gets the reply typed, as before.
+   */
+  protected readonly pastesLongReplies: boolean = false
   // Printed and not sent to the window yet, and where that starts.
   private unsent = ''
   private unsentAt = 0
@@ -263,6 +297,7 @@ export class TerminalTask extends TaskBase implements TerminalSide {
 
   private printedMore(data: string): void {
     this.lastPrinted = Date.now()
+    this.modesNow.feed(data)
     const all = this.output + data
     if (all.length > KEEP) {
       // What goes is read for the modes it set, and the cut is not made inside a sequence.
@@ -381,9 +416,10 @@ export class TerminalTask extends TaskBase implements TerminalSide {
     const line = oneLine(text)
     if (!line) return
     refuseCommand(line)
-    this.write(line)
+    const { keys, pasted } = replyKeys(text, this.pastesLongReplies && this.modesNow.has(BRACKETED_PASTE))
+    this.write(keys)
     // Enter a moment after the words: a program that takes a burst of keys as pasted text would hold the Enter in it.
-    await new Promise((resolve) => setTimeout(resolve, 150))
+    await new Promise((resolve) => setTimeout(resolve, pasted ? PASTE_THEN_ENTER_MS : 150))
     this.write('\r')
   }
 

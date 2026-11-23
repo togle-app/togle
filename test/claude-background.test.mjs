@@ -469,6 +469,86 @@ test('a reply from the cards view is typed in with Enter, and opens a closed scr
   }
 })
 
+// A reply as long as Chat's own can be (about 5,400 characters in four paragraphs: far more than one read of 1,024 bytes holds).
+const paragraphOf = (n) => `Paragraph ${n}: ${'the quick brown fox jumps over the lazy dog. '.repeat(30).trim()}`
+const longReply = [1, 2, 3, 4].map(paragraphOf).join('\n\n')
+
+test('a long reply from the cards view reaches the session as one paste with its paragraphs, a short one is typed, and a screen that did not ask for pastes is typed to as one line', { timeout: 90_000 }, async () => {
+  const { backend, home } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Long reply' })
+    const jobId = task.screen.job
+    await until(() => task.terminal.read().text.includes('\x1b[?2004h'), 'the screen to ask for pastes')
+    await connected(task)
+    await task.send(longReply)
+    await until(() => job(home, jobId).lastHeard === longReply, 'the whole reply to be heard, its paragraphs and all')
+    assert.equal(job(home, jobId).pastes, 1, 'as one paste')
+    await task.send('a short reply')
+    await until(() => job(home, jobId).lastHeard === 'a short reply', 'the short reply to be heard')
+    assert.equal(job(home, jobId).pastes, 1, 'typed: no second paste')
+  } finally {
+    await backend.close()
+  }
+  // A program that does not ask for pastes is typed to as one line, however long the reply.
+  const other = claude({ env: { FAKE_CLAUDE_NO_PASTE: '1' } })
+  try {
+    const task = await other.backend.start({ folder: scratch(), prompt: '', title: 'No pastes' })
+    const jobId = task.screen.job
+    await connected(task)
+    await task.send(longReply)
+    await until(() => job(other.home, jobId).lastHeard === longReply.replace(/\s*\n+\s*/g, ' '), 'the reply to be heard as one line')
+    assert.ok(!job(other.home, jobId).pastes, 'no paste')
+  } finally {
+    await other.backend.close()
+  }
+})
+
+test('a reply with a line break that starts as a command of its own is still refused, long or short, and nothing of it is pasted', { timeout: 40_000 }, async () => {
+  const { backend, home } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: '', title: 'Long command' })
+    const jobId = task.screen.job
+    await connected(task)
+    await assert.rejects(() => task.send(`/model\n${longReply}`), /command is typed on the agent/)
+    await sleep(300)
+    assert.ok(!job(home, jobId).pastes && !job(home, jobId).lastHeard, 'nothing reached the session')
+  } finally {
+    await backend.close()
+  }
+})
+
+test('Take back of a long message empties the prompt with keys written in small pieces, a moment apart, and all of them reach the session', { timeout: 60_000 }, async () => {
+  const { backend, home } = claude()
+  try {
+    const task = await backend.start({ folder: scratch(), prompt: 'long', title: 'Long take back' })
+    const jobId = task.screen.job
+    await until(() => task.state === 'working', 'the turn to be at work')
+    await connected(task)
+    const writes = []
+    const screen = task.terminal
+    const write = screen.write.bind(screen)
+    screen.write = (data) => { writes.push(data); write(data) }
+    const words = [longReply]
+    const read = async () => ({ queued: job(home, jobId).ups ? [] : words, said: ['Fix it'] })
+    assert.deepEqual(await task.takeBackQueue(read), words)
+    const keys = T.clearKeys(words)
+    assert.ok(keys.length > 200, 'a reply like this has many keys to press')
+    assert.equal(writes[0], '\x1b[A', 'the Up arrow, in a write of its own')
+    assert.equal(writes.slice(1).join(''), keys, 'then every key, in order')
+    assert.ok(writes.slice(1).every((piece) => piece.length <= 30), 'none of the writes holds more than a few keys: a long run of them is taken as pasted text')
+    assert.ok(writes.length > 5)
+    const count = (key) => keys.split(key).length - 1
+    await until(() => job(home, jobId).kills === count('\x0b'), 'every key to reach the session', 20_000)
+    const seen = job(home, jobId)
+    assert.equal(seen.homes, count('\x01'))
+    assert.equal(seen.backspaces, count('\x7f'))
+    assert.equal(seen.escapes, undefined, 'no Esc')
+    assert.equal(task.state, 'working', 'the turn goes on')
+  } finally {
+    await backend.close()
+  }
+})
+
 test('a reply is refused while the session asks, and when it is a command of the agent’s own', { timeout: 40_000 }, async () => {
   const { backend, text } = claude()
   try {
