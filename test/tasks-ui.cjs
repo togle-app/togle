@@ -1864,6 +1864,25 @@ async function checkShells(T, agent) {
   await ui.evaluate('window.togleUITest.setTask("claude:sh1", { model: null, updatedAt: Date.now() })')
   await ui.wait("window.togleUITest.calls().filter(call=>call.name==='runnerModel').length>" + readsThen)
   assert.equal(await ui.evaluate("document.querySelector('.task-status .status-model')?.textContent.trim()"), 'Sonnet 5.5 · high', 'a reading that tells nothing leaves what was said')
+  // Idle, the person picks another model on its screen (/model): nothing about the task changes (not how it stands, not when it was last touched),
+  // and the line follows all the same, because a Claude Code task of Togle's own is asked again every few seconds while it is idle too. (It said
+  // the model of the last answer until the next one: "Sonnet 5.5" for a session just set to Fable 5.2.)
+  const pause = (ms) => ui.evaluate('new Promise(r=>setTimeout(r,' + ms + '))')
+  await ui.evaluate('window.togleUITest.setTask("claude:sh1", { state: "idle", line: "Done", model: { model: "claude-sonnet-5-5", effort: "xhigh" }, updatedAt: Date.now() })')
+  await ui.wait("document.querySelector('.task-status .state-chip')?.textContent.trim()==='Idle' && document.querySelector('.task-status .status-model')?.textContent.trim()==='Sonnet 5.5 · xhigh'")
+  // (Nothing but the model is changed here, so only asking again can show it.)
+  await ui.evaluate('window.togleUITest.setTask("claude:sh1", { model: { model: "Fable 5.2", effort: "max" } })')
+  await pause(5200)
+  await ui.wait("document.querySelector('.task-status .status-model')?.textContent.trim()==='Fable 5.2 · max'")
+  assert.equal(await ui.evaluate("document.querySelector('.task-status .status-model').title"), 'Model: Fable 5.2. Effort: max.', 'the name Claude Code gives the model, said once on the pointer')
+  // An agent whose model is asked of its own program (Codex, Hermes) is not asked again while it is idle: only when the task changes.
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'codex:idle1', runner: 'codex', title: 'Idle Codex', folder: 'C:\\work\\notes', state: 'idle', screen: true, terminal: false, mine: true, line: 'Idle Codex', model: { model: 'gpt-6.2-sol', effort: 'ultra' } }) + ', "")')
+  await ui.task('Idle Codex')
+  await ui.wait("document.querySelector('.task-title h2')?.textContent==='Idle Codex' && document.querySelector('.task-status .status-model')?.textContent.trim()==='GPT 6.2 Sol · ultra'")
+  const codexReads = async () => (await ui.calls('runnerModel')).filter((call) => call.args[0] === 'codex:idle1').length
+  const codexBefore = await codexReads()
+  await pause(5600)
+  assert.equal(await codexReads(), codexBefore, 'Codex is not asked again while it is idle')
   // Another task with no model of its own does not carry this one's: each task has its own line.
   await ui.task('Rebuild the pricing page')
   await ui.wait("document.querySelector('.task-title h2')?.textContent==='Rebuild the pricing page'")
@@ -3032,6 +3051,15 @@ async function checkSentTicks(T, agent) {
   await ui.click('.sent-failed button', 'Remove')
   await ui.wait("!document.querySelector('.you-row[data-delivery=failed]')")
   assert.equal((await stateOf('Third try')).length, 0, 'the card is gone')
+  // A message of several lines: the agent keeps it as the one line it was typed as, and its screen may have broken that line where it liked,
+  // inside a word too (Claude Code takes a long burst of keys as pasted text, cut where its input filled). It is the message that was sent:
+  // one card with two ticks. It was shown twice: the record's card, and under it the sent one with one tick.
+  await press('Give each promise\n\na direct route to trying it.')
+  await ui.wait("!!document.querySelector('.you-row[data-delivery=sent]')")
+  await ui.evaluate('window.togleUITest.recorded("claude:t1", ' + JSON.stringify([{ id: 302, at: Date.now() + 3000, kind: 'you', text: 'Give each promise a dire\n\nct route to trying it.' }]) + ')')
+  await ui.wait("document.querySelectorAll('.you-row[data-delivery=taken]').length===4")
+  assert.equal(await ui.evaluate("document.querySelectorAll('.you-row').length"), 4, 'one card for it, not two')
+  assert.equal(await ui.evaluate("!!document.querySelector('.you-row[data-delivery=sent]')"), false, 'and none left with one tick')
   // What the agent holds in its own queue: two grey ticks, in the Queued card.
   await ui.evaluate('window.togleUITest.setTask("claude:t1", ' + JSON.stringify({ state: 'working', history: { entries: [...before, { id: 300, at: Date.now() + 1000, kind: 'you', text: 'Add a dark mode' }, { id: 301, at: Date.now() + 2000, kind: 'you', text: 'Second try' }], queued: ['Also the footer'] } }) + ')')
   await ui.wait("!!document.querySelector('.held-row .ticks')")

@@ -384,6 +384,64 @@ test('words that started a turn of their own are shown once, by their message li
   assert.deepEqual(await saidIn(18), [['you', 'Again.'], ['you', 'Again.'], ['you', 'Late.']])
 })
 
+// Pasted text as Claude Code writes it into a message (seen on 2.1.318 to 2.1.329): two line breaks, the opening tag with an id, a line break,
+// the text, a line break, the closing tag with the same id, a line break; and one more line break where typed words come before or after.
+const pasted = (text, mark = 'c053') => `\n\n<pasted_content id="${mark}">\n${text}\n</pasted_content id="${mark}">\n`
+
+test('a long reply typed from Chat, which Claude Code took as pasted text and cut inside a word, reads as it was typed, and is the message that was sent', async () => {
+  // As it was seen: 2,700 characters typed as one line were recorded as two pasted blocks of 1,024 bytes and a typed end. The first cut fell
+  // inside a word ("a dire", "ct route"), the second after a space. Chat showed the message twice: the record's, and the one it had sent.
+  const sent = 'I got feedback about our design. Check below and give me your own thoughts.\n\n**Keep one subscription.** I’d give each promise a direct route to trying it.\n\n3. Use your Windows PC, Linux VPS, and Android emulator.'
+  const typed = sent.replace(/\s*\n+\s*/g, ' ')
+  const first = typed.indexOf('direct') + 4
+  const second = typed.indexOf('Linux')
+  const recorded = pasted(typed.slice(0, first)) + pasted(typed.slice(first, second)) + '\n' + typed.slice(second)
+  assert.ok(recorded.includes('a dire\n</pasted_content id="c053">\n\n\n<pasted_content id="c053">\nct route') && recorded.includes('PC, \n</pasted_content id="c053">\n\nLinux VPS'), 'the record as Claude Code wrote it')
+  write(92, line(asked(92, recorded)) + line(said(92, [{ type: 'text', text: 'Read.' }])))
+  const history = await claudeConversation(id(92))
+  assert.deepEqual(history.entries.map((entry) => [entry.kind, entry.text]), [['you', typed], ['agent', 'Read.']], 'the line as it was typed: no tag, no line break inside "direct"')
+  // It is the message Chat sent, whose words still have their line breaks: found in the conversation, not shown a second time.
+  const message = { id: 1, text: sent, at: Date.now(), known: [], state: 'sent' }
+  assert.deepEqual(T.placeSent([message], history.entries, [], []).map((one) => one.place), ['thread'])
+  // The same while it waits in Claude Code's queue, and when the turn takes it in from there.
+  write(93, line(asked(93, 'Ping it.')) + line(enqueue(93, recorded, 3)))
+  assert.deepEqual((await claudeConversation(id(93))).queued, [typed])
+  assert.deepEqual(T.placeSent([message], (await claudeConversation(id(93))).entries, (await claudeConversation(id(93))).queued, []).map((one) => one.place), ['queued'])
+  appendFileSync(file(93), line(remove(93, recorded, 6)) + line(takenIn(93, recorded, 3)))
+  assert.deepEqual(await saidIn(93), [['you', 'Ping it.'], ['you', typed]])
+})
+
+test('text the person pasted on the screen: one line of it stays in the line it went into, several lines stand on lines of their own, and words that only name the tag stay', async () => {
+  // A long address pasted between typed words: it is part of their line.
+  write(94, line(asked(94, 'See \n' + pasted('https://example.test/a/long/address', 'a1') + '\n and tell me.')))
+  assert.deepEqual(await saidIn(94), [['you', 'See https://example.test/a/long/address and tell me.']])
+  // A log of three lines after a question: on its own lines, with one line break where Claude Code put three; its own line breaks stay.
+  write(95, line(asked(95, 'Why does this fail?\n' + pasted('Traceback:\n  File "a.py"\nValueError', 'b2'))))
+  assert.deepEqual(await saidIn(95), [['you', 'Why does this fail?\nTraceback:\n  File "a.py"\nValueError']])
+  // Nothing but a paste, and a closing tag written without its id.
+  write(96, line(asked(96, pasted('first line\nsecond line', 'c3'))) + line(asked(96, '\n\n<pasted_content id="d4">\nonly this\n</pasted_content>\n')))
+  assert.deepEqual(await saidIn(96), [['you', 'first line\nsecond line'], ['you', 'only this']])
+  // A tag that has no partner is taken out, and the words around it are kept.
+  write(97, line(asked(97, 'What does <pasted_content id="x"> mean here?')))
+  assert.deepEqual(await saidIn(97), [['you', 'What does  mean here?']])
+})
+
+test('a prompt that something else sent (a scheduled wakeup) and that started a turn of its own is not left in the queue as if the person had typed it', async () => {
+  // Seen on a real session: the wakeup was enqueued and dequeued within a second, its turn began with a system prompt (isMeta, promptSource "system",
+  // wakeupSource "loop_wakeup") that is not the person's, and the Queued card showed it for days, as a message the person never typed.
+  const prompt = 'Check the CI runs for the newest commit and report in plain words.'
+  write(90, line(asked(90, 'Ping it.')) + line(said(90, [{ type: 'text', text: 'Pong.' }])) + line(enqueue(90, prompt, 4)))
+  assert.deepEqual((await claudeConversation(id(90))).queued, [prompt], 'it waits in the queue until its turn starts')
+  const system = asked(90, prompt, { isMeta: true, promptSource: 'system', wakeupSource: 'loop_wakeup', origin: undefined })
+  appendFileSync(file(90), line({ type: 'queue-operation', operation: 'dequeue', timestamp: stamp(4), sessionId: id(90) }) + line(system) + line(said(90, [{ type: 'text', text: 'Checked.' }])))
+  const history = await claudeConversation(id(90))
+  assert.equal(history.queued, undefined, 'its turn started: nothing is queued')
+  assert.deepEqual(history.entries.map((entry) => [entry.kind, entry.text]), [['you', 'Ping it.'], ['agent', 'Pong.'], ['agent', 'Checked.']], 'and it is not shown as something the person said')
+  // The person's own words that are the same as such a prompt are still theirs: queued, then said by their own message line.
+  write(91, line(asked(91, 'Ping it.')) + line(enqueue(91, 'Then the footer.', 3)) + line(asked(91, 'Not that one.', { isMeta: true, promptSource: 'system', origin: undefined })))
+  assert.deepEqual((await claudeConversation(id(91))).queued, ['Then the footer.'], 'a system prompt with other words leaves their queue alone')
+})
+
 test('a command the person stopped with Esc is told as stopped, and one they refused as declined', async () => {
   write(20,
     line(asked(20, 'Run the long job.')) +

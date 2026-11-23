@@ -149,6 +149,23 @@ const parse = (line: string): Json | null => {
 const INJECTED = /<(system-reminder|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|task-notification|bash-input|bash-stdout|bash-stderr|user-prompt-submit-hook)>[\s\S]*?<\/\1>/g
 const NOT_SAID = /^\[Request interrupted by user[^\]]*\]$|^No response requested\.?$/
 /**
+ * Pasted text as Claude Code writes it into what the person said: between two tags that carry the same id, with a line break of its own after
+ * the opening tag and before the closing one, and blank lines around the whole (seen on 2.1.318 to 2.1.329: two or three line breaks before
+ * the opening tag, one or two after the closing one). The tags and those line breaks are Claude Code's own; the person typed none of them.
+ *
+ * A long line that arrives in one burst counts as pasted too, cut where its input happened to fill (every 1,024 bytes): a 2,700-character
+ * reply typed from Chat was recorded as two such blocks and a typed end, the first cut inside a word ("a dire", then "ct route"). Read with
+ * the line breaks left in, that word was broken in the conversation, and the message no longer had the words that were sent, so Chat showed
+ * it twice: once from the record, and once as the message it had sent and never found there.
+ */
+const PASTED = /\n{0,3}<pasted_content\b([^>]*)>\n?([\s\S]*?)\n?<\/pasted_content\b(?:\1)?>\n{0,2}/g
+/**
+ * A message without the paste tags. Pasted text of one line is part of the line it went into, and is put back there with nothing added:
+ * a line typed in one burst reads as it was typed. Pasted text of several lines (a log, a file) stands on lines of its own.
+ */
+const withoutPasteTags = (text: string): string =>
+  text.replace(PASTED, (_whole, _id: string, pasted: string) => (pasted.includes('\n') ? `\n${pasted}\n` : pasted)).replace(/<\/?pasted_content[^>]*>/g, '')
+/**
  * What they wrote in a message, without what Claude Code added to it. A command they ran with words after it stays as
  * they typed it ("/fix-issue SSO login fails"): the words are what they asked.
  */
@@ -156,9 +173,7 @@ const theirWords = (text: string): string => {
   const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1].trim()
   const name = /<command-name>\s*([^<]*?)\s*<\/command-name>/.exec(text)?.[1]
   const typed = args ? `${name ? `${name.startsWith('/') ? name : `/${name}`} ` : ''}${args}` : ''
-  const rest = text
-    .replace(INJECTED, '')
-    .replace(/<\/?pasted_content[^>]*>/g, '')
+  const rest = withoutPasteTags(text.replace(INJECTED, ''))
     .trim()
     .replace(NOT_SAID, '')
   return typed && rest ? `${typed}\n${rest}` : typed || rest
@@ -397,10 +412,42 @@ export async function claudeLastSaid(id: string): Promise<string> {
 }
 
 /**
- * The model and the effort a session's last answer used. Claude Code writes both on each answer it gives (the record's `message.model`, and
- * `effort` beside it), so the end of the file says what the session works with now, also after the person changed it on its screen (/model,
- * /effort). What a helper agent answered with is left out, and so is an answer with no model of its own ("<synthetic>"). Null when the session
- * has no answer yet, or no file. Read from the end of the file only: it is cheap, whatever the session's length.
+ * What Claude Code writes in the session's file when the person picks a model on its screen (/model): the line its screen shows, and nothing
+ * else (no id, no record of its own). Seen on 2.1.312 to 2.1.329, in 36 picks: "Set model to `Fable 5.2` and saved as your default for new
+ * sessions", with " · `max` effort for this session only" after it when an effort was picked too, or " · effort stays max (set by
+ * CLAUDE_CODE_EFFORT_LEVEL); xhigh is saved" when a setting holds the effort; the default row reads "`Fable 5.2 (default)`". "Kept model as …"
+ * is no pick. In each of the 36 the next answer used that model, and that effort where one was said.
+ */
+const MODEL_PICKED = /^<local-command-stdout>\s*Set model to `([^`]+)`([^<]*)<\/local-command-stdout>$/
+
+/**
+ * The model the person picked with this line of the session's file, and the effort when the line says one; null for any other line. The line is
+ * the command's output and nothing else: as a message whose whole content is that output, or as a system line of a local command (both are
+ * written). Words that only quote it (what they typed, what a tool printed) are not it.
+ */
+function modelPicked(r: Json): ModelInfo | null {
+  const text = r.type === 'system' && r.subtype === 'local_command' ? str(r.content) : r.type === 'user' && isObject(r.message) ? textOf(r.message.content) : ''
+  if (!text.includes('Set model to')) return null
+  // (Without the color codes a screen's line may carry.)
+  const said = MODEL_PICKED.exec(text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').trim())
+  const model = said?.[1].replace(/\s*\(default\)\s*$/i, '').trim()
+  if (!said || !model) return null
+  const effort = /`([A-Za-z][\w-]*)` effort\b/.exec(said[2])?.[1] ?? /\beffort stays ([A-Za-z][\w-]*)/.exec(said[2])?.[1]
+  return { model, ...(effort ? { effort: effort.toLowerCase() } : {}) }
+}
+
+// What each session's file said last, with the size and the time of the file then: a file that has not changed since is not read again,
+// so that asking every few seconds while a task is idle costs a look at the file and nothing more.
+const modelsRead = new Map<string, { size: number; mtimeMs: number; info: ModelInfo | null }>()
+
+/**
+ * The model and the effort a session works with now. Claude Code writes both on each answer it gives (the record's `message.model`, and `effort`
+ * beside it), so the session's last answer says them. A model the person picked on its screen after that answer (/model) is not in any answer
+ * yet: the line the pick left in the file says it, by the name Claude Code gives the model ("Fable 5.2"), with the effort when the line says
+ * one; without one only the model is told, since the effort may follow the model. (It showed the model of the last answer until the next
+ * one: "Sonnet 5.5" for a session just set to Fable 5.2.) What a helper agent answered with is left out, and so is an answer with no model of its
+ * own ("<synthetic>"). Null when the session has no answer yet, or no file. Read from the end of the file only: it is cheap, whatever the
+ * session's length, and a file that has not changed since it was read is not read again.
  */
 export async function claudeModel(id: string): Promise<ModelInfo | null> {
   let file = sessionFiles.get(id)
@@ -413,13 +460,31 @@ export async function claudeModel(id: string): Promise<ModelInfo | null> {
     if (!file) return null
     sessionFiles.set(id, file)
   }
-  const size = (await fs.stat(file).catch(() => null))?.size ?? 0
+  const stat = await fs.stat(file).catch(() => null)
+  const size = stat?.size ?? 0
+  const before = modelsRead.get(id)
+  if (stat && before && before.size === size && before.mtimeMs === stat.mtimeMs) return before.info
+  const info = await modelAtEnd(file, size)
+  if (stat && info !== undefined) {
+    modelsRead.delete(id)
+    modelsRead.set(id, { size, mtimeMs: stat.mtimeMs, info })
+    while (modelsRead.size > 60) modelsRead.delete(modelsRead.keys().next().value as string)
+  }
+  return info ?? null
+}
+
+/** What the end of a session's file says of its model: the newest of its last answer and a model picked after it. Undefined when the file cannot be read. */
+async function modelAtEnd(file: string, size: number): Promise<ModelInfo | null | undefined> {
   for (const bytes of TAIL_BYTES) {
     const tail = await readEnd(file, size, 'tail', bytes).catch(() => null)
-    if (!tail) return null
+    if (!tail) return undefined
     for (const line of tail.lines.slice().reverse()) {
       const r = parse(line)
-      if (!r || r.type !== 'assistant' || r.isSidechain || !isObject(r.message)) continue
+      if (!r || r.isSidechain) continue
+      // Met before any answer, from the end: it was picked after the last answer.
+      const picked = modelPicked(r)
+      if (picked) return picked
+      if (r.type !== 'assistant' || !isObject(r.message)) continue
       const model = str(r.message.model)
       if (!model || model.startsWith('<')) continue
       const effort = str(r.effort) || str(r.perTurnEffort)
@@ -763,6 +828,10 @@ export function feedConversation(state: Conversation, lines: string[], places?: 
         for (const picture of pictures) state.places.set(picture, place as Place)
         return
       }
+      // A prompt that something else sent (a scheduled wakeup, a loop) waits in the queue as the person's words do, and starts a turn of its own
+      // with a line that is not theirs (a system prompt): it still takes that prompt out of the queue. Without this it stayed in the Queued card for
+      // good, as a message the person never typed (the queue's enqueue line says nothing of who sent it).
+      unqueue(state, theirWords(textOf(content)))
       const results = blocks.filter((block) => block.type === 'tool_result')
       for (const block of results) {
         const call = str(block.tool_use_id)

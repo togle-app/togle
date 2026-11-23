@@ -256,7 +256,10 @@ export interface StepDetail {
  * words for the window.
  */
 export interface ModelInfo {
-  /** The model's id: "claude-opus-5-5", "gpt-6.2-sol". */
+  /**
+   * The model's id: "claude-opus-5-5", "gpt-6.2-sol". For a model the person just picked on Claude Code's screen it is the name Claude Code
+   * gives it ("Fable 5.2"): its record has no id for it until its next answer.
+   */
   model?: string
   /** The effort: "low", "medium", "high", "xhigh", "max" (Claude Code), "ultra" (Hermes). */
   effort?: string

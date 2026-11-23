@@ -37,9 +37,14 @@ test('what is new is told by what was there, not by ids or time: Codex keeps has
   assert.deepEqual(places(T.placeSent([sent(1, 'Also keep the old link', { known: [before.id] })], [before], [], [])), ['tail'])
 })
 
-test('words are compared as the agent keeps them: spaces as one, the marks and paths of pictures left out, and no more than the agent keeps', () => {
+test('words are compared as the agent keeps them: by their letters, whatever the screen did with the space between them, the marks and paths of pictures left out, and no more than the agent keeps', () => {
   const file = 'C:\\Users\\someone\\AppData\\Roaming\\togle\\pasted\\paste-20261119-123644.png'
   assert.deepEqual(places(T.placeSent([sent(1, 'Fix  the\nheader')], [you(12, 'Fix the header')], [], [])), ['thread'], 'a line break is a space on the screen')
+  // A screen may break a long line where it likes, inside a word too (Claude Code cut a long reply at "a dire", "ct route", and the message
+  // that was sent was shown a second time): it is still that message. Other letters are another message.
+  assert.deepEqual(places(T.placeSent([sent(1, 'Give each promise\n\na direct route')], [you(12, 'Give each promise a dire\n\n\nct route')], [], [])), ['thread'], 'a line broken inside a word')
+  assert.deepEqual(places(T.placeSent([sent(1, 'Give each promise a direct route')], [], ['Give each promise a dire\nct route'], [])), ['queued'], 'in the agent’s queue too')
+  assert.deepEqual(places(T.placeSent([sent(1, 'Give each promise a direct route')], [you(12, 'Give each promise a direct root')], [], [])), ['tail'], 'other letters')
   assert.deepEqual(places(T.placeSent([sent(1, `Look at this ${file}`)], [you(12, `[Image #1] Look at this ${file}`)], [], [])), ['thread'])
   assert.deepEqual(places(T.placeSent([sent(1, `Look at this ${file}`)], [you(12, 'Look at that')], [], [])), ['tail'])
   // Two pictures and no words are two messages, not one.
@@ -49,6 +54,17 @@ test('words are compared as the agent keeps them: spaces as one, the marks and p
   const long = 'word '.repeat(6_000)
   assert.ok(long.length > T.RECORD_WORDS_MOST)
   assert.deepEqual(places(T.placeSent([sent(1, long)], [you(12, long.slice(0, T.RECORD_WORDS_MOST))], [], [])), ['thread'])
+  // A long message with paragraphs: the record keeps 20,000 characters of the one line it was typed as, and that cut falls at another place
+  // than 20,000 characters of what was sent (each blank line between paragraphs is two characters there, and one space on the screen).
+  const paragraphs = Array.from({ length: 900 }, (_, n) => `Paragraph ${n} says a few words about the plan.`).join('\n\n')
+  const typed = paragraphs.replace(/\s*\n+\s*/g, ' ')
+  assert.ok(typed.length > T.RECORD_WORDS_MOST && paragraphs.slice(0, T.RECORD_WORDS_MOST).replace(/\s+/g, ' ') !== typed.slice(0, T.RECORD_WORDS_MOST), 'the two cuts are not at the same words')
+  assert.deepEqual(places(T.placeSent([sent(1, paragraphs)], [you(12, typed.slice(0, T.RECORD_WORDS_MOST))], [], [])), ['thread'], 'still that message')
+  // Its picture is past the record's cut: the record has no path, and it is still that message.
+  assert.deepEqual(places(T.placeSent([sent(1, `${paragraphs} ${file}`)], [you(12, typed.slice(0, T.RECORD_WORDS_MOST))], [], [])), ['thread'])
+  // Two long messages that part ways early are two messages.
+  assert.deepEqual(places(T.placeSent([sent(1, paragraphs)], [you(12, typed.replace('Paragraph 3 ', 'Chapter 3 ').slice(0, T.RECORD_WORDS_MOST))], [], [])), ['tail'])
+  assert.ok(T.KEY_LETTERS_MOST < T.RECORD_WORDS_MOST * 0.7, 'fewer letters are compared than a record of 20,000 characters holds, spaces and all')
 })
 
 test('what is known when a message is sent is the ids of the entries with the same words', () => {

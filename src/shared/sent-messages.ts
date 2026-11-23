@@ -50,17 +50,28 @@ export interface Placed {
   entry?: LogEntry
 }
 
-/** The most of a message an agent's record keeps (each reader cuts what the person said at this): a longer one is compared as far as that. */
+/** The most of a message an agent's record keeps (each reader cuts what the person said at this). */
 export const RECORD_WORDS_MOST = 20_000
 
 /**
- * What a message says, for telling it from another: its words with spaces as one, and the files of its pictures. The agent keeps what
- * was typed on its screen, which is one line (line breaks become spaces) without the marks Togle puts for a picture, and no more than
- * RECORD_WORDS_MOST characters of it.
+ * How many of a long message's letters are compared: fewer than a record keeps of it. A record keeps RECORD_WORDS_MOST characters of the
+ * line as the screen got it, spaces among them, so its cut falls at another place than a cut of the words as they were sent; the letters
+ * before this many are in both.
+ */
+export const KEY_LETTERS_MOST = 12_000
+
+/**
+ * What a message says, for telling it from another: its letters in order, with no space or line break among them, and the files of its
+ * pictures. The agent keeps what was typed on its screen, which is not what was sent letter for letter: line breaks became spaces, the
+ * marks Togle puts for a picture are gone, and a screen may break a long line where it likes (Claude Code took a long reply as pasted text,
+ * cut inside a word, and the message that was sent was not found in the record: it showed twice). The letters are the same whatever the
+ * screen did with the space between them. A message with more letters than KEY_LETTERS_MOST is told by that many alone, without its
+ * pictures: the record has cut it, and the paths at its end with it.
  */
 export function messageKey(text: string): string {
-  const said = splitPictures(text.slice(0, RECORD_WORDS_MOST).replace(/\[Image #\d+\]\s*/g, ''))
-  return `${said.words.replace(/\s+/g, ' ').trim()}\n${said.files.join('\n')}`
+  const said = splitPictures(text.slice(0, RECORD_WORDS_MOST * 2).replace(/\[Image #\d+\]\s*/g, ''))
+  const letters = said.words.replace(/\s+/g, '')
+  return letters.length >= KEY_LETTERS_MOST ? letters.slice(0, KEY_LETTERS_MOST) : `${letters}\n${said.files.join('\n')}`
 }
 
 /** The ids of what the person said in these entries with the words of a message about to be sent: what `SentMessage.known` holds. */

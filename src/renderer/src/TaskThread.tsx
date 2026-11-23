@@ -20,7 +20,7 @@ const READ_AGAIN_MS = 3_000
  * what is typed on its screen (a queued message, an answer) shows within a second. Codex's and Hermes's are asked of their programs.
  */
 const READ_AGAIN_FILE_MS = 1_000
-/** How often the model and effort of a task that works are read again, in milliseconds (main keeps an answer for 3 seconds). */
+/** How often the model and effort of a task are read again while it works (a Claude Code task of Togle's own: while it is idle too), in milliseconds (main keeps an answer for 3 seconds). */
 const MODEL_AGAIN_MS = 5_000
 
 /** The conversations read last, by task (and whether all of it was read): one opened again shows at once and is read again behind it. */
@@ -84,10 +84,15 @@ const modelBefore = new Map<string, ModelInfo | null>()
  * The model a task's agent works with now and the effort it thinks with, for the status line: read when the task opens, when it changes, and every
  * few seconds while it works or waits (the person can change both on the agent's own screen). Read in either view: it is a line of the agent's own
  * record, not the conversation. Null until the agent tells; a reading that tells nothing leaves what was known.
+ *
+ * A Claude Code task of Togle's own is read again while it is idle too. The person picks a model on its screen between turns (/model), nothing
+ * about the task changes then, and the line said the old model until the next answer. Its record is a file whose end is read, and main does
+ * not read a file that has not changed, so asking again costs nothing. Codex's and Hermes's are asked of their programs (Hermes's starts
+ * one): those are read again only while they work.
  */
-export function useModel(task: Pick<TaskView, 'key' | 'state' | 'updatedAt'>): ModelInfo | null {
+export function useModel(task: Pick<TaskView, 'key' | 'state' | 'updatedAt' | 'runner' | 'mine'>): ModelInfo | null {
   const [info, setInfo] = useState<ModelInfo | null>(() => modelBefore.get(task.key) ?? null)
-  const atWork = task.state === 'working' || task.state === 'waiting'
+  const follows = task.state === 'working' || task.state === 'waiting' || (task.runner === 'claude' && task.mine)
   useEffect(() => {
     let live = true
     const again = (): void => {
@@ -103,12 +108,12 @@ export function useModel(task: Pick<TaskView, 'key' | 'state' | 'updatedAt'>): M
       )
     }
     again()
-    const timer = atWork ? setInterval(again, MODEL_AGAIN_MS) : undefined
+    const timer = follows ? setInterval(again, MODEL_AGAIN_MS) : undefined
     return () => {
       live = false
       if (timer) clearInterval(timer)
     }
-  }, [task.key, task.updatedAt, atWork])
+  }, [task.key, task.updatedAt, follows])
   return info
 }
 
