@@ -21,6 +21,18 @@ after(() => {
 const address = () => (process.platform === 'win32' ? `\\\\.\\pipe\\togle-test-${randomBytes(6).toString('hex')}` : path.join(scratch(), 's.sock'))
 const secretA = T.secretOf(randomBytes(32).toString('hex'))
 const secretB = T.secretOf(randomBytes(32).toString('hex'))
+
+test('Windows profile spellings reach the same running channel', { skip: process.platform !== 'win32' }, async () => {
+  const folder = scratch()
+  const server = new T.ChannelServer({ secret: secretA, address: T.channelAddress(folder), handlers: { echo: async body => body } })
+  await server.listen()
+  try {
+    const reply = await T.askChannel({ address: T.channelAddress(folder.toUpperCase()), secret: secretA, kind: 'echo', body: 'ready' })
+    assert.equal(reply.ok, true)
+    assert.equal(JSON.parse(reply.result), 'ready')
+    assert.notEqual(T.channelAddress(scratch()), T.channelAddress(folder))
+  } finally { await server.close() }
+})
 const until = async (check, what, ms = 4000) => {
   const start = Date.now()
   while (Date.now() - start < ms) {

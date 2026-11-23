@@ -16,6 +16,8 @@ start "" /wait "Togle Setup 0.1.0.exe" /S
 
 For a public Windows beta, open its GitHub release and use the Command Prompt line in the release notes. It downloads the signed installer directly from GitHub. [Togle Free releases](https://github.com/togle-app/togle/releases)
 
+Starting with 0.1.0-beta.2, open Togle from the Start menu, then open a new Command Prompt and run `togle tasks` to list your tasks.
+
 Once the stable Windows release and website install script are published, you can also install from any folder with the following command.
 
 ```cmd

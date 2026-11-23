@@ -46,6 +46,7 @@ win:
 nsis:
   oneClick: true
   perMachine: false
+  include: build/installer.nsh
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
 mac:
