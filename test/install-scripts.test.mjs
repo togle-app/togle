@@ -18,19 +18,23 @@ const files = {
   'Togle-0.2.0-arm64-mac.zip': Buffer.from('a Mac zip, made up')
 }
 
-async function serve(signer = key, builds = files, tag) {
+async function serve(signer = key, builds = files, tag, intercept) {
   const metadataPath = tag ? 'releases/tags/' + tag : 'release.json'
   const scriptPath = tag ? 'releases/download/' + tag + '/install.ps1' : 'install.ps1'
   const server = http.createServer((req, res) => {
     const name = decodeURIComponent(req.url.slice(1))
     const origin = `http://127.0.0.1:${server.address().port}`
+    if (intercept?.(name, req, res)) return
     if (name === scriptPath) {
       res.writeHead(200, { 'Content-Type': 'application/octet-stream' })
       res.end(installers(pub, tag).ps1.replace('https://api.github.com/repos/togle-app/togle', origin))
       return
     }
     if (name === metadataPath) {
-      const assets = Object.keys(builds).flatMap((file) => [file, file + '.sig']).map((file) => ({ name: file, browser_download_url: origin + '/' + file }))
+      const assets = Object.entries(builds).flatMap(([file, bytes]) => [
+        { name: file, size: bytes.length, browser_download_url: origin + '/' + file },
+        { name: file + '.sig', size: sign(signer, bytes).length, browser_download_url: origin + '/' + file + '.sig' }
+      ])
       res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ tag_name: tag ?? 'v0.2.0', assets }, null, 2)); return
     }
     const base = name.replace(/\.sig$/, '')
@@ -67,11 +71,63 @@ test('the release key signs and checks a file, and the scripts get the key writt
   const pinned = installers(pub, "beta/test'1")
   for (const script of Object.values(pinned)) {
     assert.ok(script.includes('https://api.github.com/repos/togle-app/togle/releases/tags/beta%2Ftest%271'))
-    assert.ok(!script.includes('/releases/latest'))
+    assert.ok(!script.includes('https://api.github.com/repos/togle-app/togle/releases/latest'))
   }
 })
 
 const powershell = process.platform === 'win32' && spawnSync('powershell.exe', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { windowsHide: true }).status === 0
+test('the Windows beta recovers from interrupted downloads and verifies the complete file', { skip: !powershell }, async t => {
+  const file = 'Togle.Setup.exe', bytes = Buffer.alloc(192 * 1024, 42), cut = 32768
+  const systemCurl = fs.existsSync(path.join(process.env.SystemRoot, 'System32', 'curl.exe'))
+  for (const acceptsRange of [true, false]) {
+    await t.test(acceptsRange ? 'resume' : 'restart when the server ignores Range', async t => {
+      const requests = []
+      const tag = 'v0.2.0-beta.1'
+      const release = await serve(key, { [file]: bytes }, tag, (name, req, res) => {
+        if (name !== file) return false
+        const range = req.headers.range
+        requests.push(range)
+        if (requests.length === 1) {
+          res.writeHead(200, { 'Content-Length': bytes.length })
+          res.write(bytes.subarray(0, cut), () => setTimeout(() => res.destroy(), 60))
+        } else if (range && acceptsRange) {
+          res.writeHead(206, { 'Content-Range': 'bytes ' + cut + '-' + (bytes.length - 1) + '/' + bytes.length, 'Content-Length': bytes.length - cut })
+          res.end(bytes.subarray(cut))
+        } else {
+          res.writeHead(200, { 'Content-Length': bytes.length }); res.end(bytes)
+        }
+        return true
+      })
+      t.after(release.close)
+      const url = release.origin + '/releases/download/' + tag + '/install.ps1'
+      const result = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "iex (irm '" + url + "' -ErrorAction Stop)"],
+        { TOGLE_INSTALL_RELEASES: release.url, TOGLE_INSTALL_DRY_RUN: '1' })
+      assert.equal(result.code, 0, result.out)
+      assert.match(result.out, /Signature checked\./)
+      assert.ok(requests.length >= 2)
+      assert.equal(requests[0], undefined)
+      assert.equal(requests[1], systemCurl ? 'bytes=' + cut + '-' : undefined)
+    })
+  }
+})
+
+test('the stable command explains an empty channel and never installs a prerelease', { skip: !powershell }, async t => {
+  const release = await serve(key, files, undefined, (name, req, res) => {
+    if (name !== 'prerelease') return false
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ tag_name: 'v0.2.0-beta.1', prerelease: true, assets: [] }))
+    return true
+  })
+  t.after(release.close)
+  for (const endpoint of ['missing', 'prerelease']) {
+    const result = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "iex (irm '" + release.origin + "/install.ps1' -ErrorAction Stop)"],
+      { TOGLE_INSTALL_RELEASES: release.origin + '/' + endpoint, TOGLE_INSTALL_DRY_RUN: '1' })
+    assert.notEqual(result.code, 0)
+    assert.match(result.out, /No stable Windows release/)
+    assert.doesNotMatch(result.out, /Downloading Togle|Signature checked/)
+  }
+})
+
 async function windowsSetupFixture(t) {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'togle cmd test '))
   const setup = path.join(folder, 'fixture.exe')
@@ -108,9 +164,10 @@ test('the GitHub beta command installs its tag when no stable release or website
 test('the documented Command Prompt command runs a signed setup silently and propagates failures', { skip: !powershell && 'needs Windows Command Prompt' }, async (t) => {
   const { env, marker, builds } = await windowsSetupFixture(t)
   const readme = fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8')
-  const command = readme.split(/\r?\n/).find(line => line.startsWith('powershell ') && line.includes('https://togle.app/install.ps1'))
+  const stableUrl = 'https://togle.app/stable/install.ps1'
+  const command = readme.split(/\r?\n/).find(line => line.startsWith('powershell ') && line.includes(stableUrl))
   assert.ok(command, 'a Command Prompt install command in the user guide')
-  const fromCmd = (release, script) => run('cmd.exe', ['/d', '/s', '/c', command.replace('https://togle.app/install.ps1', new URL(script, release.url).href)],
+  const fromCmd = (release, script) => run('cmd.exe', ['/d', '/s', '/c', command.replace(stableUrl, new URL(script, release.url).href)],
     { ...env, TOGLE_INSTALL_RELEASES: release.url }, { windowsVerbatimArguments: true })
 
   const good = await serve(key, builds)

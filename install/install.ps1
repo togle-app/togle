@@ -1,14 +1,17 @@
 # Installs Togle on Windows for the person who runs it, with no administrator rights: a release from GitHub,
 # checked against Togle's release key before it runs. The key is written in when the script is published; it is the
 # same key every update is checked with.
-#   From cmd.exe: powershell -NoProfile -Command "iex (irm https://togle.app/install.ps1 -ErrorAction Stop)"
-#   irm https://togle.app/install.ps1 | iex
+#   Stable: powershell -NoProfile -Command "iex (irm https://togle.app/stable/install.ps1 -ErrorAction Stop)"
+#   Beta:   powershell -NoProfile -Command "iex (irm https://togle.app/beta/install.ps1 -ErrorAction Stop)"
 & {
   $ErrorActionPreference = 'Stop'
   $ProgressPreference = 'SilentlyContinue'
   $Modulus = '__TOGLE_RELEASE_MODULUS__'
   $Exponent = '__TOGLE_RELEASE_EXPONENT__'
-  $Releases = if ($env:TOGLE_INSTALL_RELEASES) { $env:TOGLE_INSTALL_RELEASES } else { 'https://api.github.com/repos/togle-app/togle/releases/__TOGLE_RELEASE_TARGET__' }
+  $ChannelUrl = 'https://api.github.com/repos/togle-app/togle/releases/__TOGLE_RELEASE_TARGET__'
+  $Stable = $ChannelUrl.EndsWith('/releases/latest')
+  $Releases = if ($env:TOGLE_INSTALL_RELEASES) { $env:TOGLE_INSTALL_RELEASES } else { $ChannelUrl }
+  $NoStable = 'No stable Windows release of Togle Free is available yet. For the Windows beta, use https://togle.app/beta/install.ps1.'
   $Headers = @{ 'User-Agent' = 'togle-install' }
 
   if ($Modulus.StartsWith('__')) { throw 'This install script has no release key written in. Get install.ps1 from a published Togle Free release.' }
@@ -26,7 +29,52 @@
     } finally { $rsa.Dispose() }
   }
 
-  $release = Invoke-RestMethod -Uri $Releases -Headers $Headers
+  # A fresh curl invocation resumes the bytes already written after a broken connection.
+  function Save-ReleaseAsset($Asset, [string]$Destination, [switch]$Resume) {
+    $curl = Join-Path ([Environment]::SystemDirectory) 'curl.exe'
+    $expected = [long]$Asset.size
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
+      try {
+        if ([IO.File]::Exists($curl)) {
+          $range = @()
+          if ($Resume -and [IO.File]::Exists($Destination)) { $range = @('--continue-at', '-') }
+          & $curl -q --fail --location --silent --connect-timeout 20 --speed-limit 1 --speed-time 90 --user-agent togle-install @range --output $Destination -- $Asset.browser_download_url
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            # A server can decline a range. Request the whole file on the next attempt.
+            if ($range.Count -and $code -in 22, 33, 36) { [IO.File]::Delete($Destination) }
+            throw "curl exited with code $code."
+          }
+        } else {
+          Invoke-WebRequest -Uri $Asset.browser_download_url -OutFile $Destination -Headers $Headers -UseBasicParsing
+        }
+        $length = (Get-Item -LiteralPath $Destination).Length
+        if ($length -eq 0 -or ($expected -gt 0 -and $length -ne $expected)) {
+          if ($expected -gt 0 -and $length -gt $expected) { [IO.File]::Delete($Destination) }
+          throw "Received $length bytes. Expected $expected."
+        }
+        return
+      } catch {
+        if ($attempt -eq 4) { throw "Could not download $($Asset.name) after four attempts. $($_.Exception.Message)" }
+        Write-Host "Retrying the download of $($Asset.name)..."
+        Start-Sleep -Seconds $attempt
+      }
+    }
+  }
+
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try { $release = Invoke-RestMethod -Uri $Releases -Headers $Headers; break }
+    catch {
+      if ($_.Exception.Response.StatusCode -eq 404) {
+        if ($Stable) { throw $NoStable }
+        throw
+      }
+      if ($attempt -eq 3) { throw }
+      Start-Sleep -Seconds $attempt
+    }
+  }
+  if ($release.draft) { throw 'This release is a draft.' }
+  if ($Stable -and $release.prerelease) { throw $NoStable }
   $installer = $release.assets | Where-Object { $_.name -match 'Setup.*\.exe$' } | Select-Object -First 1
   if (-not $installer) { throw "Togle $($release.tag_name) has no Windows installer." }
   $signature = $release.assets | Where-Object { $_.name -eq ($installer.name + '.sig') } | Select-Object -First 1
@@ -38,8 +86,8 @@
   $signatureFile = $file + '.sig'
   try {
     Write-Host "Downloading Togle $($release.tag_name)..."
-    Invoke-WebRequest -Uri $installer.browser_download_url -OutFile $file -Headers $Headers -UseBasicParsing
-    Invoke-WebRequest -Uri $signature.browser_download_url -OutFile $signatureFile -Headers $Headers -UseBasicParsing
+    Save-ReleaseAsset $installer $file -Resume
+    Save-ReleaseAsset $signature $signatureFile
     if (-not (Test-Signature ([IO.File]::ReadAllBytes($file)) ([IO.File]::ReadAllBytes($signatureFile)))) {
       throw 'The download does not match Togle''s release key, so nothing was installed.'
     }

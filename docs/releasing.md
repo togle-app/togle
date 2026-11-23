@@ -51,17 +51,18 @@ The tag matters because GitHub's latest-release endpoint skips prereleases. For 
 
    Each file gets a `.sig` beside it. Upload both to the GitHub release. A build without its `.sig` is never installed:
    not by the install commands, not by Togle's own updates.
-3. Generate the install scripts using the public key. After the signed Windows installer and its matching `.sig` are available in the latest public GitHub release, copy the generated `install.ps1` to `web/togle.app/install.ps1` in the website repo (`LukaDut7/togle`). Commit that public script and deploy the main site. Stage `install.sh` there when its Mac and Linux downloads are ready. The website build includes the staged scripts and enables their install commands.
+3. Publish the Windows commands in the website repo under `web/togle.app/`. Generate `beta/install.ps1` with the exact tag of the signed Windows beta. Generate `stable/install.ps1` without a tag so it follows the latest stable GitHub release. The stable command reports when there is no stable release. Both use the same public release key. Stage `install.sh` when the Mac and Linux downloads are ready.
 
    ```sh
-   node scripts/release-key.mjs installers togle-release.pub <folder>
+   node scripts/release-key.mjs installers togle-release.pub <beta-folder> <beta-tag>
+   node scripts/release-key.mjs installers togle-release.pub <stable-folder>
    ```
 
 4. Check one download with `node scripts/release-key.mjs verify togle-release.pub "Togle Setup 0.2.0.exe"`. These commands verify the deployed Windows download and signature in Command Prompt without installing.
 
    ```cmd
    set "TOGLE_INSTALL_DRY_RUN=1"
-   powershell -NoProfile -Command "iex (irm https://togle.app/install.ps1 -ErrorAction Stop)"
+   powershell -NoProfile -Command "iex (irm https://togle.app/stable/install.ps1 -ErrorAction Stop)"
    set "TOGLE_INSTALL_DRY_RUN="
    ```
 
@@ -69,7 +70,7 @@ The tag matters because GitHub's latest-release endpoint skips prereleases. For 
 
 | | Install | Update |
 | --- | --- | --- |
-| Windows Command Prompt | `powershell -NoProfile -Command "iex (irm https://togle.app/install.ps1 -ErrorAction Stop)"` checks the installer with PowerShell's own RSA, then runs it quietly for the current user. | Togle checks the installer, then runs it quietly once it has quit; it opens again |
+| Windows Command Prompt | `powershell -NoProfile -Command "iex (irm https://togle.app/stable/install.ps1 -ErrorAction Stop)"` checks the installer with PowerShell's own RSA, then runs it quietly for the current user. | Togle checks the installer, then runs it quietly once it has quit; it opens again |
 | Mac | `curl -fsSL https://togle.app/install.sh \| sh`: checks the zip with openssl, then puts Togle in `~/Applications` | Togle checks the zip and shows it, to open |
 | Linux | the same command: checks the AppImage, then puts it in `~/.local/share/togle` with a menu entry | Togle checks the AppImage, replaces itself and starts again |
 
