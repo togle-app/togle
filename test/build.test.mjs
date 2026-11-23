@@ -14,10 +14,15 @@ test('installers carry no audio driver and need no administrator', () => {
   const targets = config.mac.target.map(target => typeof target === 'string' ? target : target.target)
   assert.deepEqual(targets, ['dmg', 'zip'], 'macOS ships the app alone: Togle Studio brings its own driver')
   assert.equal(config.pkg, undefined)
-  assert.equal(config.nsis.include, undefined, 'the Windows installer runs no driver setup')
   assert.equal(config.nsis.perMachine, false, 'Windows installs for the user, without administrator rights')
+  const windowsHook = fs.readFileSync(new URL('../' + config.nsis.include, import.meta.url), 'utf8')
+  const pathHelper = fs.readFileSync(new URL('../build/windows-cli-path.ps1', import.meta.url), 'utf8')
+  const windowsSetup = windowsHook + '\n' + pathHelper
+  assert.doesNotMatch(windowsSetup, /\.(?:inf|sys|cat)\b|\b(?:pnputil|devcon|drvinst|HKLM|HKEY_LOCAL_MACHINE|runas)\b|RequestExecutionLevel\s+(?:admin|highest)/i)
   const resources = JSON.stringify(config.extraResources)
-  for (const driver of ['audio-prepared', 'audio-source', 'vb-cable', 'voice-isolation']) assert.ok(!resources.includes(driver), driver)
+  for (const driver of ['audio-prepared', 'audio-source', 'vb-cable', 'voice-isolation']) {
+    assert.ok(!resources.includes(driver) && !windowsSetup.toLowerCase().includes(driver), driver)
+  }
   assert.ok(!config.deb.depends.includes('pulseaudio-utils'), 'capture goes through Chromium, not pactl')
 })
 
