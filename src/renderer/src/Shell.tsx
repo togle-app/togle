@@ -20,6 +20,7 @@ import { keepAnswer, TASKS_LISTED } from './kept'
 import { Tasks } from './Tasks'
 import { Todo } from './Todo'
 import { useCall } from './useCall'
+import { MeetingConsent } from './TellOthers'
 
 const api = window.togle
 
@@ -63,10 +64,11 @@ export function Shell() {
   const [view, setView] = useState<View>(placeBefore)
   // In Meetings: the call being written down, or the list (with a call opened from elsewhere).
   const [live, setLive] = useState(false)
+  const [consent, setConsent] = useState<{ meeting?: string | false }>()
   const [meetingFocus, setMeetingFocus] = useState<{ id: string; seq: number }>()
-  // Meetings pressed in the sidebar: back to the list, from a call's page.
-  const [meetingsHome, setMeetingsHome] = useState(0)
+  const [meetingId, setMeetingId] = useState<string>()
   const [taskFocus, setTaskFocus] = useState<{ key: string; seq: number }>({ key: '', seq: 0 })
+  const [resultKeys, setResultKeys] = useState<string[]>([])
   const [settingsAt, setSettingsAt] = useState<SettingsPart>()
   const [confirmClose, setConfirmClose] = useState<CloseWarning | null>(null)
   const [waiting, setWaiting] = useState(0)
@@ -129,16 +131,23 @@ export function Shell() {
     }
   }, [take])
   const openMeeting = useCallback((id: string) => { setLive(false); setMeetingFocus((previous) => ({ id, seq: (previous?.seq ?? 0) + 1 })); setView('meetings') }, [])
-  const openTask = useCallback((key: string) => { setTaskFocus((previous) => ({ key, seq: previous.seq + 1 })); setView('agents') }, [])
+  const openTask = useCallback((key: string) => { setResultKeys([]); setTaskFocus((previous) => ({ key, seq: previous.seq + 1 })); setView('agents') }, [])
   const showLive = useCallback(() => { setLive(true); setView('meetings') }, [])
+  const showMeetingList = useCallback(() => { setMeetingId(undefined); setLive(false); setView('meetings') }, [])
 
   // Writing a call down needs speech recognition on this computer; without it, Settings shows how to get it.
-  const writeDown = useCallback(async () => {
+  const writeDown = useCallback((meeting?: string | false) => {
     if (call.listening) { showLive(); return }
+    if (call.starting) return
     if (stt.state === 'missing') { openSettings('speech'); return }
+    setConsent({ meeting })
+  }, [call.listening, call.starting, stt.state, showLive])
+  const startNotes = () => {
+    if (!consent) return
+    setConsent(undefined)
     showLive()
-    await call.start()
-  }, [call, stt.state, showLive])
+    void call.start(consent.meeting)
+  }
 
   useEffect(() => {
     void api.getSettings().then(take)
@@ -152,7 +161,16 @@ export function Shell() {
       api.onMicrophone(setMicrophone),
       api.onConfirmClose((warning) => setConfirmClose(warning)),
       // From a notice or the tray: Togle opens on the task that waits.
-      api.onShowTask((key) => { setTaskFocus((previous) => ({ key, seq: previous.seq + 1 })); setView('agents') }),
+      api.onShowTask(openTask),
+      api.onNoticeOpen(destination => {
+        if ('page' in destination) {
+          if (destination.page === 'meetings') showMeetingList()
+          if (destination.page === 'devices') { setSettingsAt('devices'); setView('settings') }
+          return
+        }
+        openTask(destination.keys[0] ?? '')
+        if (destination.keys.length > 1) setResultKeys(destination.keys)
+      }),
       // Hidden or minimized, nothing on the page moves (design.css).
       api.onAway((away) => document.documentElement.toggleAttribute('data-away', away))
     ]
@@ -167,9 +185,13 @@ export function Shell() {
     if (action === 'dictation-settings') openSettings('dictation')
     // "Change keys" on the one-time offer when a key was pressed in a code editor.
     if (action === 'keys-settings') openSettings('keys')
-    // The call shortcut, and a call app's notice ("Write it down"): a call starts, or the one going on stops.
-    if (action === 'toggle-listening' || action === 'start-call-unseen') void (call.listening ? call.stop() : writeDown())
-  }), [call, writeDown])
+    // The call shortcut and a call reminder both open the permission prompt.
+    if (action === 'toggle-listening') void (call.listening ? call.stop() : writeDown())
+    if (action === 'start-call-unseen' && !call.listening) void writeDown(false)
+    if (action === 'stop-call' && call.listening) void call.stop()
+  }), [call.listening, call.stop, writeDown])
+  useEffect(() => api.onDetectedMeeting(writeDown), [writeDown])
+  useEffect(() => api.onMeetingDeparted(id => setConsent(current => current?.meeting === id ? undefined : current)), [])
   // A call that ends opens on its notes, and on who spoke when names wait.
   const wasListening = useRef(false)
   useEffect(() => {
@@ -217,6 +239,8 @@ export function Shell() {
         <WindowButtons closeTitle="Close to tray · Togle keeps running" closeLabel="Close to tray" onClose={() => api.close()} />
       </header>
 
+      {consent && <MeetingConsent onClose={() => setConsent(undefined)} onStart={startNotes} />}
+
       {/* Once, after the first sign-in with ChatGPT: what Togle uses counts toward the plan, and where to see it. */}
       {settings && auth.signedIn && !settings.chatgpt.planIntroSeen && (
         <div className="monitor-picker-backdrop plan-intro-backdrop">
@@ -235,7 +259,7 @@ export function Shell() {
       <div className={`shell-layout${iconsOnly ? ' nav-icons' : ''}`} style={{ '--nav-width': `${nav}px` } as CSSProperties}>
         <nav className="shell-nav workspace-nav" aria-label="Places">
           {PLACES.map((place) => (
-            <button key={place.id} aria-label={place.label} title={place.title} aria-current={view === place.id ? 'page' : undefined} onClick={() => { if (place.id === 'meetings') { setLive(call.listening); setMeetingsHome((count) => count + 1) } setView(place.id) }}>
+            <button key={place.id} aria-label={place.label} title={place.title} aria-current={view === place.id ? 'page' : undefined} onClick={() => { if (place.id === 'meetings' && view === 'meetings') { showMeetingList(); return } if (place.id === 'meetings') setLive(call.listening); setView(place.id) }}>
               <Icon name={place.icon as 'todo'} size={16} /><span>{place.label}</span>
               {place.id === 'todo' && waiting > 0 && <span className="nav-count" aria-label={`${waiting} waiting for you`}>{waiting}</span>}
               {place.id === 'meetings' && call.listening && <span className="dot live" role="img" aria-label="A call is being written down" />}
@@ -266,17 +290,26 @@ export function Shell() {
               </div>
             </div>
           )}
+          {settings?.keysOffer?.key && (
+            <div className="notice ask" role="status" aria-label="Shortcut conflict">
+              <span>{settings.keysOffer.key} is also a shortcut in {settings.keysOffer.editor}.</span>
+              <div className="row">
+                <button className="ghost" onClick={() => void changeSettings({ keysOffer: { key: '', editor: '' } })}>Keep {settings.keysOffer.key}</button>
+                <button className="primary" onClick={() => { void changeSettings({ keysOffer: { key: '', editor: '' } }); openSettings('keys') }}>Change shortcut</button>
+              </div>
+            </div>
+          )}
           {call.warning && (
             <div className="notice" role="alert"><span>{call.warning}</span><button className="dismiss" aria-label="Dismiss" title="Dismiss" onClick={call.clearWarning}><Icon name="close" size={12} /></button></div>
           )}
           {/* Once, on a Togle that has never run: the first minute, then the to-do list. */}
           {view === 'todo' && settings && !settings.firstMinute?.done && <FirstMinute settings={settings} stt={stt} onDone={() => void changeSettings({ firstMinute: { done: true } })} />}
           {view === 'todo' && settings?.firstMinute?.done && <Todo onOpenTask={openTask} onOpenCall={openMeeting} />}
-          {view === 'agents' && <Tasks focus={taskFocus} />}
+          {view === 'agents' && <Tasks focus={taskFocus} resultKeys={resultKeys} closeResults={() => setResultKeys([])} />}
           {view === 'meetings' && settings && (live && call.listening
-            ? <LiveCall settings={settings} title={call.title} since={call.since} transcript={call.transcript} flags={call.flags} inputs={call.inputs} levels={call.levels} callKey={call.callKey}
-                onMark={() => void api.markCall().catch(() => undefined)} onStop={() => void call.stop()} onReconnect={() => void call.reconnect()} onFirstCallSeen={() => void changeSettings({ meetings: { ...settings.meetings, introSeen: true } })} />
-            : <div className="settings meetings-page"><MeetingsPage agents={[]} callKey={call.callKey} liveId={call.listening ? call.callKey : undefined} onOpenLive={showLive} onWriteDown={() => void writeDown()} focus={meetingFocus} home={meetingsHome} noise={call.noise && !call.listening ? { callId: call.callKey, finding: call.noise } : undefined} microphone={microphone} /></div>)}
+            ? <LiveCall title={call.title} since={call.since} transcript={call.transcript} flags={call.flags} inputs={call.inputs} levels={call.levels} speaking={call.speaking} onToggleMic={call.manualMic ? call.toggleMic : undefined} callKey={call.callKey}
+                onBack={showMeetingList} onMark={() => void api.markCall().catch(() => undefined)} onStop={() => void call.stop()} onReconnect={() => void call.reconnect()} />
+            : <div className="settings meetings-page"><MeetingsPage agents={[]} callKey={call.callKey} liveId={call.listening ? call.callKey : undefined} onOpenLive={showLive} onWriteDown={() => void writeDown()} focus={meetingFocus} openId={meetingId} setOpenId={setMeetingId} noise={call.noise && !call.listening ? { callId: call.callKey, finding: call.noise } : undefined} microphone={microphone} /></div>)}
           {view === 'settings' && settings && <SettingsPage settings={settings} stt={stt} at={settingsAt} onSave={changeSettings} />}
         </main>
       </div>

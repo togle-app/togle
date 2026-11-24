@@ -18,6 +18,21 @@ after(() => {
 })
 const fileOf = () => path.join(scratch(), 'to-do.md')
 const read = (file) => readFileSync(file, 'utf8')
+test('meeting decisions survive a restart and clearing the list preserves notes and newer items', async () => {
+  const file = fileOf()
+  writeFileSync(file, '# Personal list\r\nNotes I wrote myself\r\n')
+  const todos = new T.TodoFile(file)
+  const a = { callId: 'm1', text: 'Send the report.' }, b = { callId: 'm1', text: 'Book the review.' }
+  await Promise.all([todos.reviewOffer(a.callId, a.text, 'add'), todos.reviewOffer(a.callId, a.text, 'add'), todos.reviewOffer(b.callId, b.text, 'dismiss')])
+  assert.deepEqual((await todos.list()).map(t => t.text), ['Send the report'])
+  const snapshot = await todos.list()
+  await todos.add('New item')
+  await todos.clear(snapshot)
+  const restored = new T.TodoFile(file)
+  assert.deepEqual(await restored.pendingOffers([a, b, { ...a, callId: 'm2' }]), [{ ...a, callId: 'm2' }])
+  assert.deepEqual((await restored.list()).map(t => t.text), ['New item'])
+  assert.match(read(file), /Notes I wrote myself\r\n/)
+})
 const until = async (check, what, ms = 4000) => {
   const start = Date.now()
   while (Date.now() - start < ms) {

@@ -78,12 +78,11 @@ test('a partial finishing after its final transcript cannot replace it', async (
   assert.ok(!calls.some(([kind]) => kind === 'caption'))
 })
 
-/** The hearing handler with recognizers and a call that record what they were asked (`api`: the speech API picked for a side). */
-function ears({ parakeet = [], whisper = [], language = 'en', api, normalize, whisperReady, whisperChecks } = {}) {
+/** The hearing handler with this PC's two recognizers and a call that record what they were asked. */
+function ears({ parakeet = [], whisper = [], language = 'en', normalize, whisperReady, whisperChecks } = {}) {
   const calls = []
   const handler = hearing({
     normalize,
-    api,
     whisperReady,
     whisperChecks,
     parakeet: () =>
@@ -259,84 +258,33 @@ test('each finished utterance reports who heard it and whether the line was nois
   )
 })
 
-test("the API picked for the other side writes their lines; captions, pauses and my side stay on this PC", async () => {
+test('every side of a call is heard on this PC: nothing that was once given to hear a side in its place is ever asked', async () => {
+  // An earlier Togle could send a side's finished lines to a speech API. This PC hears every call now, so the sound of a call
+  // never leaves it: what hears each line is one of its own two recognizers, whatever else is handed in.
   const asked = []
-  const openai = { id: 'openai', transcribe: async (_pcm, opts) => (asked.push(opts), 'How much is it per seat?') }
-  const { handler, calls } = ears({
-    parakeet: [
-      { text: 'How much is it', confidence: 0.9 },
-      { text: 'How much is it per seat?', confidence: 0.95 },
-      { text: 'Forty seats.', confidence: 0.95 }
-    ],
-    api: (speaker) => (speaker === 'them' ? openai : null)
-  })
-  await handler('them', second, 1000, 'seg-11', 'partial')
-  await handler('them', second, 1000, 'seg-11', 'pause')
-  await handler('them', second, 1000, 'seg-11', 'final')
-  await handler('me', second, 3000, 'seg-12', 'final')
-  assert.deepEqual(asked, [{ language: 'en', vocabulary: 'Nordlink, SAP' }], "only their finished line goes to it, with the call's language and the agent's words")
-  assert.deepEqual(
-    calls,
-    [
-      ['parakeet', true],
-      ['caption', 'How much is it'],
-      ['parakeet', true],
-      ['caption', 'How much is it per seat?'],
-      ['add', 'them', 'How much is it per seat?', 1000, 2000, 'seg-11'],
-      ['parakeet', false],
-      ['add', 'me', 'Forty seats.', 3000, 4000, 'seg-12']
-    ]
-  )
-})
-
-test("a line the API couldn't hear is heard on this PC, so it isn't lost", async () => {
-  const warn = console.warn
-  console.warn = () => {}
-  try {
-    const server = {
-      id: 'server',
-      transcribe: async () => {
-        throw new Error('nothing answers at localhost:8000')
-      }
-    }
-    const { handler, calls } = ears({ parakeet: [{ text: 'Does it work with SAP?', confidence: 0.95 }], api: () => server })
-    await handler('them', second, 1000, 'seg-13', 'final')
-    assert.deepEqual(calls, [
-      ['parakeet', false],
-      ['add', 'them', 'Does it work with SAP?', 1000, 2000, 'seg-13']
-    ])
-  } finally {
-    console.warn = warn
-  }
-})
-
-test('a line the API heard is reported as heard by it', async () => {
   const heard = []
+  const outside = { id: 'openai', transcribe: async (_pcm, opts) => (asked.push(opts), 'Heard somewhere else.') }
   const handler = hearing({
-    parakeet: () => ({ available: true, transcribe: async () => ({ text: 'Mhm.', confidence: 0.95 }) }),
+    parakeet: () => ({ available: true, transcribe: async () => ({ text: 'Does it work with SAP?', confidence: 0.95 }) }),
     whisper: { transcribe: async () => ({ text: '' }) },
-    api: (speaker) => (speaker === 'them' ? { id: 'server', transcribe: async () => 'Does it work with SAP?' } : null),
+    api: () => outside,
     language: () => 'en',
     vocabulary: async () => '',
-    call: { add: () => {} },
+    call: { add: (speaker, text) => heard.push([speaker, text]) },
     caption: () => {},
-    heard: (timing) => heard.push(timing)
+    heard: (timing) => heard.push(timing.by)
   })
   await handler('them', speech(0.0005), 1000, 'seg-14', 'final')
   await handler('me', speech(0.0005), 2000, 'seg-15', 'final')
-  assert.deepEqual(
-    heard.map(({ by }) => by),
-    ['server', 'parakeet']
-  )
+  assert.deepEqual(asked, [], 'nothing outside this PC was asked')
+  assert.deepEqual(heard, ['parakeet', ['them', 'Does it work with SAP?'], 'parakeet', ['me', 'Does it work with SAP?']])
 })
 
 test('speech requests run together, but finished lines from one side reach the call in order', async () => {
   const finish = []
-  const server = { id: 'server', transcribe: () => new Promise((resolve) => finish.push(resolve)) }
-  const { handler, calls } = ears({
-    api: (speaker) => (speaker === 'them' ? server : null),
-    parakeet: [{ text: 'Let me check.', confidence: 0.95 }]
-  })
+  // Their two lines are slow to hear, the second done first; mine, asked for last, is quick.
+  const slow = () => new Promise((resolve) => finish.push((text) => resolve({ text, confidence: 0.95 })))
+  const { handler, calls } = ears({ parakeet: [slow, slow, { text: 'Let me check.', confidence: 0.95 }] })
   const first = handler('them', second, 1000, 'ordered-1', 'final')
   const next = handler('them', second, 3000, 'ordered-2', 'final')
   await new Promise((resolve) => setImmediate(resolve))
@@ -358,16 +306,15 @@ test('a failed transcription does not let a later line overtake an earlier reque
   t.mock.method(console, 'warn', () => {})
   t.mock.method(console, 'error', () => {})
   const finish = []
-  const { handler, calls } = ears({
-    parakeet: null,
-    whisper: [() => Promise.reject(new Error('Whisper stopped'))],
-    api: () => ({ id: 'server', transcribe: () => new Promise((resolve, reject) => finish.push({ resolve, reject })) })
-  })
+  // Whisper hears all three (Parakeet is not there): the first is slow, the second fails, the third is done at once.
+  const slow = () => new Promise((resolve, reject) => finish.push({ resolve: (text) => resolve({ text }), reject }))
+  const { handler, calls } = ears({ parakeet: null, whisper: [slow, slow, slow] })
   const first = handler('them', second, 1000, 'failed-1', 'final')
   const failed = handler('them', second, 3000, 'failed-2', 'final')
   const last = handler('them', second, 5000, 'failed-3', 'final')
   await new Promise((resolve) => setImmediate(resolve))
-  finish[1].reject(new Error('The speech server is down'))
+  assert.equal(finish.length, 3, 'all three are being heard')
+  finish[1].reject(new Error('Whisper stopped'))
   finish[2].resolve('And what does it cost?')
   await new Promise((resolve) => setImmediate(resolve))
   assert.ok(!calls.some(([what]) => what === 'add'), 'the failure still waits for the earlier request')
@@ -378,10 +325,9 @@ test('a failed transcription does not let a later line overtake an earlier reque
 
 test('a later pause captions at once, while an earlier line is still being heard', async () => {
   let finish
-  const { handler, calls } = ears({
-    api: () => ({ id: 'server', transcribe: () => new Promise((resolve) => (finish = resolve)) }),
-    parakeet: [{ text: 'And what does it cost?', confidence: 0.95 }]
-  })
+  // The finished line is slow to hear; the pause after it is heard at once.
+  const slow = () => new Promise((resolve) => (finish = (text) => resolve({ text, confidence: 0.95 })))
+  const { handler, calls } = ears({ parakeet: [slow, { text: 'And what does it cost?', confidence: 0.95 }] })
   const first = handler('them', second, 1000, 'before-pause', 'final')
   const pause = handler('them', second, 3000, 'after-pause', 'pause')
   await new Promise((resolve) => setImmediate(resolve))

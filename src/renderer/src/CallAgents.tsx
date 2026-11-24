@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { stepsLine, type CallAgents as CallAgentList, type GiveResult, type RunnerKind, type RunnerStatus, type TaskView } from '@shared/runner'
+import { stepsLine, taskHandoffProblem, type CallAgents as CallAgentList, type GiveResult, type RunnerKind, type RunnerStatus, type TaskView } from '@shared/runner'
 import { AgentLead, AgentMark, agentOf } from './AgentMark'
 import { Icon } from './Icon'
 import { Markdown } from './Markdown'
@@ -230,7 +230,7 @@ function CallAnswer({ taskKey, asked, task, onDismiss }: { taskKey: string; aske
       </header>
       <p className="hint call-answer-question">You asked: {asked.question}</p>
       {said.text
-        ? <div className="task-agent"><Markdown text={said.text} /></div>
+        ? <div className="task-agent"><Markdown text={said.text} localFiles /></div>
         : <p className="hint">{!task ? 'That task is gone.' : finished ? 'It finished. Open it to read what it said.' : 'Working on it…'}</p>}
       {said.steps && <p className="hint">{said.steps}</p>}
       {task?.pending.map((request) => (
@@ -251,7 +251,7 @@ const connectWords = new Map<string, string>()
 const GIVE_GAP = 8, GIVE_EDGE = 12, GIVE_CEILING = 44
 
 /**
- * The list that gives a call to agents: the running tasks on this computer to tick (any number), and a new task, with what to do
+ * The list that gives a call to agents: the existing tasks on this computer to tick (any number), and a new task, with what to do
  * with the call. In `connect` mode it only picks the agents on the call, for Send to find. It opens under its button and over
  * the page, as a menu does: Escape or a click elsewhere closes it, and in a low window it moves up and scrolls in itself, so
  * that its buttons are never under the window's edge.
@@ -269,6 +269,7 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
   const { tasks, loaded } = useTasks()
   const [status, setStatus] = useState<RunnerStatus[]>([])
   const [picked, setPicked] = useState<string[]>(connected)
+  const [search, setSearch] = useState('')
   const [creating, setCreating] = useState(false)
   const [runner, setRunner] = useState<RunnerKind | undefined>()
   const [folder, setFolder] = useState('')
@@ -308,18 +309,22 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
   }, [])
   useEffect(() => { setRunner((current) => (current && status.some((item) => item.runner === current) ? current : status[0]?.runner)) }, [status])
   const pickedAgent = status.find((item) => item.runner === runner)
-  const now = Date.now()
-  // The tasks Togle runs, then the ones from the last day: the ones that can take the call first.
+  const problemFor = mode === 'give' ? taskHandoffProblem : whyNotSent
+  const searchable = mode === 'give' && tasks.length > MOST_ROWS
   const rows = useMemo(() => {
-    const recent = tasks.filter((task) => task.mine || now - task.updatedAt < RECENT_MS || connected.includes(task.key))
-    return recent.sort((a, b) => Number(!!whyNotSent(a)) - Number(!!whyNotSent(b)) || b.updatedAt - a.updatedAt).slice(0, MOST_ROWS)
-  }, [tasks, connected, now])
+    const query = searchable ? search.trim().toLowerCase() : ''
+    const candidates = tasks.filter(task => mode === 'connect'
+      ? task.mine || Date.now() - task.updatedAt < RECENT_MS || connected.includes(task.key)
+      : !query || [task.title, agentOf(task), task.folder].some(value => value.toLowerCase().includes(query)))
+    candidates.sort((a, b) => Number(!!problemFor(a)) - Number(!!problemFor(b)) || b.updatedAt - a.updatedAt)
+    return mode === 'connect' ? candidates.slice(0, MOST_ROWS) : candidates
+  }, [tasks, mode, connected, search, searchable, problemFor])
   // The folders tasks work in, the one a task was most recently in first: that is the one a new task starts in.
   const folders = useMemo(() => [...new Set([...tasks].sort((a, b) => b.updatedAt - a.updatedAt).map((task) => task.folder).filter(Boolean))].slice(0, 6), [tasks])
   useEffect(() => { if (!folder && folders[0]) setFolder(folders[0]) }, [folder, folders])
   const toggle = (key: string): void => setPicked((previous) => (previous.includes(key) ? previous.filter((item) => item !== key) : [...previous, key]))
   // A task that is gone is not offered, and not given the call: it is left out of what is ticked.
-  const present = loaded ? picked.filter((key) => tasks.some((task) => task.key === key)) : picked
+  const present = loaded ? picked.filter(key => tasks.some(task => task.key === key && (mode === 'connect' || !taskHandoffProblem(task)))) : picked
   const count = present.length + (creating ? 1 : 0)
   const newReady = !creating || (!!runner && !!folder && !!words.trim())
   const ready = mode === 'connect' ? newReady : count > 0 && newReady
@@ -346,7 +351,12 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
       const results = await api.giveCall({ call, tasks: present, prompt: words, connect: true, ...(creating && runner ? { start: { runner, folder } } : {}) })
       onGiven?.(results, resultLine(results, tasks).text)
       if (results.every((result) => result.ok)) { giveWords.delete(call); onClose() }
-      else setError(resultLine(results, tasks).text)
+      else {
+        const sent = results.filter(result => result.ok)
+        setPicked(present.filter(key => !sent.some(result => result.key === key)))
+        if (creating && sent.some(result => !present.includes(result.key))) setCreating(false)
+        setError(resultLine(results, tasks).text)
+      }
     } catch (failure) {
       setError(errorText(failure))
     } finally {
@@ -379,42 +389,45 @@ export function GivePanel({ call, mode, connected, onClose, onChanged, onGiven }
     window.addEventListener('resize', measure)
     document.addEventListener('scroll', measure, true)
     return () => { window.removeEventListener('resize', measure); document.removeEventListener('scroll', measure, true) }
-  }, [rows.length, creating, error, mode, status.length])
+  }, [rows.length, creating, error, mode, status.length, searchable])
+  const newTaskRow = (
+    <label className="give-row">
+      <input type="checkbox" checked={creating} disabled={!status.length} onChange={(event) => setCreating(event.target.checked)} />
+      <span className="grow">
+        <b>New task</b>
+        <small>{creating ? '' : status.length ? (mode === 'give' ? 'Starts an agent with the call' : 'Starts an agent for this call') : 'No agent found'}</small>
+        {creating && (
+          <span className="give-new">
+            <Menu className="pick-chip" ariaLabel="Agent" title="The agent that does it" label={pickedAgent ? <AgentMark runner={pickedAgent.runner} name={pickedAgent.name} /> : 'Pick an agent'}
+              items={status.map((item) => ({ label: <AgentMark runner={item.runner} name={item.name} />, checked: item.runner === runner, onSelect: () => setRunner(item.runner) }))} />
+            <Menu className="pick-chip" ariaLabel="Folder" title={folder || 'The folder it works in'} label={folder ? baseName(folder) : 'Pick a folder'}
+              items={[...options.map((path) => ({ label: baseName(path), detail: path, checked: path === folder, onSelect: () => setFolder(path) })), ...(options.length ? ['divider' as const] : []), { label: 'Choose…', onSelect: () => void choose() }]} />
+          </span>
+        )}
+      </span>
+    </label>
+  )
   return (
     <form ref={panel} tabIndex={-1} className="give-panel" aria-label={mode === 'give' ? 'Give this call to' : 'Add agents to this call'} onSubmit={(event) => void submit(event)}
       style={{ maxHeight: fit.height, transform: fit.up ? `translateY(${-fit.up}px)` : undefined }}>
       <strong>{mode === 'give' ? 'Give this call to' : 'Agents on this call'}</strong>
+      {searchable && <input type="search" aria-label="Find an existing task" placeholder="Find a task, agent or project" value={search} onChange={event => setSearch(event.target.value)} />}
       <div className="give-rows" role="group">
+        {searchable && newTaskRow}
         {rows.map((task) => {
-          const reason = whyNotSent(task)
+          const reason = problemFor(task)
           return (
             <label key={task.key} className="give-row" aria-disabled={!!reason}>
               <input type="checkbox" checked={picked.includes(task.key)} disabled={!!reason && !picked.includes(task.key)} onChange={() => toggle(task.key)} />
               <span className="grow">
                 <b className="cut">{task.title}</b>
-                <small className="cut"><AgentLead runner={task.runner} name={agentOf(task)} rest={reason || whereRest(task)} /></small>
+                <small className="cut" title={task.folder}><AgentLead runner={task.runner} name={agentOf(task)} rest={reason || whereRest(task)} /></small>
               </span>
             </label>
           )
         })}
-        {!rows.length && <p className="hint">{mode === 'give' ? 'No agent task on this computer yet. Start one from Agents, or give the call to a new task.' : 'No agent task on this computer yet. Start one from Agents, and it shows here.'}</p>}
-        {(
-          <label className="give-row">
-            <input type="checkbox" checked={creating} disabled={!status.length} onChange={(event) => setCreating(event.target.checked)} />
-            <span className="grow">
-              <b>A new task</b>
-              <small>{creating ? '' : status.length ? (mode === 'give' ? 'Starts an agent with the call' : 'Starts an agent for this call') : 'No agent found'}</small>
-              {creating && (
-                <span className="give-new">
-                  <Menu className="pick-chip" ariaLabel="Agent" title="The agent that does it" label={pickedAgent ? <AgentMark runner={pickedAgent.runner} name={pickedAgent.name} /> : 'Pick an agent'}
-                    items={status.map((item) => ({ label: <AgentMark runner={item.runner} name={item.name} />, checked: item.runner === runner, onSelect: () => setRunner(item.runner) }))} />
-                  <Menu className="pick-chip" ariaLabel="Folder" title={folder || 'The folder it works in'} label={folder ? baseName(folder) : 'Pick a folder'}
-                    items={[...options.map((path) => ({ label: baseName(path), detail: path, checked: path === folder, onSelect: () => setFolder(path) })), ...(options.length ? ['divider' as const] : []), { label: 'Choose…', onSelect: () => void choose() }]} />
-                </span>
-              )}
-            </span>
-          </label>
-        )}
+        {!rows.length && <p className="hint">{!loaded ? 'Looking for tasks…' : tasks.length && searchable ? 'No matching tasks.' : mode === 'give' ? 'No existing tasks yet. You can start a new task below.' : 'No agent task on this computer yet. Start one from Agents, and it shows here.'}</p>}
+        {!searchable && newTaskRow}
       </div>
       {/* The words and the button that gives the call share one box, as the design draws it. */}
       {mode === 'give' && (

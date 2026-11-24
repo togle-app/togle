@@ -10,3 +10,5 @@
 export const APP_ID = 'io.togle.app'
 
 export const appUserModelId = (packaged: boolean): string => (packaged ? APP_ID : `${APP_ID}.source`)
+
+export const TOAST_ACTIVATOR = '{38D38FEF-DC19-4C9F-A11D-30B1AC603BD9}'

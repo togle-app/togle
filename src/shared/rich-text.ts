@@ -26,6 +26,38 @@ export function richDocument(text: string): RichDocument {
   }
 }
 
+/** Some terminal transcripts saved pasted documents as one line. The divider and paired outer pipes
+ * still identify complete table rows. Only repair the display when those boundaries agree. */
+export function userMessageMarkdown(text: string): string {
+  if (text.length > MAX_MARKDOWN_CHARS || /[\r\n`]/.test(text) || !/\|[ \t]+\|[ \t]*:?-{3,}/.test(text)) return text
+  const cells = text.split(/(?<!\\)\|/)
+  const isDivider = (cell: string): boolean => /^:?-{3,}:?$/.test(cell.trim())
+  const rowGap = (cell: string): boolean => /^[ \t]+$/.test(cell)
+  const divider = cells.findIndex(isDivider)
+  if (divider < 1 || !rowGap(cells[divider - 1])) return text
+  let end = divider
+  while (end < cells.length && isDivider(cells[end])) end++
+  const columns = end - divider
+  // The prefix, header cells and gap must account for every pipe before the divider.
+  if (columns < 2 || divider !== columns + 2) return text
+  const row = (start: number): string => '|' + cells.slice(start, start + columns).join('|') + '|'
+  const rows = [row(1), row(divider)]
+  let next = end
+  while (next + columns + 1 < cells.length && rowGap(cells[next])) {
+    rows.push(row(next + 1))
+    next += columns + 1
+  }
+  if (rows.length < 3 || next !== cells.length - 1) return text
+
+  // A heading marker still identifies a section start. Its title and following sentence can no longer
+  // be separated reliably, so keep their words together as prose.
+  const intro = cells[0].trim(), rest = cells[next].trim()
+  if (!/^#{1,6}[ \t]+/.test(rest)) return [intro, rows.join('\n'), rest].filter(Boolean).join('\n\n')
+  const lead = intro.replace(/(?:^|[ \t]+)#[ \t]+(?=\p{Lu})/u, '\n\n').trim()
+  const sections = rest.replace(/(?:^|(?<=[.!?])[ \t]+)#{1,6}[ \t]+(?=\S)/g, '\n\n').trim()
+  return [lead, rows.join('\n'), sections].filter(Boolean).join('\n\n')
+}
+
 /** A readable folded preview, using the same grammar as the expanded reply. */
 export function richPreview(text: string): string {
   const walk = (tokens: Token[], depth = 0): string => depth > 40 ? tokens.map(token => token.raw).join('') : tokens.map(token => {

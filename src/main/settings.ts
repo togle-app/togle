@@ -39,9 +39,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // Other people's voices are remembered only when the person turns it on (Settings → Speakers).
   assist: { auto: false, rememberVoices: false, autoNotes: true },
   activeAgentId: '',
-  // Calls are heard by this PC (no sign-in includes transcription), which detects the spoken language, unless a speech
-  // API is picked for them.
-  transcription: { language: 'auto', me: 'local', them: 'local', openaiModel: 'gpt-transcribe', serverUrl: '', serverModel: '' },
+  // Calls are heard by this PC and nowhere else (the sound of a call never leaves it), and it detects the spoken language.
+  transcription: { language: 'auto' },
   window: { alwaysOnTop: true, opacity: 1, keepOutOfCaptures: false },
   microphone: { ...MICROPHONE_DEFAULTS },
   // Voice typing is heard by this PC too; its account ('' : the AI's own, automatically) cleans up the words.
@@ -53,13 +52,13 @@ export const DEFAULT_SETTINGS: Settings = {
   // A task that waits is told in a notice, and one that finished too, until turned off in Settings → Coding agents. A task
   // opens as its agent's own screen (Terminal) until Settings says Chat. The AI set in Accounts sorts the tasks by subject,
   // until that is turned off there too.
-  tasks: { notices: true, finished: true, view: 'session', sortBySubject: true },
+  tasks: { notices: true, finished: true, notificationPreviews: true, view: 'session', sortBySubject: true },
   // Said once, before the first call is written down.
   meetings: { introSeen: false, confirmNames: true, notice: true, apps: {} },
   // The first minute: once, on a Togle that has never run.
   firstMinute: { done: false },
   // The offer to change keys a code editor uses too: once, the first time it applies.
-  keysOffer: { shown: false },
+  keysOffer: { shown: false, key: '', editor: '' },
   // Agents added in Settings (Codex, Claude Code and Hermes are found by themselves).
   addedAgents: [],
   // Agents found by themselves that the person removed from Togle's lists.
@@ -78,8 +77,6 @@ let lastWrite: Promise<void> = Promise.resolve()
  */
 const KEPT_FOR_OTHERS = ['cleanMic'] as const
 let kept: Record<string, unknown> = {}
-// Saved by a Togle from before the speech model was a choice, when this PC heard every call.
-let fromBeforeSpeechChoice = false
 // Saved when voice typing's account was two settings (a shared speech account, and voice typing's own over it): what
 // they were, for the agents' own choices to carry over too (migrateVoicePreferences). Undefined once carried over.
 let oldVoiceAccounts: OldVoiceAccounts | undefined
@@ -127,16 +124,12 @@ function merge(base: Settings, patch: SettingsPatch): Settings {
   if (tasks.view !== 'session' && tasks.view !== 'cards') next.tasks = { ...tasks, view: 'session' }
   // Only agents Togle knows by name can be taken off its lists, each once.
   next.hiddenAgents = hiddenAgentsFrom(next.hiddenAgents)
-  // What hears a side of a call is this PC or a speech API. Neither sign-in includes transcription (the ChatGPT plan's
-  // isn't part of Sign in with ChatGPT; Claude's speech isn't open to other apps), so a side saved or sent as either,
-  // or as anything else, is heard by this PC.
-  const t = next.transcription as Settings['transcription']
-  const heard = (source: string): Settings['transcription']['me'] => source === 'openai' || source === 'server' ? source : 'local'
-  if (heard(t.me) !== t.me || heard(t.them) !== t.them) next.transcription = { ...t, me: heard(t.me), them: heard(t.them) }
-  // No account hears calls: the speech account they shared with voice typing is voice typing's own now (loadSettings).
-  if ('accountId' in (next.transcription as object)) {
-    const { accountId: _moved, ...rest } = next.transcription as Settings['transcription'] & { accountId?: unknown }
-    next.transcription = rest
+  // This PC hears every call, so the sound of a call never leaves it. An earlier Togle could send a side to a speech API
+  // (it kept `me`, `them`, a model and a server's address here) and shared an account with voice typing (loadSettings
+  // gives that one to voice typing): whatever a settings file or a change says, only the language is a setting here.
+  const heard = next.transcription as Record<string, unknown>
+  if (Object.keys(heard).length !== 1 || typeof heard.language !== 'string') {
+    next.transcription = { language: typeof heard.language === 'string' ? heard.language : DEFAULT_SETTINGS.transcription.language }
   }
   return next as unknown as Settings
 }
@@ -168,7 +161,6 @@ export async function loadSettings(): Promise<Settings> {
     current.dictation = { ...current.dictation, accountId: mergedVoiceAccount(voice, speechAccount) }
   }
   if (current.dictation.speech === 'local') current.dictation = { ...current.dictation, speech: 'auto' }
-  fromBeforeSpeechChoice = Object.keys(stored).length > 0 && stored.transcription?.me === undefined && stored.transcription?.them === undefined
   // Lanes merge one by one, so a lane added in a newer version keeps its default; settings from before
   // lanes existed (one model for everything) start from the lane defaults.
   current.chatgpt = { ...current.chatgpt, lanes: { ...DEFAULT_SETTINGS.chatgpt.lanes, ...stored.chatgpt?.lanes } }
@@ -196,11 +188,6 @@ export function getSettings(): Settings {
 export function voiceAccountsMigrated(): Promise<Settings> {
   oldVoiceAccounts = undefined
   return updateSettings({})
-}
-
-/** Whether the settings loaded were saved before the speech model was a choice: this PC heard every call then. */
-export function savedBeforeSpeechChoice(): boolean {
-  return fromBeforeSpeechChoice
 }
 
 /** Applies at once (the caller can act on getSettings() right away) and saves in the background. */

@@ -30,6 +30,11 @@ test('the to-dos that are mine are found, and the ones for others or for nobody 
   assert.deepEqual(myTodoItems(notes, ['dana']).length, 3, 'any case')
 })
 
+test('verbose saved microphone owners and grouped timestamp ranges produce usable personal to-dos', () => {
+  const notes = '## To do\n- You (speaker labeled “Luka?”, identity tentative): Review the tickets. [1:57–2:54, 4:26]\n- **You (speaker labelled "Luka?", name tentative):** Check the deployment. [1:02:04 — 1:02:10]\n- Dana: Her task. [1:10]'
+  assert.deepEqual(myTodoItems(notes, []), ['Review the tickets.', 'Check the deployment.'])
+})
+
 test('only items under a to-do heading count, and the next heading ends them', () => {
   assert.deepEqual(myTodoItems('## Decided\n- You: nothing to do here.\n', []), [])
   assert.deepEqual(myTodoItems('## Action items\n- You: first\n\n## Notes\n- You: not this\n', []), ['first'])

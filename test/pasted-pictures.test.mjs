@@ -61,3 +61,17 @@ test('pictures pasted more than a week ago are deleted; newer ones and other fil
   assert.equal(fs.existsSync(fresh), true)
   assert.equal(fs.existsSync(other), true, 'only pictures Togle kept are deleted')
 })
+
+test('F8 previews read the original saved PNG only from this profile’s pictures folder', async () => {
+  const dir = path.join(home, 'pictures')
+  fs.mkdirSync(dir, { recursive: true })
+  const name = 'show-2026-11-20T13-46-03-372Z.png'
+  const kept = path.join(dir, name)
+  fs.writeFileSync(kept, PNG)
+  assert.equal(await T.readPastedPicture(kept), 'data:image/png;base64,' + Buffer.from(PNG).toString('base64'))
+  for (const file of [path.join(dir, 'private.png'), path.join(folder, name), path.join(home, 'other', 'pictures', name)]) {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, PNG)
+    assert.equal(await T.readPastedPicture(file), null)
+  }
+})

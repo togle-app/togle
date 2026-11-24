@@ -15,6 +15,7 @@ export default defineConfig({
           'parakeet-worker': resolve(__dirname, 'src/main/stt/parakeet-worker.ts'),
           'whisper-worker': resolve(__dirname, 'src/main/stt/whisper-worker.ts'),
           'voice-worker': resolve(__dirname, 'src/main/stt/voice-worker.ts'),
+          'meeting-worker': resolve(__dirname, 'src/main/meeting-worker.ts'),
           // The `togle` command in a terminal: plain Node, started by Electron with ELECTRON_RUN_AS_NODE.
           cli: resolve(__dirname, 'src/main/cli/entry.ts')
         }

@@ -16,9 +16,11 @@ import path from 'node:path'
 import { TASK_WORDS, type AgentCommand, type AgentModel, type PendingRequest, type SignInChoice, type TaskInfo, type TaskOffers } from '@shared/runner'
 import { type Id, JsonRpcPeer, RpcError, list, rec, text } from './jsonrpc'
 import { TaskBase } from './task-base'
+import { reportedCost, SessionCosts } from './usage'
 import type { Backend, Detected, ResumeOptions, StartOptions, TaskHandle } from './types'
 
 export interface AcpOptions {
+  costFile?: string
   /** The agent's id in task keys ("hermes", "acp-gemini"). */
   runner: string
   /** Its name, as the person reads it. */
@@ -390,6 +392,7 @@ class AcpServer {
     readonly name: string,
     command: string[],
     env: NodeJS.ProcessEnv | undefined,
+    private readonly costs: SessionCosts,
     private readonly onClosed: () => void
   ) {
     const [program, ...args] = command
@@ -438,6 +441,11 @@ class AcpServer {
     const id = text(params.sessionId)
     const update = rec(params.update)
     const task = this.tasks.get(id)
+    if (id && update.sessionUpdate === 'usage_update') {
+      const cost = reportedCost(update.cost)
+      if (cost) void this.costs.record(id, cost, task?.replaying).catch(() => undefined)
+      return
+    }
     if (task) task.update(update)
     // A new session's commands can be told before the answer that names the session has been read: kept for it.
     else if (id && text(update.sessionUpdate) === 'available_commands_update') {
@@ -461,6 +469,7 @@ const LIST_RETRY_MS = 60_000
 const LIST_PAGES = 3
 
 export class AcpBackend implements Backend {
+  private readonly costs: SessionCosts
   readonly runner: string
   readonly name: string
   private server: Promise<AcpServer> | null = null
@@ -468,9 +477,12 @@ export class AcpBackend implements Backend {
   private listFailedAt = 0
 
   constructor(private readonly options: AcpOptions) {
+    this.costs = new SessionCosts(options.costFile)
     this.runner = options.runner
     this.name = options.name
   }
+
+  usage(sessionId?: string) { return this.costs.total('agent-sessions', sessionId) }
 
   async detect(): Promise<Detected> {
     const command = await this.options.command().catch(() => null)
@@ -490,7 +502,7 @@ export class AcpBackend implements Backend {
   private async launch(): Promise<AcpServer> {
     const command = await this.options.command()
     if (!command?.length) throw new Error(`${this.name} is not installed on this computer.`)
-    const server = new AcpServer(this.runner, this.name, command, this.options.env, () => {
+    const server = new AcpServer(this.runner, this.name, command, this.options.env, this.costs, () => {
       this.server = null
     })
     await server.initialize(this.options.version ?? '0.0.0')

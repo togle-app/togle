@@ -39,9 +39,8 @@ async function open(T, agent, scenario, width = 1024, height = 850, surface) {
   settings.transcription.language = 'en'
   settings.activeAgentId = agent.id
   settings.transcription.me = settings.transcription.them = 'local'
-  // Voices are remembered only when turned on; the first-call notice is said once, in its own scenario.
+  // Voices are remembered only when turned on.
   settings.assist.rememberVoices = scenario === 'ready'
-  settings.meetings.introSeen = scenario !== 'first-call'
   // The first minute is gone through once; only its own scenarios have not.
   settings.firstMinute = { done: !scenario.startsWith('first-minute') }
   const names = [...fs.readFileSync(path.join(project, 'src/shared/api.ts'), 'utf8').matchAll(/^  (\w+)\(/gm)].map(m => m[1])
@@ -102,6 +101,11 @@ async function open(T, agent, scenario, width = 1024, height = 850, surface) {
 }
 
 const LIVE = "document.querySelector('section[aria-label=\"Call being written down\"]')"
+const confirmNotes = ui => ui.click('.meeting-consent button', 'Everyone agreed · Start notes')
+async function writeDown(ui) {
+  await ui.click('.meetings .meetings-top button', 'Write down now')
+  await confirmNotes(ui)
+}
 const texts = (ui, selector) => ui.evaluate('[...document.querySelectorAll(' + JSON.stringify(selector) + ")].map(e=>e.textContent.trim().replace(/\\s+/g,' '))")
 // A choice of Settings (a microphone, a language, where tasks open): its button opens Togle's own list, and a choice in
 // the list is pressed by its words. The button is brought into view first: a list does not open from a button out of sight.
@@ -143,7 +147,7 @@ async function checkCall(T, agent) {
   // Agents can be connected before the call starts: the call has its key already.
   assert.deepEqual(await texts(ui, '.meetings .call-agents .lab'), ['Agents for the next call'])
   assert.deepEqual(await texts(ui, '.meetings .call-agents button'), ['Add'], 'no one is connected yet: nothing to send')
-  await ui.click('.meetings .meetings-top button', 'Write down now')
+  await writeDown(ui)
   await ui.wait('!!' + LIVE)
   assert.deepEqual(await ui.calls('setListening'), [[true]])
   const order = await ui.evaluate("window.togleUITest.calls().map(call=>call.name).filter(name=>['clearTranscript','prepareCallMicrophone','setListening'].includes(name))")
@@ -152,12 +156,15 @@ async function checkCall(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.titlebar').textContent.trim()"), 'Togle', "the title bar is the window's name, as the design draws it")
   assert.ok(await ui.evaluate("!!document.querySelector('.workspace-nav button[aria-label=\"Meetings\"] .dot.live')"))
   assert.deepEqual(await texts(ui, '.live-sources > span'), ['You', 'Call'])
+  await ui.click('.live-sources button', 'Pause my mic')
+  await ui.wait("document.querySelector('.live-sources > span').dataset.state === 'paused'")
+  assert.equal(await ui.evaluate("document.querySelectorAll('.live-sources > span')[1].dataset.state"), 'on')
+  await ui.click('.live-sources button', 'Include my mic')
+  await ui.wait("document.querySelector('.live-sources > span').dataset.state === 'on'")
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.live-head button')].map(b=>b.textContent.trim())"), ['Mark', 'Stop'])
 
-  // The line to tell the others stays until it is ticked, and says where the sound goes.
-  assert.equal(await ui.evaluate("document.querySelector('.tell-others .tell-line')?.textContent"), "I'm writing this call down with Togle. The sound stays on my computer.")
-  await ui.click('.tell-others button', 'Copy the line')
-  assert.equal(await ui.evaluate("document.querySelectorAll('.tell-others').length"), 1, 'copying the line is not telling them')
+  await ui.wait("!document.querySelector('.tell-others')")
+  assert.deepEqual(await ui.calls('setToldOthers'), [[true]])
 
   // The words as people speak: who said them, a guessed name with a question mark, a voice not named yet.
   assert.equal(await ui.evaluate("document.querySelector('.live-lines').classList.contains('waiting')&&document.querySelector('.live-lines > .hint')?.textContent.startsWith('Listening')"), true, 'nothing said yet: one calm line in the middle of the card')
@@ -191,9 +198,6 @@ async function checkCall(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.live-line:last-child').classList.contains('marked')"), true)
   assert.equal(await ui.evaluate("[...document.querySelectorAll('.live-head button')][0].textContent.trim()"), 'Mark', 'Mark stays Mark')
   assert.equal((await ui.calls('markCall')).length, 1)
-  await ui.evaluate("document.querySelector('.tell-others .tell-tick input').click()")
-  await ui.wait("!document.querySelector('.tell-others')")
-  assert.deepEqual(await ui.calls('setToldOthers'), [[true]])
 
   // A caption while someone speaks (after the mark, so the mark stays where it was); the finished line replaces it, and
   // a late caption for it is not shown again.
@@ -303,7 +307,7 @@ async function checkCall(T, agent) {
   await ui.wait("document.querySelectorAll('.give-row').length>=2")
   const addButton = "document.querySelector('.give-panel .primary')"
   assert.equal(await ui.evaluate(addButton + ".textContent"), 'Done', 'adding a running task is what it was')
-  const newRow = "[...document.querySelectorAll('.give-row')].find(r=>r.textContent.includes('A new task'))"
+  const newRow = "[...document.querySelectorAll('.give-row')].find(r=>r.textContent.includes('New task'))"
   await ui.evaluate(newRow + ".querySelector('input').click()")
   await ui.wait("!!document.querySelector('.give-new')")
   assert.deepEqual(await texts(ui, '.give-new button'), ['Claude Code', 'website'], 'the agent and the folder, as the task box has them')
@@ -383,11 +387,15 @@ async function checkCall(T, agent) {
   assert.deepEqual(ui.errors, [])
   ui.window.destroy()
 
-  // The call app's notice ("Write it down") starts a call without the window, and the same message ends it.
+  // A fallback call notice opens confirmation and the call can then be ended from the strip.
   const unseen = await open(T, agent, 'ready', 640)
   await unseen.emit('onHotkey', 'start-call-unseen')
+  await confirmNotes(unseen)
   await unseen.wait('!!' + LIVE)
   await unseen.emit('onHotkey', 'start-call-unseen')
+  await unseen.wait(LIVE)
+  assert.deepEqual(await unseen.calls('setListening'), [[true]], 'repeated Start leaves the meeting running')
+  await unseen.emit('onHotkey', 'stop-call')
   await unseen.wait('!' + LIVE)
   assert.deepEqual(await unseen.calls('setListening'), [[true], [false]])
   assert.deepEqual(unseen.errors, [])
@@ -396,29 +404,149 @@ async function checkCall(T, agent) {
 }
 
 /** The first call says two things plainly, once. */
-async function checkFirstCall(T, agent) {
-  const ui = await open(T, agent, 'first-call', 640)
+async function checkDesktopMeetings(T, agent) {
+  const ui = await open(T, agent, 'ready')
+  const id = 'a'.repeat(32)
+  const event = (mic, ended, revision) => ui.evaluate('window.togleUITest.emit("onMeetingCapture",' + JSON.stringify({ id, app: 'teams', mic, ended, revision }) + ')')
+  await ui.evaluate('window.togleUITest.emit("onDetectedMeeting",' + JSON.stringify(id) + ')')
+  await ui.wait("!!document.querySelector('.meeting-consent')")
+  assert.deepEqual(await ui.calls('setListening'), [], 'detection asks before opening audio')
+  await ui.emit('onMeetingDeparted', id)
+  await ui.wait("!document.querySelector('.meeting-consent')")
+  assert.deepEqual(await ui.calls('setListening'), [])
+  await ui.emit('onDetectedMeeting', id)
+  await confirmNotes(ui)
+  await ui.wait("document.querySelector('.live-sources')?.textContent.includes('Muted in Teams')")
+  assert.deepEqual(await ui.calls('setListening'), [[true]])
+  await event('open', false, 2)
+  await ui.wait("document.querySelector('.live-sources .live-meter')?.dataset.state === 'on'")
+  await event('unknown', false, 3)
+  await ui.wait("document.querySelector('.live-sources')?.textContent.includes('call controls unavailable')")
+  assert.equal(await ui.evaluate("document.querySelectorAll('.live-meter')[1].dataset.state"), 'on')
+  await event('unknown', true, 4)
+  await ui.wait("!!document.querySelector('.meeting-detail .call-detail-tabs')")
+  assert.deepEqual(await ui.calls('setListening'), [[true], [false]])
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
+async function checkMeetingConsent(T, agent) {
+  const ui = await open(T, agent, 'ready', 420)
   await ui.click('.workspace-nav button', 'Meetings')
   await ui.click('.meetings .meetings-top button', 'Write down now')
-  await ui.wait("!!document.querySelector('.first-call')")
-  const said = await ui.evaluate("document.querySelector('.first-call').textContent")
-  assert.match(said, /rules for writing down a call differ by place/)
-  assert.match(said, /The words go to your AI plan, which writes the notes/)
-  assert.match(said, /the sound stays on this computer\./)
-  await ui.capture('first-call')
-  await ui.click('.first-call button', 'Got it')
-  await ui.wait("!document.querySelector('.first-call')")
-  assert.equal(await ui.evaluate('window.togleUITest.settings().meetings.introSeen'), true)
+  await ui.wait("!!document.querySelector('.meeting-consent')")
+  const message = await ui.evaluate("document.querySelector('.meeting-consent').textContent")
+  assert.match(message, /The audio stays on my computer/)
+  assert.match(message, /The transcript may go to my connected AI service/)
+  assert.deepEqual(await ui.calls('prepareCallMicrophone'), [])
+  await ui.fitsWidth()
+  await ui.capture('meeting-consent')
+  await ui.click('.meeting-consent button', 'Cancel')
+  assert.deepEqual(await ui.calls('setListening'), [])
+  await writeDown(ui)
+  await ui.wait('!!' + LIVE)
   await ui.click('.live-head button', 'Stop')
   await ui.wait("!!document.querySelector('.meeting-detail')")
   await ui.click('.workspace-nav button', 'Meetings')
   await ui.click('.meetings .meetings-top button', 'Write down now')
-  await ui.wait('!!' + LIVE)
-  assert.equal(await ui.evaluate("!!document.querySelector('.first-call')"), false, 'said once')
-  assert.equal(await ui.evaluate("!!document.querySelector('.tell-others')"), true, 'the line to tell the others comes with every call')
-  await ui.click('.live-head button', 'Stop')
+  await ui.wait("!!document.querySelector('.meeting-consent')")
+  assert.deepEqual(await ui.calls('setListening'), [[true], [false]], 'agreement is requested for every call')
   assert.deepEqual(ui.errors, [])
   ui.window.destroy()
+}
+
+async function checkMeetingReview(T, agent) {
+  const ui = await open(T, agent, 'meeting-review', 1440, 850)
+  const openReview = () => ui.click('.meeting-row', 'Open call: Testing Strategy and Environment Cleanup')
+  const selectedTab = "document.querySelector('.meeting-detail [role=tab][aria-selected=true]')?.textContent"
+  await ui.click('.workspace-nav button', 'Meetings')
+  await openReview()
+  await ui.wait("!!document.querySelector('.meeting-people .confirm-person')")
+  assert.deepEqual(await texts(ui, '.notes-section button.md-time'), ['4:48', '5:10–6:03', '1:57–2:54', '4:26', '3:34–4:13', '4:46'])
+  const actions = await texts(ui, '.notes-section[data-kind=todo] li')
+  assert.equal(actions.length, 2)
+  for (const action of actions) {
+    assert.match(action, /^You/)
+    assert.doesNotMatch(action, /speaker labeled|identity tentative|\[|\]/)
+  }
+  assert.ok(await ui.evaluate("(()=>{const grid=document.querySelector('.notes-sections'),cards=grid.children,a=cards[0].getBoundingClientRect(),b=cards[1].getBoundingClientRect();return a.top===b.top&&Math.abs(b.right-grid.getBoundingClientRect().right)<1})()"))
+  await ui.capture('meeting-review-notes')
+  await ui.click('.confirm-person', 'Confirm your name as Luka')
+  await ui.wait("[...document.querySelectorAll('.meeting-people .person-chip.ok')].some(e=>e.textContent==='Luka (you)')")
+  assert.deepEqual(await ui.calls('renameCallSpeaker'), [['history-' + agent.id, 'me', 'Luka']])
+
+  for (const [time, line] of [['5:10–6:03', 103], ['4:26', 88], ['4:48', 96]]) {
+    await ui.click('.notes-section .md-time', time)
+    await ui.wait(selectedTab + "==='Transcript'")
+    await ui.wait("document.activeElement.matches('.call-turn.cited')")
+    assert.equal(await ui.evaluate("document.querySelector('.call-turn.cited p').textContent"), 'Review item ' + line)
+    await ui.click('.meeting-detail [role=tab]', 'Notes')
+  }
+  await ui.click('.meeting-people .person-chip', 'Luka (you)')
+  await ui.fill('.meeting-people input', 'Luca')
+  await ui.click('.meeting-people button', 'Save')
+  await ui.wait("[...document.querySelectorAll('.meeting-people .person-chip.ok')].some(e=>e.textContent==='Luca (you)')")
+  await ui.click('.meeting-back', 'Back to meetings')
+  await ui.wait("document.activeElement.matches('.meeting-row')")
+  await ui.fill('.history-search', 'Review item 103')
+  await ui.wait("!!document.querySelector('[aria-label=\"Search results\"] .meeting-row')")
+  await openReview()
+  await ui.wait(selectedTab + "==='Transcript'")
+  assert.deepEqual(await texts(ui, '.call-turn:nth-child(-n+2) .who'), ['Luca', 'Dennis'])
+  assert.deepEqual(await texts(ui, '.confirm-person'), [])
+  await ui.click('.meeting-detail [role=tab]', 'Notes')
+  ui.window.setSize(420, 800)
+  await ui.paint()
+  await ui.fitsWidth()
+  await ui.capture('meeting-review-narrow')
+  await ui.click('.meeting-back', 'Back to meetings')
+  assert.equal(await ui.evaluate("document.querySelector('.history-search').value"), 'Review item 103')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+  console.log('Meeting review: own name confirmation and correction, timestamp ranges and groups, focused transcript passages, and return to filtered meetings passed.')
+}
+
+async function checkMeetingAccountAndRemoval(T, agent) {
+  const ui = await open(T, agent, 'meeting-account', 980, 760)
+  const title = 'Angell <> Luka Monthly 1:1'
+  await ui.click('.workspace-nav button', 'Meetings')
+  await ui.click('.meeting-row', 'Open call: ' + title)
+  await ui.wait("document.querySelector('.notes-recovery')?.textContent.includes('Update notes with ChatGPT')")
+  assert.deepEqual(await texts(ui, '.meeting-people .person-chip.ok'), ['Luka (you)', 'Angell'])
+  assert.ok(await ui.evaluate("document.querySelector('.notes-text').textContent.includes('Previous notes')"))
+  assert.deepEqual(await ui.calls('generateCallNotes'), [])
+  await ui.capture('meeting-notes-account-recovery')
+  await ui.click('.notes-recovery button', 'Update notes with ChatGPT')
+  await ui.wait("!document.querySelector('.notes-recovery') && document.querySelector('.notes-text')?.textContent.includes('report is due Tuesday')")
+  assert.deepEqual(await ui.calls('generateCallNotes'), [['history-' + agent.id, 'detailed', 'account-error', 'chatgpt-default']])
+
+  await ui.click('.meeting-remove', 'Remove ' + title)
+  await ui.wait("document.activeElement?.textContent==='Keep meeting'")
+  await ui.click('.call-confirm button', 'Keep meeting')
+  assert.deepEqual(await ui.calls('deleteCallSession'), [])
+  await ui.click('.meeting-back', 'Back to meetings')
+  await ui.click('.meeting-remove', 'Remove Spare meeting')
+  await ui.click('.call-confirm button', 'Remove meeting')
+  await ui.wait("document.querySelectorAll('.meeting-row').length===2")
+  await ui.fill('.history-search', 'Monthly')
+  await ui.wait("document.querySelector('[aria-label=\"Search results\"] .meeting-remove')?.textContent==='Remove'")
+  await ui.click('.meeting-remove', 'Remove ' + title)
+  assert.ok(await ui.evaluate("document.querySelector('.call-confirm').textContent.includes('Angell <> Luka Monthly 1:1')"))
+  await ui.click('.call-confirm button', 'Remove meeting')
+  await ui.wait("document.querySelector('[aria-label=\"Search results\"]')?.textContent.includes('Nothing said')")
+  await ui.fill('.history-search', '')
+  await ui.wait("document.querySelectorAll('.meeting-row').length===1")
+  await ui.click('.meeting-row', 'Open call: Project planning')
+  ui.window.setSize(420, 760)
+  await ui.paint()
+  await ui.fitsWidth()
+  await ui.click('.meeting-remove', 'Remove Project planning')
+  await ui.click('.call-confirm button', 'Remove meeting')
+  await ui.wait("document.querySelector('.history-empty')?.textContent.includes('No calls yet')")
+  assert.deepEqual(await ui.calls('deleteCallSession'), [['spare'], ['history-' + agent.id], ['other']])
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+  console.log('Notes account recovery with both confirmed speakers and removal from a meeting, the list and search results passed.')
 }
 
 /** After a call: who spoke, and the Meetings screen with search, a call's page and giving it to an agent. */
@@ -509,8 +637,8 @@ async function checkMeetings(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.give-panel').getAttribute('aria-label')"), 'Give this call to')
   const rowOf = title => "[...document.querySelectorAll('.give-row')].find(r=>r.textContent.includes(" + JSON.stringify(title) + "))"
   assert.equal(await ui.evaluate(rowOf('Rebuild the pricing page') + ".querySelector('small').textContent"), 'Claude Code · website · idle', 'a task that is idle can take the call')
-  assert.equal(await ui.evaluate(rowOf('Write the release notes') + ".querySelector('small').textContent"), 'Hermes · It is working', 'one that works cannot: Hermes takes words when its turn has ended')
-  assert.equal(await ui.evaluate(rowOf('Write the release notes') + ".querySelector('input').disabled"), true)
+  assert.equal(await ui.evaluate(rowOf('Write the release notes') + ".querySelector('small').textContent"), 'Hermes · notes · working', 'a running conversation receives handoffs through its chat')
+  assert.equal(await ui.evaluate(rowOf('Write the release notes') + ".querySelector('input').disabled"), false)
   assert.equal(await ui.evaluate(rowOf('Check refunds') + ".querySelector('small').textContent"), 'Claude Code · Open it in Agents first', 'a task Togle does not run is not written to')
   assert.equal(await ui.evaluate("document.querySelector('.give-panel .primary').disabled"), true, 'nothing is ticked: nothing to give')
   assert.equal(await ui.evaluate("document.querySelector('.give-field .primary')===document.querySelector('.give-panel .primary')&&!!document.querySelector('.give-field .give-words')"), true, 'the words and the button that gives the call share one box, as the design draws it')
@@ -526,7 +654,7 @@ async function checkMeetings(T, agent) {
   await ui.click('.meeting-detail .call-record-actions button', 'Give to an agent')
   await ui.wait("document.querySelectorAll('.give-row').length===4")
   assert.equal(await ui.evaluate(rowOf('Rebuild the pricing page') + ".querySelector('input').checked"), true, 'on the call already: ticked')
-  await ui.evaluate("[...document.querySelectorAll('.give-row')].find(r=>r.textContent.includes('A new task')).querySelector('input').click()")
+  await ui.evaluate("[...document.querySelectorAll('.give-row')].find(r=>r.textContent.includes('New task')).querySelector('input').click()")
   await ui.wait("!!document.querySelector('.give-new')")
   assert.deepEqual(await texts(ui, '.give-new button'), ['Claude Code', 'website'], 'the agent and the folder, as the task box has them')
   assert.equal(await ui.evaluate("document.querySelector('.give-panel .primary').disabled"), true, 'a new task needs words')
@@ -565,6 +693,19 @@ async function checkMeetings(T, agent) {
   await ui.wait("!document.querySelector('.give-panel')")
   await new Promise(resolve => setTimeout(resolve, 300))
   assert.equal(await ui.evaluate("!!document.querySelector('.give-panel')"), false, 'its own button closes the list, and it stays closed')
+  // A saved conversation beyond the first ten can be found by its project, and a retry only goes to the recipient that failed.
+  await ui.evaluate("for(let i=0;i<12;i++) window.togleUITest.terminalTask({key:'codex:archive'+i,runner:'codex',title:'Earlier report '+i,folder:'C:/work/archive-'+i,mine:false,terminal:false,state:'idle',updatedAt:100+i},'')")
+  await ui.click('.meeting-detail .call-record-actions button', 'Give to an agent')
+  await ui.fill('.give-panel input[type=search]', 'archive-11')
+  await ui.wait("document.querySelectorAll('.give-row').length===2")
+  await ui.evaluate(rowOf('Earlier report 11') + ".querySelector('input').click()")
+  await ui.click('.give-field .primary', 'Give to 2')
+  await ui.wait("document.querySelector('.give-field .primary')?.textContent==='Give to 1'")
+  assert.deepEqual((await ui.calls('giveCall')).at(-1)[0].tasks, ['claude:s9', 'codex:archive11'])
+  await ui.evaluate("window.togleUITest.giveFails('claude:s9','')")
+  await ui.click('.give-field .primary', 'Give to 1')
+  await ui.wait("!document.querySelector('.give-panel')")
+  assert.deepEqual((await ui.calls('giveCall')).at(-1)[0].tasks, ['claude:s9'])
   await ui.click('.workspace-nav button', 'Meetings')
   // A right click on a call in the list: rename it, or delete it after asking.
   await ui.evaluate("[...document.querySelectorAll('.meeting-row')].find(row=>row.textContent.includes('Acme renewal')).dispatchEvent(new MouseEvent('contextmenu',{clientX:300,clientY:160,bubbles:true,cancelable:true}))")
@@ -574,8 +715,8 @@ async function checkMeetings(T, agent) {
   assert.ok((await ui.evaluate("document.querySelector('.meetings .notice.ask').textContent")).includes('This can’t be undone.'))
   // It is asked over the page, where the menu was: the page under it does not move, and the first button keeps the call.
   assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.meetings .notice.ask')).position"), 'fixed')
-  assert.equal(await ui.evaluate("document.activeElement?.textContent"), 'Keep call')
-  await ui.click('.meetings .notice.ask button', 'Keep call')
+  assert.equal(await ui.evaluate("document.activeElement?.textContent"), 'Keep meeting')
+  await ui.click('.meetings .notice.ask button', 'Keep meeting')
   // A real press elsewhere keeps the call too.
   await ui.evaluate("[...document.querySelectorAll('.meeting-row')].find(row=>row.textContent.includes('Acme renewal')).dispatchEvent(new MouseEvent('contextmenu',{clientX:300,clientY:160,bubbles:true,cancelable:true}))")
   await ui.wait("!!document.querySelector('.call-menu')")
@@ -588,18 +729,27 @@ async function checkMeetings(T, agent) {
   await ui.wait("!!document.querySelector('.confirm-names')")
   assert.equal(await ui.evaluate("[...document.querySelectorAll('.confirm-names button')].some(b=>b.textContent.startsWith('Skip'))"), false, 'it closes after the last answer, or by itself the next day')
 
-  // The notes, as the design has them: alone, then a line that your own items are offered on your list.
-  await ui.click('.workspace-nav button', 'Meetings')
+  // Leave speaker review even with unanswered names, then open a different saved call.
+  await ui.click('.meeting-back', 'Back to meetings')
   await ui.click('.meeting-row', 'Open call: Acme renewal')
   await ui.wait("!!document.querySelector('.meeting-notes .notes-text')")
   assert.equal(await ui.evaluate("!!document.querySelector('.notes-by')"), false, 'notes from before it was kept say nothing about what wrote them')
-  assert.equal(await ui.evaluate("document.querySelector('.notes-foot').textContent"), 'Your own items are offered on your to-do list.')
-  assert.equal(await ui.evaluate("!!document.querySelector('.meeting-notes button, .personal-call-notes, .meeting-notes-generate')"), false, 'no buttons and no notes of your own under them')
+  await ui.wait("document.querySelectorAll('.meeting-suggestions .todo-row').length===2")
+  await ui.click('.meeting-suggestions button', 'Add')
+  await ui.click('.meeting-suggestions button', 'Dismiss')
+  await ui.wait("!document.querySelector('.meeting-suggestions')")
+  assert.deepEqual((await ui.calls('reviewMeetingTodo')).map(args => args[2]), ['add', 'dismiss'])
 
   // While a call is written down, Meetings is the call, and its list waits behind it.
   await ui.click('.workspace-nav button', 'Meetings')
-  await ui.click('.meetings .meetings-top button', 'Write down now')
+  await writeDown(ui)
   await ui.wait('!!' + LIVE)
+  const listeningBeforeBack = await ui.calls('setListening')
+  await ui.click('.meeting-back', 'Back to meetings')
+  await ui.wait("!!document.querySelector('.meetings-top')")
+  await ui.click('.meetings-top button', 'Return to live meeting')
+  await ui.wait('!!' + LIVE)
+  assert.deepEqual(await ui.calls('setListening'), listeningBeforeBack)
   await ui.click('.workspace-nav button', 'Agents')
   await ui.click('.workspace-nav button', 'Meetings')
   await ui.wait('!!' + LIVE)
@@ -675,7 +825,7 @@ async function checkProblems(T, agent) {
   const audio = await open(T, agent, 'audio', 640)
   await installAudio(audio)
   await audio.click('.workspace-nav button', 'Meetings')
-  await audio.click('.meetings .meetings-top button', 'Write down now')
+  await writeDown(audio)
   await audio.wait("!!document.querySelector('.live-problem')")
   assert.ok((await audio.evaluate("document.querySelector('.live-problem').textContent")).includes("Togle can't hear your microphone. It still hears the call."))
   assert.deepEqual(await audio.evaluate("[...document.querySelectorAll('.live-sources > span')].map(s=>s.dataset.state)"), ['off', 'on'])
@@ -696,11 +846,11 @@ async function checkProblems(T, agent) {
   await installAudio(failed)
   await failed.evaluate('window.audioFixture.micAllowed=true')
   await failed.click('.workspace-nav button', 'Meetings')
-  await failed.click('.meetings .meetings-top button', 'Write down now')
+  await writeDown(failed)
   await failed.wait("[...document.querySelectorAll('.notice')].some(e=>e.textContent.includes('Call service could not start'))")
   assert.equal(await failed.evaluate(LIVE), null)
   assert.ok(await failed.evaluate("window.audioFixture.streams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))"))
-  await failed.click('.meetings .meetings-top button', 'Write down now')
+  await writeDown(failed)
   await failed.wait('!!' + LIVE)
   await failed.click('.live-head button', 'Stop')
   assert.deepEqual((await failed.calls('setListening')).map(args => args[0]), [true, false, true, false])
@@ -715,7 +865,7 @@ async function checkNoisyCall(T, agent) {
   for (const width of [640, 1024]) {
     const ui = await open(T, agent, 'noisy-call', width)
     await ui.click('.workspace-nav button', 'Meetings')
-    await ui.click('.meetings .meetings-top button', 'Write down now')
+    await writeDown(ui)
     await ui.wait('!!' + LIVE)
     assert.equal(await ui.evaluate("!!document.querySelector('.studio-mention')"), false, 'nothing about Togle Studio during a call')
     await ui.click('.live-head button', 'Stop')
@@ -744,13 +894,27 @@ async function checkNoisyCall(T, agent) {
 async function checkShow(T, agent) {
   const ui = await open(T, agent, 'show', 800, 600, 'show')
   await ui.wait("document.querySelector('.show-shot')?.complete===true")
-  assert.equal(await ui.evaluate("!!document.querySelector('.show-bar, .show button')"), false, 'no bar and no buttons: Enter puts it in, Esc leaves it')
+  const selected = "document.querySelector('.show-tools [aria-pressed=true]').textContent"
+  assert.equal(await ui.evaluate(selected), 'Crop')
+  assert.equal(await ui.evaluate("document.querySelector('#show-voice-hint').innerText.trim()"), 'Speak while you draw.')
   const pointer = (type, x, y) => ui.evaluate(`document.querySelector('.show').dispatchEvent(new PointerEvent(${JSON.stringify(type)},{clientX:${x},clientY:${y},button:0,pointerId:1,bubbles:true}))`)
+  await pointer('pointerdown', 50, 50)
+  await pointer('pointerup', 52, 52)
+  assert.equal(await ui.evaluate(selected), 'Crop', 'a click leaves Crop ready')
   await pointer('pointerdown', 100, 100)
   await pointer('pointermove', 300, 250)
   await pointer('pointerup', 300, 250)
   await ui.wait("!!document.querySelector('.show-part')")
   assert.deepEqual(await ui.evaluate("(()=>{const s=document.querySelector('.show-part').style;return [s.left,s.top,s.width,s.height]})()"), ['100px', '100px', '200px', '150px'])
+  assert.equal(await ui.evaluate(selected), 'Arrow')
+  await pointer('pointerdown', 120, 135)
+  await pointer('pointerup', 240, 135)
+  assert.equal(await ui.evaluate("document.querySelector('.show-ink path')?.getAttribute('stroke')"), '#e03131', 'the first annotation after cropping is a red arrow')
+  await ui.click('.show-tools button', 'Circle')
+  await pointer('pointerdown', 125, 110)
+  await pointer('pointerup', 155, 124)
+  assert.equal(await ui.evaluate("document.querySelector('.show-ink ellipse')?.getAttribute('rx')"), '15')
+  await ui.click('.show-tools button', 'Draw')
   // Drawn on while talking: a bent line stays as drawn, a loop round something is a box, a straight stroke an arrow.
   const stroke = async points => { await pointer('pointerdown', ...points[0]); for (const point of points.slice(1)) await pointer('pointermove', ...point); await pointer('pointerup', ...points.at(-1)) }
   await stroke([[150, 150], [200, 200], [250, 180]])
@@ -758,7 +922,7 @@ async function checkShow(T, agent) {
   await stroke([[160, 160], [240, 158], [242, 210], [162, 212], [158, 166]])
   assert.deepEqual(await ui.evaluate("(()=>{const r=document.querySelector('.show-ink rect');return r&&[r.getAttribute('x'),r.getAttribute('y'),r.getAttribute('width'),r.getAttribute('height')]})()"), ['158', '158', '84', '54'])
   await stroke([[120, 240], [160, 220], [200, 200]])
-  assert.equal(await ui.evaluate("document.querySelectorAll('.show-ink path').length"), 1, 'an arrow')
+  assert.equal(await ui.evaluate("document.querySelectorAll('.show-ink path').length"), 2, 'a freehand straight line also becomes an arrow')
   // A click on the part, then words typed there.
   await pointer('pointerdown', 210, 235)
   await pointer('pointerup', 210, 235)
@@ -767,11 +931,14 @@ async function checkShow(T, agent) {
   assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.show-part')).borderTopStyle"), 'dashed', 'the part in a dashed frame')
   await ui.capture('show')
   const scale = await ui.evaluate('1600/innerWidth')
-  await ui.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))")
+  await ui.evaluate("window.togleUITest.emit('onShowFinish');window.togleUITest.emit('onShowFinish')")
   await ui.wait("window.togleUITest.calls().some(call=>call.name==='showDone')")
+  assert.equal((await ui.calls('showDone')).length, 1)
   const [done] = (await ui.calls('showDone'))[0]
   assert.deepEqual(done.head, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'a PNG')
   assert.deepEqual([done.width, done.height], [Math.round(200 * scale), Math.round(150 * scale)], "the part chosen, at the screen's own size")
+  const saved = nativeImage.createFromBuffer(Buffer.from(done.png, 'base64'))
+  assert.deepEqual([...saved.crop({ x: Math.round(80 * scale), y: Math.round(35 * scale), width: 1, height: 1 }).toBitmap()], [49, 49, 224, 255], 'the saved PNG contains the same red arrow as the overlay')
   assert.deepEqual(ui.errors, [])
   ui.window.destroy()
 
@@ -892,7 +1059,7 @@ async function checkSettings(T, agent) {
   assert.equal(await ui.evaluate("!!document.querySelector('.menu-overlay')"), false, 'a press on the name of the row opens nothing')
   assert.equal(await ui.evaluate(shownChoice('Language')), 'English', 'and nothing was chosen by any of this')
   assert.equal(await ui.evaluate("!!document.querySelector('.settings .card-note, .settings .setting > .note')"), false, 'no notes under the rows: everything fits on one screen')
-  if (process.platform === 'win32') assert.deepEqual(await texts(ui, '#settings-meetings .setting > .name'), ['Zoom, Meet, Teams', 'Remembered voices'], 'the call apps the design names, together while Togle does the same in each')
+  if (process.platform === 'win32') assert.deepEqual(await texts(ui, '#settings-meetings .setting > .name'), ['Zoom, Meet, Teams, Other calls', 'Remembered voices'], 'the call apps the design names, together while Togle does the same in each')
   assert.equal(await ui.evaluate("document.querySelector('#settings-meetings .setting:last-of-type .choice')?.textContent"), 'None')
   assert.ok(await ui.evaluate("(()=>{const s=document.querySelector('.sets');return s.scrollHeight<=innerHeight})()"), 'the groups fit on one screen')
   await ui.capture('settings')
@@ -901,16 +1068,18 @@ async function checkSettings(T, agent) {
   const valueOf = (group, name) => "[...document.querySelectorAll('" + group + " .setting')].find(r=>r.querySelector('.name')?.textContent===" + JSON.stringify(name) + ").querySelector('.choice')"
   await ui.evaluate(valueOf('#settings-voice', 'Names and terms') + '.click()')
   await ui.wait("!!document.querySelector('#settings-voice .vocabulary-editor')")
+  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('#settings-voice .setting-detail:has(.vocabulary-editor)')).borderWidth"), '1px', 'Names and terms has a border on all four sides')
   await ui.click('#settings-voice button', 'Done')
   // Remembered voices: nobody until it is turned on.
   await ui.evaluate(valueOf('#settings-meetings', 'Remembered voices') + '.click()')
   await ui.wait("!!document.querySelector('.remembered-people [role=switch]')")
+  assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.remembered-people')).borderWidth"), '1px', 'Remembered voices has a border on all four sides')
   assert.equal(await ui.evaluate("document.querySelector('.remembered-people [role=switch]').checked"), false)
   await ui.evaluate("document.querySelector('.remembered-people [role=switch]').click()")
   await ui.wait('window.togleUITest.settings().assist.rememberVoices===true')
   if (process.platform === 'win32') {
-    await pickChoice(ui, 'When a call starts in Zoom, Meet, Teams', 'Always write down')
-    await ui.wait("window.togleUITest.settings().meetings.apps.zoom==='always'")
+    await pickChoice(ui, 'When a call starts in Zoom, Meet, Teams, Other calls', 'Never')
+    await ui.wait("window.togleUITest.settings().meetings.apps.zoom==='never'")
   }
 
   // The AI plan: one sign-in, or a key from another service instead.
@@ -982,7 +1151,7 @@ async function checkSettings(T, agent) {
 
   // Agents: Add another agent is a list to pick from (nobody types a command), and the agents added can be edited and removed.
   const agentNames = "[...document.querySelectorAll('#settings-agents .agent-label')].map(name=>name.textContent)"
-  const agentValue = name => "[...document.querySelectorAll('#settings-agents .setting')].find(row=>row.querySelector('.agent-label')?.textContent===" + JSON.stringify(name) + ").querySelector('.setting-value').textContent"
+  const agentControls = name => "[...document.querySelectorAll('#settings-agents .agent-row')].find(row=>row.querySelector('.agent-label')?.textContent===" + JSON.stringify(name) + ").querySelector('.control').innerText.replace(/\\s+/g,' ').trim()"
   await ui.evaluate("document.querySelector('#settings-agents').scrollIntoView({ block: 'center' })")
   assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add another agent'])
   await ui.click('#settings-agents button', 'Add another agent')
@@ -1027,7 +1196,7 @@ async function checkSettings(T, agent) {
   await ui.click('form.add-agent.pick button', 'Add Gemini CLI')
   await ui.wait("(" + agentNames + ").includes('Gemini CLI')")
   assert.deepEqual(await ui.calls('addCodingAgent'), [['Gemini CLI', 'gemini --acp']], 'a name and the command Togle knows for it')
-  assert.equal(await ui.evaluate(agentValue('Gemini CLI')), 'Added · conversation', 'a command for ACP opens as a conversation')
+  assert.match(await ui.evaluate(agentControls('Gemini CLI')), /^Edit\s*Remove$/)
   assert.deepEqual(await texts(ui, 'form.add-agent.pick .agent-choice b'), ['Aider', 'goose', 'OpenCode', 'Mistral Vibe'], 'the one added is not offered again')
   // The keys went back to the search when the agent left the list, and the search is empty again: typing narrows the list at once.
   assert.equal(await ui.evaluate("document.activeElement?.getAttribute('aria-label')"), 'Search agents', 'the keys are in the search again')
@@ -1036,12 +1205,12 @@ async function checkSettings(T, agent) {
   await ui.evaluate(submit)
   await ui.wait("(" + agentNames + ").includes('Aider')")
   assert.deepEqual((await ui.calls('addCodingAgent')).at(-1), ['Aider', 'aider'])
-  assert.equal(await ui.evaluate(agentValue('Aider')), 'Added · terminal', 'any other command opens as a terminal, and the row says so')
+  assert.match(await ui.evaluate(agentControls('Aider')), /^Edit\s*Remove$/)
   // One of the more agents: the command that fetches it through npx.
   await ui.click('form.add-agent.pick button', 'Add OpenCode')
   await ui.wait("(" + agentNames + ").includes('OpenCode')")
   assert.deepEqual((await ui.calls('addCodingAgent')).at(-1), ['OpenCode', 'npx -y opencode-ai@1.0.0 acp'])
-  assert.equal(await ui.evaluate(agentValue('OpenCode')), 'Added · conversation')
+  assert.match(await ui.evaluate(agentControls('OpenCode')), /^Edit\s*Remove$/)
   assert.deepEqual(await texts(ui, 'form.add-agent.pick .agent-choice b'), ['goose', 'Mistral Vibe'])
   await ui.click('form.add-agent.pick button', 'Close')
   await ui.wait("!document.querySelector('form.add-agent')")
@@ -1074,7 +1243,7 @@ async function checkSettings(T, agent) {
   await ui.click('form.add-agent button', 'Add')
   await ui.wait("(" + agentNames + ").includes('Aider') && !document.querySelector('form.add-agent')")
   assert.deepEqual((await ui.calls('addCodingAgent')).at(-1), ['Aider', 'aider --message {task}'])
-  assert.equal(await ui.evaluate(agentValue('Aider')), 'Added · terminal')
+  assert.match(await ui.evaluate(agentControls('Aider')), /^Edit\s*Remove$/)
   // Edit: its command, and only that. The name stays, Save waits for a change, and a command that would run it the other way is refused.
   await ui.click('#settings-agents button', 'Edit Aider')
   await ui.wait("!!document.querySelector('form.edit-agent')")
@@ -1215,8 +1384,11 @@ app.whenReady().then(async () => {
     const store = new T.AgentStore(async () => '')
     await store.load()
     const agent = store.list()[0]
+    await checkDesktopMeetings(T, agent)
+    await checkMeetingAccountAndRemoval(T, agent)
+    await checkMeetingReview(T, agent)
     await checkCall(T, agent)
-    await checkFirstCall(T, agent)
+    await checkMeetingConsent(T, agent)
     await checkMeetings(T, agent)
     await checkProblems(T, agent)
     await checkNoisyCall(T, agent)

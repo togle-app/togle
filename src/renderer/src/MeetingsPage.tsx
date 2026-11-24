@@ -6,6 +6,7 @@ import { keepAnswer, keptAnswer, useKeptState } from './kept'
 import { CallNotes } from './CallNotes'
 import { callLength, CallTranscript } from './CallTranscript'
 import { confirmOpen, ConfirmNames } from './ConfirmNames'
+import { BackToMeetings, MeetingPeople } from './MeetingControls'
 import { Menu } from './Menu'
 import { NoisyMicrophone, type NoiseFinding } from './StudioMention'
 import type { TogleMicrophoneStatus } from '@shared/microphone'
@@ -60,11 +61,27 @@ interface Props {
   /** After a call in a loud room: what the microphone picked up, for that call's page. */
   noise?: { callId: string; finding: NoiseFinding }
   microphone?: TogleMicrophoneStatus
-  /** Meetings was pressed in the sidebar: the list shows again. */
-  home?: number
+  openId?: string
+  setOpenId: (id: string | undefined) => void
 }
 
 type Point = { x: number; y: number }
+type MeetingRecord = Pick<CallSessionSummary, 'id' | 'title' | 'startedAt'>
+
+function RemoveMeetingButton({ call, onAsk }: { call: MeetingRecord; onAsk: (at: Point) => void }) {
+  return <button type="button" className="meeting-remove" aria-label={'Remove ' + meetingTitle(call)} onClick={event => {
+    const bounds = event.currentTarget.getBoundingClientRect()
+    onAsk({ x: bounds.left, y: bounds.bottom + 4 })
+  }}>Remove</button>
+}
+
+function RemoveMeetingConfirm({ call, at, busy, close, remove }: { call: MeetingRecord; at: Point; busy: boolean; close: () => void; remove: () => void }) {
+  const title = meetingTitle(call)
+  return <CallConfirm at={at} label={'Remove ' + title + '?'} onClose={close}>
+    <span>Remove “{title}”, its notes and its transcript from this computer? This can’t be undone.</span>
+    <div className="row"><button disabled={busy} onClick={close}>Keep meeting</button><button className="primary stop" disabled={busy} onClick={remove}>Remove meeting</button></div>
+  </CallConfirm>
+}
 // A call asked for from outside is opened once (see MeetingsPage).
 let focusTaken = 0
 
@@ -73,11 +90,10 @@ let focusTaken = 0
  * looks in what was said. A call opens to who spoke while names wait, then to its notes and its transcript, and can be
  * given to an agent or shared. A right click on a call renames or deletes it.
  */
-export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown, focus, noise, microphone, home }: Props) {
+export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown, focus, noise, microphone, openId, setOpenId }: Props) {
   // The calls read last show at once when Meetings is opened again (see kept.tsx), and are read again behind them.
   const [calls, setCalls] = useState<CallSessionSummary[] | null>(() => keptAnswer<CallSessionSummary[]>('meetings.calls') ?? null)
   // Which call is open, on which tab, and what is searched stay when the window shows another place and Meetings again.
-  const [openId, setOpenId] = useKeptState<string | undefined>('meetings.open', undefined)
   const [openTab, setOpenTab] = useKeptState<'notes' | 'transcript'>('meetings.tab', 'notes')
   // Rename picked from a call's menu in the list: its page opens with the name ready to change.
   const [renaming, setRenaming] = useState(false)
@@ -90,6 +106,14 @@ export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown,
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const open = openId
+  const list = useRef<HTMLDivElement>(null)
+  const returnFocus = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (open || !returnFocus.current || !list.current || (!hits && !calls)) return
+    const row = [...list.current.querySelectorAll<HTMLButtonElement>('[data-call-id]')].find(button => button.dataset.callId === returnFocus.current)
+    ;(row ?? list.current.querySelector('input'))?.focus()
+    returnFocus.current = undefined
+  }, [open, hits, calls])
   // The list, kept up to date while it shows. With a call open, other calls changing don't reload it: going back does.
   useEffect(() => {
     if (open) return
@@ -99,14 +123,6 @@ export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown,
     const stop = api.onCallSessions(() => load())
     return () => { current = false; stop() }
   }, [open])
-  // Meetings pressed in the rail while it shows takes the page back to its list; drawn again, it is where it was left.
-  const homeSeen = useRef(home)
-  useEffect(() => {
-    if (homeSeen.current === home) return
-    homeSeen.current = home
-    setOpenId(undefined)
-    setRenaming(false)
-  }, [home])
   // A call asked for from outside (the to-do list) opens once: the page drawn again later does not go back to it.
   useEffect(() => {
     if (!focus?.id || focus.seq === focusTaken) return
@@ -127,48 +143,56 @@ export function MeetingsPage({ agents, callKey, liveId, onOpenLive, onWriteDown,
   }, [query])
   const now = Date.now()
   const rows = useMemo(() => [...(calls ?? [])].sort((a, b) => Number(b.status === 'live') - Number(a.status === 'live') || b.startedAt - a.startedAt), [calls])
-  const remove = async (call: CallSessionSummary): Promise<void> => {
+  const byId = useMemo(() => new Map(calls?.map(call => [call.id, call])), [calls])
+  const results = hits?.filter(hit => !calls || byId.has(hit.id))
+  const remove = async (call: MeetingRecord): Promise<void> => {
     setBusy(true); setError('')
-    try { await api.deleteCallSession(call.id); setDeleting(null); setCalls(previous => previous?.filter(item => item.id !== call.id) ?? previous) } catch (failure) { setError(errorText(failure)) } finally { setBusy(false) }
+    try {
+      await api.deleteCallSession(call.id)
+      returnFocus.current = call.id
+      setDeleting(null)
+      setCalls(previous => previous?.filter(item => item.id !== call.id) ?? previous)
+      setHits(previous => previous?.filter(item => item.id !== call.id) ?? previous)
+    } catch (failure) { setError(errorText(failure)) } finally { setBusy(false) }
   }
-  if (open) return <MeetingDetail id={open} noise={noise?.callId === open ? noise.finding : undefined} microphone={microphone} agents={agents} tab={openTab} onTab={setOpenTab} renameAsked={renaming} onDeleted={() => { setOpenId(undefined); setRenaming(false) }} />
+  const removeButton = (call?: CallSessionSummary) => call && call.status !== 'live' && call.id !== liveId
+    ? <RemoveMeetingButton call={call} onAsk={at => setDeleting({ call, at })} /> : null
+  if (open) return <MeetingDetail key={open} id={open} noise={noise?.callId === open ? noise.finding : undefined} microphone={microphone} agents={agents} tab={openTab} onTab={setOpenTab} renameAsked={renaming} onBack={() => { returnFocus.current = open; setOpenId(undefined); setRenaming(false) }} />
   return (
-    <div className="meetings call-history">
+    <div ref={list} className="meetings call-history">
       <div className="meetings-top">
         <input className="history-search" aria-label="Search what was said" placeholder="Search what was said" value={query} onChange={event => setQuery(event.target.value)} />
-        <button className="primary" disabled={!!liveId} title={liveId ? 'A call is being written down' : 'Start writing down a call now'} onClick={onWriteDown}>Write down now</button>
+        {liveId ? <button className="primary" onClick={onOpenLive}>Return to live meeting</button>
+          : <button className="primary" title="Start writing down a call now" onClick={onWriteDown}>Write down now</button>}
       </div>
       {callKey && !liveId && <CallAgentsRow call={callKey} live={false} />}
-      {deleting && (
-        <CallConfirm at={deleting.at} label={`Delete ${meetingTitle(deleting.call)}?`} onClose={() => setDeleting(null)}>
-          <span>Delete “{meetingTitle(deleting.call)}”, its notes and its transcript, from this computer? This can’t be undone.</span>
-          <div className="row"><button disabled={busy} onClick={() => setDeleting(null)}>Keep call</button><button className="primary stop" disabled={busy} onClick={() => void remove(deleting.call)}>Delete call</button></div>
-        </CallConfirm>
-      )}
-      {hits ? (
+      {deleting && <RemoveMeetingConfirm call={deleting.call} at={deleting.at} busy={busy} close={() => setDeleting(null)} remove={() => void remove(deleting.call)} />}
+      {results ? (
         <div className="call-history-list" aria-label="Search results">
           {searching && <p className="hint" role="status">Searching…</p>}
-          {hits.map(hit => (
-            <button key={hit.id} className="past-call-row meeting-row" aria-label={`Open call: ${meetingTitle(hit)}`} title={meetingTitle(hit)} onClick={() => { setOpenId(hit.id); setRenaming(false); setOpenTab(hit.lines.length ? 'transcript' : 'notes') }}>
+          {results.map(hit => <div key={hit.id} className="meeting-card">
+            <button data-call-id={hit.id} className="past-call-row meeting-row" aria-label={`Open call: ${meetingTitle(hit)}`} title={meetingTitle(hit)} onClick={() => { setOpenId(hit.id); setRenaming(false); setOpenTab(hit.lines.length ? 'transcript' : 'notes') }}>
               <span className="meeting-dot done" aria-hidden="true" />
               <strong>{meetingTitle(hit)}</strong>
               <span>{whenText(hit.startedAt, now)}</span>
               {hit.lines.map(line => <span key={line.at} className="past-call-preview"><b>{line.who}:</b> {line.text}</span>)}
             </button>
-          ))}
-          {!hits.length && !searching && <p className="hint">Nothing said in your recent calls has these words.</p>}
+            {removeButton(byId.get(hit.id))}
+          </div>)}
+          {!results.length && !searching && <p className="hint">Nothing said in your recent calls has these words.</p>}
         </div>
       ) : calls === null ? <p className="hint" role="status">Loading calls…</p> : (
         <div className="call-history-list">
-          {rows.map(call => (
-            <button key={call.id} className={`past-call-row meeting-row ${call.status === 'live' ? 'live-record' : ''}`} aria-label={`Open call: ${meetingTitle(call)}`} title={meetingTitle(call)}
+          {rows.map(call => <div key={call.id} className="meeting-card">
+            <button data-call-id={call.id} className={`past-call-row meeting-row ${call.status === 'live' ? 'live-record' : ''}`} aria-label={`Open call: ${meetingTitle(call)}`} title={meetingTitle(call)}
               onClick={() => call.status === 'live' && call.id === liveId ? onOpenLive() : (setOpenId(call.id), setRenaming(false), setOpenTab('notes'))}
               onContextMenu={event => { if (call.status === 'live') return; event.preventDefault(); setMenu({ at: { x: event.clientX, y: event.clientY }, call }) }}>
               <span className={`meeting-dot ${meetingDot(call, now)}`} aria-hidden="true" />
               <strong>{meetingTitle(call)}</strong>
               <span>{whenText(call.startedAt, now)} · {meetingState(call, now)}</span>
             </button>
-          ))}
+            {removeButton(call)}
+          </div>)}
           {!rows.length && <div className="history-empty"><h3>No calls yet</h3><p>Write down a call and it shows here, with its notes and who spoke.</p></div>}
         </div>
       )}
@@ -217,6 +241,7 @@ function CallConfirm({ at, label, onClose, children }: { at: Point; label: strin
   useEffect(() => {
     const card = box.current
     if (!card) return
+    const opener = document.activeElement
     // Whole inside the window, also after the window is made smaller with the question open.
     const fit = (): void => {
       const { width, height } = card.getBoundingClientRect()
@@ -230,17 +255,22 @@ function CallConfirm({ at, label, onClose, children }: { at: Point; label: strin
     document.addEventListener('pointerdown', outside, true)
     document.addEventListener('keydown', key, true)
     window.addEventListener('resize', fit)
-    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', key, true); window.removeEventListener('resize', fit) }
+    return () => {
+      document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', key, true); window.removeEventListener('resize', fit)
+      if (opener instanceof HTMLElement && opener.isConnected && (card.contains(document.activeElement) || document.activeElement === document.body)) opener.focus()
+    }
   }, [at.x, at.y])
   return <div ref={box} className="notice ask call-confirm" role="alertdialog" aria-label={label} style={{ left: place.x, top: place.y }}>{children}</div>
 }
 
-function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDeleted }: { id: string; noise?: NoiseFinding; microphone?: TogleMicrophoneStatus; agents: Agent[]; tab: 'notes' | 'transcript'; onTab: (tab: 'notes' | 'transcript') => void; renameAsked?: boolean; onDeleted: () => void }) {
+function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onBack }: { id: string; noise?: NoiseFinding; microphone?: TogleMicrophoneStatus; agents: Agent[]; tab: 'notes' | 'transcript'; onTab: (tab: 'notes' | 'transcript') => void; renameAsked?: boolean; onBack: () => void }) {
   const [record, setRecord] = useState<CallSession | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState('')
+  const [seconds, setSeconds] = useState<number>()
+  const showTime = useCallback((at: number) => { setSeconds(at); onTab('transcript') }, [onTab])
   const [menu, setMenu] = useState<Point | null>(null)
   const [deleting, setDeleting] = useState<Point | null>(null)
   const [copied, setCopied] = useState(false)
@@ -250,16 +280,23 @@ function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDelet
   const [connected, setConnected] = useState<string[]>([])
   useEffect(() => { setGiving(false); setGiven('') }, [id])
   useEffect(() => { void api.callAgents(id).then(found => setConnected(found?.keys ?? []), () => undefined) }, [id, giving])
-  const selected = useRef(id)
-  selected.current = id
+  const reads = useRef(0)
+  const receive = useCallback((next: CallSession) => { ++reads.current; setRecord(next) }, [])
   // A call that is gone (deleted while another place showed, and this page drawn again on it) takes the page back to the list.
-  const gone = useRef(onDeleted)
-  gone.current = onDeleted
-  const load = useCallback(() => { void api.callSession(id).then(found => { if (selected.current === id) { setRecord(found); if (!found) { setError('This call is no longer available.'); gone.current() } } }).catch(failure => setError(errorText(failure))) }, [id])
+  const gone = useRef(onBack)
+  gone.current = onBack
+  const load = useCallback(() => {
+    const read = ++reads.current
+    void api.callSession(id).then(found => {
+      if (read !== reads.current) return
+      if (found) setRecord(found)
+      else gone.current()
+    }, failure => { if (read === reads.current) setError(errorText(failure)) })
+  }, [id])
   useEffect(() => {
     setRecord(null); setError(''); setEditing(false); load()
     const stop = api.onCallSessions(change => { if (!change?.id || change.id === id) load() })
-    return stop
+    return () => { ++reads.current; stop() }
   }, [id, load])
   // Rename picked from the list: once the call is here, its name is ready to change.
   const loadedTitle = record?.title
@@ -273,23 +310,30 @@ function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDelet
     if (!record) return
     const next = title.trim()
     setEditing(false)
-    if (next && next !== record.title) void run(async () => { setRecord(await api.renameCallSession(record.id, next)) })
+    if (next && next !== record.title) void run(async () => { receive(await api.renameCallSession(record.id, next)) })
   }
   const ended = !!record && record.status !== 'live'
+  const navigation = <div className="meeting-navigation"><BackToMeetings onClick={onBack} />
+    {record && ended && <RemoveMeetingButton call={record} onAsk={setDeleting} />}</div>
+  const removeDialog = record && deleting && <RemoveMeetingConfirm call={record} at={deleting} busy={busy} close={() => setDeleting(null)}
+    remove={() => void run(async () => { await api.deleteCallSession(record.id); onBack() })} />
   // While names wait, the call is at its second stage: who spoke, on its own. The last answer opens the notes.
   if (record && confirmOpen(record)) {
     return (
       <div className="meetings meeting-detail call-history">
-        <ConfirmNames key={`confirm-${record.id}`} record={record} onRecord={setRecord} />
+        {navigation}
+        {removeDialog}
+        <ConfirmNames key={`confirm-${record.id}`} record={record} onRecord={receive} />
         {error && <p className="error" role="status">{error}</p>}
       </div>
     )
   }
   return (
     <div className="meetings meeting-detail call-history">
-      {!record ? <p className="hint" role="status">{error || 'Loading call…'}</p> : <>
+      {!record ? <><BackToMeetings onClick={onBack} /><p className="hint" role="status">{error || 'Loading call…'}</p></> : <>
         {/* The call's name, its buttons and its tabs stay on top while the notes or the transcript scroll under them. */}
         <div className="call-detail-top">
+          {navigation}
           <div className="call-detail-head">
             {editing
               ? <input className="rename-title" aria-label="Call title" value={title} maxLength={140} autoFocus onChange={event => setTitle(event.target.value)} onBlur={rename}
@@ -303,13 +347,13 @@ function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDelet
                 { label: copied ? 'Copied' : 'Copy the notes', disabled: busy || !record.summary, keepOpen: false, onSelect: () => void navigator.clipboard.writeText(record.summary).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }, failure => setError(errorText(failure))) },
                 { label: 'Save as a file', disabled: busy, onSelect: () => void run(async () => { await api.exportCallSession(record.id) }) }
               ]} />
-              <button className="primary" disabled={busy || !ended} title={ended ? 'Give this call to a new agent task, or to agents that are running' : 'End the call first'} aria-expanded={giving} onClick={() => { setGiven(''); setGiving(!giving) }}>Give to an agent</button>
+              <button className="primary" disabled={busy || !ended} title={ended ? 'Give this call to an existing task or start a new one' : 'End the call first'} aria-expanded={giving} onClick={() => { setGiven(''); setGiving(!giving) }}>Give to an agent</button>
             </div>
             {/* The list opens under its button, over the page: the notes under it do not move. */}
             {giving && <GivePanel call={record.id} mode="give" connected={connected} onClose={() => setGiving(false)} onGiven={(_results, line) => setGiven(line)} />}
           </div>
           <div className="tabs call-detail-tabs" role="tablist" aria-label="Call details">
-            {(['notes', 'transcript'] as const).map(name => <button key={name} role="tab" id={`meeting-tab-${name}`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => onTab(name)}>{name === 'notes' ? 'Notes' : 'Transcript'}</button>)}
+            {(['notes', 'transcript'] as const).map(name => <button key={name} role="tab" id={`meeting-tab-${name}`} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => { setSeconds(undefined); onTab(name) }}>{name === 'notes' ? 'Notes' : 'Transcript'}</button>)}
           </div>
           {/* Under it, what scrolls fades out while the part is stuck at the top, instead of showing cut. */}
           <span className="call-detail-fade" aria-hidden="true" />
@@ -319,15 +363,11 @@ function MeetingDetail({ id, noise, microphone, tab, onTab, renameAsked, onDelet
           { label: 'Rename', onSelect: () => { setTitle(record.title); setEditing(true) } },
           { label: 'Delete call', danger: true, onSelect: () => setDeleting(menu) }
         ]} />}
-        {deleting && (
-          <CallConfirm at={deleting} label="Delete this call?" onClose={() => setDeleting(null)}>
-            <span>Delete this call’s notes and transcript from this computer? This can’t be undone.</span>
-            <div className="row"><button disabled={busy} onClick={() => setDeleting(null)}>Keep call</button><button className="primary stop" disabled={busy} onClick={() => void run(async () => { await api.deleteCallSession(record.id); onDeleted() })}>Delete call</button></div>
-          </CallConfirm>
-        )}
+        {removeDialog}
         {ended && noise && <NoisyMicrophone finding={noise} microphone={microphone} minutes={((record.endedAt ?? record.startedAt) - record.startedAt) / 60_000} />}
+        <MeetingPeople callId={record.id} transcript={record.transcript} onRecord={receive} heading />
         <section className="call-detail-content" role="tabpanel" aria-labelledby={`meeting-tab-${tab}`}>
-          {tab === 'notes' ? <CallNotes key={`notes-${record.id}`} record={record} onRecord={setRecord} /> : <CallTranscript key={record.id} record={record} />}
+          {tab === 'notes' ? <CallNotes record={record} onRecord={receive} onTime={showTime} /> : <CallTranscript record={record} seconds={seconds} />}
         </section>
       </>}
       {error && record && <p className="error" role="status">{error}</p>}

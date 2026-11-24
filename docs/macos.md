@@ -31,7 +31,11 @@ node scripts/verify-macos.cjs dist/mac-arm64/Togle.app arm64
 # Intel: node scripts/verify-macos.cjs dist/mac/Togle.app x64
 ```
 
-These are development builds. Distribution with Developer ID signing and Apple notarization requires the maintainer's Apple Developer credentials and a separate release setup. The verification does not establish notarization.
+## Distribution
+
+Build the tagged source on each target architecture with a **Developer ID Application** identity and Apple notarization configured for electron-builder. With the certificate and notarization credentials configured, run `npm run dist -- --mac`. [electron-builder signing and notarization](https://www.electron.build/v26/docs/features/code-signing/notarization/)
+
+Extract the final ZIP with `ditto -x -k` into a temporary folder. Run `xcrun stapler validate` and `syspolicy_check distribution` on the extracted `Togle.app`. Use `Togle-<version>-arm64-mac.zip` for Apple silicon and `Togle-<version>-mac.zip` or `Togle-<version>-x64-mac.zip` for Intel. Sign the verified ZIPs with Togle's release key and attach them with their `.sig` files to the tagged GitHub release. [Apple packaging guide](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution) · [Togle releases](releasing.md)
 
 ## Permissions and behavior
 

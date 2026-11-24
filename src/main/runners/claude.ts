@@ -22,6 +22,10 @@ import { ClaudeJob, claudeEnv, isJob, rowOf, stateOfJob, type AgentRow, type Job
 import { claudeConfigDir, withShells } from './claude-registry'
 import { oneLine } from './claude-requests'
 import { list, rec } from './jsonrpc'
+import type { RunnerUsage } from '@shared/runner-usage'
+import { claudePlan, SessionCosts } from './usage'
+import { claudeHomes, claudeSessionCost } from './claude-sessions'
+import { claudeUsageFiles, TranscriptUsage } from './transcript-usage'
 import { listProcesses } from './process-tree'
 import { detailOf, diffOf, isFileKey } from './step-detail'
 import { loadPty, type TerminalChunk } from './terminal'
@@ -135,6 +139,7 @@ function refusal(text: string, folder: string): string {
 }
 
 export class ClaudeBackend implements Backend {
+  private readonly costs: SessionCosts
   readonly runner = 'claude' as const
   readonly screens = true
   private readonly hooks: HookServer
@@ -152,6 +157,7 @@ export class ClaudeBackend implements Backend {
   private background?: Promise<string | undefined>
 
   constructor(private readonly options: ClaudeOptions) {
+    this.costs = new SessionCosts(options.keep && path.join(options.keep, 'api-usage.json'))
     this.hooks = new HookServer(options.keep)
   }
 
@@ -183,6 +189,52 @@ export class ClaudeBackend implements Backend {
   private async run(command: string[], args: string[], cwd: string): Promise<{ ok: boolean; text: string }> {
     const { ok, text } = await exec(command[0], [...command.slice(1), ...args], { cwd, env: claudeEnv(this.options.env ?? process.env), timeout: 60_000 })
     return { ok, text }
+  }
+
+  private async billing(cwd?: string): Promise<'subscription' | 'api' | 'signed-out' | 'unknown'> {
+    const [file, ...args] = await this.command()
+    const result = await exec(file, [...args, 'auth', 'status', '--json'], { env: claudeEnv(this.options.env ?? process.env), cwd, timeout: 6000 })
+    const status = rec(JSON.parse(result.out))
+    if (status.loggedIn === false) return 'signed-out'
+    if (!result.ok || status.loggedIn !== true) return 'unknown'
+    if (status.authMethod === 'claude.ai') return 'subscription'
+    return /^(api[_-]?key|apiKeyHelper|console|bedrock|vertex|foundry|thirdParty)$/i.test(String(status.authMethod)) || /^(bedrock|vertex|foundry)$/i.test(String(status.apiProvider)) ? 'api' : 'unknown'
+  }
+
+  private readonly tokens = new TranscriptUsage('claude', async () => claudeUsageFiles(this.options.env?.CLAUDE_CONFIG_DIR ? [this.options.env.CLAUDE_CONFIG_DIR] : await claudeHomes()))
+
+  async limits() {
+    if (await this.billing() !== 'subscription') return []
+    const [file, ...args] = await this.command()
+    // This read-only control request never starts a model turn.
+    const output = await new Promise<string>((resolve, reject) => {
+      const child = execFile(file, [...args, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+        '--no-session-persistence', '--strict-mcp-config', '--tools', '', '--settings', '{"disableAllHooks":true}'],
+        { cwd: os.tmpdir(), env: claudeEnv(this.options.env ?? process.env), windowsHide: true, timeout: 20_000, maxBuffer: 2 * 1024 * 1024 },
+        (err, stdout) => err ? reject(err) : resolve(stdout))
+      child.stdin?.on('error', () => undefined)
+      child.stdin?.end(JSON.stringify({ type: 'control_request', request_id: 'usage', request: { subtype: 'get_usage', skip_behaviors: true } }) + '\n')
+    })
+    for (const line of output.split(/\r?\n/)) {
+      let row
+      try { row = rec(JSON.parse(line)) } catch { continue }
+      const reply = rec(row.response)
+      if (row.type === 'control_response' && reply.request_id === 'usage' && reply.subtype === 'success') return claudePlan(reply.response)
+    }
+    return []
+  }
+
+  async usage(id?: string): Promise<RunnerUsage> {
+    if (await this.costs.has(id)) {
+      const mode = await this.billing().catch(() => 'unknown')
+      if (mode === 'subscription') await this.costs.closeTracked()
+      if (mode === 'api') {
+        await this.costs.refresh(await this.list(), claudeSessionCost, id)
+        const cost = await this.costs.total('api-tasks', id)
+        if (cost.amounts.length) return cost
+      }
+    }
+    return this.costs.withTrackedApi(await this.tokens.read(id), id)
   }
 
   async detect(): Promise<Detected> {
@@ -283,6 +335,7 @@ export class ClaudeBackend implements Backend {
     const context = await this.context()
     const asks = options.asks ?? false
     const title = options.title ?? oneLine(options.prompt)
+    const billing = this.billing(options.folder).catch(() => 'unknown')
     const hook = await this.hooks.attach(this.waiting(), asks)
     let job: string
     try {
@@ -295,6 +348,7 @@ export class ClaudeBackend implements Backend {
     const task = this.make(context, row, { key: hook.key, title, folder: options.folder })
     this.hooks.retarget(hook.key, task)
     await this.remember({ job, id: task.id as string, key: hook.key, folder: options.folder, title, asks })
+    if (task.id && await billing === 'api') await this.costs.track(task.id)
     if (options.prompt) task.began()
     // A screen that cannot open does not undo the task: it goes on, and its screen says why it is closed.
     await task.show().catch(() => undefined)

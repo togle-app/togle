@@ -14,10 +14,15 @@ test('installers carry no audio driver and need no administrator', () => {
   const targets = config.mac.target.map(target => typeof target === 'string' ? target : target.target)
   assert.deepEqual(targets, ['dmg', 'zip'], 'macOS ships the app alone: Togle Studio brings its own driver')
   assert.equal(config.pkg, undefined)
-  assert.equal(config.nsis.include, undefined, 'the Windows installer runs no driver setup')
   assert.equal(config.nsis.perMachine, false, 'Windows installs for the user, without administrator rights')
+  const windowsHook = fs.readFileSync(new URL('../' + config.nsis.include, import.meta.url), 'utf8')
+  const pathHelper = fs.readFileSync(new URL('../build/windows-cli-path.ps1', import.meta.url), 'utf8')
+  const windowsSetup = windowsHook + '\n' + pathHelper
+  assert.doesNotMatch(windowsSetup, /\.(?:inf|sys|cat)\b|\b(?:pnputil|devcon|drvinst|HKLM|HKEY_LOCAL_MACHINE|runas)\b|RequestExecutionLevel\s+(?:admin|highest)/i)
   const resources = JSON.stringify(config.extraResources)
-  for (const driver of ['audio-prepared', 'audio-source', 'vb-cable', 'voice-isolation']) assert.ok(!resources.includes(driver), driver)
+  for (const driver of ['audio-prepared', 'audio-source', 'vb-cable', 'voice-isolation']) {
+    assert.ok(!resources.includes(driver) && !windowsSetup.toLowerCase().includes(driver), driver)
+  }
   assert.ok(!config.deb.depends.includes('pulseaudio-utils'), 'capture goes through Chromium, not pactl')
 })
 
@@ -30,8 +35,8 @@ function fixture(t) {
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 })
   })
   write('package.json', JSON.stringify({ name: 'togle', version: '0.1.0' }))
-  for (const name of ['src/main.ts', 'build/icon.png', 'build/icon.ico', 'resources/dictation-windows.ps1', 'resources/licenses/test.txt']) write(name)
-  for (const name of ['main/index.js', 'main/cli.js', 'main/parakeet-worker.js', 'main/whisper-worker.js', 'main/voice-worker.js', 'preload/index.js', 'renderer/index.html', 'renderer/pcm-tap.js', 'renderer/assets/current.js']) write('out/' + name)
+  for (const name of ['src/main.ts', 'build/icon.png', 'build/icon.ico', 'resources/dictation-windows.ps1', 'resources/meeting-windows.ps1', 'resources/licenses/test.txt']) write(name)
+  for (const name of ['main/index.js', 'main/cli.js', 'main/parakeet-worker.js', 'main/whisper-worker.js', 'main/voice-worker.js', 'main/meeting-worker.js', 'preload/index.js', 'renderer/index.html', 'renderer/pcm-tap.js', 'renderer/assets/current.js']) write('out/' + name)
   return { root, write }
 }
 
@@ -99,7 +104,7 @@ test('package verification rejects development artifacts, stale files and an out
   const stage = path.join(root, 'package-input'), resources = path.join(root, 'package/resources')
   fs.mkdirSync(stage, { recursive: true }); fs.mkdirSync(resources, { recursive: true })
   fs.cpSync(path.join(root, 'out'), path.join(stage, 'out'), { recursive: true })
-  for (const [source, target] of [['build/icon.png', 'icon.png'], ['build/icon.ico', 'icon.ico'], ['resources/dictation-windows.ps1', 'dictation-windows.ps1'], ['resources/licenses/test.txt', 'licenses/test.txt']]) {
+  for (const [source, target] of [['build/icon.png', 'icon.png'], ['build/icon.ico', 'icon.ico'], ['resources/dictation-windows.ps1', 'dictation-windows.ps1'], ['resources/meeting-windows.ps1', 'meeting-windows.ps1'], ['resources/licenses/test.txt', 'licenses/test.txt']]) {
     fs.mkdirSync(path.dirname(path.join(resources, target)), { recursive: true }); fs.copyFileSync(path.join(root, source), path.join(resources, target))
   }
   const runtime = path.join('package/resources/app.asar.unpacked/node_modules')

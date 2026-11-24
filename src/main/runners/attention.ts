@@ -1,13 +1,19 @@
 // Which tasks need the person, as small notices: a command, a change or a question waits, or a turn ended. This only
 // decides what to say and what has been said. The window that shows a notice and the mark on the tray are elsewhere.
-import type { TaskAttention, TaskNotice, ViewRequest } from '@shared/runner'
+import { isWork, stepsLine, type TaskAttention, type TaskNotice, type ViewRequest } from '@shared/runner'
 import { canAllowHere, shownPart as shown } from '@shared/runner-command'
 import { RUNNER_NAMES } from './hub'
+import { actionResult, resultExcerpt } from '../task-notification-text'
 
 const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder
 
+function taskIdentity(task: TaskAttention) {
+  const agent = task.agent || RUNNER_NAMES[task.runner] || task.runner
+  return { key: task.key, title: task.title, agent, where: [agent, baseName(task.folder)].filter(Boolean).join(' · ') }
+}
+
 function waitingNotice(task: TaskAttention, request: ViewRequest, others: number): TaskNotice {
-  const base = { id: `${task.key}#${request.id}`, kind: 'waiting' as const, key: task.key, title: task.title, where: `${task.agent ?? RUNNER_NAMES[task.runner] ?? task.runner} · ${baseName(task.folder)}`, requestId: request.id, others }
+  const base = { ...taskIdentity(task), id: `${task.key}#${request.id}`, kind: 'waiting' as const, requestId: request.id, others, ...(request.reason ? { reason: request.reason } : {}) }
   if (request.kind === 'question') return { ...base, says: 'asks', detail: shown(request.questions?.[0]?.text ?? 'A question'), detailKind: 'question', canRefuse: false, canAllow: false }
   if (request.kind === 'edit') {
     return { ...base, says: 'wants to change', detail: shown((request.files ?? []).join('\n') || 'a file'), detailKind: 'files', canRefuse: true, canAllow: canAllowHere(request) }
@@ -21,9 +27,7 @@ function screenNotice(task: TaskAttention, others: number): TaskNotice {
   return {
     id: `${task.key}#screen`,
     kind: 'waiting',
-    key: task.key,
-    title: task.title,
-    where: `${task.agent ?? RUNNER_NAMES[task.runner] ?? task.runner} · ${baseName(task.folder)}`,
+    ...taskIdentity(task),
     says: 'waits on its screen',
     detail: shown(task.waitingFor ?? ''),
     detailKind: 'words',
@@ -45,7 +49,7 @@ export interface AttentionLook {
 export class Attention {
   private readonly firstSeen = new Map<string, number>()
   private readonly dismissed = new Set<string>()
-  private readonly last = new Map<string, TaskAttention['state']>()
+  private readonly last = new Map<string, { state: TaskAttention['state']; logAfter: number }>()
   private endings = 0
 
   constructor(private readonly clock: () => number = Date.now) {}
@@ -87,12 +91,15 @@ export class Attention {
     const present = new Set<string>()
     for (const task of tasks) {
       present.add(task.key)
-      const before = this.last.get(task.key)
-      this.last.set(task.key, task.state)
+      const previous = this.last.get(task.key)
+      const before = previous?.state
+      const logAfter = previous?.logAfter ?? 0
+      const active = task.state === 'working' || task.state === 'waiting'
+      this.last.set(task.key, { state: task.state, logAfter: active ? logAfter : task.log?.at(-1)?.id ?? logAfter })
       // A turn can end between two looks, so a task seen waiting that is idle now has finished as well. A signed-out agent
       // ends its first turn at once, before a look sees it working: that is news too, as the tasks here started in this run.
-      if ((before === 'working' || before === 'waiting') && task.state === 'idle') finished.push(this.ending(task, 'done'))
-      else if ((before === 'working' || before === 'waiting' || (before === undefined && task.signedOut)) && task.state === 'failed') finished.push(this.ending(task, 'failed'))
+      if ((before === 'working' || before === 'waiting') && task.state === 'idle') finished.push(this.ending(task, 'done', logAfter))
+      else if ((before === 'working' || before === 'waiting' || (before === undefined && task.signedOut)) && task.state === 'failed') finished.push(this.ending(task, 'failed', logAfter))
     }
     for (const key of [...this.last.keys()]) if (!present.has(key)) this.last.delete(key)
     return { waiting: waitingTasks.size, notices, finished }
@@ -103,17 +110,25 @@ export class Attention {
     this.dismissed.add(id)
   }
 
-  private ending(task: TaskAttention, kind: 'done' | 'failed'): TaskNotice {
+  private ending(task: TaskAttention, kind: 'done' | 'failed', logAfter: number): TaskNotice {
     // Signed out, it says what signs the agent in again.
     const signedOut = kind === 'failed' && task.signedOut
+    const turn = task.log?.filter(entry => entry.id > logAfter) ?? []
+    const activity = stepsLine(turn)
+    // The task line can still contain an earlier reply. Only use it for completed turns when the runner supplies no log.
+    const last = turn.findLast(entry => entry.kind === 'agent' || entry.kind === 'you' || isWork(entry))
+    const reply = last?.kind === 'agent' ? last.text : task.log ? '' : task.line
+    const result = signedOut ? (task.fix ? `Sign in again with ${task.fix}.` : 'Sign in to the agent to continue.')
+      : kind === 'failed' ? resultExcerpt(task.line) || actionResult(turn)
+      : resultExcerpt(reply) || actionResult(turn)
     return {
       id: `${task.key}#end${++this.endings}`,
       kind,
-      key: task.key,
-      title: task.title,
-      where: `${task.agent ?? RUNNER_NAMES[task.runner] ?? task.runner} · ${baseName(task.folder)}`,
+      ...taskIdentity(task),
       says: kind === 'done' ? 'finished' : signedOut ? 'is signed out' : 'stopped with an error',
       detail: signedOut && task.fix ? task.fix : shown(task.line),
+      ...(activity ? { activity } : {}),
+      ...(result ? { result } : {}),
       detailKind: signedOut && task.fix ? 'command' : 'words',
       canRefuse: false,
       canAllow: false,

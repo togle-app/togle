@@ -22,7 +22,8 @@ class TestTray extends EventEmitter {
   destroy() { this.destroyed = true }
 }
 const Module = require('node:module'), originalLoad = Module._load
-Module._load = function(name, ...args) { return name === 'electron' ? { ...electron, Tray: TestTray } : originalLoad.call(this, name, ...args) }
+const windows = process.platform === 'win32' && require('./windows-notice-shell.cjs').windowsShell(electron)
+Module._load = function(name, ...args) { return name === 'electron' ? { ...electron, ...(windows && windows.api), Tray: TestTray } : originalLoad.call(this, name, ...args) }
 const profile = path.join(__dirname, '.work', 'tray-' + process.pid)
 // Empty: Windows reuses process ids, and an earlier run's profile would still hold its settings and calls.
 fs.rmSync(profile, { recursive: true, force: true })
@@ -31,6 +32,7 @@ app.setAppPath(path.resolve(__dirname, '..'))
 process.env.TOGLE_HEADLESS = '1'; process.env.TOGLE_TEST_TRAY = '1'; process.env.TOGLE_SILENT_AUDIO = '1'
 // The test hooks (a dictation as if said, the clipboard kept in Togle), on a debugging port the system picks.
 process.env.TOGLE_DEBUG_PORT = '0'
+process.env.TOGLE_TEST_CLIPBOARD = '1'
 process.env.TOGLE_SPEECH_HOME = path.join(profile, 'speech'); process.env.TOGLE_SPEECH_SEEDS = ''
 process.env.CLAUDE_CONFIG_DIR = path.join(profile, 'claude')
 process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR
@@ -116,10 +118,16 @@ async function run() {
   assert.equal(invoke('call:current').session.status, 'live', 'Closing to the tray does not end a meeting')
   assert.ok(icon.tooltip.includes('Writing down a call'))
   item('Quit Togle').click()
-  await wait(() => js("document.body.innerText.includes('Quit Togle?')"))
-  assert.equal(await js("document.querySelector('.notice.ask').getBoundingClientRect().top < document.querySelector('.settings').getBoundingClientRect().top"), true, 'Quit remains visible above Settings without navigating away')
-  assert.equal(main.isDestroyed(), false, 'Quit during a call asks in the app')
-  await js("[...document.querySelectorAll('button')].find(button=>button.textContent==='Keep going').click()")
+  if (windows) {
+    await wait(() => windows.dialogs.length === 1)
+    assert.match(windows.dialogs[0].options.detail, /call and dictation will stop/)
+    windows.dialogs[0].answer(0)
+  } else {
+    await wait(() => js("document.body.innerText.includes('Quit Togle?')"))
+    assert.equal(await js("document.querySelector('.notice.ask').getBoundingClientRect().top < document.querySelector('.settings').getBoundingClientRect().top"), true, 'Quit remains visible above Settings without navigating away')
+    assert.equal(main.isDestroyed(), false, 'Quit during a call asks in the app')
+    await js("[...document.querySelectorAll('button')].find(button=>button.textContent==='Keep going').click()")
+  }
   await invoke('session:listening', false)
   await wait(() => bar.webContents.executeJavaScript(`document.querySelector('.dictation-prompt')?.textContent.startsWith(${JSON.stringify(defaultPrompt)})`))
   // When typing failed, the tray offers the last dictations to copy, newest first (kept in memory until Togle closes).

@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { accessSync, constants, promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { IPty } from 'node-pty'
-import { splitPictures } from '@shared/pasted-pictures'
+import { filePathsForTerminal, splitPictures } from '@shared/pasted-pictures'
 import { TASK_WORDS, type RunnerKind, type TaskInfo } from '@shared/runner'
 import { commandWords, exists, forCmd, whereIs } from './acp'
 import { endTree } from './process-tree'
@@ -63,15 +63,15 @@ export const cleanWords = (text: string): string =>
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
 
 /** Text as one line, for a terminal: there, a line break would press Enter. */
-const oneLine = (text: string): string => cleanWords(text).replace(/\s*[\r\n]+\s*/g, ' ').replace(/\t/g, ' ').trim()
+const oneLine = (text: string): string => cleanWords(filePathsForTerminal(text)).replace(/\s*[\r\n]+\s*/g, ' ').replace(/\t/g, ' ').trim()
+
 /** The mode a program sets to ask that a paste is marked as one (ESC [ 200 ~ before it, ESC [ 201 ~ after). */
 const BRACKETED_PASTE = 2004
 
 /**
  * From this many characters a reply to a screen that takes pastes is handed over as one paste. Typed in a burst, a long reply reaches Claude Code
  * as pasted text anyway (from about 800 characters, measured on 2.1.330), cut in pieces of 1,024 bytes where its input fills, inside a word too,
- * and with its line breaks gone. A paste arrives whole and keeps its paragraphs. A short reply is typed as before: a short paste shows as typed
- * words, so nothing is gained there. Well under 800, so that a version that counts differently still finds the long ones.
+ * and with its line breaks gone. A paste arrives whole and keeps its paragraphs. Multiline replies use a paste at any length.
  */
 export const PASTE_FROM = 400
 
@@ -79,16 +79,22 @@ export const PASTE_FROM = 400
 const PASTE_THEN_ENTER_MS = 300
 
 /**
- * What goes to a screen for a reply: the words as one line, or from PASTE_FROM characters one bracketed paste with the line breaks they had
- * (a terminal sends each as a carriage return, and a program that took the paste in does not press Enter for it). What is pasted is cleaned as
- * what is typed is (cleanWords takes out escape sequences and control characters), so that nothing in the words can end the paste early and
- * have what follows read as keys. A reply with files is always typed: how a program treats a paste that names a file is not measured.
+ * A screen that accepts bracketed paste can receive line breaks without submitting separate prompts.
+ * Keep appended attachment paths outside the paste so the screen recognizes them as typed paths.
  */
 export function replyKeys(text: string, bracketed: boolean): { keys: string; pasted: boolean } {
   const line = oneLine(text)
-  if (!bracketed || line.length < PASTE_FROM || splitPictures(text).files.length) return { keys: line, pasted: false }
-  const body = cleanWords(text).replace(/\r\n?|\n/g, '\r').replace(/\t/g, ' ').trim()
-  return { keys: `\x1b[200~${body}\x1b[201~`, pasted: true }
+  const typed = { keys: line, pasted: false }
+  if (!bracketed) return typed
+  const input = cleanWords(filePathsForTerminal(text)).trim()
+  const multiline = /[\r\n]/.test(input)
+  if (!multiline && line.length < PASTE_FROM) return typed
+  const { words, files } = splitPictures(input)
+  const body = files.length ? words : input
+  const suffix = input.slice(body.length)
+  if (files.length && (!multiline || !body || !input.startsWith(body) || /[\r\n]/.test(suffix))) return typed
+  const paste = body.replace(/\r\n?|\n/g, '\r').replace(/\t/g, ' ')
+  return { keys: `\x1b[200~${paste}\x1b[201~${suffix.replace(/\t/g, ' ')}`, pasted: true }
 }
 
 /**

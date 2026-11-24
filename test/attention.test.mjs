@@ -21,7 +21,7 @@ test('a command that waits becomes a notice with the command in full and both bu
   assert.equal(look.notices.length, 1)
   const [notice] = look.notices
   assert.deepEqual({ ...notice }, {
-    id: 'codex:a#r1', kind: 'waiting', key: 'codex:a', title: 'Task codex:a', where: 'Codex · api-server', says: 'wants to run', detail: 'npm run migrate',
+    id: 'codex:a#r1', kind: 'waiting', key: 'codex:a', agent: 'Codex', title: 'Task codex:a', where: 'Codex · api-server', says: 'wants to run', detail: 'npm run migrate',
     detailKind: 'command', requestId: 'r1', canRefuse: true, canAllow: true, others: 0
   })
   assert.deepEqual(look.finished, [])
@@ -45,7 +45,7 @@ test('a task in the background that waits on its own screen counts, with a notic
   assert.equal(look.waiting, 2, 'and with the other')
   assert.deepEqual(look.notices.map((notice) => notice.id), ['claude:a#screen', 'codex:b#r1'], 'oldest first')
   assert.deepEqual({ ...look.notices[0] }, {
-    id: 'claude:a#screen', kind: 'waiting', key: 'claude:a', title: 'Task claude:a', where: 'Claude Code · api-server', says: 'waits on its screen', detail: 'permission prompt',
+    id: 'claude:a#screen', kind: 'waiting', key: 'claude:a', agent: 'Claude Code', title: 'Task claude:a', where: 'Claude Code · api-server', says: 'waits on its screen', detail: 'permission prompt',
     detailKind: 'words', canRefuse: false, canAllow: false, others: 1
   })
   attention.dismiss('claude:a#screen')
@@ -155,6 +155,61 @@ test('a task that stopped because its agent is signed out says so, with the comm
   ])
   assert.deepEqual(quick.finished.map((n) => [n.key, n.says, n.detail]), [['claude:c', 'is signed out', 'claude auth login']])
   assert.deepEqual(attention.look([task('claude:c', 'failed', [], { signedOut: true, fix: 'claude auth login' })]).finished, [], 'told once')
+})
+
+test('a completion summarizes only the actions in this turn and keeps private text out of the summary', () => {
+  const attention = new T.Attention(clock())
+  const log = [
+    { id: 1, kind: 'command', text: 'old command' },
+    { id: 2, kind: 'agent', text: 'older reply' }
+  ]
+  const look = state => attention.look([task('codex:a', state, [], { log })])
+  look('idle')
+  look('working')
+  log.push({ id: 3, kind: 'command', status: 'finished', text: 'private command' })
+  log.push({ id: 4, kind: 'files', paths: ['private.txt'] })
+  const actions = look('idle').finished
+  assert.equal(actions[0].activity, '2 steps: edited 1 file, ran 1 command')
+  assert.match(T.taskNotificationText(actions, true).body, /Changed private\.txt\./)
+  assert.doesNotMatch(T.taskNotificationText(actions, false).body, /private/)
+  look('working')
+  log.push({ id: 5, kind: 'agent', text: 'private reply' })
+  const reply = look('idle').finished
+  assert.equal(T.taskNotificationText(reply, true).body, 'private reply')
+  assert.doesNotMatch(JSON.stringify(T.taskNotificationText(reply, false)), /private reply|Task codex:a/)
+  look('working')
+  assert.doesNotMatch(T.taskNotificationText(look('idle').finished, true).body, /private reply|private\.txt/, 'a silent turn cannot reuse the previous reply')
+})
+
+test('a result banner leads with the reported blocker, gives the outcome, and keeps Markdown and credentials out', () => {
+  const attention = new T.Attention(clock())
+  const log = [], options = { agent: 'Claude Code', title: 'Marketing strategy', log }
+  attention.look([task('claude:x', 'working', [], options)])
+  log.push({ id: 1, kind: 'agent', text: "## Summary\n\nDone. Updated the speech download instructions. I couldn't save `design.html`, so the changes are in a working copy.\n\n```sh\nTOKEN=fixture-secret\n```" })
+  const done = attention.look([task('claude:x', 'idle', [], options)]).finished
+  assert.deepEqual(T.taskNotificationText(done, true), { title: 'Claude Code · Marketing strategy', body: "I couldn't save design.html, so the changes are in a working copy. Updated the speech download instructions." })
+  const failed = { ...task('codex:y', 'failed'), title: 'Release beta', line: 'Signing failed. The key is sk-ant-' + '0'.repeat(36) + '.' }
+  attention.look([{ ...failed, state: 'working' }])
+  const error = attention.look([failed]).finished
+  const batch = T.taskNotificationText([...done, ...error, { ...done[0], title: 'Third task' }], true)
+  assert.equal(batch.title, '3 task results · 1 failed')
+  assert.match(batch.body, /^Codex · Release beta — Signing failed/)
+  assert.match(batch.body, /Claude Code · Marketing strategy/)
+  assert.doesNotMatch(batch.body, /sk-ant-|Third task/)
+})
+
+test('a request banner identifies the actual decision without putting shell arguments or full file paths in Windows', () => {
+  const attention = new T.Attention(clock())
+  const requests = [
+    request('q', 'question', { questions: [{ text: 'Which **branch** should I use?' }] }),
+    request('c', 'command', { command: 'npm run build --token private-value', reason: 'Rebuild the installer.' }),
+    request('f', 'edit', { files: ['C:\\work\\private-folder\\settings.ts', '/project/main.ts'] })
+  ]
+  const items = attention.look([task('codex:x', 'waiting', requests)]).notices
+  const banners = items.map(item => T.taskNotificationText([item], true))
+  assert.equal(banners[0].title, 'Codex needs input · Task codex:x')
+  assert.deepEqual(banners.map(banner => banner.body), ['Which branch should I use?', 'Approve running npm run build? Rebuild the installer.', 'Review changes to settings.ts, main.ts'])
+  assert.equal(T.taskNotificationText([items[0]], false).body, 'A question needs an answer.')
 })
 
 // ---- the tray's dot ----

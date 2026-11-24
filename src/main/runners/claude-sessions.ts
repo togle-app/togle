@@ -402,7 +402,9 @@ export async function claudeLastSaid(id: string): Promise<string> {
     if (!tail) return ''
     for (const line of tail.lines.slice().reverse()) {
       const r = parse(line)
-      if (!r || r.type !== 'assistant' || r.isSidechain || !isObject(r.message)) continue
+      if (!r || r.isSidechain) continue
+      if (said(r)) return ''
+      if (r.type !== 'assistant' || !isObject(r.message)) continue
       const words = textOf(r.message.content).trim()
       if (words) return withoutSecrets(words).slice(0, 2000)
     }
@@ -488,7 +490,8 @@ async function modelAtEnd(file: string, size: number): Promise<ModelInfo | null 
       const model = str(r.message.model)
       if (!model || model.startsWith('<')) continue
       const effort = str(r.effort) || str(r.perTurnEffort)
-      return { model, ...(effort ? { effort } : {}) }
+      const fast = isObject(r.message.usage) && r.message.usage.speed === 'fast'
+      return { model, ...(effort ? { effort } : {}), ...(fast ? { fast } : {}) }
     }
     if (bytes >= size) break
   }
@@ -511,6 +514,24 @@ export async function claudeWrittenAt(id: string): Promise<number | undefined> {
     sessionFiles.set(id, file)
   }
   return (await fs.stat(file).catch(() => null))?.mtimeMs
+}
+
+/** Claude's latest cost checkpoint is cumulative for this session. */
+export async function claudeSessionCost(id: string): Promise<import('./usage').ReportedCost | undefined> {
+  if (await claudeWrittenAt(id) === undefined) return
+  const file = sessionFiles.get(id)
+  if (!file) return
+  const { size } = await fs.stat(file)
+  for (const bytes of TAIL_BYTES) {
+    const tail = await readEnd(file, size, 'tail', bytes)
+    for (const line of tail.lines.reverse()) {
+      if (!line.includes('"cost-state"')) continue
+      const row = parse(line)
+      if (row?.type !== 'cost-state' || row.sessionId !== id || typeof row.totalCostUSD !== 'number' || !Number.isFinite(row.totalCostUSD) || row.totalCostUSD < 0) continue
+      return { currency: 'USD', amount: row.totalCostUSD, estimated: true, partial: row.hasUnknownModelCost === true }
+    }
+    if (bytes >= size) break
+  }
 }
 
 // ---- A session's conversation, for the Chat view ----

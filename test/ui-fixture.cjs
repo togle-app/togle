@@ -1,5 +1,5 @@
 // Isolated, deterministic renderer fixtures. No real credentials, devices, model requests, or exports.
-const { contextBridge } = require('electron')
+const { contextBridge, webUtils } = require('electron')
 
 module.exports = function install(fixture) {
   const callbacks = new Map()
@@ -112,6 +112,30 @@ module.exports = function install(fixture) {
   }))
   // Notes in Markdown with all it can hold: links that open outside, and a picture and a script that must never load or run.
   if (fixture.richText) Object.assign(sessions[0], { summary: fixture.richText, minutes: { state: 'ready', template: 'concise', revision: 'rich-notes', edited: false } })
+  if (fixture.scenario === 'meeting-account') {
+    subscriptions[0].signedIn = true
+    const call = sessions[0]
+    for (const [id, title] of [['other', 'Project planning'], ['spare', 'Spare meeting']]) sessions.push({ ...clone(call), id, title })
+    Object.assign(call, { title: 'Angell <> Luka Monthly 1:1', accountId: 'claude-default',
+      summary: '## Key points\n- Previous notes. [2:35]\n\n## Open questions\n- Speaker identities are unconfirmed.',
+      minutes: { template: 'detailed', revision: 'account-error', state: 'error', error: 'This subscription account is unavailable. Choose an account in the agent’s settings.' },
+      transcript: call.transcript.map(line => ({ ...line, voiceId: line.speaker === 'me' ? 'me' : 'voice:1', voiceName: line.speaker === 'me' ? 'Luka' : 'Angell', voiceNamedBy: 'user' })) })
+  }
+  if (fixture.scenario === 'meeting-review') {
+    const call = sessions[0]
+    call.title = 'Testing Strategy and Environment Cleanup'
+    call.summary = [
+      '## Decided', '- Merge the PR. [4:48]', '- Remove the environment. [5:10–6:03]', '',
+      '## To do', '- You (speaker labeled “Luka?”, identity tentative): Review the tickets. [1:57–2:54, 4:26]',
+      '- You (speaker labeled “Luka?”, identity tentative): Retry merging. [3:34–4:13, 4:46]'
+    ].join('\n')
+    call.minutes = { state: 'ready', template: 'concise', revision: 'review', edited: false, by: 'chatgpt' }
+    call.transcript = Array.from({ length: 140 }, (_, i) => ({
+      id: 'review-' + i, text: 'Review item ' + i, at: call.startedAt + i * 3000, end: call.startedAt + i * 3000 + 1900,
+      speaker: i % 2 ? 'them' : 'me', voiceId: i % 2 ? 'voice:2' : i ? 'me' : undefined,
+      voiceName: i % 2 ? 'Dennis' : 'Luka', voiceNamedBy: i % 2 ? 'user' : 'suggested'
+    }))
+  }
   // Two calls with voices to confirm after them: one to answer, one to skip.
   if (fixture.scenario === 'confirm-names') {
     const base = sessions[0], line = (id, voiceId, text, at, name, by) => ({ id, speaker: 'them', voiceId, text, at, end: at + 4000, ...(name ? { voiceName: name, voiceNamedBy: by } : {}) })
@@ -168,18 +192,20 @@ module.exports = function install(fixture) {
     return [{ id: 'opus', label: 'Claude Opus', reasoningLevels: ['low', 'medium', 'high'] }, { id: 'sonnet', label: 'Claude Sonnet', reasoningLevels: ['low', 'medium', 'high'] }, { id: 'haiku', label: 'Claude Haiku', reasoningLevels: ['low', 'medium', 'high'] }]
   }
   api.currentCall = async () => current()
+  api.followMeeting = async request => typeof request === 'string' ? { id: request, app: 'teams', mic: 'muted', ended: false, revision: 1 } : null
+  api.pauseCallInput = async (speaker, paused, manual) => { record('pauseCallInput', manual ? [speaker, paused, true] : [speaker, paused]) }
   api.clearTranscript = async () => {
     record('clearTranscript', []); if (holdClear) await new Promise(resolve => { releaseClear = resolve })
     flags = { toldOthers: 0, marks: [] }; currentInfo = undefined; currentKey = 'current-call-' + ++sequence; transcript.splice(0); return current()
   }
   api.callSessions = async () => { record('callSessions', []); return clone(sessions.map(summary)) }
   api.callSession = async id => { record('callSession', [id]); return clone(sessions.find(session => session.id === id) || null) }
-  api.generateCallNotes = async (id, template, revision) => {
-    record('generateCallNotes', [id, template, revision]); const session = needSession(id)
+  api.generateCallNotes = async (id, template, revision, sourceId) => {
+    record('generateCallNotes', sourceId ? [id, template, revision, sourceId] : [id, template, revision]); const session = needSession(id)
     if (session.minutes?.revision !== revision) throw new Error('These notes changed')
     if (rejectNotes) { rejectNotes = false; throw new Error('Notes could not be generated') }
     session.summary = '## Decisions\nThe report is due Tuesday. [0:03]\n\n## Action items\nSend the report. Owner not assigned. [0:03]'
-    session.minutes = { state: 'ready', template, revision: 'minutes-' + ++sequence, edited: false, by: 'chatgpt' }
+    session.minutes = { state: 'ready', template, revision: 'minutes-' + ++sequence, sourceId: sourceId ?? session.minutes?.sourceId, edited: false, by: 'chatgpt' }
     emit('onCallSessions', { id }); return clone(session)
   }
   api.saveCallNotes = async (id, revision, text) => {
@@ -195,6 +221,15 @@ module.exports = function install(fixture) {
     session.personalNotes = text; emit('onCallSessions', { id }); return clone(session)
   }
   api.confirmSound = async (id, clip) => { record('confirmSound', [id, clip]); return new Float32Array(1600) }
+  api.renameCallSpeaker = async (id, voiceId, name) => {
+    record('renameCallSpeaker', [id, voiceId, name])
+    const session = needSession(id)
+    const lines = session.transcript.filter(line => (line.voiceId ?? (line.speaker === 'me' ? 'me' : undefined)) === voiceId)
+    if (!lines.length) throw new Error('No such speaker.')
+    for (const line of lines) Object.assign(line, { voiceId, voiceName: name, voiceNamedBy: 'user' })
+    emit('onCallSessions', { id })
+    return clone(session)
+  }
   api.confirmAnswer = async (id, voiceId, name) => {
     record('confirmAnswer', [id, voiceId, name]); const session = needSession(id), value = (name || '').trim()
     session.confirm.voices = session.confirm.voices.map(voice => voice.id === voiceId ? { ...voice, answered: value } : voice)
@@ -206,7 +241,7 @@ module.exports = function install(fixture) {
     record('searchCalls', [query])
     const words = String(query).toLowerCase().split(/\s+/).filter(Boolean)
     const has = text => words.every(word => text.toLowerCase().includes(word))
-    return clone(sessions.filter(session => session.transcript.some(line => has(line.text))).map(session => ({ id: session.id, title: session.title, startedAt: session.startedAt, lines: session.transcript.filter(line => has(line.text)).slice(0, 3).map(line => ({ at: line.at, who: line.voiceName || 'Them', text: line.text })) })))
+    return clone(sessions.filter(session => has(session.title) || has(session.summary) || session.transcript.some(line => has(line.text))).map(session => ({ id: session.id, title: session.title, startedAt: session.startedAt, lines: session.transcript.filter(line => has(line.text)).slice(0, 3).map(line => ({ at: line.at, who: line.voiceName || 'Them', text: line.text })) })))
   }
   // Agents on a call, in memory: the tasks connected to each call, and what giving a call to agents answered.
   const callAgentLists = new Map()
@@ -294,6 +329,7 @@ module.exports = function install(fixture) {
   }
   // The person's own arrangement of the list, in memory, changed as main changes it (task-groups.ts, in short).
   let groups = clone(fixture.groups ?? { made: [], names: {}, placed: {}, folded: [] })
+  groups.earlierFolded ??= clone(groups.folded)
   api.taskGroups = async () => clone(groups)
   api.changeTaskGroups = async change => {
     record('changeTaskGroups', [change])
@@ -302,12 +338,13 @@ module.exports = function install(fixture) {
     if (change.kind === 'make' && change.name.trim() && !next.made.some(group => group.id === change.id)) next.made.push({ id: change.id, name: change.name.trim() })
     else if (change.kind === 'rename' && change.group.startsWith('made:')) { const group = next.made.find(item => 'made:' + item.id === change.group); if (group && change.name.trim()) group.name = change.name.trim() }
     else if (change.kind === 'rename') { if (change.name.trim()) next.names[change.group] = change.name.trim(); else delete next.names[change.group] }
-    else if (change.kind === 'remove' && made(change.group)) { next.made = next.made.filter(group => 'made:' + group.id !== change.group); for (const [task, at] of Object.entries(next.placed)) if (at.group === change.group) delete next.placed[task]; next.folded = next.folded.filter(at => at.group !== change.group) }
+    else if (change.kind === 'remove' && made(change.group)) { next.made = next.made.filter(group => 'made:' + group.id !== change.group); for (const [task, at] of Object.entries(next.placed)) if (at.group === change.group) delete next.placed[task]; for (const key of ['folded', 'earlierFolded']) next[key] = next[key].filter(at => at.group !== change.group) }
     else if (change.kind === 'place' && change.group !== 'scheduled' && (!change.group.startsWith('made:') || made(change.group))) next.placed[change.task] = change.subject ? { group: change.group, subject: change.subject } : { group: change.group }
     else if (change.kind === 'put-back') delete next.placed[change.task]
     else if (change.kind === 'fold-subject') {
-      next.folded = next.folded.filter(at => !(at.group === change.group && at.subject.toLowerCase() === change.subject.toLowerCase()))
-      if (change.folded) next.folded.push({ group: change.group, subject: change.subject })
+      const key = change.earlier ? 'earlierFolded' : 'folded'
+      next[key] = next[key].filter(at => !(at.group === change.group && at.subject.toLowerCase() === change.subject.toLowerCase()))
+      if (change.folded) next[key].push({ group: change.group, subject: change.subject })
     }
     groups = next
     return clone(groups)
@@ -317,8 +354,30 @@ module.exports = function install(fixture) {
   // Agents Togle finds by itself that were taken off its lists (Remove): listed as removed, so that they can be added back.
   const removedKnown = new Set()
   // (`fixture.agentsFound`: a scenario that has none by default, given them: a call with an agent to start for it.)
-  const knownAgents = () => (['tasks', 'confirm-names'].includes(fixture.scenario) || fixture.agentsFound ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: false }] : []).map(agent => removedKnown.has(agent.runner) ? { runner: agent.runner, name: agent.name, installed: false, removed: true } : agent)
+  const knownAgents = () => (['tasks', 'confirm-names'].includes(fixture.scenario) || fixture.agentsFound ? [{ runner: 'claude', name: 'Claude Code', installed: true, version: '2.1.322' }, { runner: 'codex', name: 'Codex', installed: true, version: '0.166.0' }, { runner: 'hermes', name: 'Hermes', installed: !!fixture.hermesMeters }] : []).map(agent => removedKnown.has(agent.runner) ? { runner: agent.runner, name: agent.name, installed: false, removed: true } : agent)
   api.runnerStatus = async () => [...knownAgents(), ...clone(addedAgents)]
+  api.attachmentPath = file => webUtils.getPathForFile(file)
+  api.showChatFile = async href => { record('showChatFile', [href]); return !href.endsWith('/missing.log') }
+  let extraTokens = 0
+  const reportedCosts = new Map()
+  const codexWindows = [{ label: 'weekly', usedPercent: 17, resetsAt: Date.now() + 101 * hour }]
+  api.runnerLimits = async runner => {
+    record('runnerLimits', [runner])
+    if (runner === 'hermes' && fixture.hermesMeters) return [{ ...codexWindows[0], provider: 'ChatGPT' }]
+    return runner === 'codex' ? clone(codexWindows) : []
+  }
+  api.runnerUsage = async (runner, id) => {
+    record('runnerUsage', [runner, id ?? null])
+    if (runner === 'hermes' && fixture.hermesMeters) return { kind: 'providers', period: id ? 'session' : 'all', sources: [
+      { provider: 'ChatGPT', billing: 'subscription', tokens: id ? 700 : 3400 },
+      { provider: 'Kimi', billing: 'api', tokens: id ? 300 : 1700, cost: { currency: 'USD', amount: id ? 0.20 : 1.10 }, estimated: true }
+    ] }
+    if (reportedCosts.has(runner)) return { kind: 'cost', scope: id ? 'session' : 'agent-sessions', amounts: [{ amount: reportedCosts.get(runner), currency: 'USD' }] }
+    return runner === 'codex' ? id ? { kind: 'tokens', period: 'session', total: (id === 'installer-link' ? 12400 : 5700) + extraTokens }
+      : { kind: 'tokens', period: '7d', total: 89000 + extraTokens }
+    : runner === 'claude' ? { kind: 'cost', scope: id ? 'session' : 'api-tasks', amounts: [{ amount: id ? 0.08 : 1.25, currency: 'USD' }] }
+      : { kind: 'unavailable', reason: 'unsupported' }
+  }
   // The main process tells how it runs from the command: one for ACP is talked to, any other runs in a terminal (here: with acp in it, and no {task}).
   const acpCommand = command => !command.includes('{task}') && /(^|[^a-z])acp([^a-z]|$)/i.test(command)
   api.addCodingAgent = async (name, command) => { record('addCodingAgent', [name, command]); addedAgents.push({ runner: (acpCommand(command) ? 'acp-' : 'term-') + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, installed: true, added: true, command }); return api.runnerStatus() }
@@ -339,7 +398,7 @@ module.exports = function install(fixture) {
     const more = [{ id: 'goose', name: 'goose', description: 'A local, extensible, open source AI agent', command: 'npx -y goose-acp@1.0.0' }, { id: 'opencode', name: 'OpenCode', description: 'The open source coding agent', command: 'npx -y opencode-ai@1.0.0 acp' }, { id: 'mistral-vibe', name: 'Mistral Vibe', description: 'Mistral\'s coding agent', command: 'uvx mistral-vibe --acp', needs: 'uvx' }]
     // (`fixture.catalogMany`: the registry's real length, a few dozen, so that its list has to scroll.)
     const extra = fixture.catalogMany ? Array.from({ length: 24 }, (_, n) => ({ id: 'extra-' + n, name: 'Extra agent ' + (n + 1), description: 'One more agent of the list, with a line about it that is long enough to be cut off at the end of its row', command: 'npx -y extra-acp-' + n + '@1.0.0' })) : []
-    return clone({ found: found.filter(choice => !taken(choice.name)), more: fixture.catalogOffline ? [] : [...more, ...extra].filter(choice => !taken(choice.name)), registry: !fixture.catalogOffline })
+    return clone({ found: (fixture.catalog?.found ?? found).filter(choice => !taken(choice.name)), more: fixture.catalogOffline ? [] : [...(fixture.catalog?.more ?? more), ...extra].filter(choice => !taken(choice.name)), registry: !fixture.catalogOffline })
   }
   api.removeCodingAgent = async id => { record('removeCodingAgent', [id]); if (['claude', 'codex', 'hermes'].includes(id)) removedKnown.add(id); else addedAgents.splice(addedAgents.findIndex(agent => agent.runner === id), 1); return api.runnerStatus() }
   api.restoreCodingAgent = async id => { record('restoreCodingAgent', [id]); removedKnown.delete(id); return api.runnerStatus() }
@@ -381,7 +440,7 @@ module.exports = function install(fixture) {
     record('runnerHistory', [key, all === true])
     const found = runnerFind(key)
     if (!found.history) return null
-    return clone({ entries: all && found.history.older ? [...found.history.older, ...found.history.entries] : found.history.entries, more: !!found.history.older && all !== true, ...(found.history.queued?.length ? { queued: found.history.queued } : {}) })
+    return clone({ entries: all && found.history.older ? [...found.history.older, ...found.history.entries] : found.history.entries, more: !!found.history.older && all !== true, ...(found.history.queued?.length ? { queued: found.history.queued } : {}), ...(found.history.questions ? { questions: found.history.questions } : {}) })
   }
   // What a step holds (what a command printed, a thought's words), as a task given `history.details` keeps it by the step's key.
   api.runnerStep = async (key, more) => {
@@ -447,6 +506,17 @@ module.exports = function install(fixture) {
     record('sendToRunnerTask', [key, text]); const found = runnerFind(key)
     if (takesNoWords(found)) { found.held = [...(found.held ?? []), text]; delete found.heldNote; delete found.heldPaused; runnerChanged(); return }
     found.log.push({ id: 200 + ++sequence, at: Date.now(), kind: 'you', text }); found.state = 'working'; found.line = 'Working…'; runnerChanged()
+  }
+  api.giveToRunnerTask = async (key, text, item) => {
+    record('giveToRunnerTask', [key, text, item])
+    if (fixture.giveFails?.[key]) throw new Error(fixture.giveFails[key])
+    if (!runnerFind(key).mine) await api.openRunnerTask(key)
+    await api.sendToRunnerTask(key, text)
+    if (item) {
+      try { todoAt(item).task = key; emit('onTodoChanged') }
+      catch (error) { return { todoProblem: error.message } }
+    }
+    return {}
   }
   // The model and effort a task's agent works with now (a task given `model: { model, effort }`), as main reads them from the agent's record.
   api.runnerModel = async key => { record('runnerModel', [key]); return clone(runnerFind(key).model ?? null) }
@@ -555,18 +625,37 @@ module.exports = function install(fixture) {
   api.editTodo = async (ref, text) => { record('editTodo', [ref, text]); todoAt(ref).text = text; return clone(todoView()) }
   api.removeTodo = async ref => { record('removeTodo', [ref]); todoAt(ref); todoItems.splice(ref.line, 1); return clone(todoView()) }
   // What calls left for today, in the scenario with a to-do list: names to confirm, notes ready, to-dos that are the person's.
-  api.meetingOffers = async () => fixture.scenario === 'tasks'
-    ? clone({
+  api.clearTodos = async refs => {
+    refs.forEach(todoAt)
+    for (const line of refs.map(ref => ref.line).sort((a,b) => b-a)) todoItems.splice(line, 1)
+    emit('onTodoChanged')
+    return clone(todoView())
+  }
+  const reviewedTodos = new Set()
+  api.reviewMeetingTodo = async (call, text, action) => {
+    record('reviewMeetingTodo', [call, text, action])
+    const key = JSON.stringify([call, text])
+    if (!reviewedTodos.has(key) && action === 'add') todoItems.push({ text: text.replace(/\.$/, ''), done: false })
+    reviewedTodos.add(key)
+    emit('onTodoChanged')
+    return clone(todoView())
+  }
+  api.meetingOffers = async callId => {
+    const offers = fixture.scenario === 'tasks' ? {
       calls: [{ id: 'sprint', title: 'Sprint review', startedAt: Date.now() - 3600_000, notes: true, toConfirm: 2 }, { id: 'planning', title: 'Planning sync', startedAt: Date.now() - 7200_000, notes: true, toConfirm: 0 }],
       items: [{ callId: 'planning', title: 'Planning sync', startedAt: Date.now() - 7200_000, text: 'Send the API timeline to Dario.' }, { callId: 'planning', title: 'Planning sync', startedAt: Date.now() - 7200_000, text: 'Book the staging review.' }]
-    })
-    : { calls: [], items: [] }
+    } : { calls: [], items: [] }
+    const meeting = sessions.find(call => call.id === callId)
+    if (meeting?.title === 'Acme renewal') offers.items = ['Send the report.', 'Book the review.'].map(text => ({ callId, title: meeting.title, startedAt: meeting.startedAt, text }))
+    offers.items = offers.items.filter(item => (!callId || callId === item.callId) && !reviewedTodos.has(JSON.stringify([item.callId, item.text])))
+    return clone(offers)
+  }
   api.linkTodo = async (ref, task) => { record('linkTodo', [ref, task]); const item = todoAt(ref); if (task) item.task = task; else delete item.task; return clone(todoView()) }
   api.showTodoFile = async () => { record('showTodoFile', []) }
   // F8 Show's overlay: the frozen screen it shows, and the picture it gives back (its first bytes and its size, from the
   // PNG's header).
   api.showPicture = async () => fixture.showPicture ?? null
-  api.showDone = png => { const view = new DataView(png.buffer, png.byteOffset, png.byteLength); record('showDone', [{ head: [...png.slice(0, 8)], width: view.getUint32(16), height: view.getUint32(20) }]) }
+  api.showDone = png => { const view = new DataView(png.buffer, png.byteOffset, png.byteLength); record('showDone', [{ head: [...png.slice(0, 8)], width: view.getUint32(16), height: view.getUint32(20), png: Buffer.from(png).toString('base64') }]) }
   api.showCancel = () => { record('showCancel', []) }
   // How long main takes to answer, per call, in milliseconds (`fixture.slow`, or later togleUITest.slow), and a call that fails
   // once (togleUITest.failNext): the waits of the real app, made visible. A call neither slowed nor failing answers as before.
@@ -589,6 +678,10 @@ module.exports = function install(fixture) {
   const noiseReport = () => ({ analyzedMs: 600000, speechMs: 180000, quietMs: 360000, noisyMs: 162000, bursts: 41, floorDb: -47, peakDb: -38, speechDb: -24, snrDb: 23, verdict: 'noisy', sample: new Float32Array(1600) })
   contextBridge.exposeInMainWorld('togleDev', { silentAudio: !['audio', 'start-failure'].includes(fixture.scenario), ...(fixture.scenario === 'noisy-call' ? { noiseReport } : {}) })
   contextBridge.exposeInMainWorld('togleUITest', {
+    setExtraTokens: n => { extraTokens = n },
+    changeNativeSession: (key, id) => { runnerFind(key).sessionId = id; runnerChanged() },
+    publishWeeklyLimit: n => { codexWindows[0].usedPercent = n; emit('onRunnerLimitsChanged', { runner: 'codex', windows: clone(codexWindows) }) },
+    setReportedCost: (runner, amount) => { reportedCosts.set(runner, amount) },
     // A session that runs in a terminal asks about a command and the question is held here: it waits, and can be answered.
     // An agent answers a question put to it on a call: the question as it was sent (with where the call is saved), and its words after.
     answerOnCall: (key, question, answer) => {

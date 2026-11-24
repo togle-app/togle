@@ -1,16 +1,16 @@
 import { useState } from 'react'
-import type { Settings } from '@shared/types'
 import { tellOthersLine } from '@shared/meeting'
+import { FormOver } from './Rows'
 
 // How long Copy says "Copied".
 const COPIED_MS = 1500
 
 /**
  * During a call, until the person says they did: the line to tell the others that the call is being written down.
- * The notes record whether it was ticked. The line says where the sound goes, as this computer hears it.
+ * The notes record whether it was ticked. The line says what is done with the sound: it stays on this computer.
  */
-export function TellOthers({ transcription, onTold }: { transcription: Settings['transcription']; onTold: () => void }) {
-  const line = tellOthersLine(transcription)
+export function TellOthers({ onTold }: { onTold: () => void }) {
+  const line = tellOthersLine()
   const [copied, setCopied] = useState(false)
   return (
     <div className="tell-others" role="group" aria-label="Tell the others" title={line}>
@@ -32,17 +32,24 @@ export function TellOthers({ transcription, onTold }: { transcription: Settings[
   )
 }
 
-/** Said once, when the first call starts: the rules differ by place, and where the words and the sound go. */
-export function FirstCallNotice({ settings, onDone }: { settings: Settings; onDone: () => void }) {
-  const here = settings.transcription.me === 'local' && settings.transcription.them === 'local'
+const askBeforeNotes = 'Is everyone okay with Togle transcribing this call? The audio stays on my computer. The transcript may go to my connected AI service to prepare the notes.'
+
+/** The person asks the other participants before Togle opens either audio input. */
+export function MeetingConsent({ onClose, onStart }: { onClose: () => void; onStart: () => void }) {
+  const [copied, setCopied] = useState(false)
   return (
-    <div className="notice ask first-call" role="alert" aria-label="Before your first call">
-      <span>
-        <strong>Before your first call.</strong> The rules for writing down a call differ by place. The words go to your AI plan, which writes the notes{here ? '; the sound stays on this computer.' : ', and the sound to the speech service you chose in Settings.'}
-      </span>
+    <FormOver label="Before taking notes" className="meeting-consent" onClose={onClose} onSubmit={onStart}>
+      <h2>Before taking notes</h2>
+      <p>Ask everyone before Togle starts transcribing. You can say this or paste it into the call chat.</p>
+      <p className="hint">{askBeforeNotes}</p>
       <div className="row">
-        <button className="primary" autoFocus onClick={onDone}>Got it</button>
+        <button type="button" className="ghost" onClick={() => void navigator.clipboard.writeText(askBeforeNotes).then(() => setCopied(true), () => undefined)}>
+          {copied ? 'Copied' : 'Copy message'}
+        </button>
+        <span className="spacer" />
+        <button type="button" className="ghost" onClick={onClose}>Cancel</button>
+        <button type="submit" className="primary">Everyone agreed · Start notes</button>
       </div>
-    </div>
+    </FormOver>
   )
 }

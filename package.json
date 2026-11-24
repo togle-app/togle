@@ -42,6 +42,7 @@
     "test:dictation:hover": "electron-vite build && rolldown -c eval/rolldown.config.mjs && node test/dictation-hover-native-launch.cjs",
     "test:tray": "electron-vite build && node test/tray-launch.cjs",
     "test:notice": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/notice-launch.cjs",
+    "test:notice:windows": "node test/windows-notice-native.cjs",
     "test:give": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/give-launch.cjs",
     "test:notes:live": "electron-vite build && node test/meeting-notes-live-launch.cjs",
     "test:voices:live": "electron-vite build && rolldown -c test/rolldown.config.mjs && node test/voices-launch.cjs",

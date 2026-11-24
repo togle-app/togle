@@ -1,12 +1,12 @@
 # Reach: Togle across your devices
 
-Reach is the part of Togle Studio that connects Togle on your computers, a server that runs agents, and your phone. Togle's side of it is here, in the open: the keys, the list of your devices, adding one by its code, and every check of what another device may do. Studio's side is a courier that carries what your devices lock for each other. It opens none of it and decides nothing.
+Reach is the development name for Togle Pro’s hosted device connection. The Togle client pairs devices and checks which actions each may take. The relay checks the account entitlement and carries messages encrypted between the devices. The planned phone client is the open-source Togle app. The separate Studio desktop app handles call audio.
 
 **Status: not reviewed.** Reach stays out of every release until an outside review has tried to break it. Only a development run with a courier set (`TOGLE_COURIER`) has it. A packaged Togle never does.
 
 ## What is built
 
-- **Your devices** (Settings → Devices). The first computer you sign in to Togle Studio on starts your devices. Every later device is added at a computer you already use: it shows a code, you type the code there, the add screen says what joins and as what, and you say yes. A server and a phone never sign in. **Remove** lets a device go, and **Other devices may act on this computer** can turn off answers from elsewhere.
+- **Your devices** (Settings → Devices). In the development client, the first computer starts the group when you sign in under Settings → Accounts. The current sign-in is labeled **Togle Studio**. Pair later devices by entering the new device’s code at a computer you already trust and confirming its name and role. **Remove** revokes a device. **Other devices may act on this computer** controls whether it accepts remote actions.
 - **Tasks on your other computers** (Agents). Each computer's tasks show under its name, with a command it waits on in full. From here you can **Refuse** that command or **Stop** the task. Allowing it from another device will need your fingerprint, face or PIN, and that is not built yet, so for now a command is allowed on its own computer.
 - **A record** (Settings → Devices): what other devices did on this computer, and a system notice each time.
 
@@ -34,7 +34,7 @@ The parts are in `src/main/reach/`:
 
 ## The courier's messages
 
-The messages between Togle and the courier are in [`src/shared/courier-protocol.ts`](../src/shared/courier-protocol.ts). The same file is in the courier, which is part of Togle Studio and not open source. Anyone can write a courier from that file: Togle checks everything itself, so a courier is trusted with nothing but carrying.
+The messages between Togle and the courier are in [`src/shared/courier-protocol.ts`](../src/shared/courier-protocol.ts). The hosted Togle Pro service uses that public format. Other implementations can use it too. Each destination device verifies the message and decides whether the action may run.
 
 ## Tests
 

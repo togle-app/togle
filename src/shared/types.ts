@@ -235,6 +235,8 @@ export interface CallMinutes {
   state: 'idle' | 'generating' | 'ready' | 'error'
   template: MeetingNoteTemplate
   revision: string
+  /** Account or connection explicitly chosen to update these notes after the original became unavailable. */
+  sourceId?: string
   sourceKey?: string
   edited?: boolean
   generatedAt?: number
@@ -377,19 +379,10 @@ export interface Settings {
   activeAgentId: string
   /** Hubs of agents to browse and install from (GitHub repositories: "owner/repo"), besides Togle's own. */
   hubs?: string[]
+  /** Calls are heard by this PC's own models, and nowhere else: the sound of a call never leaves the computer. */
   transcription: {
     /** Whisper language code, or "auto". */
     language: string
-    /** What hears my voice (the microphone). */
-    me: Recognizer
-    /** What hears the others (the call's sound). */
-    them: Recognizer
-    /** OpenAI's speech model, for a side OpenAI hears. Its API key is kept apart, encrypted. */
-    openaiModel: string
-    /** The address of a server with OpenAI's speech API (".../v1"), for a side it hears, and its model (some servers
-     * take any). A key, if it needs one, is kept apart, encrypted. */
-    serverUrl: string
-    serverModel: string
   }
   window: WindowSettings
   /** Local outgoing audio for other call apps, independent of transcription and F9. */
@@ -408,6 +401,8 @@ export interface Settings {
     notices: boolean
     /** One as well when a task finishes or stops with an error. */
     finished: boolean
+    /** Include the task name and an excerpt of its outcome or request in new Windows notifications. */
+    notificationPreviews: boolean
     /** Which view a task opens in (a switch in its header changes it for that task): its agent's own screen, or the cards and a reply box. */
     view: 'session' | 'cards'
     /**
@@ -430,7 +425,7 @@ export interface Settings {
   /** The first minute (talk, sign in with the plan, what Togle found) was gone through, once. */
   firstMinute: { done: boolean }
   /** The offer to change Togle's keys, made once: the first time one is pressed while a code editor that uses it is in front. */
-  keysOffer: { shown: boolean }
+  keysOffer: { shown: boolean; key: string; editor: string }
   /** Agents the person added in Settings: any that speaks ACP, by the command that starts it. */
   addedAgents: import('./runner').AddedAgent[]
   /** Agents Togle finds by itself that the person took off its lists (Settings → Agents → Remove). They stay installed. */
@@ -506,16 +501,6 @@ export interface SubscriptionAccount {
   error?: string
 }
 
-/**
- * What turns a side of the call into words: this PC's models (Parakeet, with Whisper for unclear speech), OpenAI's
- * speech API, another server that speaks it (a model run on this PC, or a service's), or the dictation of the ChatGPT
- * plan Togle is signed in to.
- */
-export type Recognizer = 'local' | 'openai' | 'server' | 'chatgpt'
-
-/** The speech APIs that can hear a side in place of this PC's models. */
-export type SpeechApiId = Exclude<Recognizer, 'local'>
-
 /** The models Togle can install to hear on this PC (Whisper base only for installs from before Whisper small). */
 export type LocalModelId = 'parakeet' | 'whisper-turbo' | 'whisper-small' | 'whisper-base'
 
@@ -544,16 +529,12 @@ export interface SttStatus {
   state: SttState
   detail?: string
   transcriptionLanguage?: string
-  /** Why the API picked for a side can't hear it, or didn't hear its last line: this PC hears that side meanwhile, if it can. */
-  problem?: string
-  /** What the API picked needs before it can hear ("a ChatGPT sign-in", "an OpenAI API key"), while nothing else can. */
-  needs?: string
 }
 
 export type AssistKind = 'suggest' | 'ask' | 'summary'
 
 /** 'start-call-unseen': the call shortcut while Togle's window is hidden or minimized (no picker it couldn't show). */
-export type HotkeyAction = 'toggle-listening' | 'start-call-unseen' | 'toggle-recording' | 'snapshot' | 'ask' | 'copy' | 'dictation-settings' | 'keys-settings'
+export type HotkeyAction = 'toggle-listening' | 'start-call-unseen' | 'stop-call' | 'toggle-recording' | 'snapshot' | 'ask' | 'copy' | 'dictation-settings' | 'keys-settings'
 
 /** One of Togle's keys was pressed in a code editor that uses it too: the key ("F9") and the editor ("VS Code"). */
 export interface KeysOffer {

@@ -9,6 +9,65 @@ const KEY = 'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Ca
 const block = (kind, name, start, stop) => `${KEY}\\${kind}\\${name}\r\n    Value    REG_SZ    Allow\r\n    LastUsedTimeStart    REG_QWORD    ${start}\r\n    LastUsedTimeStop    REG_QWORD    ${stop}\r\n\r\n`
 const header = `${KEY}\r\n    Value    REG_SZ    Allow\r\n\r\n${KEY}\\NonPackaged\r\n    Value    REG_SZ    Allow\r\n\r\n`
 const now = Date.UTC(2026, 10, 12, 10, 30)
+const { DesktopMeetings } = await import('./.build/togle.mjs')
+test('a desktop meeting starts once when joined muted, stays open across unknown controls and ends on departure', async () => {
+  let at = 1000
+  const starts = [], ends = [], updates = []
+  const meet = new DesktopMeetings(id => starts.push(id), () => ends.push(at), state => updates.push(state), () => at)
+  const id = 'a'.repeat(32), observe = state => meet.observe({ id, app: 'meet', state })
+  observe('muted'); observe('muted')
+  assert.deepEqual(starts, [id])
+  assert.equal(meet.follow(id).mic, 'muted')
+  assert.equal(await meet.allowsClip(1000, 1010), false)
+  at = 1100; observe('open')
+  const spoken = meet.allowsClip(1101, 1400)
+  at = 1450; observe('open')
+  assert.equal(await spoken, true)
+  const straddlesMute = meet.allowsClip(1300, 1500)
+  at = 1510; observe('muted')
+  assert.equal(await straddlesMute, false)
+  at = 1700; meet.uncertain()
+  assert.equal(meet.capture.mic, 'unknown')
+  assert.deepEqual(ends, [])
+  at = 2000; observe('open')
+  assert.equal(await meet.allowsClip(1400, 2100), false, 'preroll cannot reintroduce muted speech')
+  at = 6000; meet.checkFresh()
+  assert.equal(meet.capture.mic, 'unknown', 'a lost reader fails closed')
+  observe('left'); observe('left')
+  assert.equal(ends.length, 1)
+  assert.equal(updates.filter(s => s.ended).length, 1)
+  assert.throws(() => meet.follow(id), /ended/)
+  observe('open')
+  assert.equal(starts.length, 2, 'rejoining is offered again')
+  assert.equal(meet.follow(false), null, 'a meeting in another app owns its own notes')
+  assert.equal(await meet.allowsClip(1, 10), true)
+})
+
+test('manual notes can follow a newly discovered desktop call, and choosing a manual mic keeps that choice', () => {
+  let at = 1000
+  const starts = [], changes = [], ends = []
+  const meet = new DesktopMeetings((_id, app) => starts.push(app), app => ends.push(app), state => changes.push(state), () => at)
+  const first = '1'.repeat(32), second = '2'.repeat(32)
+  meet.follow()
+  assert.equal(meet.needsReader, true)
+  at += 2400
+  meet.observe({ id: first, app: 'other', state: 'muted' })
+  assert.deepEqual(starts, [])
+  assert.equal(changes.at(-1).mic, 'muted')
+  meet.observe({ id: second, state: 'gap' })
+  assert.equal(meet.capture.mic, 'muted', 'a different window has no say over this one')
+  meet.observe({ id: first, state: 'left' })
+  meet.observe({ id: first, state: 'gap' })
+  assert.equal(meet.capture.ended, true)
+  meet.follow(); meet.cancelPending()
+  meet.observe({ id: second, app: 'teams', state: 'open' })
+  assert.deepEqual(starts, ['teams'])
+  assert.equal(meet.capture, undefined)
+  meet.disabled()
+  assert.equal(meet.app, undefined, 'disabling discovery withdraws the old call')
+  assert.deepEqual(ends, ['other', 'teams'])
+  assert.throws(() => meet.follow(second), /ended/)
+})
 const using = (name, since = now - 60_000, kind = 'NonPackaged') => block(kind, name, filetime(since), '0x0')
 const stopped = (name, kind = 'NonPackaged') => block(kind, name, filetime(now - 3_600_000), filetime(now - 3_000_000))
 
@@ -36,7 +95,7 @@ test('only call apps count, once each, and a browser or Togle itself does not', 
     + using('C:#Program Files#Discord#Discord.exe')
     + using('C:#Program Files#Cisco Spark#CiscoCollabHost.exe')
     + using('Microsoft.SkypeApp_kzf8qxf38zg5c', now - 10_000, 'Packaged')))
-  assert.deepEqual(found.map(item => item.app).sort(), ['skype', 'slack', 'teams', 'webex', 'zoom'])
+  assert.deepEqual(found.map(item => item.app).sort(), ['discord', 'skype', 'slack', 'teams', 'webex', 'zoom'])
   assert.ok(Math.abs(found.find(item => item.app === 'zoom').since - (now - 80_000)) < 1, 'the earliest start')
   assert.deepEqual(callAppsIn([]), [])
 })
@@ -205,7 +264,7 @@ test('on Linux, the programs recording are read from what PulseAudio or PipeWire
 test("Linux programs match only Linux names, and Windows names only Windows'", () => {
   const linux = ['zoom', 'ZoomWebviewHost', 'teams-for-linux', 'CiscoCollabHost', 'skypeforlinux', 'slack'].map(name => ({ name, since: now }))
   assert.deepEqual(callAppsIn(linux).map(item => item.app).sort(), ['skype', 'slack', 'teams', 'webex', 'zoom'])
-  assert.deepEqual(callAppsIn(['zoomer', 'slack-helper', 'my-teams', 'discord'].map(name => ({ name, since: now }))), [], 'names that only start or end alike are not those apps')
+  assert.deepEqual(callAppsIn(['zoomer', 'slack-helper', 'my-teams', 'discord-music'].map(name => ({ name, since: now }))), [], 'names that only start or end alike are not those apps')
   assert.deepEqual(browsersIn(['firefox', 'google-chrome-stable', 'chromium-browser', 'brave', 'firefoxish'].map(name => ({ name, since: now }))).map(item => item.program), ['firefox', 'google-chrome-stable', 'chromium-browser', 'brave'])
 })
 

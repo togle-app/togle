@@ -437,6 +437,8 @@ export class CallCapture {
     return levels
   }
 
+  get speaking(): boolean { return this.sources.some(source => source.speaker === 'me' && source.segmenter.active) }
+
   async start(onSegment: SegmentHandler, paused: Speaker[] = [], options: { measureNoise?: boolean } = {}): Promise<string[]> {
     if (this.ctx) throw new Error('Audio capture is already running')
     this.paused = new Set(paused)
@@ -457,6 +459,7 @@ export class CallCapture {
       const warnings: string[] = []
       for (const speaker of ['me', 'them'] as const) {
         if (this.paused.has(speaker)) { this.input(speaker, 'paused'); continue }
+        const revision = this.revisions[speaker]
         try {
           const stream = await (speaker === 'me' ? openMic(ctx) : openLoopback(ctx))
           if (!current()) {
@@ -464,6 +467,7 @@ export class CallCapture {
             throw new Error('Audio start cancelled')
           }
           if (this.paused.has(speaker)) { stream.getTracks().forEach(t => t.stop()); this.input(speaker, 'paused'); continue }
+          if (revision !== this.revisions[speaker]) { stream.getTracks().forEach(t => t.stop()); continue }
           this.attach(speaker, stream)
         } catch (err) {
           if (!current()) throw err
@@ -557,11 +561,14 @@ export class CallCapture {
   }
 
   async setPaused(speaker: Speaker, paused: boolean): Promise<void> {
-    if (!this.ctx) return
     if (this.paused.has(speaker) === paused) return
     this.revisions[speaker]++
     if (paused) {
       this.paused.add(speaker)
+      if (speaker === 'me') {
+        this.noiseTap?.stop()
+        this.noiseTap = undefined
+      }
       const source = this.sources.find(item => item.speaker === speaker)
       this.sources = this.sources.filter(item => item !== source)
       source?.stop()
@@ -574,13 +581,16 @@ export class CallCapture {
 
   /** Opens (or opens again) the unprocessed microphone the noise check measures. Without it the call goes on unmeasured. */
   private async openNoise(): Promise<void> {
-    const ctx = this.ctx, generation = this.generation
-    if (!ctx || window.togleDev?.silentAudio) return
+    const ctx = this.ctx, generation = this.generation, revision = this.revisions.me
+    if (!ctx || this.paused.has('me') || window.togleDev?.silentAudio) return
     this.noiseTap?.stop()
     this.noiseTap = undefined
     try {
       const stream = await openRawMic()
-      if (this.ctx !== ctx || generation !== this.generation) { stream.getTracks().forEach((t) => t.stop()); return }
+      if (this.ctx !== ctx || generation !== this.generation || revision !== this.revisions.me || this.paused.has('me')) {
+        stream.getTracks().forEach(t => t.stop())
+        return
+      }
       // Opened again meanwhile (the device changed twice): the newer stream replaces this one's predecessor.
       ;(this.noiseTap as NoiseTap | undefined)?.stop()
       this.noiseCheck ??= new NoiseCheck(() => this.sources.some((s) => s.speaker === 'them' && s.segmenter.active))

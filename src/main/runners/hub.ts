@@ -3,8 +3,11 @@
 // the ones Togle runs (with what happened in each, so the window can show it), and the actions on a task by its key.
 import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
-import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, type Decision, type LogEntry, type ModelInfo, type RunnerKind, type RunnerStatus, type SignInChoice, type StartRequest, type StepDetail, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
+import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, taskHandoffProblem, type Decision, type LogEntry, type ModelInfo, type RunnerKind, type RunnerStatus, type SignInChoice, type StartRequest, type StepDetail, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
+import type { RunnerUsage, UsageWindow } from '@shared/runner-usage'
+import { codexQuestionReplies } from '@shared/codex-questions'
+import { withQuote } from '@shared/quote'
 import { ownGroupOf } from '@shared/task-groups'
 import { carriedFlags } from './claude-job'
 import { askedLine } from './claude-sessions'
@@ -44,6 +47,7 @@ export interface FreshStore {
 
 export interface HubOptions {
   backends: Backend[]
+  limitsChanged?: (runner: string, windows: UsageWindow[]) => void
   /** Something the window shows has changed. Called at most about every 100 ms. */
   changed: () => void
   titles?: TitleStore
@@ -124,7 +128,12 @@ const rank = (task: TaskView): number => (task.state === 'waiting' ? 0 : task.st
 const order = (a: TaskView, b: TaskView): number => rank(a) - rank(b) || b.updatedAt - a.updatedAt
 
 export class RunnerHub {
+  private readonly usageReadings = new WeakMap<Backend, Map<string | undefined, { at: number; reading: Promise<RunnerUsage> }>>()
+  private readonly limitReadings = new WeakMap<Backend, UsageWindow[]>()
+  private readonly checkingLimits = new WeakSet<Backend>()
+  private readonly limitTimer?: NodeJS.Timeout
   private readonly owned = new Map<string, Owned>()
+  private readonly resuming = new Map<string, Promise<TaskView>>()
   /** The model and effort each task was last read with, and when (see `model`). */
   private readonly models = new Map<string, { at: number; info: ModelInfo | null; running?: Promise<ModelInfo | null> }>()
   private cache: { at: number; infos: TaskInfo[] } | null = null
@@ -142,6 +151,11 @@ export class RunnerHub {
 
   constructor(private readonly options: HubOptions) {
     this.cacheMs = options.cacheMs ?? 4_000
+    if (options.limitsChanged) {
+      void this.refreshLimits()
+      this.limitTimer = setInterval(() => void this.refreshLimits(), 3 * 60_000)
+      this.limitTimer.unref()
+    }
   }
 
   /**
@@ -188,6 +202,45 @@ export class RunnerHub {
   private agentsChanged(): void {
     this.found = null
     this.agentsGeneration++
+  }
+
+  async usage(runner: string, sessionId?: string): Promise<RunnerUsage> {
+    const backend = this.options.backends.find(agent => agent.runner === runner)
+    if (!backend?.usage) return { kind: 'unavailable', reason: 'unsupported' }
+    let readings = this.usageReadings.get(backend)
+    if (!readings) this.usageReadings.set(backend, readings = new Map())
+    const now = Date.now()
+    // Coalesce the sidebar and Settings. A full minute tick always gets a fresh reading.
+    for (const [key, value] of readings) if (now - value.at >= 5_000) readings.delete(key)
+    const previous = readings.get(sessionId)
+    if (previous) return previous.reading
+    const reading = backend.usage(sessionId).catch((): RunnerUsage => ({ kind: 'unavailable', reason: 'temporary' }))
+    readings.set(sessionId, { at: now, reading })
+    return reading
+  }
+
+  limits(runner: string): UsageWindow[] {
+    const backend = this.options.backends.find(agent => agent.runner === runner)
+    return backend && this.limitReadings.get(backend) || []
+  }
+
+  private async refreshLimits(): Promise<void> {
+    if (this.disposed || !this.options.backends.some(agent => agent.limits)) return
+    const installed = await this.lookForAgents().catch(() => [])
+    if (this.disposed) return
+    await Promise.all(installed.filter(agent => agent.installed).map(async agent => {
+      const backend = this.options.backends.find(item => item.runner === agent.runner)
+      if (!backend?.limits || this.checkingLimits.has(backend)) return
+      this.checkingLimits.add(backend)
+      try {
+        const windows = await backend.limits()
+        if (this.disposed || !this.options.backends.includes(backend)) return
+        if (JSON.stringify(windows) === JSON.stringify(this.limitReadings.get(backend))) return
+        this.limitReadings.set(backend, windows)
+        this.options.limitsChanged?.(agent.runner, windows)
+      } catch { /* Keep the previous limits if the provider cannot be reached. */ }
+      finally { this.checkingLimits.delete(backend) }
+    }))
   }
 
   async list(): Promise<TaskView[]> {
@@ -334,6 +387,14 @@ export class RunnerHub {
       this.fresh()
       return this.viewOfOwned(known, undefined)
     }
+    const underway = this.resuming.get(key)
+    if (underway) return underway
+    const resumed = this.resumeTask(key, flags)
+    this.resuming.set(key, resumed)
+    try { return await resumed } finally { this.resuming.delete(key) }
+  }
+
+  private async resumeTask(key: string, flags: string[]): Promise<TaskView> {
     const info = (await this.infos()).find((task) => keyOf(task.runner, task.id) === key)
     if (!info) throw new Error('That task is gone.')
     const backend = this.backend(info.runner)
@@ -398,11 +459,29 @@ export class RunnerHub {
     }
   }
 
+  /** Explicitly give work to an existing conversation, using the same delivery and queue as a reply in Chat. */
+  async giveToTask(key: string, text: string): Promise<void> {
+    if (!text.trim()) throw new Error('Say what to send.')
+    const owned = this.owned.get(key)
+    if (!owned) this.forgetList()
+    const task = owned ? this.viewOfOwned(owned, undefined) : (await this.list()).find(view => view.key === key)
+    if (!task) throw new Error('That task is gone.')
+    const problem = taskHandoffProblem(task)
+    if (problem) throw new Error(problem)
+    if (!task.mine) {
+      const resumed = await this.open(key)
+      const resumeProblem = taskHandoffProblem(resumed)
+      if (resumeProblem) throw new Error(resumeProblem)
+    }
+    await this.sendOrHold(key, text)
+  }
+
   async send(key: string, text: string): Promise<void> {
     const owned = this.mine(key)
     const message = text.trim()
     if (!message) return
-    const said = this.log(owned, 'you', message)
+    const replies = owned.handle.runner === 'codex' ? codexQuestionReplies(message) : null
+    const said = this.log(owned, 'you', replies ? replies.map(reply => withQuote(reply.question, reply.answer)).join('\n\n') : message)
     this.touch(owned)
     // A reply goes on from where it stopped: what went wrong is past.
     owned.problem = undefined
@@ -740,7 +819,7 @@ export class RunnerHub {
   attention(): TaskAttention[] {
     const mine = [...this.owned.values()].map((owned) => {
       const view = this.viewOfOwned(owned, undefined)
-      return { key: owned.key, runner: view.runner, agent: this.nameOf(view.runner), title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line, ...(view.signedOut ? { signedOut: true } : {}), ...(view.fix ? { fix: view.fix } : {}), ...(view.terminal ? { terminal: true } : {}), ...(view.waitingFor ? { waitingFor: view.waitingFor } : {}) }
+      return { key: owned.key, runner: view.runner, agent: this.nameOf(view.runner), title: view.title, folder: view.folder, state: view.state, pending: view.pending, line: view.line, log: owned.log, ...(view.signedOut ? { signedOut: true } : {}), ...(view.fix ? { fix: view.fix } : {}), ...(view.terminal ? { terminal: true } : {}), ...(view.waitingFor ? { waitingFor: view.waitingFor } : {}) }
     })
     return mine
   }
@@ -785,6 +864,7 @@ export class RunnerHub {
 
   private async shutDown(): Promise<void> {
     this.disposed = true
+    clearInterval(this.limitTimer)
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     const owned = [...this.owned.values()]
@@ -906,6 +986,10 @@ export class RunnerHub {
 
   private record(owned: Owned, event: TaskEvent): void {
     owned.updatedAt = Date.now()
+    if (event.type === 'model') {
+      this.models.delete(owned.key)
+      return
+    }
     // An error explains the program stopping only when the stop comes right after it (a state change between is fine).
     const justSaid = owned.justSaid
     if (event.type !== 'state') owned.justSaid = undefined
@@ -992,6 +1076,7 @@ export class RunnerHub {
 
   private viewOfOwned(owned: Owned, info: TaskView | undefined): TaskView {
     const { handle } = owned
+    const sessionId = handle.screen?.session()
     const pending = handle.pending.map((request) => this.withMark(request))
     const lastCommand = [...owned.log].reverse().find((e) => e.kind === 'command' && e.status === 'running')
     const lastWords = [...owned.log].reverse().find((e) => e.kind === 'agent')
@@ -1021,6 +1106,7 @@ export class RunnerHub {
       key: owned.key,
       runner: handle.runner,
       id: handle.id ?? '',
+      ...(sessionId && sessionId !== handle.id ? { sessionId } : {}),
       title: this.titleOf(owned.key, handle.title, info?.title),
       folder: handle.folder || info?.folder || '',
       state,

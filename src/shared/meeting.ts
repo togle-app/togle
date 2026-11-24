@@ -1,13 +1,19 @@
-import type { Settings, TranscriptEntry } from './types'
+import type { TranscriptEntry } from './types'
+
+export const NOTES_ACCOUNT_UNAVAILABLE = 'The account saved for these meeting notes is unavailable.'
+
+/** Older saved notes contain the account service's error verbatim. */
+export function missingNotesAccount(message: string): boolean {
+  return message === NOTES_ACCOUNT_UNAVAILABLE || message.startsWith('This subscription account is unavailable.') || message.startsWith('This AI connection is unavailable.')
+}
 
 /**
- * What the person can tell the others on a call, so they know it is being written down: true for how this computer
- * hears it. With the speech models on this computer the sound never leaves it; with a speech service it goes there.
+ * What the person can tell the others on a call, so they know it is being written down. This computer hears every call,
+ * so the sound never leaves it. The design's words: what is done with the sound. The person was told when the first
+ * call started where the words go.
  */
-export function tellOthersLine(transcription: Pick<Settings['transcription'], 'me' | 'them'>): string {
-  const here = transcription.me === 'local' && transcription.them === 'local'
-  // The design's words: what is done with the sound. The person was told when the first call started where the words go.
-  return `I'm writing this call down with Togle. ${here ? 'The sound stays on my computer.' : 'The sound is sent to a speech service to turn it into text.'}`
+export function tellOthersLine(): string {
+  return 'I\'m writing this call down with Togle. The sound stays on my computer.'
 }
 
 /** A prompt to check group mode, never a claim to count voices from text. */

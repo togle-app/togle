@@ -1592,6 +1592,33 @@ test('the question before quitting says what would stop, and the call wording is
   assert.ok(said.includes(`“${'x'.repeat(47)}…”`) && !said.includes('x'.repeat(48)), 'a long name is cut')
 })
 
+test('giving to a saved session resumes it once and respects ownership and pending questions', async () => {
+  const claude = new FakeBackend('claude', { screens: true, tasks: [
+    info('claude', 'old', 'Earlier work', 'idle', 10),
+    info('claude', 'outside', 'In a terminal', 'working', 20, { pid: 123 }),
+    info('claude', 'waiting', 'Someone is answering', 'waiting', 30)
+  ] })
+  const { hub } = hubOf([claude])
+  try {
+    await assert.rejects(hub.giveToTask('claude:outside', 'Follow up'), /runs in your terminal/)
+    await assert.rejects(hub.giveToTask('claude:waiting', 'Follow up'), /Open it in Agents first/)
+    await assert.rejects(hub.giveToTask('claude:old', '  '), /what to send/)
+    assert.equal(claude.resumed.length, 0)
+    await Promise.all([hub.open('claude:old'), hub.giveToTask('claude:old', 'First follow-up')])
+    assert.equal(claude.resumed.length, 1)
+    assert.equal(claude.started.length, 0)
+    const [session] = claude.resumed
+    assert.deepEqual(session.sent, ['First follow-up'])
+    assert.equal(session.folder, claude.tasks[0].folder)
+    session.want({ id: 'permission', kind: 'command', command: 'npm test', raw: 'npm test', folder: session.folder })
+    await hub.giveToTask('claude:old', 'Second follow-up')
+    const { task } = await hub.detail('claude:old')
+    assert.deepEqual(task.held, ['Second follow-up'])
+    assert.equal(task.pending[0].id, 'permission')
+    assert.deepEqual(session.sent, ['First follow-up'])
+  } finally { await hub.dispose() }
+})
+
 test('the window can ask for everything through its messages, and is told when something changes', async () => {
   const handlers = new Map()
   const sent = []
@@ -1899,6 +1926,10 @@ test('a task’s conversation is asked of its agent by the session the task is i
     const view = await hub.open('claude:a')
     const owned = claude.resumed.find((task) => task.id === 'a')
     owned.sessionNow = 'a-after-clear'
+    claude.usage = async id => ({ kind: 'tokens', period: 'session', total: id === 'a-after-clear' ? 12 : 99 })
+    const detail = await hub.detail(view.key)
+    assert.equal(detail.task.sessionId, 'a-after-clear')
+    assert.equal((await hub.usage('claude', detail.task.sessionId)).total, 12)
     assert.deepEqual((await hub.history(view.key, false)).entries.map((e) => e.text), ['asked in a-after-clear'])
     assert.deepEqual(asked.at(-1), ['a-after-clear', false])
     // An agent that keeps no conversation to read, a task that is gone, and a failing read: nothing, not an error.

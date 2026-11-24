@@ -122,11 +122,12 @@ test('the notes are asked to list the marked lines first, and are written again 
   assert.notEqual(again.minutes.sourceKey, key)
 })
 
-test('the line to tell the others says where the sound goes', () => {
-  assert.equal(tellOthersLine({ me: 'local', them: 'local' }), "I'm writing this call down with Togle. The sound stays on my computer.", "the design's words")
+test('the line to tell the others says where the sound goes: it stays on the computer, whatever an earlier Togle was set to', () => {
+  assert.equal(tellOthersLine(), "I'm writing this call down with Togle. The sound stays on my computer.", "the design's words")
+  // An earlier Togle could send a side of a call to a speech service, and its line said so. This PC hears every call now.
   for (const [me, them] of [['openai', 'local'], ['local', 'server'], ['server', 'openai']]) {
     const said = tellOthersLine({ me, them })
-    assert.match(said, /sent to a speech service/)
-    assert.doesNotMatch(said, /stays on my computer/)
+    assert.equal(said, tellOthersLine())
+    assert.doesNotMatch(said, /speech service/)
   }
 })

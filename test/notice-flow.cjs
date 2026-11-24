@@ -21,7 +21,8 @@ class TestTray extends EventEmitter {
 }
 const Module = require('node:module')
 const originalLoad = Module._load
-Module._load = function (name, ...args) { return name === 'electron' ? { ...electron, Tray: TestTray } : originalLoad.call(this, name, ...args) }
+const windows = process.platform === 'win32' && require('./windows-notice-shell.cjs').windowsShell(electron)
+Module._load = function (name, ...args) { return name === 'electron' ? { ...electron, ...(windows && windows.api), Tray: TestTray } : originalLoad.call(this, name, ...args) }
 
 const profile = path.join(__dirname, '.work', 'notice-' + process.pid)
 // Empty: Windows reuses process ids, and an earlier run's profile would still hold its settings and calls.
@@ -31,6 +32,7 @@ app.setPath('userData', profile)
 app.setAppPath(path.resolve(__dirname, '..'))
 process.env.TOGLE_HEADLESS = '1'
 process.env.TOGLE_TEST_TRAY = '1'
+process.env.TOGLE_TEST_NOTIFICATIONS = '1'
 process.env.TOGLE_SILENT_AUDIO = '1'
 // A call on this computer (a program using the microphone, as one is when the test runs in the middle of a meeting) would put
 // Togle's own notice of a call in the corner, and a notice already there keeps the offer to change keys from coming.
@@ -93,6 +95,11 @@ async function run() {
   main.focus = () => {}
   let opened = 0
   const item = (label) => icon.menu.items.find((entry) => entry.label === label)
+  if (windows) {
+    await require('./windows-notice-flow.cjs')({ app, windows, main, js, wait, find, invoke, item, profile, icon, BrowserWindow })
+    clearTimeout(timeout)
+    return
+  }
   const noticeWindow = () => BrowserWindow.getAllWindows().find((win) => win.webContents.getURL().includes('surface=notice'))
   assert.equal(noticeWindow(), undefined, 'no notice window until there is something to say')
   assert.ok(!icon.tooltip.includes('waiting'), 'and the tray says nothing waits')
@@ -184,6 +191,19 @@ async function run() {
   await js(box, "document.querySelectorAll('.pick-chip')[1].click()")
   await wait(() => js(box, "!!document.querySelector('.menu-overlay')"), 'the list of folders')
   await wait(async () => box.getBounds().height > oneLine && await js(box, "(()=>{const list=document.querySelector('.menu-overlay');return !!list&&list.getBoundingClientRect().bottom<=innerHeight&&list.scrollHeight<=list.clientHeight+1&&list.scrollWidth<=list.clientWidth+1})()"), 'the box to grow until all of its list shows, with its long folder paths')
+  const points = await js(box, `(() => {
+    const menu = document.querySelector('.menu-overlay').getBoundingClientRect()
+    const form = document.querySelector('.taskbox').getBoundingClientRect()
+    const row = document.querySelector('.menu-overlay button').getBoundingClientRect()
+    return {
+      hover: { x: Math.floor(row.x + row.width / 2), y: Math.floor(row.y + row.height / 2) },
+      outside: { x: menu.left > innerWidth - menu.right ? 2 : innerWidth - 3, y: Math.floor((form.bottom + menu.bottom) / 2) }
+    }
+  })()`)
+  box.webContents.sendInputEvent({ type: 'mouseMove', ...points.hover })
+  const alpha = async point => (await box.webContents.capturePage({ ...point, width: 1, height: 1 })).toBitmap()[3]
+  assert.equal(await alpha(points.hover), 255, 'the open folder list stays opaque')
+  assert.equal(await alpha(points.outside), 0, 'the window beside the open list stays transparent')
   await js(box, "document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))")
   await wait(async () => !(await js(box, "!!document.querySelector('.menu-overlay')")) && box.getBounds().height === oneLine, 'the box to be one line tall again')
   await js(box, "(() => { const area = document.querySelector('.taskbox textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(area, 'run frombox'); area.dispatchEvent(new Event('input', { bubbles: true })) })()")

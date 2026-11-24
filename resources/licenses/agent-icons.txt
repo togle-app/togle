@@ -1,12 +1,19 @@
-Agent marks (src/renderer/src/agent-marks.ts)
+Agent marks
 
-Togle shows a small mark beside a task to say which program it belongs to. The three marks are their makers' own and are shown
-only for that: Claude Code's belongs to Anthropic, Codex's to OpenAI and Hermes Agent's to Nous Research. They are not Togle's,
-and showing them says nothing about those companies backing Togle. If a maker asks for one to come out, it is one entry in
-agent-marks.ts.
+Togle uses these marks to identify the respective agents. Each mark belongs to its owner.
 
-The drawings were taken from the LobeHub icon set, @lobehub/icons-static-svg 1.104.0 (claudecode, codex and hermesagent),
-https://github.com/lobehub/lobe-icons, which is under this license:
+The SVG files in src/renderer/src/agent-icons come from the Agent Client Protocol registry.
+https://github.com/agentclientprotocol/registry/tree/de88559ce058f10f1af8297083f0207aba92466c
+
+Aider's application icon comes from the Aider project.
+https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/icons/favicon-32x32.png
+
+Both projects distribute this artwork under the Apache License, Version 2.0.
+See agent-icons-apache-2.0.txt for the license text.
+
+The Claude Code, Codex and Hermes Agent drawings in src/renderer/src/agent-marks.ts
+come from the LobeHub icon set, @lobehub/icons-static-svg 1.104.0 (claudecode, codex and hermesagent).
+https://github.com/lobehub/lobe-icons
 
 MIT License
 

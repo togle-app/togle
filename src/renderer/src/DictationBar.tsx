@@ -16,6 +16,7 @@ export function DictationBar() {
   const [copied, setCopied] = useState(false)
   const [copying, setCopying] = useState(false)
   const [actionError, setActionError] = useState('')
+  const [preview, setPreview] = useState<{ file: string; src: string | null } | null>(null)
   const [microphone, setMicrophone] = useState<DictationMicrophone>({ name: 'Microphone', muted: false })
   const [heardSound, setHeardSound] = useState(false)
   const heard = useRef(false)
@@ -29,7 +30,7 @@ export function DictationBar() {
   const peak = useRef(0)
   const nextFrame = useRef(0)
   const nextHover = useRef(0)
-  const shortcut = useHotkeys().find(item => item.id === 'dictate')
+  const shortcut = useHotkeys().find(item => item.id === (state.show && state.phase !== 'idle' ? 'show' : 'dictate'))
   const keys = shortcut?.ok ? shortcut.keys : ''
   const shortcutBlocked = !!shortcut?.keys && !shortcut.ok
   const current = useRef(state)
@@ -64,6 +65,14 @@ export function DictationBar() {
   }, [])
 
   useEffect(() => { setCopied(false); setCopying(false); setActionError('') }, [state.id, state.text, state.phase, state.message])
+  useEffect(() => {
+    const file = state.picture
+    setPreview(null)
+    if (!file) return
+    let live = true
+    void api.pastedPicture(file).catch(() => null).then(src => { if (live) setPreview({ file, src }) })
+    return () => { live = false }
+  }, [state.picture])
 
   useEffect(() => {
     if (state.phase === 'recording' && state.id && job.current !== state.id) {
@@ -116,12 +125,17 @@ export function DictationBar() {
   const busy = !idle && !recording && !recovery && state.phase !== 'done'
   const hasStatus = !idle && !recording
   const pasteKey = window.togle.platform === 'darwin' ? '⌘V' : 'Ctrl+V'
+  const held = !!state.picture && recovery
+  const onClipboard = recovery && state.outcome === 'copied'
+  const copyLabel = onClipboard ? 'Copy again' : held ? state.text ? 'Copy both' : 'Copy screenshot' : 'Copy text'
+  const resultName = held ? state.text ? 'Screenshot and text' : 'Screenshot' : 'Text'
+  const recoveryTitle = onClipboard ? resultName + ' copied' : held ? resultName + ' ready' : state.text ? 'Your text is ready' : 'Try dictation again'
+  const recoveryStage = actionError ? 'Copy failed' : onClipboard || copied ? `Copied · ${pasteKey}`
+    : held ? 'Screenshot ready' : state.text ? 'Copy text' : state.phase === 'ready' ? 'No speech' : 'Try again'
   // One word while it works ("Typing…"), not a flicker of six steps; the panel still says each step.
   const stage = state.phase === 'starting' ? 'Getting ready'
-    : busy ? 'Typing…'
-      : state.phase === 'done' ? state.outcome === 'copied' ? `Copied · ${pasteKey}` : 'Inserted'
-        : state.text ? actionError ? 'Copy failed' : copied ? `Copied · ${pasteKey}` : 'Copy text'
-          : state.phase === 'ready' ? 'No speech' : 'Try again'
+    : busy ? state.show ? 'Finishing…' : 'Typing…'
+      : state.phase === 'done' ? state.outcome === 'copied' ? `Copied · ${pasteKey}` : 'Inserted' : recoveryStage
   const muted = recording && micReady && microphone.muted
   const noSound = recording && micReady && !microphone.muted && quiet
   const micAttention = muted || noSound
@@ -141,24 +155,30 @@ export function DictationBar() {
   const title = idle ? shortcutBlocked ? `${shortcut?.keys ?? 'The shortcut'} is used by another app` : 'Ready to dictate'
     : recording ? !micReady ? 'Opening microphone…' : muted ? 'Your microphone is muted' : noSound ? 'No sound yet' : 'Listening'
       : state.phase === 'starting' ? 'Getting ready…' : state.phase === 'done' ? state.message || 'Text entered'
-        : recovery ? state.text ? 'Your text is ready' : 'Try dictation again' : state.message ?? 'Finishing…'
+        : recovery ? recoveryTitle : state.message ?? 'Finishing…'
+  const fold = (): void => { setExpanded(false); api.expandDictation(false, true) }
+  const dismiss = (): void => { fold(); void api.cancelDictation(state.id) }
+  const openSettings = (): void => { fold(); void api.openDictationSettings() }
   const copy = async (): Promise<void> => {
     if (copying) return
+    fold()
     const unchanged = (): boolean => current.current.id === state.id && current.current.text === state.text && current.current.phase === state.phase
     setActionError(''); setCopying(true)
-    try { await api.copyDictationText(); if (unchanged()) setCopied(true) }
-    catch { if (unchanged()) setActionError('Could not copy. Try again; your text is still here.') }
+    try { await api.copyDictationText(state.id); if (unchanged()) setCopied(true) }
+    catch { if (unchanged()) setActionError('Could not copy. Your result is still here.') }
     finally { if (unchanged()) setCopying(false) }
   }
-  const fold = (): void => { setExpanded(false); api.expandDictation(false, true) }
-  const cancel = <button className="dictation-icon" title={recording ? 'Cancel dictation (Esc)' : 'Collapse voice bar'} aria-label={recording ? 'Cancel dictation' : 'Collapse voice bar'} onClick={() => { fold(); if (recording) void api.cancelDictation() }}><Icon name="close" size={14} /></button>
-  const settings = <button className={`dictation-icon ${shortcutBlocked || micAttention ? 'needs-attention' : ''}`} title={shortcutBlocked ? `${shortcut!.keys} is in use. Choose another shortcut.` : micAttention ? 'Check microphone' : 'Dictation settings'} aria-label={shortcutBlocked ? 'Fix dictation shortcut' : micAttention ? 'Check microphone' : 'Dictation settings'} onClick={() => void api.openDictationSettings()}><Icon name="settings" size={14} /></button>
-  const handleLabel = idle ? 'Start dictation' : recording ? 'Stop dictation' : recovery ? state.text ? 'Copy dictated text' : 'Show dictation recovery' : state.phase === 'done' ? 'Dismiss dictation' : title
+  const closeLabel = recording ? 'Cancel dictation' : busy ? 'Collapse voice bar' : 'Close result'
+  const cancel = <button className="dictation-icon" title={closeLabel} aria-label={closeLabel} onClick={busy ? fold : dismiss}><Icon name="close" size={14} /></button>
+  const recoveryHandle = held ? 'Show captured screenshot' : onClipboard ? 'Show dictated text' : state.text ? 'Copy dictated text' : 'Show dictation recovery'
+  const handleLabel = state.waitingForPaste ? 'Show copied result' : idle ? 'Start dictation' : recording ? 'Stop dictation' : recovery ? recoveryHandle : state.phase === 'done' ? 'Dismiss dictation' : title
   const clickHandle = (): void => {
-    if (idle || recording) void api.toggleDictation()
+    if (state.waitingForPaste) api.expandDictation(true, true)
+    else if (idle || recording) { fold(); void api.toggleDictation() }
     // "Copy text" on the bar copies: opening a panel instead left people pasting whatever was on the clipboard.
-    else if (recovery) state.text ? void copy() : api.expandDictation(!expanded, true)
-    else if (state.phase === 'done') void api.cancelDictation()
+    else if (held || onClipboard || (recovery && !state.text)) api.expandDictation(!expanded, true)
+    else if (recovery) void copy()
+    else if (state.phase === 'done') dismiss()
   }
 
   return <main className="dictation-shell" aria-label="Togle dictation">
@@ -192,31 +212,32 @@ export function DictationBar() {
         {recovery ? <>
           <div className="dictation-top"><strong>{title}</strong>{cancel}</div>
           <p className="dictation-note">{state.message}</p>
-          {state.text && <div className="dictation-result" aria-label="Dictated text">{state.text}</div>}
+          {(state.text || held) && <div className={'dictation-result' + (held ? ' with-picture' : '')} aria-label={held ? 'Captured result' : 'Dictated text'}>
+            {held && (preview?.file === state.picture && preview?.src ? <img src={preview.src} alt="Captured screenshot" /> : <span>{preview?.file === state.picture ? 'Screenshot preview unavailable' : 'Screenshot'}</span>)}
+            {state.text && <span>{state.text}</span>}
+          </div>}
           <div className="dictation-actions">
-            {state.text ? <button className="primary" disabled={copying} onClick={() => void copy()}>{copying ? 'Copying…' : copied ? `Copied · ${pasteKey} to paste` : 'Copy text'}</button> : <button className="primary" onClick={() => void api.toggleDictation()}>Try again</button>}
-            <button className="ghost" onClick={() => { fold(); void api.cancelDictation() }}>Dismiss</button>
-            {settings}
+            {state.text || held ? <button className="primary" disabled={copying} onClick={() => void copy()}>{copying ? 'Copying…' : copyLabel}</button> : <button className="primary" onClick={() => { fold(); void api.toggleDictation() }}>Try again</button>}
+            <button className="ghost" onClick={dismiss}>Dismiss</button>
           </div>
           {actionError && <p className="dictation-action-error" role="alert">{actionError}</p>}
         </> : <>
           <div className="dictation-top">
             {/* The way out stays in view: with long keys the sentence is shortened, never the link after it. */}
-            {idle ? <span className={`dictation-prompt ${shortcutBlocked ? 'has-link' : ''}`}>{shortcutBlocked ? <><span className="dictation-cut" title={title}>{shortcut?.keys ?? 'The shortcut'} is taken.</span> <button className="link" onClick={() => void api.openDictationSettings()}>Change key</button></> : keys ? <>{hold ? 'Hold' : 'Press'} <kbd>{keys}</kbd>{keys.length <= 12 ? ' to speak' : ''}</> : 'Click to speak'}</span>
+            {idle ? <span className={`dictation-prompt ${shortcutBlocked ? 'has-link' : ''}`}>{shortcutBlocked ? <><span className="dictation-cut" title={title}>{shortcut?.keys ?? 'The shortcut'} is taken.</span> <button className="link" onClick={openSettings}>Change key</button></> : keys ? <>{hold ? 'Hold' : 'Press'} <kbd>{keys}</kbd>{keys.length <= 12 ? ' to speak' : ''}</> : 'Click to speak'}</span>
               : <><strong title={recording ? state.destination ? `Into ${state.destination} · ${microphone.name}` : microphone.name : state.message}>{title}</strong>
                 {recording && keys && !micAttention && <span className="dictation-shortcut">{state.hold ? 'Release' : 'Press'} <kbd>{keys}</kbd></span>}</>}
-            {/* At rest there's no close button: the panel folds when the pointer leaves, and Settings can hide the bar. */}
-            {idle ? settings : <>{micAttention && settings}{cancel}</>}
+            {!idle && cancel}
           </div>
           {muted && <p className="dictation-call-note">Unmute it on your headset or in your computer’s sound settings.</p>}
-          {noSound && <p className="dictation-call-note">Listening to {microphone.name || 'your microphone'}. <button className="link" onClick={() => void api.openDictationSettings()}>Change microphone</button></p>}
+          {noSound && <p className="dictation-call-note">Listening to {microphone.name || 'your microphone'}. <button className="link" onClick={openSettings}>Change microphone</button></p>}
           {/* Muted or silent, the call doesn't hear you either: the microphone's line says what to do instead. */}
           {recording && state.inCall && !micAttention && <p className="dictation-call-note">Your call can hear you too.</p>}
         </>}
       </div>
       <button className={`dictation-handle ${hasStatus || alert ? 'has-status' : ''} ${alert ? 'has-alert' : ''} ${callHears ? 'has-label' : ''}`} aria-label={alert ? `${alert}. ${handleLabel}` : handleLabel} title="Drag to move the voice bar" onClick={clickHandle}>
         {hasStatus ? <>
-          {busy ? <span className="dictation-spinner" aria-hidden="true" /> : state.phase === 'done' ? <Icon name="check" size={12} /> : <span className="dictation-attention-dot" aria-hidden="true" />}
+          {busy ? <span className="dictation-spinner" aria-hidden="true" /> : state.phase === 'done' || onClipboard ? <Icon name="check" size={12} /> : <span className="dictation-attention-dot" aria-hidden="true" />}
           <span className="dictation-stage" aria-hidden="true">{stage}</span>
         </> : alert ? <>
           <span className="dictation-attention-dot" aria-hidden="true" />

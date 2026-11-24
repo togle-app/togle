@@ -2,4 +2,4 @@
 *.sh text eol=lf
 resources/bin/togle text eol=lf
 resources/bin/togle.cmd text eol=crlf
-*.sh text eol=lf
+bin/togle.cjs text eol=lf

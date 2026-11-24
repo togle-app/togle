@@ -5,13 +5,15 @@
 //   node scripts/release-key.mjs keygen <folder>            togle-release.key (keep it offline) and togle-release.pub
 //   node scripts/release-key.mjs sign <key> <file>...       writes <file>.sig beside each file
 //   node scripts/release-key.mjs verify <pub> <file>        checks <file>.sig
-//   node scripts/release-key.mjs installers <pub> <folder>  install.ps1 and install.sh with the key written in
-// Copy the .pub file to build/release-key.pub before packaging: the app carries it to check its updates.
+//   node scripts/release-key.mjs installers <pub> <folder> [tag]  install.ps1 and install.sh for a tag or the latest stable release
+// Put the public key in src/main/release-key.ts before packaging so the app can check its updates.
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
+const scriptPath = fileURLToPath(import.meta.url)
+const here = path.dirname(scriptPath)
 
 export function generate() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 3072, publicExponent: 0x10001 })
@@ -31,18 +33,27 @@ export function rsaParameters(pub) {
   return { modulus: b64(jwk.n), exponent: b64(jwk.e) }
 }
 
-/** The two install scripts with the public key written in. */
-export function installers(pub) {
-  const { modulus, exponent } = rsaParameters(pub)
+/** With a tag, the scripts fetch exactly that release, including a public prerelease. */
+export function installers(pub, tag) {
+  if (/-----BEGIN [^-\r\n]*PRIVATE KEY-----/.test(pub)) {
+    throw new Error('Use the public release key (togle-release.pub) to generate the install scripts.')
+  }
+  const publicPem = crypto.createPublicKey(pub).export({ type: 'spki', format: 'pem' })
+  const { modulus, exponent } = rsaParameters(publicPem)
+  if (tag !== undefined && !tag.trim()) throw new Error('The release tag must have a name.')
+  // The tag occupies one URL path segment inside a quoted shell string.
+  const target = tag === undefined ? 'latest' : 'tags/' + encodeURIComponent(tag).replace(/'/g, '%27')
   const ps1 = fs.readFileSync(path.join(here, '..', 'install', 'install.ps1'), 'utf8')
     .replace('__TOGLE_RELEASE_MODULUS__', modulus).replace('__TOGLE_RELEASE_EXPONENT__', exponent)
+    .replace('__TOGLE_RELEASE_TARGET__', target)
   // A shell script must end its lines with LF alone, even when this runs on a Windows checkout.
   const sh = fs.readFileSync(path.join(here, '..', 'install', 'install.sh'), 'utf8').replace(/\r\n/g, '\n')
-    .replace('__TOGLE_RELEASE_PUBLIC_KEY__', pub.trim())
+    .replace('__TOGLE_RELEASE_PUBLIC_KEY__', publicPem.trim())
+    .replace('__TOGLE_RELEASE_TARGET__', target)
   return { ps1, sh }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))) {
+if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
   const [command, ...rest] = process.argv.slice(2)
   if (command === 'keygen') {
     const folder = path.resolve(rest[0] ?? '.')
@@ -61,7 +72,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(im
     console.log(ok ? 'good signature' : 'BAD SIGNATURE')
     process.exitCode = ok ? 0 : 1
   } else if (command === 'installers') {
-    const { ps1, sh } = installers(fs.readFileSync(rest[0], 'utf8'))
+    if (rest.length < 2 || rest.length > 3) throw new Error('Usage: node scripts/release-key.mjs installers <pub> <folder> [tag]')
+    const { ps1, sh } = installers(fs.readFileSync(rest[0], 'utf8'), rest[2])
     fs.mkdirSync(rest[1], { recursive: true })
     fs.writeFileSync(path.join(rest[1], 'install.ps1'), ps1)
     fs.writeFileSync(path.join(rest[1], 'install.sh'), sh, { mode: 0o755 })

@@ -102,6 +102,13 @@ test('a reply to a screen nobody looks at waits for it to be drawn, is typed as 
     assert.ok(Date.now() - began >= 250, 'and had been quiet for a while')
     await task.submit('two\nlines\twith a tab')
     await until(() => plain(task.read().text).includes('heard: two lines with a tab'), 'the reply to be heard as one line, with Enter')
+    const files = ['C:\\test files\\togle-release.pub', '/tmp/notes.log']
+    const message = T.withFilePaths('Review these', files)
+    await task.submit(message)
+    const recorded = () => /heard: (Review these[^\r\n]*)/.exec(plain(task.read().text))?.[1] ?? ''
+    await until(() => T.splitPictures(recorded()).files.length === 2, 'both attachments in the terminal reply')
+    assert.deepEqual(T.splitPictures(recorded()), { words: 'Review these', files })
+    assert.equal(T.messageKey(recorded()), T.messageKey(message))
     // A quote and its reply, as Chat sends them (src/shared/quote.ts): typed as one line, heard whole, and read back by Chat.
     await task.submit(T.withQuote('Two plans\nit is.', 'Make it\ncheaper.'))
     await until(() => plain(task.read().text).includes('heard: Replying to “Two plans it is.”: Make it cheaper.'), 'the quote and its reply to be heard as one line')

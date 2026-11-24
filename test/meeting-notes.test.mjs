@@ -6,11 +6,28 @@ process.env.TOGLE_TEST_USER_DATA = path.join(import.meta.dirname, '.work', 'meet
 // Empty: Windows reuses process ids, and an earlier run's folder would still hold its calls.
 rmSync(process.env.TOGLE_TEST_USER_DATA, { recursive: true, force: true })
 mkdirSync(process.env.TOGLE_TEST_USER_DATA, { recursive: true })
-const { CallSessions, MeetingNotes, meetingNoteChunks, exportCall, sessionSummary } = await import('./.build/togle.mjs')
+const { CallSessions, MeetingNotes, meetingNoteChunks, meetingBackgroundProvider, exportCall, sessionSummary } = await import('./.build/togle.mjs')
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes }); return { promise, resolve } }
 let sequence = 0
 const info = id => ({ id, agentId: 'work', agentName: 'Team', accountId: 'claude-work', startedAt: 1000, endedAt: 100000, status: 'ended' })
 const state = () => ({ transcript: [{ id: 'denis', speaker: 'them', text: 'I will send the incident report by Friday.', at: 240000, end: 245000, voiceName: 'Denis', voiceNamedBy: 'user' }], frames: [], notes: '', notesUntil: 0, answeredUntil: 0, callAnswers: [], brief: 'Engineering sync', group: true })
+test('confirming or correcting a saved microphone name works offline and changes only that speaker', async () => {
+  const sessions = new CallSessions(), id = 'archived-microphone'
+  const mic = { id: 'mine', speaker: 'me', voiceName: 'Luka', voiceNamedBy: 'suggested', text: 'I will review it.', at: 2000, end: 3000 }
+  const other = { ...mic, id: 'other', voiceId: 'voice:2', speaker: 'them', at: 4000, end: 5000 }
+  await sessions.capture(info(id), 'frames', { ...state(), transcript: [mic, { ...mic, voiceId: 'me', id: 'also-mine' }, other] })
+  await sessions.update(id, record => ({ ...record, summary: 'My edited notes.', minutes: { state: 'ready', edited: true, template: 'concise', revision: 'mine' } }))
+  const evidence = meetingNoteChunks(await sessions.get(id)).join('')
+  assert.match(evidence, /You: I will review it/)
+  assert.match(evidence, /Luka\? \(name tentative\): I will review it/)
+  const confirmed = await sessions.renameSpeaker(id, 'me', 'Luka')
+  assert.ok(confirmed.transcript.slice(0, 2).every(line => line.voiceId === 'me' && line.voiceNamedBy === 'user'))
+  await sessions.renameSpeaker(id, 'me', 'Luca')
+  const reopened = await new CallSessions().get(id)
+  assert.deepEqual(reopened.transcript.map(line => [line.voiceName, line.voiceNamedBy]), [['Luca', 'user'], ['Luca', 'user'], ['Luka', 'suggested']])
+  assert.deepEqual(reopened.summary, 'My edited notes.')
+  await assert.rejects(sessions.renameSpeaker(id, 'missing-voice', 'X'), /no longer in this call/)
+})
 async function fixture(complete = async () => '## Action items\n- Denis: send the incident report by Friday. [3:59]') {
   const sessions = new CallSessions(), id = 'notes-' + ++sequence, input = []
   await sessions.capture(info(id), 'frames', state())
@@ -86,6 +103,54 @@ test('provider failures are saved visibly and can be retried without losing prio
   await f.notes.generate(f.id, undefined, undefined, true); assert.equal(f.input.length, 1, 'automatic retries cannot burn allowance on the same failed input')
   fail = false; const result = await f.notes.generate(f.id, 'concise', failed.minutes.revision)
   assert.equal(result.summary, 'Retry notes.')
+})
+
+test('confirmed names survive an unavailable archived account, and only an explicit choice sends notes to a replacement', async () => {
+  const f = await fixture()
+  const transcript = [
+    { ...state().transcript[0], speaker: 'me', voiceId: 'me', voiceName: 'Luka', voiceNamedBy: 'suggested' },
+    { ...state().transcript[0], id: 'remote', voiceId: 'voice:1', voiceName: 'Angell', voiceNamedBy: 'suggested' }
+  ]
+  await f.sessions.capture(info(f.id), 'frames', { ...state(), transcript })
+  await f.sessions.update(f.id, record => ({ ...record, summary: 'Previous notes with unconfirmed speakers.' }))
+  await f.sessions.renameSpeaker(f.id, 'me', 'Luka')
+  await f.sessions.renameSpeaker(f.id, 'voice:1', 'Angell')
+  const sources = [], requests = []
+  const pin = id => {
+    sources.push(id)
+    if (id !== 'chatgpt-default') throw Error('This subscription account is unavailable. Choose an account in the agent’s settings.')
+    return { id: 'chatgpt', stream: async (input, handlers) => { requests.push(JSON.parse(input.user)); handlers.onFinal('Updated notes.') } }
+  }
+  const notes = new MeetingNotes(f.sessions, (record, chosen) => meetingBackgroundProvider(record, chosen, pin, () => assert.fail('Unexpected fallback')))
+  await assert.rejects(notes.generate(f.id, undefined, undefined, true), /account saved for these meeting notes/)
+  const failed = await f.sessions.get(f.id)
+  assert.equal(failed.summary, 'Previous notes with unconfirmed speakers.')
+  assert.ok(failed.transcript.every(line => line.voiceNamedBy === 'user'))
+  assert.deepEqual(sources, ['claude-work']); assert.deepEqual(requests, [])
+  await assert.rejects(notes.generate(f.id, 'concise', 'old-revision', false, 'chatgpt-default'), /changed/)
+  const ready = await notes.generate(f.id, 'concise', failed.minutes.revision, false, 'chatgpt-default')
+  assert.equal(ready.accountId, 'claude-work'); assert.equal(ready.minutes.sourceId, 'chatgpt-default')
+  assert.equal(ready.minutes.state, 'ready'); assert.equal(ready.minutes.error, undefined)
+  assert.equal(ready.minutes.by, 'chatgpt'); assert.equal(ready.summary, 'Updated notes.')
+  assert.deepEqual(requests[0].confirmed_speakers, [{ name: 'Luka', microphone: true }, { name: 'Angell', microphone: false }])
+  await f.sessions.renameSpeaker(f.id, 'voice:1', 'Angel')
+  const reopened = new MeetingNotes(new CallSessions(), (record, chosen) => meetingBackgroundProvider(record, chosen, pin, () => assert.fail('Unexpected fallback')))
+  await reopened.generate(f.id, undefined, undefined, true)
+  assert.deepEqual(sources, ['claude-work', 'chatgpt-default', 'chatgpt-default'])
+  assert.ok(requests[1].confirmed_speakers.some(person => person.name === 'Angel'))
+})
+
+test('a missing agent account on an unused job cannot block the saved background account or change its model', async () => {
+  const task = { sourceId: 'retired', model: 'unused-model', effort: 'low' }
+  const requests = [], pins = []
+  const call = { accountId: 'retired', ai: { tasks: { quick: task, deep: task, vision: task, background: { ...task, sourceId: 'connection:work', model: 'notes-model' } } } }
+  const provider = meetingBackgroundProvider(call, undefined, id => {
+    pins.push(id); assert.equal(id, 'connection:work')
+    return { id: 'compat', stream: async input => requests.push(input) }
+  }, () => assert.fail('Unexpected fallback'))
+  await provider.stream({ lane: 'background' }, {})
+  assert.deepEqual(pins, ['connection:work']); assert.equal(provider.id, 'compat')
+  assert.equal(requests[0].model, 'notes-model'); assert.equal(requests[0].fixedModel, true)
 })
 
 test('long calls include every line, use bounded chunks, and keep the provider pinned for the merge', async () => {

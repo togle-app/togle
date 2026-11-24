@@ -3,7 +3,6 @@ import type { SegmentKind, Speaker } from '@shared/types'
 import type { OngoingCall } from './ongoing-call'
 import type { HeardTiming } from './perf'
 import type { LocalParakeet, ParakeetResult } from './stt/parakeet'
-import type { SpeechApi } from './stt/speech-api'
 import { SAMPLE_RATE, type LocalWhisper } from './stt/whisper'
 
 // Below this mean token confidence Parakeet was guessing (very poor pronunciation, noise): Whisper, with its
@@ -70,11 +69,6 @@ export interface Ears {
    * languages worse than Parakeet; with automatic detection it still takes what Parakeet is unsure of.
    */
   whisperChecks?: () => boolean
-  /**
-   * The API picked to hear a side (OpenAI's, or another server's), once it has what it needs: it writes that side's
-   * transcript in place of this PC's models. Live captions stay on this PC, where they're quick and cost nothing.
-   */
-  api?: (speaker: Speaker) => Pick<SpeechApi, 'id' | 'transcribe'> | null
   /** The call's language setting. */
   language: () => string
   /** Words the active agent expects, which help Whisper. */
@@ -104,9 +98,9 @@ interface Heard {
  */
 export function hearing(ears: Ears): Hearing {
   /**
-   * Text for a clip: a finished utterance from the API picked for its side, when there is one; otherwise Parakeet first,
-   * Whisper when Parakeet is unsure, missing, doesn't hear the call's language, or (except for live captions) the line
-   * is noisy, as long as Whisper is installed. Null means a newer live caption replaced this one.
+   * Text for a clip, heard on this PC and nowhere else (the sound of a call never leaves it): Parakeet first, Whisper
+   * when Parakeet is unsure, missing, doesn't hear the call's language, or (except for live captions) the line is
+   * noisy, as long as Whisper is installed. Null means a newer live caption replaced this one.
    */
   async function recognize(speaker: Speaker, pcm: Float32Array, partial: boolean): Promise<Heard | null> {
     const language = ears.language()
@@ -114,15 +108,6 @@ export function hearing(ears: Ears): Hearing {
     const whisperReady = ears.whisperReady?.() ?? true
     const checks = whisperReady && (ears.whisperChecks?.() ?? true)
     const recheck = checks || (whisperReady && speechLanguageCode(language) === 'auto')
-    const api = partial ? null : ears.api?.(speaker)
-    if (api) {
-      try {
-        return { text: await api.transcribe(pcm, { language, vocabulary: await ears.vocabulary() }), by: api.id, noisy }
-      } catch (err) {
-        // This PC hears it instead, so the line isn't lost; the window says why.
-        console.warn(`[stt] ${api.id}:`, (err as Error).message)
-      }
-    }
     const byWhisper = async (): Promise<Heard> => ({
       text: (await ears.whisper.transcribe(pcm, { language, prompt: await ears.vocabulary(), partial, stream: speaker })).text,
       by: 'whisper',

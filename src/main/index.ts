@@ -1,17 +1,21 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeTheme, net, Notification, screen, session, shell, systemPreferences } from 'electron'
 import { ApiConnections } from './auth/api-connections'
 import { effectiveAI, effectiveSettings, validateAIProfile } from '@shared/preferences'
-import { routedProvider } from './providers/routed'
+import { meetingBackgroundProvider, routedProvider } from './providers/routed'
 import type { AIProfile, KeysOffer } from '@shared/types'
 import { Dictation } from './dictation'
+import { DictationPaste } from './dictation-paste'
+import { copyShowResult } from './desktop-typing'
 import { codeEditorOf, frontEditor } from './front-program'
 import { DictationSpeech, type DictationEngine } from './dictation-speech'
 import { DictationHistoryStore, type DictationHistoryTicket } from './dictation-history'
 import { DictationVocabularyStore } from './dictation-vocabulary'
 import { correctSpeech, speechLesson, speechWords, withSpeechWord } from '@shared/speech-words'
-import type { DictationVocabularyEdit } from '@shared/dictation'
+import type { DictationTarget, DictationVocabularyEdit } from '@shared/dictation'
 import { DictationTargetBridge } from './dictation-target'
-import { appUserModelId } from './app-id'
+import { APP_ID, appUserModelId, TOAST_ACTIVATOR } from './app-id'
+import { WindowsNotices } from './windows-notices'
+import { devNotificationArgument } from './windows-dev-notifications'
 import { applyTheme, themeColors } from './theme'
 import { Updates } from './updates'
 import { RELEASE_KEY } from './release-key'
@@ -20,7 +24,7 @@ import { ShowWindow } from './show-window'
 import { DictationWindow } from './dictation-window'
 import { MicrophoneLink } from './microphone-link'
 import { installedStudio } from './studio-install'
-import type { CloseWarning } from '@shared/close-warning'
+import { quitQuestion, type CloseWarning } from '@shared/close-warning'
 import { startChannel } from './channel/register'
 import type { ChannelServer } from './channel/server'
 import { NoticeWindow } from './notice-window'
@@ -30,7 +34,8 @@ import { CallStripWindow } from './call-strip-window'
 import { isCallStripAction } from '@shared/call-strip'
 import { tellOthersLine } from '@shared/meeting'
 import { appRunning, CallDetector, readMicrophoneUse, readWindowTitles } from './call-detect'
-import { callAppName, isCallApp, isCallAppMode, type CallApp } from '@shared/call-apps'
+import { DesktopMeetings, DesktopMeetingReader } from './desktop-meetings'
+import { callAppName, isCallApp, type CallApp } from '@shared/call-apps'
 import { Attention } from './runners/attention'
 import type { RunnerHub } from './runners/hub'
 import type { Backend } from './runners/types'
@@ -55,7 +60,7 @@ import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import koffi from 'koffi'
-import type { SettingsPatch } from '@shared/api'
+import type { NoticeDestination, SettingsPatch } from '@shared/api'
 import {
   type CallSession,
   type CallSessionInfo,
@@ -81,7 +86,7 @@ import { confirmVoices, namesToConfirm, pruneConfirm, type CallConfirm } from '@
 import { myTodoItems, type CallOffer, type TodoOffer } from '@shared/call-todo'
 import { FIRST_NAMES } from './names'
 import { CallTitles } from './call-titles'
-import { externalUrl } from '@shared/links'
+import { externalUrl, localFilePath } from '@shared/links'
 import { MeetingNotes } from './meeting-notes'
 import type { MeetingNoteTemplate } from '@shared/types'
 import { CaptureProtection } from './capture-protection'
@@ -95,15 +100,19 @@ import { CompatProvider } from './providers/compat'
 import type { LLMProvider, Usage } from './providers/types'
 import { VoiceTracker, VOICE_MODEL } from './stt/voices'
 import { VoiceMemory } from './stt/voice-memory'
-import { getSettings, loadSettings, savedBeforeSpeechChoice, updateSettings, voiceAccountsMigrated, voiceAccountsToMigrate } from './settings'
+import { getSettings, loadSettings, updateSettings, voiceAccountsMigrated, voiceAccountsToMigrate } from './settings'
 import { migrateVoicePreferences, parakeetHears, speechLanguageCode, speechLanguageName } from '@shared/speech'
 import { modelNameOf } from './stt/catalog'
 import { LocalParakeet } from './stt/parakeet'
 import { SpeechInstaller, speechHome } from './stt/install'
-import { hearingStatus, OPENAI_MODEL, OPENAI_URL, SpeechApi } from './stt/speech-api'
 import { LocalWhisper } from './stt/whisper'
 import { keepPlace, lastPlace } from './window-place'
 import { prunePastedPictures, readPastedPicture, savePastedPicture } from './pasted-pictures'
+
+// A desktop session can outlive the console or pipe that launched it.
+for (const output of [process.stdout, process.stderr]) {
+  output?.on('error', (error: NodeJS.ErrnoException) => { if (error.code !== 'EPIPE') throw error })
+}
 
 const auth = new ChatGPTAuth()
 const chatgpt = new ChatGPTProvider(auth)
@@ -168,19 +177,6 @@ function stopLocalSpeech(): void {
   parakeet?.stop()
   parakeet = null
 }
-// What can hear a side of the call in place of this PC's models (Settings → Speech recognition): OpenAI's speech API, and any
-// server that speaks it.
-const speechApis: Record<'openai' | 'server', SpeechApi> = {
-  openai: new SpeechApi('openai', 'openai-speech-key.bin', () => ({
-    baseUrl: OPENAI_URL,
-    model: getSettings().transcription.openaiModel.trim() || OPENAI_MODEL
-  })),
-  server: new SpeechApi('server', 'speech-server-key.bin', () => ({
-    baseUrl: getSettings().transcription.serverUrl,
-    model: getSettings().transcription.serverModel
-  })),
-}
-const remoteSpeech = new Map<string, SpeechApi>()
 function speechSettings(agentId?: string) {
   const current = (!agentId || agentId === currentSession?.agentId) ? currentSession : undefined
   if (current?.speechSettings) return current.speechSettings
@@ -190,19 +186,6 @@ function speechSettings(agentId?: string) {
 function callLanguage(agentId?: string): string {
   return (!agentId || agentId === currentSession?.agentId) && currentSession?.speechLanguage || speechSettings(agentId).language
 }
-/** The API picked to hear a side; null when this PC's models hear it. */
-const speechApiFor = (speaker: Speaker, agentId?: string): SpeechApi | null => {
-  const settings = speechSettings(agentId), source = settings[speaker]
-  // Sign in with ChatGPT does not include transcription: a plan's calls are heard by this PC.
-  if (source === 'local' || source === 'chatgpt') return null
-  const target = source === 'openai' ? { baseUrl: OPENAI_URL, model: settings.openaiModel || OPENAI_MODEL } : { baseUrl: settings.serverUrl, model: settings.serverModel }
-  const call = !agentId || agentId === currentSession?.agentId ? currentSession?.id : undefined
-  const key = JSON.stringify([source, target, call || 'defaults'])
-  let api = remoteSpeech.get(key)
-  if (!api) { api = speechApis[source].pinned(target); api.onChange = () => send('stt:status', sttStatus()); remoteSpeech.set(key, api) }
-  return api
-}
-
 /**
  * This PC's speech recognition, by the models' names and where they run: Parakeet when it's running, with Whisper
  * behind it where that's installed (on a CPU, only for languages Parakeet doesn't hear).
@@ -219,9 +202,9 @@ function localSttStatus(): SttStatus {
   return { state: 'ready', detail: `Parakeet${behind} · ${where}` }
 }
 
-/** Transcription status for the window: this PC's, and the API picked for a side, if one is. */
+/** Transcription status for the window: this PC's speech recognition, which hears every call, and the call's language. */
 function sttStatus(agentId?: string): SttStatus {
-  return { ...hearingStatus(localSttStatus(), { me: speechApiFor('me', agentId), them: speechApiFor('them', agentId) }), transcriptionLanguage: callLanguage(agentId), callId: !agentId || agentId === currentSession?.agentId ? currentSession?.id : undefined }
+  return { ...localSttStatus(), transcriptionLanguage: callLanguage(agentId), callId: !agentId || agentId === currentSession?.agentId ? currentSession?.id : undefined }
 }
 
 let win: BrowserWindow | null = null
@@ -244,6 +227,34 @@ const callNotice = new CallNoticeWindow()
 // Once, ever: one of Togle's keys was pressed in a code editor that uses it too. Change keys, or keep them.
 const keysNotice = new CornerNoticeWindow<KeysOffer>(__dirname, { surface: 'keysnotice', title: 'Togle keys', slot: 1 })
 const callStrip = new CallStripWindow()
+let noticeReceiverReady = false
+let pendingDestination: NoticeDestination | undefined
+let pendingCallOffer: CallApp | undefined
+function openNoticeDestination(destination: NoticeDestination): void {
+  pendingDestination = destination
+  if (!noticeReceiverReady || !win || win.isDestroyed()) return
+  pendingDestination = undefined
+  if ('page' in destination && destination.page === 'studio') { void microphoneLink.show().catch(() => openWindow()); return }
+  openWindow()
+  send('notices:open', destination)
+}
+function requestDetectedCall(id: CallApp): void {
+  const room = desktopMeetings.app === id ? desktopMeetings.id : undefined
+  if (!room && process.platform === 'win32') return
+  if (!noticeReceiverReady) { pendingCallOffer = id; return }
+  pendingCallOffer = undefined
+  openWindow()
+  if (room) send('meeting:detected', room)
+  else send('hotkey', 'start-call-unseen')
+}
+function startOfferedCall(id: CallApp): void {
+  if (quitting || ongoing.isListening || !getSettings().meetings.notice || getSettings().meetings.apps[id] === 'never') return
+  requestDetectedCall(id)
+}
+const sourceNotifications = process.platform === 'win32' && !app.isPackaged && process.env.TOGLE_HEADLESS !== '1'
+const windowsNotices = process.platform === 'win32' ? new WindowsNotices(openNoticeDestination, startOfferedCall, sourceNotifications) : undefined
+let pendingDevActivation = sourceNotifications ? devNotificationArgument(process.argv) : undefined
+let noticesStarted = false
 /** While a call is written down and Togle's window is closed, a small strip keeps the call's controls in reach. */
 function refreshCallStrip(): void {
   const closed = !win || win.isDestroyed() || !win.isVisible() || win.isMinimized()
@@ -253,13 +264,11 @@ function refreshCallStrip(): void {
     callStrip.show({ since, told: !!state.toldOthers, marks: state.marks?.length ?? 0 })
   } else callStrip.show(null)
 }
-/** A call started in another app: written down at once, offered in the corner, or left, as the person chose for that app. */
+/** A detected call can offer notes. The user confirms everyone agreed before transcription starts. */
 function callAppStarted(appId: CallApp): void {
-  const choice = getSettings().meetings.apps[appId]
-  const mode = isCallAppMode(choice) ? choice : 'ask'
-  if (mode === 'never' || ongoing.isListening) return
-  if (mode === 'always') send('hotkey', 'start-call-unseen')
-  else callNotice.show({ app: appId, name: callAppName(appId) }, 60_000)
+  if (getSettings().meetings.apps[appId] === 'never' || ongoing.isListening) return
+  if (windowsNotices) windowsNotices.offerCall(appId)
+  else if (callNotice.shown?.app !== appId) callNotice.show({ app: appId, name: callAppName(appId) }, 60_000)
 }
 // A Mac tells the titles of other apps' windows only once screen recording is allowed, which the computer's sound for
 // writing down a call asks for; before that, a call in a browser is not noticed there, and Write down now starts it.
@@ -274,13 +283,36 @@ async function macWindowTitles(): Promise<string[]> {
 }
 // Looked for every few seconds while no call is being written down: which program uses the microphone, as Windows,
 // Linux (PulseAudio, PipeWire) or a Mac (Core Audio, from macOS 14.2) tells it.
+const endCallOffer = (id: CallApp): void => {
+  if (pendingCallOffer === id) pendingCallOffer = undefined
+  windowsNotices?.endCall(id)
+  if (callNotice.shown?.app === id) callNotice.show(null)
+}
+let pauseMeetingSpeech: ((paused: boolean) => void) | undefined
+let nextDetectedCall: CallApp | undefined
+const desktopMeetings = new DesktopMeetings((_id, provider) => {
+  if (!getSettings().meetings.notice) return
+  if (desktopMeetings.capture?.ended) nextDetectedCall = provider
+  else callAppStarted(provider)
+}, (provider, id) => {
+  nextDetectedCall = undefined
+  endCallOffer(provider)
+  send('meeting:departed', id)
+}, state => {
+  pauseMeetingSpeech?.(state.ended || state.mic !== 'open')
+  send('meeting:capture', state)
+})
+const desktopMeetingReader = ['win32', 'linux', 'darwin'].includes(process.platform) ? new DesktopMeetingReader(
+  path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'), 'meeting-windows.ps1'),
+  desktopMeetings, () => !quitting && (getSettings().meetings.notice || desktopMeetings.needsReader) && (app.isPackaged || process.env.TOGLE_HEADLESS !== '1' && process.env.TOGLE_CALL_DETECT !== '0')
+) : undefined
 const callDetector = new CallDetector({
   read: readMicrophoneUse,
   running: appRunning,
   titles: process.platform === 'darwin' ? () => macWindowTitles() : readWindowTitles,
-  active: () => (process.platform === 'win32' || process.platform === 'linux' || process.platform === 'darwin') && !quitting && !ongoing.isListening && getSettings().meetings.notice && (app.isPackaged || process.env.TOGLE_CALL_DETECT !== '0'),
-  onStart: callAppStarted,
-  onEnd: (appId) => { if (callNotice.shown?.app === appId) callNotice.show(null) }
+  active: () => process.platform !== 'win32' && !!desktopMeetingReader && !desktopMeetings.id && !quitting && !ongoing.isListening && getSettings().meetings.notice && (app.isPackaged || process.env.TOGLE_HEADLESS !== '1' && process.env.TOGLE_CALL_DETECT !== '0'),
+  onStart: id => { if (!desktopMeetings.id) callAppStarted(id) },
+  onEnd: id => { if (desktopMeetings.app !== id) endCallOffer(id) }
 })
 // The small notice in a corner of the screen, and what it tells: a task waits for the person, or one finished.
 const noticeWindow = new NoticeWindow()
@@ -305,7 +337,8 @@ function configuredAI(agentId?: string): AIProfile | undefined {
   const agent = agentId ? agents.get(agentId) : undefined
   return agent?.preferences?.ai || getSettings().ai ? effectiveAI(getSettings(), agent, sourceProvider) : undefined
 }
-function routedAI(profile: AIProfile): LLMProvider { return routedProvider(profile, id => isApiSource(id) ? apiConnections.pinned(id) : accounts.pinned(id)) }
+const pinSource = (id: string): LLMProvider => isApiSource(id) ? apiConnections.pinned(id) : accounts.pinned(id)
+function routedAI(profile: AIProfile): LLMProvider { return routedProvider(profile, pinSource) }
 function validateProfile(profile: AIProfile): void { for (const task of Object.values(validateAIProfile(profile).tasks)) sourceProvider(task.sourceId) }
 let dictationAgentId: string | undefined
 function voiceSettings() {
@@ -449,13 +482,16 @@ let microphoneNoticeShown = false
 microphoneLink.on('changed', status => {
   send('microphone:changed', status)
   // Togle turned it on for this call and it stopped: the call may be silent.
-  if (status.forCall && status.state?.phase === 'error' && !microphoneNoticeShown && !quitting && !win?.isVisible() && Notification.isSupported()) {
+  if (status.forCall && status.state?.phase === 'error' && !microphoneNoticeShown && !quitting && !mainWindowActive()) {
     microphoneNoticeShown = true
-    const notice = new Notification({ title: 'Togle Studio stopped', body: 'Your call may be silent. Open Togle Studio to reconnect, or choose your microphone in the call app.' })
-    notice.on('click', () => void microphoneLink.show().catch(() => openWindow()))
-    notice.show()
+    if (windowsNotices) windowsNotices.showStatus('studio')
+    else if (Notification.isSupported()) {
+      const notice = new Notification({ title: 'Togle Studio stopped', body: 'Your call may be silent. Open Togle Studio to reconnect, or choose your microphone in the call app.' })
+      notice.on('click', () => void microphoneLink.show().catch(() => openWindow()))
+      notice.show()
+    }
   }
-  if (status.state?.phase !== 'error') microphoneNoticeShown = false
+  if (status.state?.phase !== 'error') { microphoneNoticeShown = false; windowsNotices?.closeStatus('studio') }
 })
 const dictation = new Dictation({
   target: dictationTarget, speech: createDictationSpeech,
@@ -463,8 +499,14 @@ const dictation = new Dictation({
   microphone: () => voiceSettings().dictation.microphoneId,
   completed: (receipt, speech) => { void dictationHistoryRuns.get(speech)?.then(ticket => dictationHistory.record(ticket, receipt)).catch(error => console.warn('[dictation history]', (error as Error).message)) },
   // A window that runs as administrator takes no typing from Togle: the words go on the clipboard for the person to paste.
-  copy: text => { if (!app.isPackaged && process.env.TOGLE_TEST_CLIPBOARD) testClipboard = text; else clipboard.writeText(text) },
-  changed: state => { send('dictation:state', state); dictationWindow.update(state); dictationEscape(); refreshTray() }
+  copy: copyVoiceText,
+  copyPicture: async (file, text, terminal) => {
+    const id = dictation.status().id
+    const plain = !app.isPackaged && process.env.TOGLE_TEST_CLIPBOARD
+      ? (testClipboard = '"' + file + '"' + (text ? ' ' + text : '')) : await copyShowResult(file, text, terminal)
+    if (dictation.status().id === id) dictationPaste.remember(id, plain)
+  },
+  changed: state => { send('dictation:state', state); dictationWindow.update(state); dictationPaste.update(state); dictationEscape(); refreshTray() }
 })
 function openWindow(): void {
   if (win?.isMinimized()) win.restore()
@@ -472,13 +514,18 @@ function openWindow(): void {
   dictationWindow.keepAbove()
 }
 function openDictationSettings(): void { openWindow(); send('hotkey', 'dictation-settings') }
+async function copyVoiceText(text: string): Promise<void> {
+  const id = dictation.status().id
+  if (!app.isPackaged && process.env.TOGLE_TEST_CLIPBOARD) testClipboard = text
+  else await clipboard.writeText(text)
+  if (dictation.status().id === id) dictationPaste.remember(id, text)
+}
 async function copyLastDictation(): Promise<void> {
-  const state = dictation.status(), text = ['ready', 'error'].includes(state.phase) ? state.text || state.lastText : state.lastText
+  const state = dictation.status()
+  if (state.picture) return dictation.copyHeldPicture()
+  const text = ['ready', 'error'].includes(state.phase) ? state.text || state.lastText : state.lastText
   if (!text) throw new Error('No dictation text is available to copy yet.')
-  try {
-    if (!app.isPackaged && process.env.TOGLE_TEST_CLIPBOARD) testClipboard = text
-    else await clipboard.writeText(text)
-  } catch (error) { dictation.copyFailed(state.id, text); throw error }
+  try { await copyVoiceText(text) } catch (error) { dictation.copyFailed(state.id, text); throw error }
   dictation.copied(state.id, text)
 }
 // The last dictations, newest first, in memory only: the tray offers them to copy.
@@ -519,6 +566,11 @@ function refreshNotices(): void {
   // A task that finished is new in the list until the person has it on screen (not while they look at it already).
   if (look.finished.map((ending) => freshTasks.finished(ending.key)).includes(true)) send('runners:changed', null)
   tray?.setWaiting(look.waiting)
+  if (windowsNotices) {
+    const { tasks, window } = getSettings()
+    windowsNotices.refresh(look, { ...tasks, notificationPreviews: tasks.notificationPreviews && !window.keepOutOfCaptures, front: mainWindowActive(), meeting: ongoing.isListening }, key => freshTasks.has(key))
+    return
+  }
   // During a call, notices wait: the tray still counts, and what finished meanwhile is kept to say after.
   if (ongoing.isListening) {
     if (look.finished.length) finishedDuringCall = look.finished[look.finished.length - 1]
@@ -581,14 +633,26 @@ async function installOnQuit(): Promise<void> {
   } catch (error) { console.warn('[updates] not installed as Togle closed:', (error as Error).message) }
 }
 
+let confirmingQuit = false
 async function requestQuit(confirmed = false): Promise<void> {
   if (quitting) return
-  if (!confirmed && !pageDown && !pageFailed) {
+  if (!confirmed && (process.platform === 'win32' || (!pageDown && !pageFailed))) {
     const warning = closeWarning()
-    if (warning.call || warning.tasks.length || warning.goesOn?.length) { openWindow(); send('window:confirm-close', warning); return }
+    if (warning.call || warning.tasks.length || warning.goesOn?.length) {
+      if (confirmingQuit) return
+      openWindow()
+      if (process.platform !== 'win32') { send('window:confirm-close', warning); return }
+      confirmingQuit = true
+      const options: Electron.MessageBoxOptions = { type: 'question', title: 'Togle', message: 'Quit Togle?', detail: quitQuestion(warning).slice('Quit Togle? '.length), buttons: ['Keep working', 'Quit Togle'], defaultId: 0, cancelId: 0, noLink: true }
+      try {
+        const answer = win && !win.isDestroyed() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
+        if (answer.response !== 1) { installAfterQuit = undefined; return }
+        if (quitting) return
+      } finally { confirmingQuit = false }
+    }
   }
   quitting = true; closeConfirmed = true
-  dictation.dispose(); voices.stop()
+  showWindow.cancel(); dictation.dispose(); voices.stop()
   // What Togle turned on for the call goes off with it; Togle Studio itself keeps running.
   await Promise.race([microphoneLink.endCall(), new Promise(resolve => setTimeout(resolve, 1500))])
   microphoneLink.stop()
@@ -601,12 +665,24 @@ async function requestQuit(confirmed = false): Promise<void> {
 }
 function dictationEscape(): void {
   if (dictation.active && dictation.status().phase !== 'inserting' && !hotkeysOff) {
-    if (!globalShortcut.isRegistered('Escape')) tryKeys('Escape', () => dictation.cancel())
+    if (!globalShortcut.isRegistered('Escape')) tryKeys('Escape', cancelVoice)
   } else globalShortcut.unregister('Escape')
 }
 const currentCall = (): CurrentCall => ({ ...ongoing.current(), session: currentSession, key: currentCallKey, restoredFrom })
-const meetingNotes = new MeetingNotes(callSessions, record => record.ai ? routedAI(record.ai) : record.accountId ? accounts.pinned(record.accountId) : activeProvider(record.agentId))
-const callTitles = new CallTitles(callSessions, record => record.ai ? routedAI(record.ai) : record.accountId ? accounts.pinned(record.accountId) : activeProvider(record.agentId))
+function meetingProvider(record: CallSession, chosen?: string): LLMProvider {
+  let profile = record.ai
+  if (chosen && chosen !== profile?.tasks.background.sourceId) {
+    // A connection may have its notes model in AI settings rather than on the connection itself.
+    const owner = agents.list().find(agent => agent.id === record.agentId)
+    const current = owner?.preferences?.ai ?? getSettings().ai
+    if (current?.tasks.background.sourceId === chosen) profile = current
+  } else if (!chosen && !profile && !record.accountId) {
+    profile = configuredAI(record.agentId)
+  }
+  return meetingBackgroundProvider({ ai: profile, accountId: record.accountId }, chosen, pinSource, () => activeProvider(record.agentId))
+}
+const meetingNotes = new MeetingNotes(callSessions, meetingProvider)
+const callTitles = new CallTitles(callSessions, meetingProvider)
 const titleQueue = new Set<string>()
 let titleTimer: ReturnType<typeof setTimeout> | undefined, namingCall = false
 function scheduleCallTitle(id: string): void {
@@ -841,6 +917,7 @@ function createWindow(): void {
   })
   let savedForClose = false
   win.webContents.on('did-start-loading', () => {
+    noticeReceiverReady = false
     if (pageLoads++) {
       restoredFrom = undefined
       perf.page('load')
@@ -864,12 +941,11 @@ function createWindow(): void {
     if (!quitting && !closeConfirmed && tray?.available && !pageDown && !pageFailed) {
       e.preventDefault(); win?.hide(); return
     }
-    if (!closeConfirmed && !pageDown && !pageFailed) {
+    if (!closeConfirmed && (process.platform === 'win32' || (!pageDown && !pageFailed))) {
       const warning = closeWarning()
-      if (ongoing.isListening || warning.tasks.length || warning.goesOn?.length) {
+      if (warning.call || warning.tasks.length || warning.goesOn?.length) {
         e.preventDefault()
-        win?.show()
-        send('window:confirm-close', warning)
+        void requestQuit()
         return
       }
     }
@@ -933,7 +1009,7 @@ function setupMediaAccess(): void {
 const HOTKEYS: { id: HotkeyId; keys: string; label: string; run: () => void }[] = [
   { id: 'dictate', keys: 'F9', label: 'Talk', run: () => void dictation.toggle() },
   // Part of the screen, drawn on while talking: the picture and the words land together.
-  { id: 'show', keys: 'F8', label: 'Show', run: () => void showPart() },
+  { id: 'show', keys: 'F8', label: 'Show', run: () => showShortcut(getSettings().hotkeys.show || 'F8') },
   // The box to start a coding agent's task in, over whatever is on screen.
   { id: 'task', keys: 'F10', label: 'Task', run: () => taskBox.toggle() }
 ]
@@ -943,59 +1019,77 @@ const keyDown = user32?.func('int16_t __stdcall GetAsyncKeyState(int)')
 const setForeground = user32?.func('int __stdcall SetForegroundWindow(intptr_t hwnd)')
 
 const showWindow = new ShowWindow()
-/**
- * F8 Show. Dictation starts first, so it notes the box the person is in before the frozen screen takes the keyboard, and
- * hears what they say meanwhile. Enter: the picture is saved (Togle's pictures folder; an agent in a terminal reads it from
- * there), that box is put in front again, and the picture goes in, then the words. Esc: nothing goes in.
- */
-// The offer to change keys, when F8 was pressed in a code editor, waits until the picture is done: only the press that
-// took a picture gives it then. A press during one (a held F8 repeats) takes none, and gives nothing.
 let showing = false
-async function showPart(): Promise<void> {
-  if (showWindow.open || dictation.active) {
-    if (!showing) giveKeysOffer()
-    return
-  }
-  showing = true
-  try {
-    await showPartNow()
-  } finally {
-    showing = false
-    giveKeysOffer()
-  }
+function cancelVoice(): void {
+  if (showing) showWindow.cancel()
+  dictation.cancel()
+}
+function finishShow(): void {
+  showWindow.finish()
+  dictation.stop()
+}
+function showShortcut(keys: string): void {
+  let target: Promise<DictationTarget> | undefined
+  showPress.run(keys, () => {
+    if (showing) { finishShow(); return }
+    if (dictation.active) { giveKeysOffer(); return }
+    // Note the original field during the first press, before the overlay can take focus.
+    target = dictationTarget.capture(true).catch(() => ({ label: 'Your text box' }))
+  }, () => {
+    if (!target || showing || dictation.active) return
+    showing = true
+    void showPartNow(keys, target).finally(() => { showing = false; giveKeysOffer() })
+  })
 }
 function giveKeysOffer(): void {
   const offer = afterShow
   afterShow = undefined
   offer?.()
 }
-async function showPartNow(): Promise<void> {
-  await dictation.start(false)
-  if (dictation.status().phase !== 'recording') return
-  let png: Buffer | null = null
-  try { png = await showWindow.show() }
-  catch (error) { console.warn('[show]', (error as Error).message) }
-  if (!png) { dictation.cancel(); return }
+async function showPartNow(keys: string, target: Promise<DictationTarget>): Promise<void> {
+  // Freeze and listen together. Speech setup can finish while the person is drawing.
+  const picture = showWindow.show(target, keys).then(async png => {
+    if (!png) return null
+    dictation.stop()
+    const handle = (await target).windowHandle
+    if (handle && setForeground) try { setForeground(BigInt(handle)) } catch { /* Insertion rechecks the original field. */ }
+    return saveShowPicture(png)
+  }).catch(error => { console.warn('[show]', (error as Error).message); return null })
+  void dictation.start(false, { target, picture })
+  const id = dictation.status().id
+  const file = await picture
+  if (!file && dictation.status().id === id) dictation.cancel()
+}
+async function saveShowPicture(png: Buffer): Promise<string> {
   const folder = path.join(app.getPath('userData'), 'pictures')
   const file = path.join(folder, `show-${new Date().toISOString().replace(/[:.]/g, '-')}.png`)
-  try {
-    await fs.mkdir(folder, { recursive: true })
-    await fs.writeFile(file, png, { mode: 0o600 })
-  } catch (error) {
-    console.warn('[show] the picture was not saved:', (error as Error).message)
-    dictation.cancel()
-    return
-  }
-  const handle = dictation.noted()?.windowHandle
-  if (handle && setForeground) try { setForeground(BigInt(handle)) } catch { /* The check before pasting says when the app changed. */ }
-  dictation.attachPicture(file)
-  dictation.stop()
+  await fs.mkdir(folder, { recursive: true })
+  await fs.writeFile(file, png, { mode: 0o600 })
+  return file
 }
 // Whether the hold key is down: Windows reads it through user32, a Mac and Linux on X11 through DesktopTyping.
 const heldKeys: HeldKeys | undefined = keyDown
   ? { down: (key) => !!((keyDown(key) as number) & 0x8000), codeOf: virtualKey }
   : dictationTarget.heldKeys()
+const clipboardSequence = user32?.func('uint32_t __stdcall GetClipboardSequenceNumber()')
+const dictationPaste = new DictationPaste({
+  sequence: () => testClipboard === undefined ? clipboardSequence?.() || undefined : undefined,
+  readText: async () => testClipboard ?? await clipboard.readText(),
+  pasted: id => dictation.pasted(id),
+  shortcut: heldKeys ? () => {
+    const down = heldKeys.down
+    if (process.platform === 'darwin') return (down(0x37) || down(0x36)) && down(0x09)
+    if (process.platform === 'win32') return !down(0x12) && ((down(0x11) && down(0x56)) || (down(0x10) && down(0x2d)))
+    return ((down(0xffe3) || down(0xffe4)) && down(0x76)) || ((down(0xffe1) || down(0xffe2)) && down(0xff63))
+  } : undefined,
+  // Togle's own editor reports the actual paste. An external shortcut also needs a plausible destination.
+  shortcutTarget: async () => (!win || BrowserWindow.getFocusedWindow() !== win) && await dictationTarget.acceptsPasteShortcut(),
+  mouse: keyDown ? () => !!(keyDown(1) & 0x8000) : undefined,
+  pointer: () => screen.dipToScreenPoint(screen.getCursorScreenPoint()),
+  pasteCommandAt: (x, y) => dictationTarget.pasteCommandAt(x, y)
+})
 const dictationPress = new HotkeyPress(heldKeys?.down ?? (() => false), heldKeys?.codeOf)
+const showPress = new HotkeyPress(heldKeys?.down ?? (() => false), heldKeys?.codeOf)
 let heldDictation: string | undefined
 let heldSince = 0
 let tapped: string | undefined
@@ -1003,6 +1097,7 @@ let tapped: string | undefined
 // lets go at once leaves dictation on, and the next press stops it.
 const TAP_MS = 300
 function dictateShortcut(keys: string): void {
+  if (showing) return
   if (voiceSettings().dictation.mode !== 'hold' || !heldKeys) { dictationPress.run(keys, () => void dictation.toggle()); return }
   dictationPress.run(keys, () => {
     if (dictation.active) {
@@ -1035,12 +1130,16 @@ const keysOf = (h: (typeof HOTKEYS)[number]): string => getSettings().hotkeys[h.
 let keysOffered = false
 let afterShow: (() => void) | undefined
 function offerKeys(id: HotkeyId, keys: string): void {
-  if (keysOffered || getSettings().keysOffer.shown || !/^F(8|9|10)$/.test(keys) || callNotice.shown) return
+  if (keysOffered || getSettings().keysOffer.shown || !/^F(8|9|10)$/.test(keys) || callNotice.shown || windowsNotices?.offeredCall) return
   // A test stands in for the program in front by its file; the app reads which one is (Windows, a Mac and Linux).
   const forced = !app.isPackaged && process.env.TOGLE_TEST_FRONT_PROGRAM
   const editor = forced ? codeEditorOf(forced) : frontEditor()
   if (!editor) return
   keysOffered = true
+  if (windowsNotices) {
+    void updateSettings({ keysOffer: { shown: true, key: keys, editor } }).then(settings => send('settings:changed', settings)).catch(error => console.warn('[keys]', error.message))
+    return
+  }
   void updateSettings({ keysOffer: { shown: true } }).catch((error) => console.warn('[keys]', (error as Error).message))
   const offer = (): void => keysNotice.show({ key: keys, editor }, 60_000)
   if (id === 'show') afterShow = offer
@@ -1058,6 +1157,7 @@ function tryKeys(keys: string, run: () => void): boolean {
 
 function registerHotkeys(): void {
   dictationPress.reset()
+  showPress.reset()
   if (heldDictation && dictation.status().id === heldDictation) dictation.cancel()
   heldDictation = undefined
   clearTimeout(hotkeysOff)
@@ -1105,6 +1205,12 @@ async function setHotkey(id: HotkeyId, keys: string): Promise<HotkeyInfo[]> {
 }
 
 function registerIpc(): void {
+  ipcMain.on('notices:ready', event => {
+    if (event.sender !== win?.webContents) return
+    noticeReceiverReady = true
+    if (pendingDestination) openNoticeDestination(pendingDestination)
+    if (pendingCallOffer) startOfferedCall(pendingCallOffer)
+  })
   ipcMain.handle('updates:status', () => updates.status())
   ipcMain.handle('updates:install', () => installUpdate())
   ipcMain.handle('microphone:status', () => microphoneLinkOn() ? microphoneLink.refresh() : microphoneLink.status())
@@ -1125,6 +1231,7 @@ function registerIpc(): void {
     return true
   })
   ipcMain.handle('dictation:status', () => dictation.status())
+  ipcMain.on('dictation:pasted', () => { void dictationPaste.observed() })
   ipcMain.handle('dictation:vocabulary', (_event, accountId: string) => { accounts.get(accountId); return dictationVocabulary.get(accountId) })
   ipcMain.handle('dictation:vocabulary-edit', (_event, accountId: string, edit: DictationVocabularyEdit) => { accounts.get(accountId); return dictationVocabulary.edit(accountId, edit) })
   ipcMain.handle('dictation:history', (_event, accountId: string) => { accounts.get(accountId); return dictationHistory.get(accountId) })
@@ -1134,12 +1241,12 @@ function registerIpc(): void {
   })
   ipcMain.on('dictation:drag', (event, action: string, x: number, y: number) => { if (dictationWindow.owns(event.sender)) dictationWindow.drag(action, x, y) })
   ipcMain.on('dictation:pill', (event, width: number, height: number) => { if (dictationWindow.owns(event.sender) && typeof width === 'number' && typeof height === 'number') dictationWindow.setPill(width, height) })
-  ipcMain.handle('dictation:toggle', () => dictation.toggle())
-  ipcMain.handle('dictation:cancel', () => dictation.cancel())
+  ipcMain.handle('dictation:toggle', () => showing ? finishShow() : dictation.toggle())
+  ipcMain.handle('dictation:cancel', (_event, id?: string) => { if (!id || dictation.status().id === id) cancelVoice() })
   ipcMain.on('dictation:audio', (event, id: string, pcm: Float32Array) => { if (dictationWindow.owns(event.sender)) dictation.push(id, pcm) })
   ipcMain.handle('dictation:finish', (event, id: string) => { if (dictationWindow.owns(event.sender)) return dictation.finish(id) })
   ipcMain.on('dictation:failed', (event, id: string, message: string) => { if (dictationWindow.owns(event.sender)) dictation.failed(id, typeof message === 'string' ? message.slice(0, 500) : 'Microphone unavailable.') })
-  ipcMain.handle('dictation:copy', copyLastDictation)
+  ipcMain.handle('dictation:copy', (_event, id?: string) => { if (!id || dictation.status().id === id) return copyLastDictation() })
   ipcMain.handle('dictation:settings', openDictationSettings)
   ipcMain.handle('dictation:agent', (_e, id?: string) => { if (id) agents.get(id); dictationAgentId = id; refreshVoiceSettings() })
   ipcMain.handle('settings:get', event => event.sender && dictationWindow.owns(event.sender) ? voiceSettings() : getSettings())
@@ -1158,6 +1265,8 @@ function registerIpc(): void {
     if (patch?.assist?.voiceLabels !== undefined && ongoing.isListening) { if (patch.assist.voiceLabels) void voices.start(); else voices.stop() }
     if (patch?.assist?.rememberVoices !== undefined) void voices.memoryChanged()
     if (patch?.tasks) refreshNotices()
+    const offered = windowsNotices?.offeredCall
+    if (offered && (!getSettings().meetings.notice || (getSettings().meetings.apps[offered] ?? 'ask') !== 'ask')) windowsNotices?.endCall()
     if (patch?.tasks?.sortBySubject !== undefined) void saved.then(() => taskSubjects?.turned())
     if (patch?.assist?.autoNotes === false || patch?.assist?.rememberCalls === false) meetingNotes.pauseAutomatic()
     if (patch?.assist?.rememberCalls === false) { callTitles.pause(); titleQueue.clear() }
@@ -1167,11 +1276,8 @@ function registerIpc(): void {
     if (patch?.dictation) refreshVoiceSettings()
     // Saving near the plan's limit may have been turned on or off.
     selectedChatGPT().provider.plan.update()
-    // What hears each side may be another now: why the one before didn't hear a line isn't this one's problem.
-    if (patch?.transcription) {
-      for (const api of Object.values(speechApis)) api.reset()
-      send('stt:status', sttStatus())
-    }
+    // The call's language may be another now.
+    if (patch?.transcription) send('stt:status', sttStatus())
     return saved
   })
 
@@ -1212,8 +1318,6 @@ function registerIpc(): void {
     if (!app.isPackaged) console.log(`[stt] ${status.state}: ${status.detail ?? ''}`)
     send('stt:status', sttStatus())
   })
-  // A line an API didn't hear, or heard again after that: the window says so.
-  for (const api of Object.values(speechApis)) api.onChange = () => send('stt:status', sttStatus())
 
   // Speech recognition on this PC: what's installed, installing it (it runs as soon as it's in), and removing it.
   ipcMain.handle('speech:local', () => speech.state())
@@ -1233,10 +1337,6 @@ function registerIpc(): void {
     whisper,
     whisperReady: () => whisper.status().state === 'ready',
     whisperChecks: () => !!speech.local()?.gpu,
-    api: (speaker) => {
-      const api = speechApiFor(speaker)
-      return api?.canHear() ? api : null
-    },
     language: () => callLanguage(),
     // The user's own names last: Whisper keeps the end of a prompt too long for it, and in a group call they're how
     // Togle tells a question is theirs.
@@ -1251,9 +1351,28 @@ function registerIpc(): void {
     log: app.isPackaged ? undefined : (line) => console.log(line),
     heard: (timing) => perf.heard(timing)
   })
-  ipcMain.handle('session:audio-pause', (_event, speaker: Speaker, paused: boolean) => {
+  pauseMeetingSpeech = paused => onSegment.pause('me', paused)
+  ipcMain.handle('meeting:accessibility', (event, prompt?: boolean) => {
+    if (event.sender !== win?.webContents || process.platform !== 'darwin') return false
+    return systemPreferences.isTrustedAccessibilityClient(prompt === true)
+  })
+  ipcMain.handle('meeting:follow', async (event, request?: string | false) => {
+    if (event.sender !== win?.webContents || request !== undefined && request !== false && typeof request !== 'string') throw new Error('Choose a meeting in Togle.')
+    const current = desktopMeetings.follow(request)
+    if (current || request !== undefined || !desktopMeetingReader) return current
+    await desktopMeetingReader.afterScan()
+    desktopMeetings.cancelPending()
+    return desktopMeetings.capture ?? null
+  })
+  ipcMain.handle('session:audio-pause', (event, speaker: Speaker, paused: boolean, manual?: boolean) => {
     if (!['me', 'them'].includes(speaker) || typeof paused !== 'boolean') throw new Error('Choose a valid call audio input.')
-    onSegment.pause(speaker, paused)
+    const meeting = desktopMeetings.capture
+    if (manual === true) {
+      if (speaker !== 'me' || event.sender !== win?.webContents) throw new Error('Choose your microphone in the meeting.')
+      desktopMeetings.cancelPending()
+      if (meeting) return meeting
+    }
+    onSegment.pause(speaker, paused || speaker === 'me' && !!meeting && (meeting.ended || meeting.mic !== 'open'))
     audioEpoch[speaker]++
     routedFinals[speaker] = Promise.resolve()
     if (speaker === 'them') {
@@ -1262,9 +1381,18 @@ function registerIpc(): void {
       else if (ongoing.isListening && getSettings().assist.voiceLabels !== false) void voices.start()
     }
   })
-  ipcMain.on('audio:segment', (_e, speaker: Speaker, pcm: Float32Array, startedAt: number, segmentId: string, kind: SegmentKind) => {
+  ipcMain.on('audio:segment', async (_e, speaker: Speaker, pcm: Float32Array, startedAt: number, segmentId: string, kind: SegmentKind) => {
     if (!['me', 'them'].includes(speaker) || !(pcm instanceof Float32Array) || pcm.length > 30 * 16000 || !pcm.every(Number.isFinite) || !Number.isFinite(startedAt) || typeof segmentId !== 'string' || segmentId.length > 160 || !['partial', 'pause', 'final'].includes(kind)) return
     if (speaker === 'me' && pcm instanceof Float32Array && dictation.overlaps(startedAt, startedAt + pcm.length / 16)) return
+    if (desktopMeetings.capture?.ended) {
+      const callFrames = Math.floor((desktopMeetings.departureTime - startedAt) * 16)
+      if (speaker === 'me' || kind !== 'final' || callFrames <= 0) return
+      pcm = pcm.subarray(0, callFrames)
+    }
+    if (speaker === 'me' && desktopMeetings.capture) {
+      const call = currentCallKey
+      if (!await desktopMeetings.allowsClip(startedAt, startedAt + pcm.length / 16) || call !== currentCallKey) return
+    }
     if (ongoing.isListening && speaker === 'them' && !callAudioPaused && kind === 'final' && pcm.length) {
       const call = currentCallKey, epoch = audioEpoch.them, before = routedFinals.them
       let delivered!: () => void
@@ -1291,6 +1419,7 @@ function registerIpc(): void {
 
   ipcMain.handle('session:listening', async (_e, value: boolean) => {
     if (typeof value !== 'boolean') throw new Error('Say whether to write the call down.')
+    if (value && desktopMeetings.capture?.ended) throw new Error('This call has ended.')
     if (value) { meetingNotes.pauseAutomatic(); callTitles.pause() }
     if (value && !callAudioPaused && getSettings().assist.voiceLabels !== false && (app.isPackaged || process.env.TOGLE_SILENT_AUDIO !== '1')) void voices.start()
     else if (!value) await voices.finish()
@@ -1309,6 +1438,13 @@ function registerIpc(): void {
     } else if (currentSession) currentSession = { ...currentSession, status: 'ended', endedAt: Date.now() }
     if (!value) void microphoneLink.endCall()
     ongoing.setListening(value)
+    if (!value) {
+      desktopMeetings.release()
+      const next = nextDetectedCall
+      nextDetectedCall = undefined
+      if (next) setImmediate(() => { if (desktopMeetings.app === next && !quitting) callAppStarted(next) })
+    }
+    if (value) windowsNotices?.endCall()
     // Notices wait during a call, and come once it is over.
     refreshNotices()
     refreshVoiceSettings()
@@ -1332,7 +1468,6 @@ function registerIpc(): void {
     // A call the user cleared mustn't come back: the saved call is deleted too.
     await callFile.clear(async () => ongoing.clear())
     callRouted = false; callAI = undefined; callAccountId = undefined; callUserName = undefined
-    remoteSpeech.clear()
     currentCallKey = randomUUID()
     // A new call while listening: its share of the plan counts from here, as when listening starts.
     if (ongoing.isListening && getSettings().provider === 'chatgpt' && auth.status().signedIn) {
@@ -1369,10 +1504,9 @@ function registerIpc(): void {
     if (!value) throw new Error('Enter a speaker name.')
     await storedCallSession(callId)
     if (callId === currentSession?.id) { ongoing.renameVoice(voiceId, value); await callFile.flush() }
-    return callSessions.update(callId, record => {
-      if (!record.transcript.some(line => line.voiceId === voiceId)) throw new Error('That speaker is no longer in this call.')
-      return { ...record, transcript: record.transcript.map(line => line.voiceId === voiceId ? { ...line, voiceName: value, voiceNamedBy: 'user' as const, voiceIdentityId: line.voiceName === value ? line.voiceIdentityId : undefined } : line) }
-    })
+    const saved = await callSessions.renameSpeaker(callId, voiceId, value)
+    if (saved.status !== 'live' && !saved.minutes?.edited && getSettings().assist.autoNotes !== false) scheduleCallNotes(callId)
+    return saved
   })
   // Confirm names, after a call: hear a voice, answer who it is, or skip the rest (which deletes the sound).
   ipcMain.handle('confirm:sound', async (_e, callId: string, clip: string) => {
@@ -1405,12 +1539,7 @@ function registerIpc(): void {
     })
     if (saved.confirm?.closed) {
       await confirmSound.remove(callId)
-      // The notes are corrected with the confirmed names: written again, unless the person edited them, turned automatic
-      // notes off, keeps no calls, or a call is being written down.
-      const settings = getSettings()
-      if (settings.assist.autoNotes !== false && settings.assist.rememberCalls !== false && !ongoing.isListening) {
-        void meetingNotes.generate(callId, undefined, undefined, true).catch(error => console.warn('[meeting notes]', (error as Error).message))
-      }
+      if (!saved.minutes?.edited && getSettings().assist.autoNotes !== false) scheduleCallNotes(callId)
     }
     return saved
   })
@@ -1445,8 +1574,8 @@ function registerIpc(): void {
     if (!callStrip.owns(event.sender) || !isCallStripAction(action) || !ongoing.isListening) return
     if (action === 'mark') ongoing.mark()
     else if (action === 'told') ongoing.setToldOthers(true)
-    else if (action === 'copy') clipboard.writeText(tellOthersLine(getSettings().transcription))
-    else send('hotkey', 'start-call-unseen')
+    else if (action === 'copy') clipboard.writeText(tellOthersLine())
+    else send('hotkey', 'stop-call')
     refreshCallStrip()
   })
   ipcMain.on('callnotice:answer', (event, choice: unknown) => {
@@ -1454,8 +1583,7 @@ function registerIpc(): void {
     const shown = callNotice.shown
     callNotice.show(null)
     if (!shown || !isCallApp(shown.app) || ongoing.isListening) return
-    if (choice === 'always') void updateSettings({ meetings: { ...getSettings().meetings, apps: { ...getSettings().meetings.apps, [shown.app]: 'always' } } }).then(() => send('settings:changed', getSettings()))
-    if (choice === 'write' || choice === 'always') send('hotkey', 'start-call-unseen')
+    if (choice === 'write') startOfferedCall(shown.app)
   })
   // Asked by the corner notices' pages when they load: the first notice can be told before they listen.
   ipcMain.handle('callnotice:now', (event) => (callNotice.owns(event.sender) ? callNotice.shown : null))
@@ -1472,24 +1600,36 @@ function registerIpc(): void {
 
   ipcMain.handle('calls:list', listCallSessions)
   // What calls left for the person's day: names to confirm, notes that are ready, and the to-dos in them that are theirs.
-  ipcMain.handle('meetings:offers', async (): Promise<{ calls: CallOffer[]; items: TodoOffer[] }> => {
+  const myMeetingTodos = (summary: string): string[] => {
     const settings = getSettings()
     const names = [...(settings.assist.names ?? '').split(',').map(name => name.trim()).filter(Boolean), ...(callUserName ? [callUserName] : [])]
+    return myTodoItems(summary, names)
+  }
+  ipcMain.handle('meetings:offers', async (_event, callId?: string): Promise<{ calls: CallOffer[]; items: TodoOffer[] }> => {
     const midnight = new Date().setHours(0, 0, 0, 0)
     const calls: CallOffer[] = [], items: TodoOffer[] = []
-    for (const call of await callSessions.list()) {
-      if (call.status === 'live' || call.legacy) continue
+    const history = callId === undefined ? await callSessions.list() : [await callSessions.get(callId)]
+    for (const call of history) {
+      if (!call || call.status === 'live' || call.legacy) continue
       const toConfirm = namesToConfirm(call.confirm, Date.now())
-      const notes = (call.endedAt ?? call.startedAt) >= midnight && call.minutes?.state === 'ready' && !!call.summary
+      const notes = (callId !== undefined || (call.endedAt ?? call.startedAt) >= midnight) && call.minutes?.state === 'ready' && !!call.summary
       if (!toConfirm && !notes) continue
       calls.push({ id: call.id, title: call.title, startedAt: call.startedAt, notes, toConfirm })
       // The list holds only the start of the notes: the to-dos are read from the whole.
       if (notes) {
         const whole = await callSessions.get(call.id).catch(() => null)
-        for (const text of myTodoItems(whole?.summary ?? call.summary, names)) items.push({ callId: call.id, title: call.title, startedAt: call.startedAt, text })
+        for (const text of myMeetingTodos(whole?.summary ?? call.summary)) items.push({ callId: call.id, title: call.title, startedAt: call.startedAt, text })
       }
     }
-    return { calls: calls.slice(0, 6), items: items.slice(0, 12) }
+    const pending = todo && items.length ? await todo.pendingOffers(items) : []
+    return { calls: calls.slice(0, 6), items: pending.slice(0, 12) }
+  })
+  ipcMain.handle('meetings:review-todo', async (_event, callId: string, text: string, action: unknown) => {
+    const call = await callSessions.get(callId)
+    if (!todo || !call || (action !== 'add' && action !== 'dismiss') || !myMeetingTodos(call.summary).includes(text)) throw new Error('The meeting notes changed. Review the current suggestions.')
+    const items = await todo.reviewOffer(callId, text, action)
+    send('todo:changed', null)
+    return { items, file: todo.file }
   })
   ipcMain.handle('calls:search', (_e, query: unknown) => callSessions.search(typeof query === 'string' ? query.slice(0, 200) : ''))
   // Agents on a call: the tasks connected to it, before it starts, while it goes on, and after.
@@ -1532,7 +1672,11 @@ function registerIpc(): void {
     }
     const results: GiveResult[] = []
     for (const key of tasks) {
-      try { await runners.send(key, message); results.push({ key, ok: true }) }
+      try {
+        if (live || upcoming) await runners.send(key, message)
+        else await runners.giveToTask(key, message)
+        results.push({ key, ok: true })
+      }
       catch (error) { results.push({ key, ok: false, problem: (error as Error).message }) }
     }
     if (start) {
@@ -1550,9 +1694,10 @@ function registerIpc(): void {
     return results
   })
   ipcMain.handle('calls:get', (_e, id: string) => getCallSession(id))
-  ipcMain.handle('calls:notes-generate', async (_e, id: string, template: MeetingNoteTemplate, revision?: string) => {
+  ipcMain.handle('calls:notes-generate', async (_e, id: string, template: MeetingNoteTemplate, revision?: string, sourceId?: string) => {
     await storedCallSession(id)
-    return meetingNotes.generate(id, template, revision)
+    if (sourceId !== undefined && (typeof sourceId !== 'string' || !sourceKnown(sourceId))) throw new Error('This AI connection is unavailable. Choose another account for the notes.')
+    return meetingNotes.generate(id, template, revision, false, sourceId)
   })
   ipcMain.handle('calls:notes-save', async (_e, id: string, revision: string | undefined, text: string) => {
     await storedCallSession(id)
@@ -1611,7 +1756,7 @@ function registerIpc(): void {
       offerKeys(hotkey.id, keysOf(hotkey))
       return hotkey.run()
     })
-    testClipboard = ''
+    if (process.env.TOGLE_TEST_CLIPBOARD) testClipboard = ''
     ipcMain.handle('dev:clipboard', () => testClipboard)
     // A dictation as if it had been said, for the tray's list of recent ones.
     ipcMain.handle('dev:dictated', (_e, text: string) => { recentDictations = withRecent(recentDictations, String(text)); refreshTray() })
@@ -1624,12 +1769,20 @@ function registerIpc(): void {
     if (!paused) return registerHotkeys()
     globalShortcut.unregisterAll()
     dictationPress.reset()
+    showPress.reset()
     clearTimeout(hotkeysOff)
     hotkeysOff = setTimeout(registerHotkeys, HOTKEYS_OFF_MS)
   })
   ipcMain.on('shell:open', (_e, url: string) => {
     const target = externalUrl(url)
     if (target) void shell.openExternal(target)
+  })
+  ipcMain.handle('shell:show-chat-file', async (event, href: unknown) => {
+    if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) return false
+    const file = localFilePath(href, process.platform)
+    if (!file || !await fs.lstat(file).catch(() => undefined)) return false
+    shell.showItemInFolder(file)
+    return true
   })
   ipcMain.on('window:minimize', () => win?.minimize())
   ipcMain.on('window:maximize', () => {
@@ -1638,14 +1791,14 @@ function registerIpc(): void {
     else win.maximize()
   })
   ipcMain.handle('window:is-maximized', () => !!win && !win.isDestroyed() && win.isMaximized())
-  // A picture pasted into an agent's screen in the window: kept as a file, whose path goes into the screen. Only the window sends it.
+  // Both local task composers can attach clipboard images and preview screenshots from this profile.
   ipcMain.handle('screen:paste-picture', (event, bytes: unknown, type: unknown) => {
-    if (!win || event.sender !== win.webContents) throw new Error('Only Togle\'s window pastes pictures.')
+    if (event.sender !== win?.webContents && !taskBox.owns(event.sender)) throw new Error('Only Togle’s task windows paste pictures.')
     return savePastedPicture(bytes as Uint8Array, typeof type === 'string' ? type : '')
   })
-  // A picture kept that way, read back to be drawn small in a message that went with it. Only the window asks.
   ipcMain.handle('screen:pasted-picture', (event, file: unknown) => {
-    if (!win || event.sender !== win.webContents) throw new Error('Only Togle\'s window reads a pasted picture.')
+    if (dictationWindow.owns(event.sender)) return typeof file === 'string' && file === dictation.status().picture ? readPastedPicture(file) : null
+    if (event.sender !== win?.webContents && !taskBox.owns(event.sender)) throw new Error('Only Togle’s task windows preview pictures.')
     return readPastedPicture(typeof file === 'string' ? file : '')
   })
   ipcMain.on('window:page-failed', () => (pageFailed = true))
@@ -1671,10 +1824,11 @@ function registerIpc(): void {
   // The task the window has on screen, told by the window itself: a task that finished is seen there.
   ipcMain.on('tasks:on-screen', (event, key: unknown) => {
     if (!win || win.isDestroyed() || event.sender !== win.webContents) return
-    if (freshTasks.shown(typeof key === 'string' && key ? key : null)) send('runners:changed', null)
+    if (freshTasks.shown(typeof key === 'string' && key ? key : null)) { send('runners:changed', null); if (windowsNotices) refreshNotices() }
   })
   // F8 Show's overlay: the frozen screen it shows, and the picture or the cancel it gives back.
   ipcMain.handle('show:picture', (event) => (showWindow.owns(event.sender) ? showWindow.picture() : null))
+  ipcMain.on('show:ready', event => { if (showWindow.owns(event.sender)) showWindow.rendererReady() })
   ipcMain.on('show:done', (event, bytes: unknown) => {
     if (showWindow.owns(event.sender) && bytes instanceof Uint8Array) showWindow.done(bytes)
   })
@@ -1732,13 +1886,33 @@ if (process.argv.includes('--togle-hook')) {
 } else if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  app.on('second-instance', openWindow)
+  if (process.platform === 'win32') {
+    app.setAppUserModelId(appUserModelId(app.isPackaged))
+    app.setToastActivatorCLSID(app.isPackaged ? TOAST_ACTIVATOR : '{965C78C6-7CA2-4D14-A2EC-FE98371F4477}')
+  }
+  app.on('second-instance', (_event, argv) => {
+    const action = sourceNotifications ? devNotificationArgument(argv) : undefined
+    if (!action) { openWindow(); return }
+    if (noticesStarted) windowsNotices?.activate(action)
+    else pendingDevActivation = action
+  })
   app.on('activate', openWindow)
 
   app.whenReady().then(async () => {
     started.ready = Date.now()
-    // The installed app is `io.togle.app`; a run from the source has its own id, so it never takes the installed app's name and icon.
-    app.setAppUserModelId(appUserModelId(app.isPackaged))
+    // Electron adopts any existing activator on its shortcut. Migrate our own older installation first.
+    if (windowsNotices && app.isPackaged) {
+      const link = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Togle.lnk')
+      if (existsSync(link)) try {
+        const old = shell.readShortcutLink(link)
+        if (old.appUserModelId === APP_ID && old.target.toLowerCase() === process.execPath.toLowerCase() && old.toastActivatorClsid?.toUpperCase() !== TOAST_ACTIVATOR) {
+          shell.writeShortcutLink(link, 'update', { target: old.target, toastActivatorClsid: TOAST_ACTIVATOR })
+        }
+      } catch (error) { console.warn('[notifications] Could not update the Togle shortcut:', (error as Error).message) }
+    }
+    if (app.isPackaged || process.env.TOGLE_HEADLESS !== '1' || process.env.TOGLE_TEST_NOTIFICATIONS === '1') await windowsNotices?.start()
+    noticesStarted = true
+    if (pendingDevActivation) { windowsNotices?.activate(pendingDevActivation); pendingDevActivation = undefined }
     // A native Edit menu supplies macOS text-editing shortcuts to every window, including sign-in and settings.
     // Quit still runs through before-quit, preserving the active call's confirmation and save flow.
     if (process.platform === 'darwin') Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -1751,7 +1925,7 @@ if (process.argv.includes('--togle-hook')) {
     // (back to To-do), Ctrl+W hid it and Ctrl+Plus zoomed it, and none of them reached the screen of a task, where Claude Code uses
     // Ctrl+R and Ctrl+W itself. A run from the source keeps the menu (Reload, Developer Tools).
     else if (app.isPackaged) Menu.setApplicationMenu(null)
-    await Promise.all([loadSettings(), auth.load(), claude.load(), compat.load(), ...Object.values(speechApis).map((api) => api.load())])
+    await Promise.all([loadSettings(), auth.load(), claude.load(), compat.load()])
     // The theme before any window: none opens in the other one. The system's own change moves the window's first-paint color too.
     applyTheme(getSettings().appearance.theme)
     nativeTheme.on('updated', () => { if (win && !win.isDestroyed()) win.setBackgroundColor(themeColors().bg) })
@@ -1761,9 +1935,6 @@ if (process.argv.includes('--togle-hook')) {
     const forgotten = settingsForgetting(getSettings(), sourceKnown)
     if (Object.keys(forgotten).length) { console.warn('[accounts] settings named accounts that are gone:', Object.keys(forgotten).join(', ')); await updateSettings(forgotten) }
     const accountsRead = accounts.list().catch(error => { console.warn('[accounts]', (error as Error).message); return [] })
-    // Before the speech model was a choice, this PC heard every call: a Togle from then that has its speech recognition
-    // keeps it (quicker, and the audio stays here); one without starts on the ChatGPT plan, as a new one does.
-    if (savedBeforeSpeechChoice() && speech.local()) await updateSettings({ transcription: { me: 'local', them: 'local' } })
     started.settings = Date.now()
     // Apply text retention on startup, including accounts whose history screen is not opened.
     void accountsRead.then(list => Promise.all(list.map(account => dictationHistory.get(account.id)))).catch(error => console.warn('[dictation history] retention:', (error as Error).message))
@@ -1804,11 +1975,15 @@ if (process.argv.includes('--togle-hook')) {
     }
     // Pictures earlier versions took of the screen during calls: Togle takes none now, so they all go.
     void fs.rm(path.join(app.getPath('userData'), 'sessions'), { recursive: true, force: true }).catch(() => undefined)
+    // An earlier Togle could send a side of a call to a speech API, with a key of the person's kept here. This PC hears every
+    // call now, so the sound never leaves it: those keys have no use, and go.
+    for (const name of ['openai-speech-key.bin', 'speech-server-key.bin']) void fs.rm(path.join(app.getPath('userData'), name), { force: true }).catch(() => undefined)
     // The sound kept to confirm names is deleted once answered or expired; checked now and every hour.
     void sweepConfirmSound()
     void sweepSharedCalls()
     setInterval(() => { void sweepConfirmSound(); void sweepSharedCalls() }, 3600_000).unref()
-    callDetector.start()
+    if (process.platform !== 'win32') callDetector.start()
+    desktopMeetingReader?.start()
     // Togle's own updates: a minute after starting, then once a day (only with a release key; see updates.ts).
     setTimeout(() => void updates.check(), app.isPackaged ? 60_000 : 2_000).unref()
     setInterval(() => void updates.check(), 24 * 3600_000).unref()
@@ -1840,12 +2015,13 @@ if (process.argv.includes('--togle-hook')) {
     void prunePastedPictures()
     // A test run can stand in for the agents with programs of its own. A packaged Togle never looks.
     const standIns = !app.isPackaged && process.env.TOGLE_TEST_RUNNERS ? await (require(process.env.TOGLE_TEST_RUNNERS) as { backends(): Promise<Backend[]> }).backends() : undefined
-    todo = registerTodo({
+    const todoFile = registerTodo({
       handle: (channel, listener) => ipcMain.handle(channel, (_event, ...args) => listener(...args)),
       send,
       file: path.join(app.getPath('userData'), 'to-do.md'),
       reveal: file => shell.showItemInFolder(file)
     })
+    todo = todoFile
     void todo.watch()
     runners = registerRunners({
       backends: standIns,
@@ -1874,6 +2050,7 @@ if (process.argv.includes('--togle-hook')) {
       // Agents found by themselves that the person took off the lists.
       hidden: () => getSettings().hiddenAgents,
       saveHidden: async (ids) => { await updateSettings({ hiddenAgents: ids }) },
+      linkGivenTodo: (item, key) => todoFile.link(item, key, true),
       // A task in a terminal of Togle's own is seen and answered only there: Togle opens on it.
       started: (task, request) => { void putOnTodo(task, request); if (task.terminal) showTask(task.key) }
     })
@@ -1891,7 +2068,10 @@ if (process.argv.includes('--togle-hook')) {
         stop: (key) => hubForReach.stop(key),
         endCommands: (key) => hubForReach.endCommands(key)
       },
-      acted: (what, by) => { if (Notification.isSupported()) new Notification({ title: `${by} acted on this computer`, body: what }).show() }
+      acted: (what, by) => {
+        if (windowsNotices) windowsNotices.showStatus('devices')
+        else if (Notification.isSupported()) new Notification({ title: `${by} acted on this computer`, body: what }).show()
+      }
     })
     // The `togle` command reaches the running Togle on its local channel (togle run claude, togle tasks).
     startChannel({ dataFolder: app.getPath('userData'), hub: runners, openBox: opening => taskBox.show(opening) }).then(
@@ -1947,8 +2127,10 @@ if (process.argv.includes('--togle-hook')) {
     quitting = true
     dictationWindow.close()
     noticeWindow.close()
+    windowsNotices?.stop()
     taskBox.close()
     callDetector.stop()
+    desktopMeetingReader?.stop()
     callNotice.close()
     keysNotice.close()
     callStrip.close()

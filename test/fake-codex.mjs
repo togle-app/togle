@@ -169,11 +169,11 @@ function core() {
       for (const conn of thread.subscribers) sendRequest(conn, thread, pending)
     })
 
-  async function runTurn(thread, turn, prompt) {
+  async function runTurn(thread, turn, prompt, input) {
     setStatus(thread, 'active', [])
     toSubscribers(thread, 'turn/started', { threadId: thread.id, turn: { id: turn.id, status: 'inProgress', items: [] } })
     // What was asked is the turn's first item, as Codex keeps it.
-    thread.turns.at(-1)?.items.push({ id: `um${turn.id}`, type: 'userMessage', content: [{ type: 'text', text: prompt, text_elements: [] }] })
+    thread.turns.at(-1)?.items.push({ id: `um${turn.id}`, type: 'userMessage', content: input ?? [{ type: 'text', text: prompt, text_elements: [] }] })
     const finish = (status) => {
       thread.turn = null
       setStatus(thread, 'idle')
@@ -271,7 +271,8 @@ function core() {
         const thread = { id: `01a1d400-0000-7000-8000-${String(nextThread++).padStart(12, '0')}`, cwd: params.cwd, status: { type: 'idle' }, updatedAt: Math.floor(Date.now() / 1000), policy: { approvalPolicy: params.approvalPolicy ?? null, sandbox: params.sandbox ?? null }, subscribers: new Set([conn]), pending: new Map(), persisted: false }
         threads.set(thread.id, thread)
         conn.subs.add(thread.id)
-        return reply({ thread: info(thread), approvalPolicy: params.approvalPolicy ?? 'never', sandbox: params.sandbox ?? 'danger-full-access', model: 'fake' })
+        thread.serviceTier = process.env.FAKE_CODEX_SERVICE_TIER ?? null
+        return reply({ thread: info(thread), approvalPolicy: params.approvalPolicy ?? 'never', sandbox: params.sandbox ?? 'danger-full-access', model: 'fake', serviceTier: thread.serviceTier })
       }
       case 'thread/name/set': {
         const thread = threads.get(params.threadId)
@@ -294,7 +295,7 @@ function core() {
         thread.policy = { approvalPolicy: params.approvalPolicy ?? null, sandbox: params.sandbox ?? null }
         thread.subscribers.add(conn)
         conn.subs.add(thread.id)
-        reply({ thread: info(thread, true) })
+        reply({ thread: info(thread, true), serviceTier: thread.serviceTier ?? null })
         // What is still open is asked again of the client that joins.
         for (const pending of thread.pending.values()) if (!pending.ids.has(conn)) sendRequest(conn, thread, pending)
         return undefined
@@ -302,6 +303,22 @@ function core() {
       case 'thread/read': {
         const thread = threads.get(params.threadId)
         return thread ? reply({ thread: info(thread, params.includeTurns === true) }) : fail('no such thread')
+      }
+      case 'thread/settings/update': {
+        const thread = threads.get(params.threadId)
+        if (!thread) return fail('no such thread')
+        thread.serviceTier = params.serviceTier
+        const threadSettings = { serviceTier: thread.serviceTier }
+        toSubscribers(thread, 'thread/settings/updated', { threadId: thread.id, threadSettings })
+        return reply({ threadSettings })
+      }
+      case 'thread/items/list': {
+        const turn = threads.get(params.threadId)?.turns?.find(turn => turn.id === params.turnId)
+        if (!turn) return fail('no such turn')
+        const from = Number(params.cursor) || 0
+        const limit = Number(params.limit) || 25
+        const data = turn.items.slice(from, from + limit).map(item => ({ turnId: turn.id, item }))
+        return reply({ data, nextCursor: from + limit < turn.items.length ? String(from + limit) : null })
       }
       case 'thread/turns/list': {
         // Newest first, a page at a time; a "summary" turn has only what was asked and the last thing said.
@@ -340,7 +357,7 @@ function core() {
           return undefined
         }
         reply({ turn })
-        void runTurn(thread, turn, String(params.input?.[0]?.text ?? ''))
+        void runTurn(thread, turn, String(params.input?.[0]?.text ?? ''), params.input)
         return undefined
       }
       case 'turn/steer': {

@@ -41,6 +41,7 @@ globalThis.AudioWorkletNode = class {
   port = { onmessage: null }
   constructor() {
     if (context.failTap) { context.failTap = false; throw new Error('Audio processor failed') }
+    context.taps.push(this)
   }
   connect(next) { return next }
   disconnect() {}
@@ -73,6 +74,45 @@ test('resuming a call with both inputs paused never requests either device', asy
   assert.equal(capture.state.them.state, 'paused')
 })
 
+test('muting releases the raw noise-check microphone too, including a stream still opening', async t => {
+  const { capture, call } = setup(t)
+  await capture.start(() => {}, ['me'], { measureNoise: true })
+  assert.equal(context.micCalls, 0, 'joining muted never opens either microphone')
+  const input = stream(), raw = stream()
+  context.mic = async () => context.micCalls === 1 ? input : raw
+  await capture.setPaused('me', false)
+  await turn()
+  await capture.setPaused('me', true)
+  assert.equal(input.getAudioTracks()[0].stops, 1)
+  assert.equal(raw.getAudioTracks()[0].stops, 1)
+  const pending = deferred(), late = stream()
+  context.mic = async () => context.micCalls === 3 ? stream() : pending.promise
+  await capture.setPaused('me', false)
+  await capture.setPaused('me', true)
+  pending.resolve(late)
+  await turn()
+  assert.equal(late.getAudioTracks()[0].stops, 1)
+  assert.equal(call.getAudioTracks()[0].stops, 0, 'the other people can still be heard')
+})
+
+test('the speaking indicator follows detected speech and only the other side can deliver words while muted', async t => {
+  const { capture } = setup(t), lines = []
+  await capture.start((speaker, pcm, _at, _id, kind) => { if (kind === 'final' && pcm.length) lines.push(speaker) })
+  const [mic, call] = context.taps
+  const feed = (tap, level, count) => {
+    for (let i = 0; i < count; i++) tap.port.onmessage?.({ data: new Float32Array(512).fill(level) })
+  }
+  feed(mic, 0.0001, 30)
+  assert.equal(capture.speaking, false)
+  feed(mic, 0.08, 12)
+  assert.equal(capture.speaking, true)
+  await capture.setPaused('me', true)
+  assert.equal(capture.speaking, false)
+  feed(mic, 0.08, 40); feed(mic, 0, 25)
+  feed(call, 0.08, 40); feed(call, 0, 25)
+  assert.deepEqual(lines, ['them'])
+})
+
 test('rapid pause, resume, pause, resume releases the stale stream and follows the last intent', async t => {
   const { capture, call } = setup(t)
   await capture.start(() => {})
@@ -95,7 +135,7 @@ function setup(t) {
   const mic = stream()
   const call = stream(true)
   context = {
-    engines: [], micCalls: 0, callCalls: 0, states: [],
+    engines: [], taps: [], micCalls: 0, callCalls: 0, states: [],
     resume: async () => {}, mic: async () => mic, call: async () => call,
     devices: [
       { kind: 'audioinput', deviceId: 'default', groupId: 'microphone-1' },

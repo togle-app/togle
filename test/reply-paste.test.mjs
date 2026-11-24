@@ -32,7 +32,7 @@ const plain = (text) => text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/
 const paragraph = (n) => `Paragraph ${n}: ${'the quick brown fox jumps over the lazy dog. '.repeat(3).trim()}`
 const long = [1, 2, 3, 4].map(paragraph).join('\n\n')
 
-test('from 400 characters a reply goes to a screen that asked for pastes as one paste, with its line breaks; any other reply is typed as one line', () => {
+test('multiline and long replies preserve paragraphs on a screen that accepts pastes', () => {
   assert.ok(long.length >= T.PASTE_FROM, 'a reply to try')
   const pasted = T.replyKeys(long, true)
   assert.equal(pasted.pasted, true)
@@ -42,12 +42,14 @@ test('from 400 characters a reply goes to a screen that asked for pastes as one 
   // The line is what counts: 399 characters are typed, 400 are pasted.
   assert.equal(T.replyKeys('x'.repeat(T.PASTE_FROM - 1), true).pasted, false)
   assert.equal(T.replyKeys('x'.repeat(T.PASTE_FROM), true).pasted, true)
-  assert.equal(T.replyKeys('short reply\nin two lines', true).keys, 'short reply in two lines', 'a short reply is typed')
-  // A reply with files is typed whatever its length: how a program treats a paste that names a file was not measured.
+  assert.deepEqual(T.replyKeys('short reply\nin two lines', true), { keys: '\x1b[200~short reply\rin two lines\x1b[201~', pasted: true })
+  // Paste the paragraphs, then type the path with its original separator.
   const picture = 'C:\\data\\pasted\\paste-20261123-141418.png'
   const withFiles = T.replyKeys(`${long} ${picture}`, true)
-  assert.equal(withFiles.pasted, false)
-  assert.ok(!withFiles.keys.includes('\x1b') && withFiles.keys.includes('paste-20261123-141418.png'))
+  assert.deepEqual(withFiles, { keys: pasted.keys + ' ' + picture, pasted: true })
+  assert.deepEqual(T.replyKeys('Start\n\n- One\n  - Two\n\nAttached files\nC:\\some files\\notes.txt', true),
+    { keys: '\x1b[200~Start\r\r- One\r  - Two\x1b[201~ Attached files: ["C:\\\\some files\\\\notes.txt"]', pasted: true })
+  assert.deepEqual(T.replyKeys(picture, true), { keys: picture, pasted: false })
   // Line breaks of any kind are one carriage return in the paste, tabs are spaces, and the ends are trimmed.
   assert.equal(T.replyKeys(`  ${long.replace(/\n/g, '\r\n')}\t `, true).keys, `\x1b[200~${long.replace(/\n/g, '\r')}\x1b[201~`)
 })
@@ -77,8 +79,7 @@ test('a quoted reply keeps its quote on one line and its reply with its line bre
   const back = T.splitQuote(body.replace(/\r/g, '\n'))
   assert.deepEqual(back, T.splitQuote(message))
   assert.equal(back.reply, reply)
-  // A short quoted reply is typed as one line, as before.
-  assert.deepEqual(T.replyKeys(T.withQuote('Two plans\nit is.', 'Make it\ncheaper.'), true), { keys: 'Replying to “Two plans it is.”: Make it cheaper.', pasted: false })
+  assert.deepEqual(T.replyKeys(T.withQuote('Two plans\nit is.', 'Make it\ncheaper.'), true), { keys: '\x1b[200~Replying to “Two plans it is.”: Make it\rcheaper.\x1b[201~', pasted: true })
 })
 
 test('the live state of bracketed paste: set, cleared, and a reset of the terminal clears it', () => {

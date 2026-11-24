@@ -45,17 +45,17 @@ export function validatePreferences(value: unknown): AgentPreferences {
     const group = input[section]
     if (!group) continue
     if (typeof group !== 'object' || Array.isArray(group)) throw new Error('Speech and voice typing preferences must be settings objects.')
-    // Voice typing's account is voice typing's alone (calls are heard by this computer or a speech API, never an account).
-    const fields = section === 'dictation' ? ['speech', 'accountId', 'mode', 'polish', 'showBar', 'microphoneId'] : ['language', 'me', 'them', 'openaiModel', 'serverUrl', 'serverModel']
+    // Voice typing's account is voice typing's alone. Calls are heard by this computer and nowhere else: what an earlier Togle
+    // kept here to send a side of a call to a speech API (`me`, `them`, a model, a server's address) is not read any more.
+    const fields = section === 'dictation' ? ['speech', 'accountId', 'mode', 'polish', 'showBar', 'microphoneId'] : ['language']
     const clean: Record<string, unknown> = {}
     for (const key of fields) {
       const value = (group as Record<string, unknown>)[key]
       if (value === undefined) continue
-      const valid = ['polish', 'showBar'].includes(key) ? typeof value === 'boolean' : typeof value === 'string' && value.length <= (key === 'serverUrl' || key === 'microphoneId' ? 2000 : 200)
-      if (!valid || key === 'mode' && !['hold', 'toggle'].includes(value as string) || key === 'speech' && !['auto', 'claude', 'chatgpt'].includes(value as string) || ['me', 'them'].includes(key) && !['local', 'openai', 'server', 'chatgpt', 'claude'].includes(value as string)) throw new Error(`Invalid ${section} preference: ${key}.`)
-      // Claude speech and Claude's cleaning up of voice typing were removed (there is no Claude sign-in): a side it heard is
-      // heard by this PC now, and voice typing goes back to the automatic account.
-      clean[key] = value === 'claude' ? (key === 'speech' ? 'auto' : 'local') : value
+      const valid = ['polish', 'showBar'].includes(key) ? typeof value === 'boolean' : typeof value === 'string' && value.length <= (key === 'microphoneId' ? 2000 : 200)
+      if (!valid || key === 'mode' && !['hold', 'toggle'].includes(value as string) || key === 'speech' && !['auto', 'claude', 'chatgpt'].includes(value as string)) throw new Error(`Invalid ${section} preference: ${key}.`)
+      // Claude's cleaning up of voice typing was removed (there is no Claude sign-in): voice typing goes back to the automatic account.
+      clean[key] = key === 'speech' && value === 'claude' ? 'auto' : value
     }
     result[section] = clean as never
   }

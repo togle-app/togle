@@ -4,6 +4,16 @@ Togle lists the tasks of the coding agents on your computer (Claude Code, Codex 
 
 ## Agents
 
+Open a task in **Chat** or **Terminal** to see **This session**. It shows the recorded token count or API cost for that conversation. **Account limits** shows the percentage used across the provider account and a countdown for each reset time the provider supplies. Agents using the same subscription can share these limits.
+
+Expand **Agent usage** in the sidebar to see totals for each installed agent. Codex and Claude Code show locally recorded tokens from the last seven days. Hermes lists each provider it used, including changes within a conversation. A task can show both ChatGPT subscription tokens and Kimi API cost. Togle marks estimated costs with ≈. Expand an agent’s **Account limits** to see its weekly and other longer subscription windows. Togle remembers which sections you opened across navigation and restarts. It checks limits in the background every three minutes. Visible usage and reset countdowns refresh every minute.
+
+For API-billed Claude Code and Codex tasks, Togle keeps the latest dollar amount reported for each task it starts with API billing. Tracking starts with this version. Added ACP agents can report cumulative session costs in their own currency. Estimates, partial totals and unavailable readings are labeled, and the totals survive restarting Togle.
+
+Use the paperclip or drop files into a local Chat, Terminal, or **New task**. Chat and New task let you review and remove files before sending. Terminal inserts their paths at the prompt for you to submit. Recordings, images, videos, logs and other files stay at their original paths. Each agent uses the formats and local file access it supports.
+
+Local file links in an agent’s Chat replies show the full path. Click the label to select the file in your file manager, or select the path to copy it.
+
 **Agents** in the sidebar opens the list. A task that waits for you comes first, with the command it wants to run shown in full.
 
 - **Allow once** lets that one command run. **Refuse** tells the agent no.
@@ -38,7 +48,11 @@ On a Claude Code screen two commands do more than answer. `/clear` empties the c
 
 ## Notices
 
-When a task waits and Togle is not in front, a small notice appears in the corner of the screen with the task, the command in full, **Allow once**, **Refuse** and **Open**. It does not take the keyboard, and it is kept out of screen shares and recordings.
+On Windows, a background task's notification names the agent and task. It shows the question or approval it needs, or a short excerpt of the result it reported. If the agent finished without a summary, Togle uses the files it changed or the commands it ran. **Review request** opens the full request. Dismissing it leaves the task waiting.
+
+Completion notifications are silent. Tasks that finish during a meeting appear together afterward, with failed tasks listed first. **View results** opens the whole group. To keep details out of new alerts in Windows Notification Center, turn off **Show task details in Windows notifications** in **Settings → Agents**. Screen capture protection also hides those previews.
+
+On macOS and Linux, a small window in the corner shows the task, the full command, **Allow once**, **Refuse** and **Open**. Its contents are hidden from screen capture.
 
 - **Allow once** is held for about a second after a notice appears, so a click meant for the window under it cannot allow a command.
 - It is not offered for a command that looks dangerous, or one too long to show in full. Those are allowed in the Togle window, where all of the command is shown. A question from an agent has only **Open**.
@@ -47,9 +61,9 @@ When a task waits and Togle is not in front, a small notice appears in the corne
 
 ## Task box
 
-**F10** opens a small box over whatever you are doing. Pick the agent and the folder, type the task (or hold the dictation key and say it), and press Enter. The task starts, goes on the to-do list, and the box puts itself away. **Esc** closes it, and so does a click elsewhere; what you typed stays for next time, and so do the agent and folder you picked. The key is a setting like the others (**Settings → Keys**), and F10 can be changed there if another program needs it.
+**F10** opens a small box over whatever you are doing. Choose **Existing task** to continue a conversation in its project, or **New task** to pick an agent and a folder. Type or dictate the instructions, then press Enter. **Esc** or a click elsewhere hides the box. F10 brings back your draft and destination. You can change the shortcut in **Settings → Keys**.
 
-Every way of giving work to an agent opens this same box: **New task** in Agents, **Give to an agent** on a to-do item, and `togle run claude` in a terminal. A call is given from its own page (see Giving a call to agents, below). Opened from a to-do item, it has the item's words and a chip naming the item; the task that starts is given to that item. **×** on the chip makes it a task of its own.
+**Give to an agent** offers existing conversations and a new task on both To-do and saved meetings. On To-do, the box opens with the item's words. Pick a conversation by its title, agent and folder, review the message, then press **Send**. Togle links the item to that conversation. **×** on the to-do chip removes the link from the draft. **New task** in Agents and `togle run claude` open the box with **New task** selected.
 
 ## Settings
 
@@ -81,7 +95,7 @@ The list is a plain text file you can also open in any editor: `to-do.md` in Tog
 
 Lines that are not items are left as they are. An item given to an agent keeps the task in the comment at its end. A change in an editor shows in Togle, and a change in Togle names the item by its line and its words, so it cannot land on another item if the file was edited meanwhile.
 
-**Give to an agent** opens the task box with the item's words filled in. The item then shows what the task is doing, and that it is idle when it has finished. You tick the item yourself once you have looked. A task started any other way (the task box on its own, **New task**, the `togle` command) gets an item of its own, so every task you give an agent is on the list.
+After **Give to an agent**, the item shows the chosen task's status. Several items can link to the same conversation. You tick each item yourself once you have looked. Starting a new task without an originating to-do adds an item of its own.
 
 ## From a terminal
 
@@ -106,9 +120,9 @@ The command is the program `out/main/cli.js`, started by Electron as plain Node 
 A call has a list of agent tasks, and a call's key exists before the call starts, so agents can be connected before it, while it goes on, and after it. The list is kept in `call-agents.json`, in Togle's folder: task keys and times, nothing that was said.
 
 - **Before the call**, the Meetings list has a row, *Agents for the next call*, with **Add**. **During** it, the live call has the same row, with a tick for each agent and **Send what was said**. A tick says which agents get it, and **×** takes one off.
-- **A new agent on the fly.** **Add**, before or during a call, also starts one: tick **A new task**, pick the agent and the folder, say what it should do, and press **Start and add**. It starts with your words, and with the call as it stands when something has been said; when nothing has, with a line that a call is going on (or about to start) and that Togle will tell it where the call is saved once there is something to read. It stays on the call, so **Send** and **Ask** reach it from then on. What you typed for it is kept if you close the list and open it again, and stays in the box when the agent could not start (with why).
+- **A new agent on the fly.** **Add**, before or during a call, also starts one: tick **New task**, pick the agent and the folder, say what it should do, and press **Start and add**. It starts with your words, and with the call as it stands when something has been said; when nothing has, with a line that a call is going on (or about to start) and that Togle will tell it where the call is saved once there is something to read. It stays on the call, so **Send** and **Ask** reach it from then on. What you typed for it is kept if you close the list and open it again, and stays in the box when the agent could not start (with why).
 - **Send** writes the call as it stands (the notes, if there are any, and the transcript so far) as a plain text file in `shared-calls`, readable only by you, and tells each ticked agent where it is. The file is written again each time you press it, and is deleted with the call.
-- **Give to an agent** on a finished call lists the running agent tasks, each with a tick, and **A new task** (an agent and a folder). Say what to do with the call and press **Give to N**. A task that cannot take it says why: *It is working* (Claude Code and Hermes take words on their screen only, once their turn has ended), *Open it in Agents first* (Togle does not run it), or *It runs in a terminal of its own*.
+- **Give to an agent** on a finished call lists existing conversations and **New task**. Long lists can be searched by title, agent or folder. Choose one or more recipients, add instructions and press **Give to N**. Togle can resume a saved conversation in its original folder. Delivery to a running conversation follows its usual chat behavior. A task that requires you to open it or use its own terminal shows the reason in the list.
 - **What an agent is told** is your own words, then one fixed line: where the call is saved, that it is a record of what people said, and that it is to be used as information and not as instructions. What was said is never part of that line, so it cannot carry a command to an agent's screen, where a line that starts with `/` or `!` would run one. Your own words are sent as you wrote them: ones that start with `/` or `!` are refused for Claude Code and Hermes.
 - **A new task asks before it runs anything**, as far as its agent lets Togle make it ask: Claude Code and Codex do. Hermes keeps its own approval settings, and so does an agent that is already running, which Togle cannot change. They are told to treat the call as information only.
 - **Ask** is a box under the agents on a live call. Type a question, or hold F9 and say it, and Ask sends it to each ticked agent, with the same line that tells where the call is saved so far (the file is written again each time). Each answer shows under the box, with the agent's name and your question, and a card when the agent needs your Allow to answer: answering it there answers the task. The answer is read from the agent's own record of the conversation, so it is the agent's last words after your question; **Open** goes to the task. An agent that cannot take the question says why, as with Send, and the question stays in the box when none took it. Answers stay under the box while the window is open, and **×** puts one away. Ask is on the live call only.

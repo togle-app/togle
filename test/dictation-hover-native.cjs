@@ -32,6 +32,7 @@ ipcMain.handle('dictation:status', () => state)
 ipcMain.on('dictation:expand', (event, expanded, explicit) => { if (surface?.owns(event.sender)) surface.setExpanded(expanded, explicit === true) })
 ipcMain.on('dictation:pill', (event, width, height) => { if (surface?.owns(event.sender)) surface.setPill(width, height) })
 ipcMain.handle('dictation:copy',()=>{copied++;change({...state,phase:'done',outcome:'copied',message:'Copied. Press Ctrl+V to paste.'})})
+ipcMain.handle('dictation:cancel',()=>change({phase:'idle'}))
 const change = next => { state = next; surface.update(next) }
 const handle = win => win.getNativeWindowHandle().readBigUInt64LE()
 const rootAt = point => BigInt(ancestor(windowAt(point), 2) || 0)
@@ -50,6 +51,7 @@ app.whenReady().then(async () => {
   fixture = new BrowserWindow({ width: 700, height: 400, x: area.x + Math.round((area.width - 700) / 2), y: area.y + area.height - 412,
     frame: false, title: 'Togle isolated hover check', show: true, webPreferences: { contextIsolation: true } })
   await fixture.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><title>Togle isolated hover check</title><style>body{margin:0;background:#222c3c;color:white;font:14px system-ui}input{position:absolute;left:20px;top:20px;width:300px}button{position:absolute;left:0;top:0;width:100%;height:100%;background:transparent;color:white;border:0}</style><button id="behind">Isolated hover test — clicks stay in this window</button><input id="destination" aria-label="Fixture text box"><script>window.clicked=0;document.querySelector("button").onclick=()=>window.clicked++</script>'))
+  fixture.setAlwaysOnTop(true, 'floating')
   fixture.show(); fixture.focus()
   const ownThread = thread(), activeThread = windowThread(foreground(), null)
   try { if (activeThread && ownThread !== activeThread) attach(ownThread, activeThread, true); bring(handle(fixture)) }
@@ -125,11 +127,16 @@ app.whenReady().then(async () => {
   }
   await clickControl('.dictation-actions button.primary')
   await wait(()=>copied===1)
-  await sleep(250)
-  await clickControl('[aria-label="Collapse voice bar"]')
   await wait(async()=>!(await expanded()))
-  await sleep(600)
-  assert.equal(await expanded(),false,'Close stays closed without further pointer movement')
+  for(const selector of ['[aria-label="Close result"]', '.dictation-actions .ghost']) {
+    await move(20,30)
+    change({phase:'ready',id:'held',text:'Fixture words',message:'Copy your text.'})
+    await move(center.x,center.y); await wait(expanded); await sleep(260)
+    await clickControl(selector)
+    await wait(async()=>state.phase==='idle' && !(await expanded()))
+    await sleep(600)
+    assert.equal(await expanded(),false,'Dismissal stays closed under a stationary pointer')
+  }
   await move(20, 30); await wait(async () => !(await expanded()))
   assert.equal(rootAt(lastCursor), handle(fixture))
   assert.equal(BigInt(foreground() || 0), handle(fixture), 'Only our fixture can receive the click')
@@ -137,8 +144,8 @@ app.whenReady().then(async () => {
   await wait(() => fixture.webContents.executeJavaScript('window.clicked===1'))
   assert.equal(resizes, 0); assert.equal(reshows, 0)
   const transitions = await js('window.__hoverChanges')
-  assert.deepEqual(transitions, Array.from({ length: 12 }, (_, i) => i % 2 === 0 ? 'true' : 'false'), 'Exactly one expansion and collapse per real pointer visit')
-  console.log('NATIVE HOVER PASS: 6 pointer visits, real Copy/Close button clicks, stationary close, 12 transitions, zero native resizes/reshows, focus retained, transparent canvas passes a real click')
+  assert.deepEqual(transitions, Array.from({ length: 16 }, (_, i) => i % 2 === 0 ? 'true' : 'false'), 'Exactly one expansion and collapse per real pointer visit')
+  console.log('Native Windows Copy, Close and Dismiss each closed the panel on the first click. Focus remained in the original window.')
 }).then(() => { clearTimeout(timeout); cleanup(); app.exit(0) }, async error => {
   console.error(error)
   if (bar && !bar.isDestroyed()) console.error(await bar.webContents.executeJavaScript('JSON.stringify({events:window.__pointerLog,changes:window.__hoverChanges,rect:document.querySelector(".dictation-hit")?.getBoundingClientRect().toJSON(),size:[innerWidth,innerHeight,devicePixelRatio]})').catch(() => 'Renderer unavailable'))

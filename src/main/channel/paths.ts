@@ -1,6 +1,6 @@
 // Where the channel lives for one person's Togle, and the secret that goes with it.
 import { createHash, randomBytes } from 'node:crypto'
-import { promises as fs } from 'node:fs'
+import { promises as fs, realpathSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { secretOf } from './protocol'
@@ -26,7 +26,14 @@ export const channelFolder = (dataFolder: string): string => path.join(dataFolde
  */
 export function channelAddress(dataFolder: string): string {
   // Always from the whole path: a socket named by a relative path would be found only from the folder it was made in.
-  const folder = path.resolve(dataFolder)
+  let folder = path.resolve(dataFolder)
+  if (process.platform === 'win32') {
+    // Electron and CLI callers can spell the same existing Windows profile with different casing.
+    // Keep the on-disk spelling so a client also reaches older apps that already used that spelling.
+    try { folder = realpathSync.native(folder) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
   const id = createHash('sha256').update(folder).digest('hex').slice(0, 16)
   if (process.platform === 'win32') return `\\\\.\\pipe\\togle-${id}`
   const inside = path.join(channelFolder(folder), 'channel.sock')

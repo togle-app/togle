@@ -2,9 +2,41 @@
 
 You talk and decide, and your agents do the work. Togle types what you say, writes down your meetings, shows every agent on your computer and keeps the list of what needs you.
 
-Togle is free and open source, under the [MIT license](LICENSE). It runs on your computer, on Windows and macOS, with Linux packages that build but are not tested yet ([macOS setup and testing](docs/macos.md), [Ubuntu setup and testing](docs/linux.md)). It has no account of its own and adds no bill: it uses the AI plan you already have.
+Togle Free is open source under the [MIT license](LICENSE). Install it on each computer where you run agents. Each copy works independently and local tools need no Togle account. You can use your own AI plan or API key for features such as meeting notes. The public beta is available on Windows and Linux x64. macOS builds are in testing. [macOS setup](docs/macos.md) · [Ubuntu setup](docs/linux.md)
 
-**Togle Studio**, a separate paid app (not open source), removes background noise from your voice in every call app. Togle works the same without it. See [Togle Studio](#togle-studio).
+**Togle Studio** is an optional, closed-source desktop app for microphone cleanup in call apps. [Using Studio with Togle](#togle-studio)
+
+## Install on Windows
+
+If you already downloaded the installer, open Command Prompt in its folder and run the following for version 0.1.0. Use the filename of your download.
+
+```cmd
+start "" /wait "Togle Setup 0.1.0.exe" /S
+```
+
+To install or update the Windows beta, run this in Command Prompt or PowerShell.
+
+```cmd
+powershell -NoProfile -Command "iex (irm https://togle.app/beta/install.ps1 -ErrorAction Stop)"
+```
+
+For the latest stable Windows release, use this command. It reports when the first stable release is still pending.
+
+```cmd
+powershell -NoProfile -Command "iex (irm https://togle.app/stable/install.ps1 -ErrorAction Stop)"
+```
+
+Both commands download from GitHub Releases and verify the installer with Togle's release key. Open **Togle** from the Start menu, then open a fresh Command Prompt and run `togle tasks` to list your tasks. [Togle Free releases](https://github.com/togle-app/togle/releases)
+
+## Install on Linux
+
+Run this in a terminal on Ubuntu 22.04 or later on an x64 computer.
+
+```sh
+curl -fsSL https://togle.app/beta/install.sh | sh
+```
+
+The command checks the signed AppImage and installs it for your user. Open **Togle** from your applications menu. [Togle Free beta 2](https://github.com/togle-app/togle/releases/tag/v0.1.0-beta.2)
 
 ## Four things, one app
 
@@ -18,11 +50,11 @@ Hold **F9** and talk. Togle types the words where your cursor is: a chat, an edi
 
 - Your AI plan cleans the words up: punctuation, filler words, and a correction you make halfway ("send it to Dario, no wait, to Marta"). Without a plan, or with cleanup off, Togle types the words as heard. Cleanup has eight seconds; if it fails, you get the words as heard, and the voice bar says why (no internet, the plan at its limit, too slow).
 - Speech is heard on this computer. Your plan gets words, never sound.
-- Togle never presses Enter or sends anything. In a terminal it types everything as one line. Windows lets no app type into a window that runs as administrator, so there Togle copies your words for you to paste. When it can't type into the box for another reason (a password field, a window that changed), the voice bar keeps your words for **Copy text**, and the tray menu lists your last ten dictations under **Copy a recent dictation**, in memory only.
+- In a terminal Togle enters the words on one line. You press Enter to send. If the original text field is missing or changes, Togle copies your dictation and keeps the words in the voice bar. Windows administrator windows also use the clipboard. When you paste the words, the bar returns to normal and the clipboard stays available. The tray keeps your last ten dictations in memory under **Copy a recent dictation**.
 - **Names and terms** (Settings): tell Togle once how a name or a word is spelled, or a phrase that stands for a longer text ("my work email"), and it writes it that way from then on.
 - The voice bar is a small strip that shows when the microphone listens. While idle, the microphone is off. You can hide the idle bar from the tray menu.
 
-**F8 Show.** Press F8 and the screen under the pointer stands still. Drag over the part to show (a dashed frame) and draw on it while you talk: a loop round something becomes a box, a straight stroke an arrow, and a click starts words typed there. **Enter** puts the picture into the box you were in, then your words; **Esc** leaves it. The picture is pasted through the clipboard, which gets back what it held right after. In a terminal, Togle types the picture's path instead, so an agent can read it. Pictures are kept in Togle's pictures folder. Pasting the picture works on Windows; elsewhere the picture is saved and the words are ready to copy.
+**F8 Show.** Press and release F8. Drag to crop, then drag again to draw a red arrow. You can speak while drawing or switch to Circle, Rectangle or Draw. Press F8 again. With a text box focused, the screenshot and your words go there. Togle Chat shows an image attachment. Text-only fields receive the saved PNG path. With no editable field, F8 copies the screenshot and your words to the clipboard. Open the voice bar to preview the result or copy it again. Pasting returns the bar to its resting state. Esc cancels while drawing.
 
 [How dictation reaches the box](docs/dictation-insertion.md).
 
@@ -30,22 +62,22 @@ Hold **F9** and talk. Togle types the words where your cursor is: a chat, an edi
 
 Togle writes down both sides of a call on this computer: your microphone is **You**, and what the computer plays is **Call**. The sound never leaves the computer.
 
-- **Starting.** **Write down now** in Meetings starts at once. Togle also notices when Zoom, Teams, Webex, Skype or Slack starts using the microphone, or a browser does with Meet, Teams, Zoom or Webex open in it (on Windows; on a Mac and Linux too, where it was not tried yet), and a notice offers **Write it down**, **Not now** or **Always in Zoom**. Settings decides, for each app, whether it asks, always writes calls down, or never.
+- **Starting.** **Write down now** in Meetings starts at once. Togle also notices when Zoom, Teams, Webex, Skype or Slack starts using the microphone, or a browser does with Meet, Teams, Zoom or Webex open in it (on Windows; on a Mac and Linux too, where it was not tried yet), and offers to take notes. On Windows, the notification offers **Start notes** or **Always in Zoom** and expires when the call ends. Settings decides, for each app, whether it asks, always writes calls down, or never.
 - **The first call** says two things once: the rules for writing down a call differ by place, and the words go to your AI plan.
 - **During the call** the words appear as people speak. Voices are told apart on this computer. A name with a question mark is a guess from what was said ("Dario said Marta just before"): click it to confirm or change it, or leave it. **Mark** flags a moment, and the notes list marked moments first. A line to tell the others ("I'm writing this call down with Togle. The sound stays on my computer.") stays until you tick **I told them**, and the call records whether you did. Nothing is suggested during a call: Togle gives no answers or advice that you did not ask for, and notices from your agents wait until the call ends.
 - **With the window closed**, a small strip shows the time, **Mark**, **Stop** and the reminder to tell the others.
 - **After the call** its page opens. Your plan writes the notes as soon as it ends, and gives the call a title. While names wait, the call opens on **Who spoke?**, which asks about the voices it could not name: each plays one short clip of what that voice said and shows why Togle guessed a name. You confirm it or give one, and after your last answer the call opens on its notes. The notes are cards, one for each part (what was marked, decided, left to do, still open) in one to three columns by the room there is, with the times they cite as small chips and, under To do, the name of who took each item first. Click a call's name to rename it; right-click a call to rename or delete it. That clip is the only sound Togle keeps of a call: encrypted on this computer, and deleted when you answer, or the next day at the latest.
 - **Meetings** lists your calls, newest first, with what is left to do for each (names to confirm, notes being written). The search box looks in what was said. A call opens to its **Notes** and **Transcript**. **Share** copies the notes or saves the call as a file.
-- **Agents on a call.** A call has a list of agent tasks, set before it starts (on the Meetings list), while it goes on (a row on the live call) or after it. **Send what was said** writes the call so far as a plain text file in Togle's `shared-calls` folder and tells each ticked agent where it is, in one line: Togle never types what was said into an agent's screen. **Give to an agent** on a finished call lists the running agent tasks to tick, any number of them, and a new task; say what to do with the call and press Give. A new Claude Code or Codex task asks before it runs anything. Hermes and an agent that is already running keep their own settings, so each one is told to read the call as information and not as instructions. The file is written again each time the call is sent, and is deleted with the call.
+- **Agents on a call.** A call has a list of agent tasks, set before it starts (on the Meetings list), while it goes on (a row on the live call) or after it. **Send what was said** writes the call so far as a plain text file in Togle's `shared-calls` folder and tells each ticked agent where it is, in one line: Togle never types what was said into an agent's screen. **Give to an agent** on a finished call lets you pick existing conversations or start a new task. Choose the recipients, say what to do with the call and press Give. A new Claude Code or Codex task asks before it runs anything. Hermes and an agent that is already running keep their own settings, so each one is told to read the call as information and not as instructions. The file is written again each time the call is sent, and is deleted with the call.
 - Calls, transcripts and notes are encrypted on this computer with the system's keystore. Other people's voices are remembered across calls only when you turn that on in Settings. Ask the people first.
 
 Speech recognition (Parakeet, with Whisper for unclear speech) is downloaded for this computer from Settings the first time. Calls can't start before it is there, and Togle says so.
 
 ### Agents
 
-One list of every agent task on your computer: Claude Code, Codex and Hermes. A task that waits for you comes first. A command an agent wants to run is shown in full before you can allow it, and one that looks dangerous carries a red mark and the reason. Where the agent offers to remember the choice, **Always allow…** says how far that reaches (a Claude Code rule in this project, a Codex rule for commands that start the same way); it is never offered for a dangerous command. An open task says how it stands and how many files it changed. You answer by typing, by voice, or with the agent's own buttons. A Claude Code, Codex or Hermes task has two views, and a switch in its header picks one. **Terminal** is the agent's own screen, the program you know with all its keys and commands, and nothing over it. Ctrl+V pastes there, a screenshot too: Togle keeps the picture as a file for a week and pastes its path, which Claude Code and Codex attach as a picture. **Chat** is the conversation as the agent keeps it, as a chat: what you said in a card of its own (the latest stays at the top, so you see what the agent works on; a picture you pasted shows small, and opens whole when pressed) and what the agent answered, with the work of each turn out of the way in one line you can open, down to what a command printed and how a file changed, a card for a command, a question or a plan that waits, and a reply box that takes words while the agent works: they wait, and go in when its turn ends (Hermes asks on its screen, and Togle says it waits there). Settings says which view a task opens in. A notice comes in both views, even over Togle's own window. The work runs outside the screen, in the agent's own background session, thread or gateway: it goes on when you close the screen or quit Togle. **Hand back** gives you the line to open it in your own terminal. A Claude Code you started in a terminal shows here too, and **Take over** moves it into the background and opens its screen here. `togle run claude` starts one from the command line. In the reply box of a task of an agent you added through ACP, type `/` to see the agent's own commands.
+One list of every agent task on your computer: Claude Code, Codex and Hermes. A task that waits for you comes first. A command an agent wants to run is shown in full before you can allow it, and one that looks dangerous carries a red mark and the reason. Where the agent offers to remember the choice, **Always allow…** says how far that reaches (a Claude Code rule in this project, a Codex rule for commands that start the same way); it is never offered for a dangerous command. An open task says how it stands and how many files it changed. You answer by typing, by voice, or with the agent's own buttons. A Claude Code, Codex or Hermes task has two views, and a switch in its header picks one. **Terminal** is the agent's own screen, the program you know with all its keys and commands, and nothing over it. Ctrl+V pastes there, a screenshot too: Togle keeps the picture as a file for a week and pastes its path, which Claude Code and Codex attach as a picture. **Chat** is the conversation as the agent keeps it, as a chat: what you said in a card of its own (the latest stays at the top, so you see what the agent works on; a picture you pasted shows small, and opens whole when pressed) and what the agent answered, with the work of each turn out of the way in one line you can open, down to what a command printed and how a file changed, a card for a command, a question or a plan that waits, and a reply box that takes words while the agent works: they wait, and go in when its turn ends (Hermes asks on its screen, and Togle says it waits there). Settings says which view a task opens in. When Togle is in the background, Windows sends one notification per request. Review request opens the task and its full command. The work runs outside the screen, in the agent's own background session, thread or gateway: it goes on when you close the screen or quit Togle. **Hand back** gives you the line to open it in your own terminal. A Claude Code you started in a terminal shows here too, and **Take over** moves it into the background and opens its screen here. `togle run claude` starts one from the command line. In the reply box of a task of an agent you added through ACP, type `/` to see the agent's own commands.
 
-**F10** opens a small task box over whatever you are doing: say or type the task and press Enter, and the agent starts in the folder you used last.
+**F10** opens the task box over whatever you are doing. Choose an existing conversation or start a new task in a folder, then type or dictate the instructions. On a to-do item, **Give to an agent** opens this box with the item filled in and links it to the task you choose.
 
 When an agent starts waiting or finishes, one notice appears in the corner. It never takes your keyboard, and **Allow once** is held for a moment so a stray click can't allow anything. The tray icon carries an amber dot until nothing waits.
 
@@ -53,14 +85,14 @@ Any other agent can be added in **Settings → Agents → Add another agent**. P
 
 ### To-do
 
-One list for the day, kept as a plain text file on your computer. What your agents need from you sits at the top, in amber. Every task you give an agent is on the list, says what the agent is doing (working, waiting for you, idle), and stays until you tick it. You add an item by typing or by holding F9. **From your calls** offers the notes' items that are yours and the calls with names to confirm.
+One list for the day, kept as a plain text file on your computer. What your agents need from you sits at the top, in amber. Every task you give an agent is on the list, says what the agent is doing (working, waiting for you, idle), and stays until you tick it. You add an item by typing or by holding F9. Remove a single item or use **Clear list**. Your meeting follow-ups appear in the meeting notes and under **From your calls**. Choose **Add** or **Dismiss** for each one.
 
 ## Keys
 
 | Key | Does |
 | --- | --- |
 | F9 | Talk: hold, talk, let go (on a Mac or Linux: press to start, again to stop) |
-| F8 | Show: drag over part of the screen and draw on it while you talk; Save (or Enter) puts the picture and your words in |
+| F8 | Release to crop. Draw a red arrow and speak, then press F8 again to insert both. |
 | F10 | Task: the box to give an agent a task |
 
 They work from any app. Settings can give each other keys: click it and press the keys you want. Keys that would stop working in every other app are refused with the reason. On most Mac keyboards, F keys need Fn held.
@@ -127,7 +159,7 @@ src/main/              Electron main process
   todo.ts              the to-do list as a plain text file
   task-box-window.ts   the F10 box; notice-window.ts the corner notice; tray.ts the tray
   microphone-link.ts   Togle Studio, when it's on this computer: found, watched, turned on and off around calls
-  reach/               Togle on your other devices (part of Togle Studio, not in releases until reviewed): keys,
+  reach/               Development-only Togle Pro device connections: keys,
                        the list of your devices, adding one by its code, what passes between them
 src/shared/            what the main process and the window share (types, the IPC api, hotkeys, call apps)
 src/preload/           the window.togle bridge
@@ -171,10 +203,10 @@ Tokens and API keys are encrypted with the system's keystore (Electron `safeStor
 
 - **Found by itself.** Togle asks your computer whether Togle Studio is installed: the program its installer puts there. An app that was removed, or a copy run from source and then closed, does not count, and one that never ran does. When Togle Studio runs, it leaves a link file in its own data folder and serves a local socket that only your user can reach. Togle reads the file, proves it with the token in it, and from then on knows whether the clean microphone is on and what it cleans. Only that state travels over the link, never audio. The protocol is in [`src/shared/microphone-link.ts`](src/shared/microphone-link.ts).
 - **On for calls.** With **Turn on during calls** (Settings), a call that starts turns it on first, so the call hears the clean microphone, and turns it off again when the call ends, unless it was already on.
-- **Signed in to it.** Togle Studio is used with its own account. While you're signed out of it, a call leaves it alone, and Settings offers **Sign in**, which opens its window. Togle only learns whether someone is signed in, never who.
+- **Signed in to Studio.** Studio uses your Togle account. If Studio is signed out, Settings offers **Sign in**, which opens its window. The local microphone connection tells Togle only whether someone is signed in.
 - **What your microphone picks up.** Without it, Togle measures your microphone during calls while nobody speaks: how often the background is loud enough to hear, and short sounds such as typing. Only levels are kept, in memory. After a noisy call (at most every few days, never during one), the call's page says for how many minutes the microphone picked up room noise, with one link: **Clean my microphone**. **Mention Togle Studio** in Settings turns that off.
 
-**Reach**, the part of Togle Studio that connects Togle across your computers, a server and your phone, is being built. Togle's side is in this repository and makes every decision; Studio only carries what your devices lock for each other. It stays out of every release until an outside review has tried to break it. See [Reach](docs/reach.md).
+**Device connections** are a development project for Togle Pro. The open-source Togle clients pair and check each request. The hosted service checks the subscription and carries encrypted messages. Device access stays out of packaged releases pending outside security review. [Development status](docs/reach.md)
 
 The link to Togle Studio's site uses `STUDIO_SITE` in [`src/shared/microphone-link.ts`](src/shared/microphone-link.ts): studio.togle.app. Togle's own site is togle.app (`TOGLE_SITE`); the domain has to be registered before a release.
 

@@ -45,6 +45,7 @@ function extraResources(root) {
   const add = (source, target) => { result[target] = digest(fs.readFileSync(path.join(root, source))) }
   for (const name of ['icon.png', 'icon.ico']) add('build/' + name, name)
   add('resources/dictation-windows.ps1', 'dictation-windows.ps1')
+  add('resources/meeting-windows.ps1', 'meeting-windows.ps1')
   for (const name of files(path.join(root, 'resources/licenses'))) add('resources/licenses/' + name, 'licenses/' + name)
   return result
 }
@@ -52,7 +53,7 @@ function extraResources(root) {
 function writeManifest(root = ROOT, expectedSource = sourceHash(root)) {
   if (sourceHash(root) !== expectedSource) throw new Error('Source changed during the build. Run npm run build again.')
   const out = path.join(root, 'out'), entries = files(out).filter(name => name !== MANIFEST)
-  const required = ['main/index.js', 'main/cli.js', 'main/parakeet-worker.js', 'main/whisper-worker.js', 'main/voice-worker.js', 'preload/index.js', 'renderer/index.html', 'renderer/pcm-tap.js']
+  const required = ['main/index.js', 'main/cli.js', 'main/parakeet-worker.js', 'main/whisper-worker.js', 'main/voice-worker.js', 'main/meeting-worker.js', 'preload/index.js', 'renderer/index.html', 'renderer/pcm-tap.js']
   for (const name of required) if (!entries.includes(name)) throw new Error('Build is missing ' + name)
   const hashes = Object.fromEntries(entries.map(name => [name, digest(fs.readFileSync(path.join(out, name)))]))
   let commit, dirty

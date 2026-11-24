@@ -17,11 +17,16 @@
 // - The server may report a thread `notLoaded` in the middle of a turn: that is not read as "not running" while a turn is.
 import { execFile, spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
+import { homedir } from 'node:os'
 import path from 'node:path'
 import type { AgentQuestion, ModelInfo, StepDetail, TaskHistory, TaskInfo, TaskState } from '@shared/runner'
 import { askedLine } from './claude-sessions'
+import type { RunnerUsage } from '@shared/runner-usage'
+import { codexPlan, codexThreadCost, codexThreadTokens, SessionCosts } from './usage'
+import { codexUsageFiles, TranscriptUsage } from './transcript-usage'
 import { daemonPid, daemonState, startDaemon } from './codex-daemon'
-import { codexEntries, turnsOf } from './codex-history'
+import { codexEntries, pendingCodexQuestions, turnsOf } from './codex-history'
+import { codexPicturePosition, readCodexPicture } from './codex-pictures'
 import { detailOf, diffOf, isFileKey } from './step-detail'
 import { WsRpcPeer } from './codex-link'
 import { type Id, JsonRpcPeer, NO_ANSWER, type PeerHandlers, RpcError, type RpcPeer, list, rec, text } from './jsonrpc'
@@ -51,6 +56,7 @@ const NATIVE: Record<string, { pkg: string; triple: string }> = {
   'win32-x64': { pkg: 'codex-win32-x64', triple: 'x86_64-pc-windows-msvc' },
   'win32-arm64': { pkg: 'codex-win32-arm64', triple: 'aarch64-pc-windows-msvc' }
 }
+const apiBilling = (type: string): boolean => ['apiKey', 'amazonBedrock', 'gcp'].includes(type)
 
 // The newest turns shown with every step (as many as the other agents' first look); and how many pages of a hundred older ones
 // "show earlier" brings.
@@ -192,6 +198,7 @@ class CodexTask extends TaskBase implements ScreenSide {
   private screenTask: CodexScreen | null = null
   private screens = 0
   closed: string | undefined
+  fast?: boolean
 
   constructor(private readonly server: CodexServer, thread: Record<string, unknown>) {
     super()
@@ -203,6 +210,14 @@ class CodexTask extends TaskBase implements ScreenSide {
 
   private get thread(): string {
     return this.id ?? ''
+  }
+
+  serviceTier(tier: unknown): void {
+    if (tier !== null && typeof tier !== 'string') return
+    const fast = tier === 'priority'
+    if (fast === this.fast) return
+    this.fast = fast
+    this.emit({ type: 'model' })
   }
 
   // ---- The screen (a thread on the shared server) ----
@@ -554,11 +569,13 @@ class CodexServer {
     this.peer.notify('initialized')
   }
 
-  adopt(thread: Record<string, unknown>): CodexTask {
+  adopt(response: Record<string, unknown>): CodexTask {
+    const thread = rec(response.thread)
     const id = text(thread.id)
     const known = this.tasks.get(id)
-    if (known) return known
-    const task = new CodexTask(this, thread)
+    const task = known ?? new CodexTask(this, thread)
+    task.serviceTier(response.serviceTier)
+    if (known) return task
     this.tasks.set(id, task)
     for (const early of this.early.get(id) ?? []) early.settle(task.asked(early.method, early.params, early.id))
     this.early.delete(id)
@@ -592,6 +609,9 @@ class CodexServer {
         break
       case 'thread/name/updated':
         task.named(text(params.name) || text(params.threadName))
+        break
+      case 'thread/settings/updated':
+        task.serviceTier(rec(params.threadSettings).serviceTier ?? null)
         break
       case 'turn/started':
         task.turnStarted(rec(params.turn))
@@ -651,6 +671,7 @@ export class CodexBackend implements Backend {
   private readonly known = new Map<string, Known>()
   /** What the steps of the threads read last hold to be opened, by thread. */
   private readonly details = new Map<string, Map<string, string>>()
+  private readonly pictureMessages = new Map<string, Promise<Record<string, unknown> | undefined>>()
   private loaded?: Promise<void>
   private adopted?: (task: TaskHandle) => void
   private timer: NodeJS.Timeout | null = null
@@ -659,7 +680,40 @@ export class CodexBackend implements Backend {
   private closing = false
   private resolved?: Promise<ServerContext>
 
-  constructor(private readonly options: CodexOptions) {}
+  private readonly costs: SessionCosts
+  constructor(private readonly options: CodexOptions) {
+    this.costs = new SessionCosts(options.keep && path.join(options.keep, 'api-usage.json'))
+  }
+
+  private async billing(server: CodexServer): Promise<string> {
+    const account = rec(await server.peer.request('account/read', { refreshToken: false }, 5000)).account
+    return text(rec(account).type)
+  }
+
+  private readonly tokens = new TranscriptUsage('codex', () => codexUsageFiles(this.options.env?.CODEX_HOME || process.env.CODEX_HOME || path.join(homedir(), '.codex')))
+
+  async limits() {
+    const server = await this.listing()
+    if (await this.billing(server) !== 'chatgpt') return []
+    return codexPlan(await server.peer.request('account/rateLimits/read', {}, 10_000))
+  }
+
+  async usage(id?: string): Promise<RunnerUsage> {
+    if (await this.costs.has(id)) {
+      const server = await this.listing().catch(() => undefined)
+      const mode = server && await this.billing(server).catch(() => '')
+      if (mode === 'chatgpt') await this.costs.closeTracked()
+      if (server && mode && apiBilling(mode)) {
+        await this.costs.refresh(await this.list(), async session => codexThreadCost(await server.peer.request('account/usage/read', { threadId: session }, 6000), session), id)
+        const cost = await this.costs.total('api-tasks', id)
+        if (cost.amounts.length) return cost
+      }
+    }
+    const local = await this.tokens.read(id)
+    if (local.kind === 'tokens' || id === undefined) return this.costs.withTrackedApi(local, id)
+    const server = await this.listing()
+    return this.costs.withTrackedApi(codexThreadTokens(await server.peer.request('account/usage/read', { threadId: id }, 6000), id), id)
+  }
 
   async detect(): Promise<Detected> {
     const command = this.options.command?.[0] ?? (await findCodex())
@@ -810,7 +864,53 @@ export class CodexBackend implements Backend {
       }
       entries = [...codexEntries(older.flat()), ...entries]
     }
-    return { entries, more: !!next }
+    const questions = pendingCodexQuestions(recent.turns)
+    return { entries, more: !!next, ...(questions.length ? { questions } : {}) }
+  }
+
+  async picture(id: string, key: string): Promise<{ type: string; data: string } | null> {
+    const position = codexPicturePosition(key)
+    if (!position) return null
+    const { turnId, itemId, index } = position
+    const message = JSON.stringify([id, turnId, itemId])
+    let pending = this.pictureMessages.get(message)
+    if (!pending) {
+      pending = this.pictureMessage(id, turnId, itemId).finally(() => this.pictureMessages.delete(message))
+      this.pictureMessages.set(message, pending)
+    }
+    const item = await pending
+    return readCodexPicture(list(item?.content)[index])
+  }
+
+  /** Read the recorded message once for all its thumbnails, releasing any embedded pixels after the read. */
+  private async pictureMessage(id: string, turnId: string, itemId: string): Promise<Record<string, unknown> | undefined> {
+    const server = await this.listing()
+    const matches = (item: Record<string, unknown>): boolean => item.type === 'userMessage' && item.id === itemId
+    let cursor: string | undefined
+    try {
+      const seen = new Set<string>()
+      do {
+        const page = rec(await server.peer.request('thread/items/list', { threadId: id, turnId, limit: 12, sortDirection: 'asc', cursor }, 15_000))
+        const match = list(page.data).map(rec).filter(row => row.turnId === turnId).map(row => rec(row.item)).find(matches)
+        if (match) return match
+        cursor = text(page.nextCursor)
+        if (seen.has(cursor)) break
+        seen.add(cursor)
+      } while (cursor)
+      return undefined
+    } catch (error) {
+      if (!(error instanceof RpcError && (error.code === -32601 || /unknown method|method not found|unsupported method/i.test(error.message)))) return undefined
+    }
+    // Older servers expose the same messages in the turn summaries used by Chat.
+    cursor = undefined
+    for (let pageIndex = 0; pageIndex <= OLDER_PAGES; pageIndex++) {
+      const page = turnsOf(await server.peer.request('thread/turns/list', { threadId: id, itemsView: 'summary', limit: 100, sortDirection: 'desc', cursor }, 15_000))
+      const turn = page.turns.map(rec).find(row => row.id === turnId)
+      if (turn) return list(turn.items).map(rec).find(matches)
+      if (!page.next || page.next === cursor) break
+      cursor = page.next
+    }
+    return undefined
   }
 
   /** What a step of that conversation holds (what a command printed, a thought's words), as the thread's last reading gave it. */
@@ -828,7 +928,8 @@ export class CodexBackend implements Backend {
     const thread = rec(rec(await server.peer.request('thread/read', { threadId: id, includeTurns: false }, 15_000).catch(() => ({}))).thread)
     const model = text(thread.model)
     const effort = text(thread.reasoningEffort)
-    return model || effort ? { ...(model ? { model } : {}), ...(effort ? { effort } : {}) } : null
+    const fast = server.tasks.get(id)?.fast
+    return model || effort || fast !== undefined ? { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(fast !== undefined ? { fast } : {}) } : null
   }
 
   // ---- Starting and opening ----
@@ -836,7 +937,8 @@ export class CodexBackend implements Backend {
   async start(options: StartOptions): Promise<TaskHandle> {
     const server = await this.join(true)
     const started = rec(await server.peer.request('thread/start', { cwd: options.folder, ephemeral: false, ...policy(options.asks) }))
-    const task = server.adopt(rec(started.thread))
+    const task = server.adopt(started)
+    const trackBilling = this.billing(server).then(mode => apiBilling(mode) && task.id ? this.costs.track(task.id) : undefined).catch(() => undefined)
     if (!task.folder) task.folder = options.folder
     if (options.title) {
       await server.peer.request('thread/name/set', { threadId: task.id, name: options.title })
@@ -844,6 +946,7 @@ export class CodexBackend implements Backend {
     }
     await task.send(options.prompt)
     await this.remember(task)
+    await trackBilling
     // A screen that cannot open does not undo the task: it goes on, and its screen says why it is closed.
     await task.show().catch(openFailed(task))
     return task
@@ -858,7 +961,7 @@ export class CodexBackend implements Backend {
       return running
     }
     const resumed = rec(await server.peer.request('thread/resume', { threadId: id, ...policy(options.asks) }))
-    const task = server.adopt(rec(resumed.thread))
+    const task = server.adopt(resumed)
     // The folder as the list told it, when the server does not say.
     if (!task.folder && options.folder) task.folder = options.folder
     // One that is at work now (a screen of the person's own started it): the turn is read, so that Stop can end it.
@@ -912,7 +1015,7 @@ export class CodexBackend implements Backend {
         if (server.tasks.has(known.id)) continue
         try {
           const resumed = rec(await server.peer.request('thread/resume', { threadId: known.id }))
-          const task = server.adopt(rec(resumed.thread))
+          const task = server.adopt(resumed)
           if (!task.folder) task.folder = known.folder
           if (known.title) task.title = known.title
           await task.learn()

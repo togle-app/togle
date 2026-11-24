@@ -920,11 +920,11 @@ test('a task with a command still running in the background says so, tells the w
     const task = await backend.start({ folder: scratch(), prompt: '', title: 'Shell' })
     const pid = job(home, task.screen.job).pid
     const events = watch(task)
-    await task.screen.hide()
-    await sleep(300)
+    await connected(task)
     assert.deepEqual([...task.shells], [], 'nothing runs in the background')
     // A command it started runs: said by the task and the list, and the window is told.
     state(task.screen.job, [{ id: 'b0000001', kind: 'shell', label: 'npm run dev', startedAt: Date.now() }])
+    await task.screen.hide()
     await until(() => task.shells.length === 1, 'the task to say what runs')
     assert.equal(task.shells[0].label, 'npm run dev')
     assert.ok(events.some((event) => event.type === 'shells'), 'the window is told, with no change of state')
@@ -1376,6 +1376,8 @@ test('what a session said last is the text of its last answer, without secrets, 
   try {
     const said = await T.claudeLastSaid(id)
     assert.match(said, /^Done\. The key is \[secret removed\] and it is out\.$/)
+    writeFileSync(path.join(folder, id + '.jsonl'), line({ type: 'user', message: { content: 'Run the next check.' } }) + '\n', { flag: 'a' })
+    assert.equal(await T.claudeLastSaid(id), '', 'a new unanswered prompt has no completion excerpt from the previous turn')
     assert.equal(await T.claudeLastSaid('ffff6666-0000-4000-8000-000000000007'), '', 'a session with no file said nothing')
   } finally {
     if (before === undefined) delete process.env.CLAUDE_CONFIG_DIR

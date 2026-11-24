@@ -32,7 +32,7 @@ export function modelWords(id: string): string {
 /** What the status line says of a task's model and effort ("Opus 5.5 · max"), or nothing when its agent tells neither. */
 export function modelLine(info: ModelInfo | null | undefined): string {
   if (!info) return ''
-  return [info.model ? modelWords(info.model) : '', info.effort ? info.effort.trim().toLowerCase() : ''].filter(Boolean).join(' · ')
+  return [info.model ? modelWords(info.model) : '', info.effort ? info.effort.trim().toLowerCase() : '', info.fast ? 'Fast' : ''].filter(Boolean).join(' · ')
 }
 
 /** The same in full, for the pointer: "Model: Opus 5.5 (claude-opus-5-5). Effort: max." */
@@ -40,5 +40,5 @@ export function modelTitle(info: ModelInfo | null | undefined): string {
   if (!info) return ''
   const model = info.model ? `Model: ${modelWords(info.model)}${modelWords(info.model) !== info.model ? ` (${info.model})` : ''}.` : ''
   const effort = info.effort ? `Effort: ${info.effort.trim().toLowerCase()}.` : ''
-  return [model, effort].filter(Boolean).join(' ')
+  return [model, effort, info.fast ? 'Fast mode.' : ''].filter(Boolean).join(' ')
 }

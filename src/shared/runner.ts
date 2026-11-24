@@ -263,6 +263,8 @@ export interface ModelInfo {
   model?: string
   /** The effort: "low", "medium", "high", "xhigh", "max" (Claude Code), "ultra" (Hermes). */
   effort?: string
+  /** The agent reports this task is using Fast mode. */
+  fast?: boolean
 }
 
 /** A request as the window shows it: with Togle's mark on a command that looks dangerous. */
@@ -273,6 +275,8 @@ export interface ViewRequest extends PendingRequest {
 
 /** A task as the window shows it. */
 export interface TaskView extends TaskInfo {
+  /** The active native conversation when the same task continues in a different session. */
+  sessionId?: string
   /** `runner:id`. */
   key: string
   /** Whether Togle runs it, so it can be answered, replied to and stopped here. */
@@ -323,6 +327,15 @@ export interface TaskView extends TaskInfo {
   held?: string[]
   heldNote?: string
   heldPaused?: boolean
+}
+
+/** Whether a handoff can reach this conversation through its chat, including by resuming a saved task. */
+export function taskHandoffProblem(task: TaskView): string | undefined {
+  if (task.signedOut) return 'It is signed out'
+  if (runsInTerminal(task.runner) || (task.terminal && !task.screen)) return 'It runs in a terminal of its own'
+  if (!task.mine && task.pid) return 'It runs in your terminal'
+  if (!task.mine && (task.state === 'working' || task.state === 'waiting')) return 'Open it in Agents first'
+  return undefined
 }
 
 /**
@@ -402,6 +415,8 @@ export interface TaskDetail {
  */
 export interface TaskHistory {
   entries: LogEntry[]
+  /** Unanswered follow-up questions in the current Codex turn. The agent can keep working. */
+  questions?: import('./codex-questions').CodexQuestion[]
   /** Whether turns before these were left out: the rest can be asked for. */
   more: boolean
   /**
@@ -543,6 +558,8 @@ export interface TaskAttention {
   pending: ViewRequest[]
   /** What the task is doing or said last, in a line. */
   line: string
+  /** Activity observed by Togle, used to count what happened during the turn. */
+  log?: readonly LogEntry[]
   /** As in TaskView: it stopped because its agent is signed out, and what signs it in again. */
   signedOut?: boolean
   fix?: string
@@ -559,6 +576,8 @@ export interface TaskNotice {
   kind: 'waiting' | 'done' | 'failed'
   /** The task, by its key. */
   key: string
+  /** The agent's display name, separate from its project. */
+  agent: string
   title: string
   /** The agent and the folder: "Codex · api-server". */
   where: string
@@ -566,6 +585,12 @@ export interface TaskNotice {
   says: string
   /** The command in full, the files, the question, or what the finished task said last. */
   detail: string
+  /** An activity summary for system notifications, without conversation text or paths. */
+  activity?: string
+  /** A short excerpt of this turn's outcome, for notifications with previews enabled. */
+  result?: string
+  /** The reason supplied with an approval request. */
+  reason?: string
   detailKind: 'command' | 'files' | 'question' | 'words'
   /** The request the buttons answer. */
   requestId?: string
@@ -607,6 +632,7 @@ export type Decision = 'allow-once' | 'allow-always' | 'refuse'
 
 export type TaskEvent =
   | { type: 'state'; state: TaskState }
+  | { type: 'model' }
   | { type: 'title'; title: string }
   | { type: 'message'; text: string }
   | { type: 'request'; request: PendingRequest }

@@ -72,7 +72,7 @@ export class TogleTray {
       { label: recording ? `Finish dictation${keys ? ` (${keys})` : ''}` : keys ? `Dictate with ${keys}` : 'Click the voice bar to dictate', enabled: recording, click: this.actions.toggle },
       ...(recording || busy ? [{ label: 'Cancel dictation', enabled: state.phase !== 'inserting', click: this.actions.cancel }] : []),
       { label: 'Show voice bar', type: 'checkbox', checked: showBar, click: item => this.actions.indicator(item.checked) },
-      ...(state.lastText && !recording && !busy ? [{ label: 'Copy last dictation', click: this.actions.copy }] : []),
+      ...((state.picture || state.lastText) && !recording && !busy ? [{ label: state.picture ? 'Copy screenshot' + (state.text ? ' and text' : '') : 'Copy last dictation', click: this.actions.copy }] : []),
       // When typing them failed, the last ten are here to copy (kept in memory until Togle closes).
       ...(recent.length > 1 ? [{ label: 'Copy a recent dictation', submenu: recent.map(text => ({ label: recentLabel(text), click: () => this.actions.copyText(text) })) }] : []),
       { label: 'Dictation settings', click: this.actions.settings },

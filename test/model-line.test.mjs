@@ -36,12 +36,14 @@ test('a model id is said as a person says it: Claude by family and version, GPT 
 test('the status line says the model and the effort, whichever the agent tells; the pointer says them in full', () => {
   assert.equal(T.modelLine({ model: 'claude-opus-5-5', effort: 'max' }), 'Opus 5.5 · max')
   assert.equal(T.modelLine({ model: 'gpt-6.2-sol', effort: 'Ultra' }), 'GPT 6.2 Sol · ultra')
+  assert.equal(T.modelLine({ model: 'gpt-6.2-sol', effort: 'Ultra', fast: true }), 'GPT 6.2 Sol · ultra · Fast')
   assert.equal(T.modelLine({ model: 'claude-haiku-5-5' }), 'Haiku 5.5')
   assert.equal(T.modelLine({ effort: 'high' }), 'high')
   assert.equal(T.modelLine(null), '')
   assert.equal(T.modelLine({}), '')
   assert.equal(T.modelTitle({ model: 'claude-opus-5-5', effort: 'max' }), 'Model: Opus 5.5 (claude-opus-5-5). Effort: max.')
   assert.equal(T.modelTitle({ model: 'gemini-2.5-pro' }), 'Model: gemini-2.5-pro.', 'an id with no words of its own is not said twice')
+  assert.equal(T.modelTitle({ model: 'claude-opus-5-5', fast: true }), 'Model: Opus 5.5 (claude-opus-5-5). Fast mode.')
   assert.equal(T.modelTitle(undefined), '')
 })
 
@@ -71,6 +73,18 @@ test('Claude Code: the model and the effort of the last answer in the session, n
   // An older Claude Code writes no effort: only the model is told.
   appendFileSync(file(1), line(answer(1, 'claude-sonnet-5-5')))
   assert.deepEqual(await T.claudeModel(id(1)), { model: 'claude-sonnet-5-5' })
+})
+
+test('Claude Code shows Fast only for the speed reported on the latest answer', async () => {
+  const withSpeed = speed => {
+    const record = answer(7, 'claude-opus-5-5', { effort: 'high' })
+    record.message.usage = { speed }
+    return line(record)
+  }
+  write(7, line(asked(7)) + withSpeed('fast'))
+  assert.deepEqual(await T.claudeModel(id(7)), { model: 'claude-opus-5-5', effort: 'high', fast: true })
+  appendFileSync(file(7), withSpeed('standard'))
+  assert.deepEqual(await T.claudeModel(id(7)), { model: 'claude-opus-5-5', effort: 'high' })
 })
 
 test('Claude Code: an answer far back in a long session is found, and a session with no answer, or no file, has none', async () => {

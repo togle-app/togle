@@ -58,6 +58,7 @@ require('../out/main/index.js')
 
 async function run() {
   await wait(() => BrowserWindow.getAllWindows().length >= 2 && handlers.has('calls:give'), 'the windows and the handlers')
+  await invoke('settings:update', { firstMinute: { done: true } })
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'togle-give-'))
   const idle = (key) => async () => (await invoke('runners:list')).find((task) => task.key === key && task.state === 'idle')
   const said = async (key) => (await invoke('runners:detail', key)).log.filter((entry) => entry.kind === 'you').map((entry) => entry.text)
@@ -66,6 +67,34 @@ async function run() {
   // An agent task that is running, and the call that starts next: it exists by its key before it starts.
   const target = await invoke('runners:start', { runner: 'hermes', folder, prompt: 'say ok', title: 'Takes the call' })
   await wait(idle(target.key), 'the task to finish its first turn')
+  const item = (await invoke('todo:add', 'Review the onboarding copy')).items.at(-1)
+  const beforeGive = (await invoke('runners:list')).map(task => task.key).sort()
+  await assert.rejects(invoke('runners:give', 'hermes:missing', 'Check the copy', item), /gone/)
+  assert.equal((await invoke('todo:list')).items.find(todo => todo.line === item.line).task, undefined)
+  const main = await wait(() => BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('/index.html')), 'the main window')
+  const giveButton = "[...document.querySelectorAll('.todo-item')].find(row=>row.querySelector('.todo-text')?.textContent==='Review the onboarding copy')?.querySelector('button.small')"
+  await wait(() => main.webContents.executeJavaScript(`!!(${giveButton})`), 'Give to an agent on the to-do')
+  await main.webContents.executeJavaScript(`(${giveButton}).click()`)
+  const box = await wait(() => BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('surface=taskbox')), 'the handoff picker')
+  const inBox = script => box.webContents.executeJavaScript(script)
+  await wait(() => inBox("document.querySelector('.taskbox-destination .on')?.textContent==='Existing task'"), 'existing task mode')
+  await inBox("document.querySelector('.taskbox-recipient button').click()")
+  const targetButton = "[...document.querySelectorAll('.menu-overlay button')].find(b=>b.querySelector('.label')?.firstChild.textContent==='Takes the call')"
+  await wait(() => inBox(`!!(${targetButton})`), 'the Hermes conversation')
+  await inBox(`(${targetButton}).click()`)
+  await wait(() => inBox("document.querySelector('.taskbox-recipient small')?.title===" + JSON.stringify(folder)), 'the original project')
+  await inBox("document.querySelector('.taskbox-field .primary').click()")
+  await wait(async () => (await invoke('todo:list')).items.some(todo => todo.line === item.line && todo.task === target.key), 'the selected to-do to link to the existing conversation')
+  assert.deepEqual((await invoke('runners:list')).map(task => task.key).sort(), beforeGive)
+  assert.equal((await said(target.key)).filter(text => text === item.text).length, 1)
+  assert.deepEqual((await invoke('todo:list')).items.filter(todo => todo.task === target.key).map(todo => [todo.text, todo.done]), [['Takes the call', false], [item.text, false]])
+  await wait(idle(target.key), 'the to-do turn to finish')
+  const removed = (await invoke('todo:add', 'Removed during handoff')).items.at(-1)
+  await invoke('todo:remove', removed)
+  assert.match((await invoke('runners:give', target.key, 'Already accepted', removed)).todoProblem, /list changed/)
+  assert.equal((await said(target.key)).filter(text => text === 'Already accepted').length, 1)
+  assert.ok(!(await invoke('todo:list')).items.some(todo => todo.text === removed.text))
+  await wait(idle(target.key), 'the handoff with a stale to-do to finish')
   const call = (await invoke('call:current')).key
   assert.match(call, /^[\w.-]{1,100}$/, 'the call that starts next has its key already')
   assert.deepEqual(await invoke('calls:agents', call), { keys: [], sent: {} })
@@ -162,7 +191,7 @@ async function run() {
 
   // Done: quit.
   clearTimeout(timeout)
-  console.log('GIVE PASS: agents connected before a call, a call going on sent to a task as one line, the file written again each time, a new task started with it, bad requests said in words, a finished call given again, and what is kept deleted with the call')
+  console.log('GIVE PASS: the To-do button sent to an existing conversation, to-do links followed delivery, and live and saved calls reached existing and new tasks.')
   await invoke('runners:stop', started[0].key).catch(() => undefined)
   app.exit(0)
 }

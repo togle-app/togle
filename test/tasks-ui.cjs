@@ -76,6 +76,20 @@ async function open(T, agent, width, surface, extra = {}) {
 }
 
 const texts = (ui, selector) => ui.evaluate("[...document.querySelectorAll(" + JSON.stringify(selector) + ")].map(e=>e.textContent.trim().replace(/\\s+/g,' '))")
+// Compare the SVG canvas and the actual drawing with the center of the visible button or badge.
+async function checkIconCenter(ui, selector) {
+  const measure = selector => {
+    const host = document.querySelector(selector)
+    const svg = host?.querySelector(':scope > svg')
+    if (!svg) return null
+    const box = host.getBoundingClientRect(), icon = svg.getBoundingClientRect(), ink = svg.getBBox()
+    const center = new DOMPoint(ink.x + ink.width / 2, ink.y + ink.height / 2).matrixTransform(svg.getScreenCTM())
+    return [icon.left + icon.width / 2, icon.top + icon.height / 2, center.x, center.y]
+      .map((point, index) => point - (index % 2 ? box.top + box.height / 2 : box.left + box.width / 2))
+  }
+  const offsets = await ui.evaluate('(' + measure.toString() + ')(' + JSON.stringify(selector) + ')')
+  assert.ok(offsets && offsets.every((px, index) => Math.abs(px) <= (index < 2 ? 0.15 : 0.65)), selector + ' center offsets: ' + offsets)
+}
 // An icon in its button, as a person sees it: the middle of the icon against the middle of the room inside the button (its border and padding taken off), the
 // room on each side, in pixels. A cross that is a letter, a button whose padding is wider than the button (the base rule button.small has 9px a side, and once
 // pushed the cross of the quote off to the right), or an icon on a half pixel, is off: the same room on every side, and a multiple of 4 px, which is whole
@@ -615,6 +629,27 @@ async function checkTasks(T, agent) {
     await left()
     assert.equal(await ui.evaluate("document.querySelector('.terminal-note b')?.textContent"), '← is not used here')
     assert.ok((await note()).includes("list of every session"), 'the note says where it would have gone')
+    const originalSize = ui.window.getContentSize()
+    const noteLayout = () => {
+      const note = document.querySelector('.terminal-note')
+      const message = note.querySelector('span'), title = message.querySelector('b').getBoundingClientRect()
+      const body = document.createRange()
+      body.selectNodeContents(message.lastChild)
+      const lines = body.getClientRects(), box = message.getBoundingClientRect(), close = note.querySelector('button').getBoundingClientRect()
+      return { lines: lines.length, below: lines[0].top >= title.bottom - 1, left: lines[0].left - title.left, center: (box.top + box.bottom - close.top - close.bottom) / 2 }
+    }
+    const lineCounts = []
+    for (const width of [1800, 430]) {
+      ui.window.setContentSize(width, originalSize[1])
+      await ui.wait('innerWidth === ' + width)
+      const layout = await ui.evaluate('(' + noteLayout.toString() + ')()')
+      assert.ok(layout.below && Math.abs(layout.left) <= 1 && Math.abs(layout.center) <= 1, 'notice at ' + width + 'px ' + JSON.stringify(layout))
+      lineCounts.push(layout.lines)
+      await ui.capture('terminal-note-' + width)
+    }
+    assert.ok(lineCounts[0] === 1 && lineCounts[1] > 1, 'the explanation fits one wide line and wraps at the narrow width: ' + lineCounts)
+    ui.window.setContentSize(...originalSize)
+    await ui.wait('innerWidth === ' + originalSize[0])
     assert.deepEqual(await sentSince(from), [], 'nothing was sent')
     await putAway()
     await left()
@@ -700,7 +735,7 @@ async function checkTodo(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.todo-add input').placeholder"), 'Add a to-do, or hold F9 and say it')
 
   // What waits for the person is on top, a command in full before it can be allowed, and one that looks dangerous only in the window.
-  assert.deepEqual(await texts(ui, '.todo-group > h3'), ['Waiting for you', 'To do', 'From your calls'])
+  assert.deepEqual(await texts(ui, '.todo-group h3'), ['Waiting for you', 'To do', 'From your calls'])
   assert.deepEqual(await texts(ui, '.todo-row.need b'), ['Add the status column', 'Clean the build folder'])
   assert.equal((await texts(ui, '.todo-row.need small'))[0], 'Codex · api-server · wants to run npm run migrate', 'the command in the row\'s one line, as the design has it')
   assert.deepEqual(await texts(ui, '.todo-row.need .todo-line code'), ['npm run migrate', 'rm -rf build'])
@@ -724,7 +759,7 @@ async function checkTodo(T, agent) {
   assert.equal(await ui.evaluate("document.querySelector('.todo-item.done .todo-text').textContent"), 'Send the invoice to Marta')
   assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.todo-item.done .todo-text')).textDecorationLine"), 'line-through')
   assert.deepEqual(await texts(ui, '.todo-item .todo-row > button.small'), ['Give to an agent'], 'only an item with no agent can be given, and an item whose agent is done has the chip only')
-  assert.equal(await ui.evaluate("!!document.querySelector('.todo-remove, .todo-file')"), false, 'no delete button on a row and no line about the file: the design has neither')
+  assert.equal(await ui.evaluate("document.querySelectorAll('.todo-item .todo-remove').length"), 4, 'open, completed, and assigned items can all be removed')
 
   // Allow once and Refuse go to the task.
   await ui.click('.todo-row.need button', 'Allow once')
@@ -737,7 +772,7 @@ async function checkTodo(T, agent) {
   assert.deepEqual((await ui.calls('answerRunnerTask')).map(call => call.args[2]), ['allow-once', 'refuse'])
   await ui.click('.workspace-nav button', 'To-do')
   await ui.wait("!!document.querySelector('.todo') && !document.querySelector('.todo-row.need')")
-  assert.deepEqual(await texts(ui, '.todo-group > h3'), ['To do', 'From your calls'], 'nothing waits, so that part is not there')
+  assert.deepEqual(await texts(ui, '.todo-group h3'), ['To do', 'From your calls'], 'nothing waits, so that part is not there')
 
   // Add, tick, change, delete.
   await ui.fill('.todo-add input', '  Call the bank  ')
@@ -802,13 +837,22 @@ async function checkTodo(T, agent) {
   assert.deepEqual(await texts(ui, offered + ' .todo-offer'), ['Send the API timeline to Dario', 'Book the staging review'], 'what a call left is one plain line')
   assert.deepEqual(await texts(ui, offered + ' small'), ['Notes are ready · 2 names to confirm'])
   assert.equal(await ui.evaluate("document.querySelectorAll('.todo-group[aria-label=\"From your calls\"] .todo-dot.done').length"), 1, 'the call has its dot')
-  assert.deepEqual(await texts(ui, offered + ' button'), ['Confirm names', 'Add', 'Add'])
+  assert.deepEqual(await texts(ui, offered + ' button'), ['Confirm names', 'Add', 'Dismiss', 'Add', 'Dismiss'])
   await ui.capture('todo-from-calls')
   await ui.click(offered + ' button', 'Add')
   await ui.wait("document.querySelectorAll('.todo-group[aria-label=\"From your calls\"] .todo-row').length===2")
-  assert.equal((await ui.calls('addTodo')).at(-1).args[0], 'Send the API timeline to Dario')
+  assert.deepEqual((await ui.calls('reviewMeetingTodo')).at(-1).args, ['planning', 'Send the API timeline to Dario.', 'add'])
   assert.ok((await texts(ui, '.todo-item .todo-text')).includes('Send the API timeline to Dario'), 'it is on the list now')
-  assert.deepEqual(await texts(ui, offered + ' .todo-offer'), ['Book the staging review'], 'and is not offered again')
+  await ui.click(offered + ' button', 'Dismiss')
+  await ui.wait("!document.querySelector('.todo-offer')")
+  await ui.click('.todo-remove', 'Remove Send the API timeline to Dario')
+  await ui.click('.todo-list-head button', 'Clear list')
+  await ui.click('[aria-label="Clear to-do list"] button', 'Cancel')
+  assert.ok((await todo()).length)
+  await ui.click('.todo-list-head button', 'Clear list')
+  await ui.click('[aria-label="Clear to-do list"] button', 'Remove all')
+  await ui.wait("!document.querySelector('.todo-item, .todo-offer')")
+  assert.deepEqual(await texts(ui, offered + ' .todo-offer'), [], 'accepted and dismissed suggestions stay reviewed after clearing the list')
   await ui.click(offered + ' button', 'Confirm names')
   await ui.wait("!!document.querySelector('.meetings')")
   assert.equal(await ui.evaluate("document.querySelector('.workspace-nav button[aria-current=page]')?.getAttribute('aria-label')"), 'Meetings', 'Confirm names opens the call in Meetings')
@@ -843,7 +887,7 @@ const pickFrom = async (ui, chip, label) => {
 const menuLabels = (ui) => ui.evaluate("[...document.querySelectorAll('.menu [role^=menuitem] .label')].map(e=>e.textContent.trim())")
 
 // The task list is the slow answer when the box opens (every agent is asked for its tasks: seconds on a first look, 4 s on this PC) and it
-// only gives the folders: the list of agents is not held up by it, and says what it is waiting for while it waits.
+// supplies the folders and existing conversations. The list of agents loads independently.
 async function checkTaskBoxWaits(T, agent) {
   const ui = await open(T, agent, 600, 'taskbox', { slow: { runnerStatus: 250, runnerTasks: 2200 } })
   await ui.click('.pick-chip', 'Agent')
@@ -936,12 +980,15 @@ async function checkTaskBox(T, agent) {
   assert.equal(await ui.evaluate("!!document.querySelector('.taskbox-signin')"), false, 'signed in: the chips go')
   assert.equal(await ui.evaluate("!!document.querySelector('.taskbox-error')"), false)
 
-  // Opened from a to-do item: its words, a chip naming the item, and the task started for it carries the item.
+  // A handoff from To-do defaults to existing conversations without guessing a recipient.
   await ui.evaluate("window.togleUITest.emit('onTaskBoxShown',{prompt:'Review the onboarding copy',todo:{line:0,text:'Review the onboarding copy'},runner:'claude',folder:'C:\\\\work\\\\website'})")
   await ui.wait("!!document.querySelector('.taskbox-todo')")
   assert.equal((await texts(ui, '.taskbox-todo span'))[0], 'To-do: Review the onboarding copy')
   await centred(ui, '.taskbox-todo button', 'the cross of the to-do chip')
   assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').value"), 'Review the onboarding copy')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox-destination .on').textContent"), 'Existing task')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox-field .primary').disabled"), true)
+  await ui.click('.taskbox-destination button', 'New task')
   assert.deepEqual(await texts(ui, '.pick-chip'), ['Claude Code', 'website'], 'the agent and the folder it was opened with')
   await ui.capture('task-box-todo')
   await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
@@ -951,17 +998,52 @@ async function checkTaskBox(T, agent) {
   // The item can be left out: the task then goes on the list as an item of its own.
   await ui.evaluate("window.togleUITest.emit('onTaskBoxShown',{prompt:'Write the release notes',todo:{line:2,text:'Write the release notes'}})")
   await ui.wait("!!document.querySelector('.taskbox-todo')")
+  await ui.click('.taskbox-destination button', 'New task')
   await ui.click('.taskbox-todo button', 'Not for this to-do')
   assert.equal(await ui.evaluate("!!document.querySelector('.taskbox-todo')"), false)
   await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
   await ui.wait("document.querySelector('.taskbox textarea').value===''")
   assert.equal((await ui.calls('startRunnerTask')).at(-1).args[0].todo, undefined)
 
+  // Sending to a named conversation keeps its project and edited instructions as the destination changes.
+  const another = await ui.evaluate("window.togle.addTodo('Review the new homepage').then(list=>list.items.at(-1))")
+  const ref = { line: another.line, text: another.text }
+  await ui.evaluate("window.togleUITest.emit('onTaskBoxShown'," + JSON.stringify({ prompt: ref.text, todo: ref }) + ")")
+  await ui.fill('.taskbox textarea', 'Check the mobile layout too')
+  await ui.click('.pick-chip', 'Existing task')
+  const option = (title, detail = '') => "[...document.querySelectorAll('.menu-overlay [role^=menuitem]')].find(b => b.querySelector('.label').firstChild.textContent===" + JSON.stringify(title) + " && b.querySelector('.note').textContent.includes(" + JSON.stringify(detail) + "))"
+  await ui.wait("!!(" + option('Port the settings screen') + ")")
+  assert.equal(await ui.evaluate(option('Write the release notes', 'runs in your terminal') + ".disabled"), true, 'a conversation running in another terminal cannot be taken over here')
+  await ui.evaluate(option('Rebuild the pricing page') + ".click()")
+  await ui.wait("document.querySelector('.taskbox-recipient small')?.textContent.includes('website')")
+  await ui.click('.taskbox-destination button', 'New task')
+  await ui.click('.taskbox-destination button', 'Existing task')
+  await ui.evaluate("window.togleUITest.emit('onTaskBoxShown',null)")
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox-recipient .pick-chip').textContent"), 'Rebuild the pricing page')
+  assert.equal(await ui.evaluate("document.querySelector('.taskbox textarea').value"), 'Check the mobile layout too')
+  const height = await ui.evaluate("Math.ceil(document.querySelector('.taskbox').getBoundingClientRect().height)")
+  ui.window.setContentSize(600, height)
+  await ui.wait("innerHeight===" + height)
+  await ui.capture('task-box-existing')
+  ui.window.setContentSize(600, 850)
+  const starts = (await ui.calls('startRunnerTask')).length
+  await ui.evaluate("window.togleUITest.giveFails('claude:s2','The task is unavailable.')")
+  await ui.click('.taskbox-field .primary', 'Send')
+  await ui.wait("document.querySelector('.taskbox-error')?.textContent==='The task is unavailable.'")
+  assert.equal(await ui.evaluate("window.togle.todoList().then(list=>list.items.at(-1).task)"), undefined)
+  await ui.evaluate("window.togleUITest.giveFails('claude:s2','')")
+  await ui.evaluate(enter)
+  await ui.wait("document.querySelector('.taskbox textarea').value===''")
+  assert.deepEqual((await ui.calls('giveToRunnerTask')).at(-1).args, ['claude:s2', 'Check the mobile layout too', ref])
+  assert.deepEqual(await ui.evaluate("window.togle.todoList().then(list=>list.items.filter(item=>item.task==='claude:s2').map(item=>item.text))"), ['Fix the login redirect', ref.text])
+  assert.equal((await ui.calls('startRunnerTask')).length, starts)
+
   // Opened from a saved call (Give to an agent): a chip names it, and the task is told where it is and what it is.
   const attach = "window.togleUITest.emit('onTaskBoxShown',{attach:{title:'Sprint review',path:'C:/data/shared-calls/confirm-call.md'}})"
   await ui.evaluate(attach)
   await ui.wait("!!document.querySelector('.taskbox-attach')")
   assert.equal((await texts(ui, '.taskbox-attach span'))[0], 'Call: Sprint review')
+  await ui.click('.taskbox-destination button', 'New task')
   await ui.capture('task-box-call')
   await ui.fill('.taskbox textarea', 'Make a to-do list from this call')
   await ui.evaluate("document.querySelector('.taskbox textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))")
@@ -999,9 +1081,10 @@ async function checkTaskBox(T, agent) {
 
 async function checkAgentSettings(T, agent) {
   const ui = await open(T, agent, 1024)
+  await ui.evaluate("localStorage.removeItem('togle.ui.fold:settings.names'); localStorage.removeItem('togle.ui.fold:settings.voices')")
   await ui.click('.shell-settings', 'Settings')
   // The agents Togle found, as the design's Settings lists them.
-  await ui.wait("document.querySelectorAll('#settings-agents .setting').length===6")
+  await ui.wait("document.querySelectorAll('#settings-agents .agent-row').length===3")
   assert.deepEqual(await texts(ui, '#settings-agents .agent-label'), ['Claude Code', 'Codex', 'Hermes'])
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('#settings-agents .agent-name .av')].map(av=>av.dataset.agent+':'+(av.querySelector('svg')?'mark':av.textContent))"), ['claude:mark', 'codex:mark', 'hermes:mark'], 'each agent with the mark its maker made, not a letter')
   assert.deepEqual(await texts(ui, '#settings-agents .add-row button'), ['Add another agent'])
@@ -1035,6 +1118,18 @@ async function checkAgentSettings(T, agent) {
   assert.deepEqual((await ui.calls('updateSettings')).map(call => call.args).at(-1), { tasks: { view: 'cards' } })
   await ui.click(viewSwitch + ' [role=radio]', 'Terminal')
   await ui.wait(pickedView + "==='Terminal'")
+  if (process.platform === 'win32') {
+    const preview = "[...document.querySelectorAll('#settings-agents .setting')].find(row=>row.textContent.includes('Show task details in Windows notifications')).querySelector('input')"
+    assert.equal(await ui.evaluate(preview + '.disabled'), true, 'screen capture protection hides the preview')
+    await ui.evaluate("document.querySelector('#settings-appearance input[role=switch]').click()")
+    await ui.wait('!' + preview + '.disabled')
+    assert.equal(await ui.evaluate(preview + '.checked'), true)
+    await ui.evaluate(preview + '.click()')
+    await ui.wait('!' + preview + '.checked')
+    assert.deepEqual((await ui.calls('updateSettings')).at(-1).args, { tasks: { notificationPreviews: false } })
+    await ui.evaluate(preview + '.click()')
+    await ui.wait(preview + '.checked')
+  }
   // Sorting by subject: on until the person turns it off; the switch says what goes to their AI.
   const sortSwitch = "[...document.querySelectorAll('#settings-agents input[role=switch]')].find(e=>e.closest('.setting')?.textContent.includes('Sort tasks by subject'))"
   assert.equal(await ui.evaluate(sortSwitch + '?.checked'), true, 'on at first')
@@ -1206,6 +1301,8 @@ async function checkReach(T, agent) {
   assert.match(panel, /build-server/)
   assert.deepEqual(await texts(ui, '.task-title .crumb-words, .task-title h2'), ['build-server', 'infra', 'Apply the staging plan'], 'from the device to it')
   assert.equal(await ui.evaluate("document.querySelector('.task-agent-name').textContent"), 'Codex', 'the agent after how it stands')
+  assert.equal(await ui.evaluate("document.querySelector('.task-agent-name [data-agent]')?.dataset.agent"), 'codex', 'a task from another device has a logo from its name')
+  await checkIconCenter(ui, '.task-title .device-mark')
   assert.match(panel, /Allow it on build-server/, 'Allow stays on its own computer until the proof that you are there is built')
   assert.equal(await ui.evaluate("[...document.querySelectorAll('.task-request button')].some(b=>b.textContent.trim()==='Allow once')"), false)
   await ui.capture('reach-agents')
@@ -1356,7 +1453,7 @@ async function checkNotice(T, agent) {
   ui.window.destroy()
 }
 
-// The corner notice that a call started in another app: three answers, held a moment so a stray click does not give one.
+// The corner notice that a call started in another app. Hold the buttons briefly to avoid an accidental click.
 async function checkCallNotice(T, agent) {
   const ui = await open(T, agent, 372, 'callnotice')
   const emit = value => ui.evaluate("window.togleUITest.emit('onCallNotice', " + JSON.stringify(value) + ")")
@@ -1365,17 +1462,16 @@ async function checkCallNotice(T, agent) {
   await emit({ app: 'zoom', name: 'Zoom' })
   await ui.wait("!!document.querySelector('.call-notice')")
   assert.equal(await ui.evaluate("document.querySelector('.call-notice strong').textContent"), 'A call started in Zoom')
-  assert.deepEqual(await texts(ui, '.call-notice button'), ['Write it down', 'Not now', 'Always in Zoom'])
+  assert.deepEqual(await texts(ui, '.call-notice button'), ['Take notes', 'Not now'])
   assert.equal(await ui.evaluate("[...document.querySelectorAll('.call-notice button')].every(button=>button.disabled)"), true, 'held at first, so a click meant for the call does not answer it')
   await ui.wait("[...document.querySelectorAll('.call-notice button')].every(button=>!button.disabled)")
   await ui.capture('call-notice')
-  await ui.click('.call-notice button', 'Write it down')
+  await ui.click('.call-notice button', 'Take notes')
   await emit({ app: 'teams', name: 'Teams' })
   await ui.wait("document.querySelector('.call-notice strong').textContent==='A call started in Teams'")
   await ui.wait("[...document.querySelectorAll('.call-notice button')].every(button=>!button.disabled)")
   await ui.click('.call-notice button', 'Not now')
-  await ui.click('.call-notice button', 'Always in Teams')
-  assert.deepEqual(await answers(), ['write', 'later', 'always'])
+  assert.deepEqual(await answers(), ['write', 'later'])
   await emit(null)
   await ui.wait("!document.querySelector('.call-notice')")
   assert.deepEqual(ui.errors, [], 'no errors in the console')
@@ -1539,7 +1635,7 @@ async function checkAgentMarks(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.workspace-nav button', 'Agents')
   await ui.wait("document.querySelectorAll('.task-row').length===5")
-  await ui.evaluate("window.togleUITest.terminalTask({ key: 'term-aider:m1', runner: 'term-aider', agent: 'Aider', title: 'Rename the module', folder: 'C:\\\\work\\\\api-server', state: 'working', words: 'Rename the module' }, '')")
+  await ui.evaluate("window.togleUITest.terminalTask({ key: 'term-atelier:m1', runner: 'term-atelier', agent: 'Atelier', title: 'Rename the module', folder: 'C:\\\\work\\\\api-server', state: 'working', words: 'Rename the module' }, '')")
   await ui.wait("[...document.querySelectorAll('.task-row strong')].some(e=>e.textContent==='Rename the module')")
   const rows = await ui.evaluate(`[...document.querySelectorAll('.task-row')].map((row) => {
     const line = row.querySelector('.task-copy > span'), mark = line.querySelector('.agent-mark')
@@ -1573,14 +1669,14 @@ async function checkAgentMarks(T, agent) {
   assert.ok(added.boxHeight > 9 && added.boxHeight <= 13, 'the letter box is smaller than the line: ' + added.boxHeight)
   assert.ok(added.boxOff <= 1, 'and in the middle of its line\'s words: ' + added.boxOff)
   assert.ok(!added.agent, 'it has no maker\'s mark')
-  assert.ok(added.line.startsWith('Aider · '), 'and its name, in the line: ' + added.line)
+  assert.ok(added.line.startsWith('Atelier · '), 'and its name, in the line: ' + added.line)
   assert.notEqual(added.dot, 'none', 'with the dot after it, as the name is there to read')
   assert.equal(new Set(rows.map((row) => row.height)).size, 1, 'no mark makes a row taller: ' + rows.map((row) => row.height))
   // The task's header: the mark and the name. An added agent's: its letter and the name.
   await ui.task('Add the status column')
   assert.deepEqual(await ui.evaluate("(()=>{const name=document.querySelector('.task-agent-name');return [name.textContent,!!name.querySelector('svg'),name.querySelector('.agent-mark').dataset.agent]})()"), ['Codex', true, 'codex'], 'the header says Codex with its mark')
   await ui.task('Rename the module')
-  assert.deepEqual(await ui.evaluate("(()=>{const name=document.querySelector('.task-agent-name');return [name.textContent,!!name.querySelector('svg'),name.querySelector('.agent-letter').dataset.letter]})()"), ['Aider', false, 'A'], 'an added agent: its letter and its name')
+  assert.deepEqual(await ui.evaluate("(()=>{const name=document.querySelector('.task-agent-name');return [name.textContent,!!name.querySelector('.agent-glyph'),name.querySelector('.agent-letter').dataset.letter]})()"), ['Atelier', false, 'A'], 'a custom agent without artwork keeps its letter and name')
   // In the header the letter box is in the middle of the name, and the name is on the center line of the chip beside it.
   const header = await ui.evaluate("(()=>{const mid=r=>r.top+r.height/2;const name=document.querySelector('.task-status .task-agent-name');const mark=name.querySelector('.agent-mark');const box=mark.querySelector('.agent-letter');const range=document.createRange();range.selectNodeContents([...mark.childNodes].find(n=>n.nodeType===3&&n.textContent.trim()));const chip=document.querySelector('.task-status .state-chip');return {box:Math.abs(mid(box.getBoundingClientRect())-mid(range.getBoundingClientRect())),name:Math.abs(mid(name.getBoundingClientRect())-mid(chip.getBoundingClientRect())),height:name.getBoundingClientRect().height}})()")
   assert.ok(header.box <= 1, 'the letter box is in the middle of its name in the header: ' + header.box)
@@ -1591,6 +1687,88 @@ async function checkAgentMarks(T, agent) {
   await ui.wait("document.querySelectorAll('.todo-chip').length>=1")
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.todo-chip')].map(chip=>[chip.textContent,!!chip.querySelector('.agent-mark.quiet svg')])"), [['Claude Code · working', true], ['Claude Code · idle', true]], 'a chip names the agent by its mark')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
+  ui.window.destroy()
+}
+
+async function checkProviderLogos(T, agent) {
+  const ids = fs.readdirSync(path.join(project, 'src/renderer/src/agent-icons')).map(file => path.parse(file).name)
+  const copilot = { id: 'known:github-copilot', name: 'GitHub Copilot', command: 'copilot --acp' }
+  const cline = { id: 'registry:cline', name: 'Cline', command: 'cline --acp' }
+  const other = ids.filter(id => id !== 'github-copilot' && id !== 'cline').map(id => ({ id: 'registry:' + id, name: id, command: id }))
+  const ui = await open(T, agent, 1024, undefined, { catalog: { found: [copilot], more: [cline, ...other] } })
+  await ui.evaluate("localStorage.removeItem('togle.ui.fold:agents.usage')")
+  await ui.click('.shell-settings', 'Settings')
+  await ui.click('#settings-agents button', 'Add another agent')
+  await ui.wait("document.querySelectorAll('.agent-choice').length===" + ids.length)
+  // Decode the same embedded resource that Chromium paints in each catalog avatar, under the renderer's actual CSP.
+  const rasterize = async () => {
+    const result = []
+    for (const avatar of document.querySelectorAll('.agent-choice .av')) {
+      const glyph = avatar.querySelector('.agent-glyph')
+      if (!glyph) { result.push({ id: avatar.textContent }); continue }
+      const url = glyph.tagName === 'IMG' ? glyph.src : getComputedStyle(glyph).maskImage.slice(5, -2)
+      const image = new Image()
+      image.src = url
+      await image.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = canvas.height = 32
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(image, 0, 0, 32, 32)
+      const rgba = ctx.getImageData(0, 0, 32, 32).data
+      let ink = 0
+      for (let i = 3; i < rgba.length; i += 4) if (rgba[i] >= 32) ink++
+      result.push({ id: avatar.dataset.agent, bundled: url.startsWith('data:image/'), ink, pixels: canvas.toDataURL() })
+    }
+    return result
+  }
+  const logos = await ui.evaluate('(' + rasterize.toString() + ')()')
+  assert.deepEqual(logos.map(logo => logo.id).sort(), [...ids].sort(), 'every catalog avatar resolves its registry or local identity')
+  for (const logo of logos) assert.ok(logo.bundled && logo.ink > 10, logo.id + ' has visible offline artwork')
+  for (const id of ['cline', 'github-copilot']) assert.ok(logos.find(logo => logo.id === id).ink < 1000, id + ' has a recognizable silhouette')
+  assert.notEqual(logos.find(logo => logo.id === 'cline').pixels, logos.find(logo => logo.id === 'github-copilot').pixels)
+  for (const choice of [copilot, cline]) await ui.click('.agent-choice button', 'Add ' + choice.name)
+  await ui.click('form.add-agent button', 'Close')
+  await ui.wait("!!document.querySelector('.agent-name [data-agent=cline] .agent-glyph') && !!document.querySelector('.agent-name [data-agent=github-copilot] .agent-glyph')")
+  const simple = id => "#settings-agents .agent-row:has([data-agent=" + id + "])"
+  for (const [id, name] of [['github-copilot', 'GitHub Copilot'], ['cline', 'Cline']]) {
+    const row = 'document.querySelector(' + JSON.stringify(simple(id)) + ')'
+    assert.equal(await ui.evaluate(row + ".textContent"), name + 'EditRemove')
+    assert.ok(await ui.evaluate("Math.abs(" + row + ".querySelector('.agent-name').getBoundingClientRect().top - " + row + ".querySelector('button').getBoundingClientRect().top) < 8"), name + ' fits on one line')
+  }
+  await ui.evaluate("document.querySelector('#settings-agents').scrollIntoView({block:'center'})")
+  const section = await ui.evaluate("(()=>{const {x,y,width,height}=document.querySelector('#settings-agents').getBoundingClientRect();return {x:Math.floor(x),y:Math.floor(y),width:Math.ceil(width),height:Math.ceil(height)}})()")
+  fs.writeFileSync(path.join(artifacts, 'settings-agents-simple.png'), (await ui.window.webContents.capturePage(section)).toPNG())
+  await ui.evaluate("window.togleUITest.setReportedCost('acp-cline',0.35)")
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.click('.shell-settings', 'Settings')
+  await ui.wait("document.querySelector(" + JSON.stringify(simple('cline')) + ").textContent.includes('$0.35Reported cost')")
+  await ui.click(simple('github-copilot') + ' button', 'Edit GitHub Copilot')
+  await ui.wait("document.querySelector('form.edit-agent .hint')?.textContent.includes('Tasks open in Chat')")
+  await ui.click('form.edit-agent button', 'Cancel')
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.click('.agent-usage-list > summary', 'Agent usage')
+  await ui.wait("!!document.querySelector('.agent-usage-list[open] [data-agent=github-copilot] .agent-glyph') && !!document.querySelector('.agent-usage-list [data-agent=cline] .agent-glyph')")
+  for (const [runner, name, id] of [['acp-github-copilot-cli', 'GitHub Copilot', 'github-copilot'], ['acp-cline-2', 'Cline', 'cline'], ['term-aider', 'Aider', 'aider']]) {
+    const task = { runner, key: runner + ':sample', agent: name, title: name + ' session', folder: '', terminal: false }
+    await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify(task) + ', "")')
+    await ui.task(task.title)
+    await ui.wait("document.querySelector('.task-agent-name .agent-mark')?.dataset.agent===" + JSON.stringify(id))
+    assert.equal(await ui.evaluate("document.querySelector('.task-row .agent-mark[data-agent=" + id + "]')?.title"), name, 'the task row keeps its accessible agent name')
+  }
+  await ui.task('Cline session')
+  await ui.capture('agent-provider-logos')
+  const { nativeTheme } = require('electron')
+  const previousTheme = nativeTheme.themeSource
+  try {
+    const ink = "getComputedStyle(document.querySelector('.agent-usage-list [data-agent=cline] .agent-mask')).backgroundColor"
+    nativeTheme.themeSource = 'dark'
+    await ui.wait("!matchMedia('(prefers-color-scheme: light)').matches")
+    const dark = await ui.evaluate(ink)
+    nativeTheme.themeSource = 'light'
+    await ui.wait("matchMedia('(prefers-color-scheme: light)').matches && " + ink + '!==' + JSON.stringify(dark))
+    await ui.capture('agent-provider-logos-light')
+  } finally { nativeTheme.themeSource = previousTheme }
+  assert.deepEqual(ui.errors, [])
   ui.window.destroy()
 }
 
@@ -1883,6 +2061,10 @@ async function checkShells(T, agent) {
   const codexBefore = await codexReads()
   await pause(5600)
   assert.equal(await codexReads(), codexBefore, 'Codex is not asked again while it is idle')
+  await ui.evaluate('window.togleUITest.setTask("codex:idle1", { model: { model: "gpt-6.2-sol", effort: "ultra", fast: true }, updatedAt: Date.now() })')
+  await ui.wait("document.querySelector('.task-status .status-model')?.textContent.trim()==='GPT 6.2 Sol · ultra · Fast'")
+  await ui.evaluate('window.togleUITest.setTask("codex:idle1", { model: { model: "gpt-6.2-sol", effort: "ultra", fast: false }, updatedAt: Date.now() })')
+  await ui.wait("document.querySelector('.task-status .status-model')?.textContent.trim()==='GPT 6.2 Sol · ultra'")
   // Another task with no model of its own does not carry this one's: each task has its own line.
   await ui.task('Rebuild the pricing page')
   await ui.wait("document.querySelector('.task-title h2')?.textContent==='Rebuild the pricing page'")
@@ -1921,6 +2103,16 @@ async function checkPanes(T, agent) {
   await ui.wait("document.querySelectorAll('.task-row').length===5")
   await ui.task('Rebuild the pricing page')
   const widths = () => ui.evaluate("(()=>{const w=s=>{const e=document.querySelector(s);return e&&e.getClientRects().length?Math.round(e.getBoundingClientRect().width):0};return {nav:w('.shell-nav'),list:w('.tasks-list'),detail:w('.tasks-detail'),tasks:w('.tasks')}})()")
+  const navRows = () => ui.evaluate(`Array.from(document.querySelectorAll('.shell-nav button'), button => {
+    const nav = button.parentElement.getBoundingClientRect()
+    const row = button.getBoundingClientRect()
+    const icon = button.querySelector('svg').getBoundingClientRect()
+    return {
+      edgeInset: button.classList.contains('shell-settings') ? nav.bottom - row.bottom : row.top - nav.top,
+      height: row.height, iconLeft: icon.left - nav.left, iconTop: icon.top - row.top
+    }
+  })`)
+  const labelledRows = await navRows()
   const dragEdge = async (selector, dx) => {
     const at = await ui.evaluate("(()=>{const r=document.querySelector(" + JSON.stringify(selector) + ").getBoundingClientRect();return {x:r.left+3,y:r.top+120}})()")
     await debug.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y })
@@ -2027,6 +2219,8 @@ async function checkPanes(T, agent) {
   assert.ok(narrowNav.buttons.every(([over, past]) => over <= 0 && past <= 0), 'at its narrowest no word runs over its edge or past its button: ' + JSON.stringify(narrowNav))
   await dragEdge('.nav-handle', -300)
   assert.equal((await widths()).nav, 52, 'dragged narrower than its words need, it is its icons only')
+  assert.deepEqual(await navRows(), labelledRows, 'collapsing the navigation keeps each icon and its highlight aligned')
+  await checkIconCenter(ui, '.shell-nav button[aria-current="page"]')
   assert.equal(await ui.evaluate("document.querySelector('.shell-layout').classList.contains('nav-icons')&&[...document.querySelectorAll('.shell-nav button')].every(b=>[...b.querySelectorAll('span:not(.nav-count):not(.dot)')].every(s=>getComputedStyle(s).display==='none'))"), true, 'with no words')
   assert.equal(await ui.evaluate("getComputedStyle(document.querySelector('.shell-nav .nav-count')).position"), 'absolute', 'and what waits for you still shows on the icon')
   await press('.nav-handle', 'ArrowRight')
@@ -2082,6 +2276,7 @@ async function checkPanes(T, agent) {
   ui.window.setContentSize(500, 850)
   await ui.wait('innerWidth===500')
   assert.deepEqual(await shown(), [], 'and in the narrowest window no edge at all')
+  assert.deepEqual(await navRows(), labelledRows, 'the responsive icon-only navigation uses the same rows')
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   await ui.evaluate("localStorage.removeItem('togle.panes')")
   ui.window.destroy()
@@ -2358,6 +2553,17 @@ async function checkGroups(T, agent) {
   assert.deepEqual(await texts(ui, '.task-groups .task-project-name'), ['Scheduled', 'Everyday', 'api-server', 'notes', 'website'], 'scheduled jobs, then Everyday, then the projects')
   assert.deepEqual((await ui.evaluate("[...document.querySelectorAll('.task-project.everyday .task-row strong')].map(e=>e.textContent)")).sort(), ['Check the flight prices', 'Plan the team offsite'], 'no folder, or the home folder: Everyday')
   assert.match(await lineOf('Check my email'), /^Hermes · every day at 8:00 · next tomorrow /, 'a scheduled job says its schedule and its next run')
+  await ui.task('Plan the team offsite')
+  await ui.wait("!!document.querySelector('.crumb-place .project-mark.everyday')")
+  for (const zoom of [1, 1.25]) {
+    ui.window.webContents.setZoomFactor(zoom)
+    await ui.paint()
+    for (const selector of ['.tasks-head-actions .icon-only', '.project-mark.big.everyday', '.project-mark.big.scheduled', '.crumb-place .project-mark']) await checkIconCenter(ui, selector)
+    const edges = await ui.evaluate("[...document.querySelectorAll('.tasks-head-actions button')].map(b=>{const r=b.getBoundingClientRect();return [r.top,r.bottom]})")
+    assert.deepEqual(edges[0], edges[1], 'New group and New task share top and bottom edges')
+  }
+  ui.window.webContents.setZoomFactor(1)
+  await ui.capture('agents-group-icons')
   assert.deepEqual(ui.errors, [])
   ui.window.destroy()
 }
@@ -2409,6 +2615,26 @@ async function checkPictures(T, agent) {
   await ui.evaluate("document.querySelector('.picture-backdrop').click()")
   await ui.wait("!document.querySelector('.picture-backdrop')")
   assert.equal((await ui.calls('runnerPicture')).filter((call) => call.args[1] === 'image:0#1').length, 1, 'a picture read is not asked for again')
+  const caption = 'this should be vertically aligned'
+  // The same check can replay a real history entry and the PNG returned by its backend.
+  const sample = process.env.TOGLE_UI_CODEX_PICTURE
+    ? JSON.parse(fs.readFileSync(process.env.TOGLE_UI_CODEX_PICTURE, 'utf8'))
+    : { entry: T.codexEntries([{ id: 'turn-1', items: [{ id: 'message-1', type: 'userMessage', content: [
+      { type: 'localImage', path: 'terminal.png' },
+      { type: 'text', text: '[Image #1] ' + caption, text_elements: [{ byteRange: { start: 0, end: 10 }, placeholder: '[Image #1]' }] }
+    ] }] }])[0], picture }
+  const key = 'codex:terminal-picture'
+  const history = { entries: [sample.entry], pictures: { [sample.entry.images[0]]: sample.picture } }
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key, runner: 'codex', title: 'Terminal screenshot', terminal: false, mine: true, state: 'idle', history }) + ', "")')
+  await ui.wait("[...document.querySelectorAll('.task-row strong')].some(e=>e.textContent==='Terminal screenshot')")
+  await ui.task('Terminal screenshot')
+  await ui.wait("document.querySelector('.you-picture img')?.naturalWidth > 0")
+  assert.deepEqual(await texts(ui, '.task-you'), [caption])
+  assert.equal(await ui.evaluate("document.querySelectorAll('.you-picture').length"), 1)
+  await ui.click('.you-picture', 'Picture 1: open it')
+  await ui.wait("document.querySelector('.picture-whole')?.naturalWidth > 0")
+  assert.equal(await ui.evaluate("document.querySelector('.picture-whole').getAttribute('src')"), sample.picture)
+  await ui.click('.picture-backdrop button', 'Close the picture')
   assert.deepEqual(ui.errors, [])
   ui.window.destroy()
 }
@@ -2567,6 +2793,42 @@ async function checkQuote(T, agent) {
   // The button is not there while the mouse is down, and is there, over the words, when it is let go.
   await ui.evaluate("document.querySelector('.task-log.thread').scrollTop=0")
   await ui.paint()
+  // Real Chromium click counts select a word, then its paragraph. The word's action must not flash between clicks.
+  const [left, top, right, bottom] = await rect('.task-agent', 'how I read')
+  const x = left + (right - left) / 4, y = (top + bottom) / 2
+  const clickCount = async count => {
+    await mouse('mousePressed', x, y, { clickCount: count })
+    await mouse('mouseReleased', x, y, { clickCount: count })
+  }
+  await clickCount(1)
+  await clickCount(2)
+  await ui.paint()
+  assert.equal(await ui.evaluate('!!' + float), false, 'hold the word action while a third click can extend it')
+  await clickCount(3)
+  await ui.wait('!!' + float)
+  await ui.evaluate(float + '.click()')
+  await ui.wait("document.querySelector('.quote-bar-words span')?.textContent === 'Here is how I read it.'")
+  await ui.click('.quote-bar button', 'Remove the quote')
+  await clickCount(1)
+  await clickCount(2)
+  await ui.wait('!!' + float)
+  const floatPosition = () => ui.evaluate("(()=>{const b=" + float + ".getBoundingClientRect();return [b.x,b.y]})()")
+  const wordPosition = await floatPosition()
+  await mouse('mousePressed', x, y, { clickCount: 3 })
+  await ui.paint()
+  assert.equal(await ui.evaluate('!!' + float), true, 'an already visible action stays in place during a later third click')
+  await mouse('mouseReleased', x, y, { clickCount: 3 })
+  await ui.paint()
+  assert.deepEqual(await floatPosition(), wordPosition)
+  await ui.evaluate(float + '.click()')
+  await ui.wait("document.querySelector('.quote-bar-words span')?.textContent === 'Here is how I read it.'")
+  await ui.click('.quote-bar button', 'Remove the quote')
+  // Chromium may include the paragraph break after the last sentence of a message.
+  await ui.evaluate("(()=>{const message=document.querySelector('.task-agent'),p=message.querySelector('p:last-child'),range=document.createRange();range.setStart(p,0);range.setEndAfter(message);const s=getSelection();s.removeAllRanges();s.addRange(range)})()")
+  await ui.wait('!!' + float)
+  await ui.evaluate(float + '.click()')
+  await ui.wait("document.querySelector('.quote-bar-words span')?.textContent === 'Then I changed the markup and ran the checks.'")
+  await ui.click('.quote-bar button', 'Remove the quote')
   const letGo = await drag(words)
   await ui.paint()
   assert.equal(await ui.evaluate("!!" + float), false, 'no button while the selection is being made')
@@ -2602,7 +2864,7 @@ async function checkQuote(T, agent) {
   // Not over two messages, not in the reply box.
   await ui.evaluate("document.querySelector('.task-log.thread').scrollTop=0")
   await ui.paint()
-  await ui.evaluate("(()=>{const a=document.querySelectorAll('.task-agent')[0].querySelector('p:last-child').firstChild,b=document.querySelectorAll('.task-you')[1].firstChild;const r=document.createRange();r.setStart(a,5);r.setEnd(b,6);const s=getSelection();s.removeAllRanges();s.addRange(r)})()")
+  await ui.evaluate("(()=>{const a=document.querySelectorAll('.task-agent')[0].querySelector('p:last-child').firstChild,b=document.querySelectorAll('.task-you')[1].querySelector('p').firstChild;const r=document.createRange();r.setStart(a,5);r.setEnd(b,6);const s=getSelection();s.removeAllRanges();s.addRange(r)})()")
   await ui.paint(); await ui.paint()
   assert.equal(await ui.evaluate("!!" + float), false, 'no button over a selection that runs over two messages')
   // A word is a quote too, and the button goes with the selection.
@@ -2671,11 +2933,13 @@ async function checkQuote(T, agent) {
   await ui.wait("document.querySelector('.quote-bar-words span')?.textContent===" + JSON.stringify(words))
   await ui.click('.quote-bar button', 'Remove the quote')
   // Copy puts the words on the clipboard and nothing else happens.
+  await ui.evaluate("Object.defineProperty(navigator.clipboard,'writeText',{value:async text=>{window.__copiedAnswer=text}})")
   await ui.evaluate("getSelection().removeAllRanges()")
   await rightClick(...(await middle('.task-agent', 'Then I changed the markup')))
   await ui.wait("!!document.querySelector('" + menu + "')")
   await ui.click(menu + ' button', 'Copy')
   await ui.wait("!document.querySelector('" + menu + "')")
+  assert.equal(await ui.evaluate('window.__copiedAnswer'), answer, 'the full reply keeps its Markdown for the next paste')
   assert.equal(await ui.evaluate("!!document.querySelector('.quote-bar')"), false, 'Copy quotes nothing')
   // The reply box, and the empty space of the conversation, have no such menu.
   const box = await ui.evaluate("(()=>{const b=document.querySelector('.task-reply textarea').getBoundingClientRect();return [b.left+b.width/2,b.top+b.height/2]})()")
@@ -2996,6 +3260,16 @@ async function checkViewsKept(T, agent) {
   await sleep(500)
   assert.equal(await ui.evaluate(rowOpen), 'None', 'the row is still open')
   assert.ok(Math.abs((await ui.evaluate("document.querySelector('.shell-content').scrollTop")) - settingsTo) <= 2, 'Settings is scrolled as it was')
+  const names = ".settings-one .setting:has(button[title^='Names and terms'])"
+  if (!await ui.evaluate("document.querySelector(" + JSON.stringify(names + ' button') + ").getAttribute('aria-expanded')==='true'")) {
+    await ui.evaluate("document.querySelector(" + JSON.stringify(names + ' button') + ").click()")
+  }
+  await ui.wait("!!document.querySelector('.vocabulary-heading button')")
+  await ui.click('.vocabulary-heading button', 'Add word')
+  await ui.fill('.vocabulary-form input', 'Togle')
+  await ui.click('.workspace-nav button', 'Meetings')
+  await ui.click('.workspace-nav button', 'Settings')
+  await ui.wait("document.querySelector('.vocabulary-form input')?.value==='Togle'")
   assert.deepEqual(ui.errors, [])
   ui.window.destroy()
 }
@@ -3399,6 +3673,57 @@ async function checkReplyDock(T, agent) {
   ui.window.destroy()
 }
 
+// The same project and subject have their own disclosures in the current list and under Earlier.
+async function checkProjectSections(T, agent) {
+  const ui = await open(T, agent, 1024)
+  const folder = 'C:\\work\\togle'
+  const group = T.ownGroupOf({ folder }, process.platform)
+  const saved = await ui.evaluate("localStorage.getItem('togle.foldedgroups')")
+  try {
+    await ui.click('.workspace-nav button', 'Meetings')
+    await ui.evaluate("localStorage.setItem('togle.foldedgroups', " + JSON.stringify(JSON.stringify([group])) + ')')
+    const tasks = ['Check', 'Marketing strategy', 'Togle app', 'Start new'].map((title, i) => ({
+      key: 'codex:fold-' + i, folder, title, subject: 'Code review', state: 'idle', terminal: false,
+      updatedAt: Date.now() - (i < 2 ? 0 : 4 * 86_400_000)
+    }))
+    await ui.evaluate('for (const task of ' + JSON.stringify(tasks) + ') window.togleUITest.terminalTask(task, "")')
+    await ui.click('.workspace-nav button', 'Agents')
+    await ui.click('.task-earlier-toggle', 'Earlier · 3 tasks')
+    const boxes = '.task-project[aria-label="togle"]'
+    const state = (selector, expected) => ui.wait('JSON.stringify([...document.querySelectorAll(' + JSON.stringify(boxes + ' ' + selector) + ')].map(e=>e.getAttribute("aria-expanded")==="true"))===' + JSON.stringify(JSON.stringify(expected)))
+    const toggle = (selector, index) => ui.evaluate('document.querySelectorAll(' + JSON.stringify(boxes + ' ' + selector) + ')[' + index + '].click()')
+    await state('.group-fold', [false, false])
+    await toggle('.group-fold', 1)
+    await state('.group-fold', [false, true])
+    await toggle('.group-fold', 0)
+    await toggle('.group-fold', 1)
+    await state('.group-fold', [true, false])
+    await ui.click('.workspace-nav button', 'Meetings')
+    await ui.click('.workspace-nav button', 'Agents')
+    await state('.group-fold', [true, false])
+    await toggle('.group-fold', 0)
+    await state('.group-fold', [false, false])
+    await holdOver(ui, 'Clean the build folder', 'document.querySelectorAll(' + JSON.stringify(boxes) + ')[1]')
+    await state('.group-fold', [false, true])
+    await letGo(ui, 'Clean the build folder')
+    await state('.group-fold', [false, false])
+    await toggle('.group-fold', 0)
+    await toggle('.group-fold', 1)
+    await state('.subject-fold', [true, true])
+    await toggle('.subject-fold', 1)
+    await state('.subject-fold', [true, false])
+    await toggle('.subject-fold', 0)
+    await toggle('.subject-fold', 1)
+    await ui.click('.workspace-nav button', 'Meetings')
+    await ui.click('.workspace-nav button', 'Agents')
+    await state('.subject-fold', [false, true])
+    assert.deepEqual(ui.errors, [])
+  } finally {
+    await ui.evaluate(saved === null ? "localStorage.removeItem('togle.foldedgroups')" : "localStorage.setItem('togle.foldedgroups'," + JSON.stringify(saved) + ")")
+    ui.window.destroy()
+  }
+}
+
 // The person's own arrangement: a group made (named straight away, there while empty), a task dragged into it (its row then
 // names its folder, its header names the group, a subject given later does not move it), a group folded (its counts stay, it
 // still takes a dropped task, it stays folded when Agents is opened again), a group of Togle's renamed and given its own name
@@ -3487,6 +3812,443 @@ async function checkArrange(T, agent) {
   ui.window.destroy()
 }
 
+async function checkUsageAlignment(ui, sameRow) {
+  const measure = () => {
+    const header = document.querySelector('.task-agent-usage')
+    const top = selector => {
+      const el = header.querySelector(selector)
+      const text = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode()
+      const range = document.createRange()
+      range.selectNodeContents(text)
+      return range.getBoundingClientRect().top
+    }
+    return {
+      session: top('.usage-session .usage-caption'),
+      value: top('.usage-session .usage-value strong, .usage-session .usage-source > span'),
+      account: top('.usage-account .usage-caption'),
+      window: top('.usage-account .window-name'),
+      percent: top('.usage-account .usage-window strong'),
+      reset: top('.usage-account .usage-window small')
+    }
+  }
+  const positions = await ui.evaluate('(' + measure.toString() + ')()')
+  const aligned = keys => Math.max(...keys.map(k => positions[k])) - Math.min(...keys.map(k => positions[k])) <= 1
+  assert.ok(aligned(['account', 'window', 'percent', 'reset']) && aligned(['session', 'value']) && (!sameRow || aligned(['session', 'account'])), 'Usage text alignment in CSS pixels: ' + JSON.stringify(positions))
+}
+
+async function checkChatLinksAndAgentUsage(T, agent) {
+  const ui = await open(T, agent, 1024)
+  await ui.evaluate("localStorage.removeItem('togle.ui.fold:agents.usage')")
+  const key = 'codex:installer-link'
+  const folder = process.platform === 'win32' ? '/C:/Users/example/togle/dist' : '/home/user/togle'
+  const target = folder + '/Togle Setup 0.1.0.exe'
+  const shownPath = process.platform === 'win32' ? target.slice(1).replaceAll('/', '\\') : target
+  const reply = '[Togle Free Windows installer](<' + target + '>)\n\n[Missing log](<' + folder + '/missing.log>) and [website](https://example.org).'
+  const entry = { id: 2, kind: 'agent', at: Date.now(), text: reply }
+  const session = { key, runner: 'codex', title: 'Find the installer', screen: true, terminal: true, state: 'idle', history: { entries: [entry] } }
+  await ui.evaluate("localStorage.setItem('togle.taskviews', JSON.stringify({ 'codex:installer-link': 'cards' }))")
+  await ui.evaluate("(()=>{const original=window.setInterval; window.setInterval=function(fn,ms,...args){if(ms===60000)window.__usageTick=fn;return original.call(this,fn,ms,...args)}})()")
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify(session) + ', "")')
+  await ui.task(session.title)
+  await ui.wait("document.querySelector('.usage-session')?.textContent.includes('12.4K tokens') && document.querySelector('.task-agent-usage .usage-window')?.textContent.includes('weekly 17% used')")
+  await checkUsageAlignment(ui, true)
+  assert.match(await ui.evaluate("document.querySelector('.task-agent-usage').textContent"), /resets in 4d 5h/)
+  assert.equal(await ui.evaluate("document.querySelector('.agent-usage-list').open"), false)
+  const limitReads = (await ui.calls('runnerLimits')).length
+  await ui.evaluate("window.togleUITest.slow('runnerUsage', 200); window.togleUITest.setExtraTokens(1000); window.__usageTick()")
+  const during = await ui.evaluate("document.querySelector('.task-agent-usage').textContent")
+  assert.match(during, /12.4K tokens/)
+  assert.doesNotMatch(during, /checking|updating|loading|last updated/i)
+  await ui.wait("document.querySelector('.usage-session')?.textContent.includes('13.4K tokens')")
+  await ui.evaluate("window.togleUITest.slow('runnerUsage', 0)")
+  assert.equal((await ui.calls('runnerLimits')).length, limitReads, 'a minute tick never fetches provider limits')
+  await ui.evaluate("window.togleUITest.publishWeeklyLimit(23)")
+  await ui.wait("document.querySelector('.task-agent-usage .usage-window')?.textContent.includes('23% used')")
+  await ui.wait("document.querySelector('.task-agent .md-file-link')?.textContent === 'Togle Free Windows installer'")
+  assert.equal(await ui.evaluate("document.querySelector('.md-file-path').textContent.trim()"), '(' + shownPath + ')')
+  assert.equal((await ui.calls('showChatFile')).length, 0)
+  await ui.capture('chat-local-installer-and-usage')
+  const { nativeTheme } = require('electron')
+  const themeBefore = nativeTheme.themeSource
+  try {
+    nativeTheme.themeSource = 'light'
+    ui.window.setContentSize(420, 800)
+    await ui.wait("document.documentElement.scrollWidth <= innerWidth && document.querySelector('.task-agent-usage').getBoundingClientRect().right <= innerWidth")
+    await checkUsageAlignment(ui, false)
+    await ui.capture('agent-usage-session-narrow-light')
+  } finally { nativeTheme.themeSource = themeBefore; ui.window.setContentSize(1024, 850) }
+  await ui.click('.md-file-link', 'Togle Free Windows installer')
+  assert.deepEqual((await ui.calls('showChatFile')).map(call => call.args[0]), [target])
+  assert.equal((await ui.calls('openExternal')).length, 0)
+  await ui.click('.md-file-link', 'Missing log')
+  await ui.wait("document.querySelector('.md-file-status')?.textContent.includes('Couldn’t locate')")
+  await ui.click('.task-agent .md a', 'website')
+  assert.deepEqual((await ui.calls('openExternal')).map(call => call.args[0]), ['https://example.org/'])
+  await ui.click('.view-switch button', 'Terminal')
+  assert.match(await ui.evaluate("document.querySelector('.task-agent-usage').textContent"), /weekly 23% used/)
+  await ui.evaluate("window.togleUITest.changeNativeSession('codex:installer-link', 'after-clear')")
+  await ui.wait("document.querySelector('.usage-session')?.textContent.includes('6.7K tokens')")
+  assert.ok((await ui.calls('runnerUsage')).some(call => call.args[1] === 'after-clear'))
+  await ui.task('Add the status column')
+  await ui.wait("document.querySelector('.usage-session')?.textContent.includes('6.7K tokens')")
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("document.querySelector('.task-agent-usage')?.textContent.includes('0.08')")
+  assert.equal(await ui.evaluate("!!document.querySelector('.task-agent-usage .usage-account')"), false)
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
+async function checkUsageNavigation(T, agent) {
+  const screen = () => open(T, agent, 1024, undefined, { hermesMeters: true })
+  let ui = await screen()
+  const outer = '.agent-usage-list'
+  const fold = provider => outer + ' .agent-usage-row:has([data-agent=' + provider + ']) details'
+  const shown = selector => 'document.querySelector(' + JSON.stringify(selector) + ')?.open'
+  await ui.evaluate("for (const key of Object.keys(localStorage)) if (key.startsWith('togle.ui.fold:agents.')) localStorage.removeItem(key)")
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.click(outer + ' > summary', 'Agent usage')
+  await ui.wait("document.querySelector('.agent-usage-list .usage-sources')?.textContent.includes('Kimi API≈ $1.10')")
+  const { nativeTheme } = require('electron'), beforeTheme = nativeTheme.themeSource
+  try {
+    nativeTheme.themeSource = 'light'
+    await ui.evaluate("document.querySelector('.agent-usage-list').style.maxWidth='224px'")
+    const geometry = await ui.evaluate(`(() => {
+      const card = document.querySelector('.agent-usage-list'), summary = card.querySelector('summary')
+      const rows = card.querySelector('.agent-usage-rows')
+      const c = card.getBoundingClientRect(), h = summary.getBoundingClientRect(), r = rows.getBoundingClientRect()
+      const center = element => { const b = element.getBoundingClientRect(); return b.top + b.height / 2 }
+      return { headerCenter: center(summary), children: [...summary.children].map(center),
+        contained: getComputedStyle(card).overflowX === 'clip', top: getComputedStyle(summary).borderTopLeftRadius,
+        bottom: getComputedStyle(summary).borderBottomLeftRadius, divider: getComputedStyle(rows).borderTopWidth,
+        aligned: h.left === r.left && h.right === r.right && h.bottom === r.top,
+        crop: { x: Math.floor(c.x) - 2, y: Math.floor(c.y) - 2, width: Math.ceil(c.width) + 4, height: Math.min(96, Math.ceil(c.height) + 4) } }
+    })()`)
+    assert.ok(geometry.children.every(y => Math.abs(y - geometry.headerCenter) <= 0.5), 'label and icons share the center of the header')
+    assert.ok(geometry.contained && geometry.aligned && parseFloat(geometry.top) > 0 && geometry.bottom === '0px' && geometry.divider === '1px', 'the hover stays inside the outline and the divider meets both sides')
+    await movePointer(ui, { x: geometry.crop.x + 40, y: geometry.headerCenter })
+    await ui.wait("document.querySelector('.agent-usage-list > summary').matches(':hover')")
+    fs.writeFileSync(path.join(artifacts, 'agent-usage-header-light.png'), (await ui.window.webContents.capturePage(geometry.crop)).toPNG())
+    await ui.click(outer + ' > summary', 'Agent usage')
+    await ui.wait("!document.querySelector('.agent-usage-list').open && document.querySelector('.agent-usage-list > summary').matches(':hover')")
+    const folded = await ui.evaluate(`(() => {
+      const card = document.querySelector('.agent-usage-list'), header = card.querySelector('summary')
+      const c = card.getBoundingClientRect(), h = header.getBoundingClientRect(), style = getComputedStyle(header)
+      return { innerHeight: h.height, outerHeight: c.height, topRadius: style.borderTopLeftRadius, bottomRadius: style.borderBottomRightRadius,
+        crop: { x: Math.floor(c.x) - 2, y: Math.floor(c.y) - 2, width: Math.ceil(c.width) + 4, height: Math.ceil(c.height) + 4 } }
+    })()`)
+    assert.equal(folded.outerHeight, folded.innerHeight + 2, 'the collapsed card only contains the header and its outline')
+    assert.equal(folded.bottomRadius, folded.topRadius)
+    const snapshot = await ui.window.webContents.capturePage(folded.crop)
+    fs.writeFileSync(path.join(artifacts, 'agent-usage-folded-light.png'), snapshot.toPNG())
+    const { width, height } = snapshot.getSize(), pixels = snapshot.toBitmap({ scaleFactor: 1 })
+    const color = (x, y) => pixels.subarray((width * y + x) * 4, (width * y + x + 1) * 4)
+    for (const [x, y] of [[3, 3], [width - 4, 3], [3, height - 4], [width - 4, height - 4]]) {
+      assert.deepEqual(color(x, y), color(0, 0), 'hover paint stays inside each rounded corner')
+    }
+    await ui.click(outer + ' > summary', 'Agent usage')
+  } finally {
+    nativeTheme.themeSource = beforeTheme
+    await ui.evaluate("document.querySelector('.agent-usage-list').style.maxWidth=''")
+  }
+  await ui.click(fold('hermes') + ' > summary', 'Account limits')
+  await ui.wait(shown(fold('hermes')))
+  assert.equal(await ui.evaluate(shown(fold('codex'))), false, 'the connected account can be shared while the fold belongs to each agent')
+  await ui.evaluate("window.togleUITest.terminalTask({ key:'hermes:mixed',runner:'hermes',title:'Two providers',state:'idle',terminal:false,history:{entries:[]} },'')")
+  await ui.task('Two providers')
+  await ui.wait("document.querySelector('.usage-session .usage-sources')?.textContent.includes('Kimi API≈ $0.20')")
+  await checkUsageAlignment(ui, false)
+  assert.match(await ui.evaluate("document.querySelector('.usage-session').textContent"), /ChatGPT subscription700 tokens/)
+  assert.match(await ui.evaluate("document.querySelector('.task-agent-usage .usage-account').textContent"), /ChatGPT weekly 17% used.*resets in 4d 5h/)
+  await ui.capture('hermes-provider-usage')
+  await ui.click('.shell-settings', 'Settings')
+  await ui.evaluate("window.togleUITest.slow('runnerUsage',1200);window.togleUITest.slow('runnerLimits',1200)")
+  await ui.click('.workspace-nav button', 'Agents')
+  assert.equal(await ui.evaluate(shown(fold('hermes'))), true)
+  assert.equal(await ui.evaluate(shown(fold('codex'))), false)
+  assert.match(await ui.evaluate("document.querySelector('.usage-session').textContent"), /Kimi API≈ \$0.20/, 'the previous session reading appears immediately while the new request is pending')
+  await ui.click(outer + ' > summary', 'Agent usage')
+  ui.window.destroy()
+  ui = await screen()
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("!!document.querySelector('.agent-usage-list')")
+  assert.equal(await ui.evaluate(shown(outer)), false, 'a closed disclosure is restored in a fresh renderer')
+  await ui.click(outer + ' > summary', 'Agent usage')
+  await ui.wait(shown(fold('hermes')))
+  assert.equal(await ui.evaluate(shown(fold('codex'))), false)
+  ui.window.destroy()
+  ui = await screen()
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait(shown(fold('hermes')))
+  assert.equal(await ui.evaluate(shown(outer)), true, 'an open disclosure is also restored')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
+async function checkF8Attachment(T, agent) {
+  const ui = await open(T, agent, 1024)
+  const file = path.join(data, 'Test Profile', 'pictures', 'show-2026-11-20T13-46-03-372Z.png')
+  const paste = (surface, selector, value, image) => {
+    const dispatch = (selector, value, image) => {
+      const data = new DataTransfer()
+      if (image) data.items.add(new File([new Uint8Array(4)], 'image.png', { type: 'image/png' }))
+      data.setData('text/plain', value)
+      const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })
+      document.querySelector(selector).dispatchEvent(event)
+      return event.defaultPrevented
+    }
+    return surface.evaluate('(' + dispatch.toString() + ')(' + [selector, value, image].map(x => JSON.stringify(x)).join(',') + ')')
+  }
+  const pathText = '"' + file + '" '
+  await ui.evaluate("localStorage.setItem('togle.taskviews', JSON.stringify({ 'claude:s2': 'cards' }))")
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("!!document.querySelector('.task-reply textarea')")
+  const input = '.task-reply textarea'
+  assert.equal(await paste(ui, input, 'Regular text with a clipboard image', true), false, 'an ordinary paste keeps its text')
+  assert.equal(await paste(ui, input, pathText, true), true)
+  await ui.wait("!!document.querySelector('.reply-chip img')?.naturalWidth")
+  assert.equal(await ui.evaluate("document.querySelector('.reply-chip small').textContent"), file)
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), '')
+  await ui.fill(input, 'Look at the footer.')
+  await ui.evaluate("document.querySelector('.task-reply textarea').setSelectionRange(12, 18)")
+  assert.equal(await paste(ui, input, pathText + 'header', true), true)
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), 'Look at the header.')
+  assert.equal(await ui.evaluate("document.querySelectorAll('.reply-chip').length"), 1)
+  await ui.click('.task-reply .reply-send', 'Send')
+  const sent = (await ui.calls('sendToRunnerTask')).at(-1).args[1]
+  assert.deepEqual(T.splitPictures(sent), { words: 'Look at the header.', files: [file] })
+  await ui.wait("[...document.querySelectorAll('.you-row')].some(row=> row.textContent.includes('Look at the header.') && row.querySelector('.you-picture img')?.naturalWidth)")
+  assert.equal(await ui.evaluate("[...document.querySelectorAll('.you-row')].some(row=>row.textContent.includes('show-2026'))"), false)
+  assert.equal((await ui.calls('savePastedPicture')).length, 0, 'Show uses the original PNG')
+  assert.equal(await paste(ui, input, pathText, false), true, 'the text-only clipboard fallback also attaches')
+  await ui.wait("!!document.querySelector('.reply-chip img')?.naturalWidth")
+  await ui.click('.chip-remove', 'Remove ' + path.basename(file))
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+  const box = await open(T, agent, 600, 'taskbox')
+  await box.wait("!!document.querySelector('.taskbox textarea')")
+  assert.equal(await paste(box, '.taskbox textarea', pathText + 'Read this', true), true)
+  await box.wait("!!document.querySelector('.reply-chip img')?.naturalWidth")
+  assert.equal(await box.evaluate("document.querySelector('.taskbox textarea').value"), 'Read this')
+  assert.deepEqual(box.errors, [])
+  box.window.destroy()
+}
+
+async function checkFilesAndUsage(T, agent) {
+  const files = ['a recording.m4a', 'build output.log', 'clip.mp4', 'frame.png'].map(name => path.join(data, name))
+  for (const file of files) fs.writeFileSync(file, file.endsWith('.png') ? nativeImage.createFromBitmap(Buffer.alloc(16, 255), { width: 2, height: 2 }).toPNG() : 'fixture')
+  const select = async (ui, selector, chosen) => {
+    const debug = debuggerOf(ui)
+    const { root } = await debug.sendCommand('DOM.getDocument')
+    const { nodeId } = await debug.sendCommand('DOM.querySelector', { nodeId: root.nodeId, selector })
+    assert.ok(nodeId, 'native file input is available')
+    await debug.sendCommand('DOM.setFileInputFiles', { nodeId, files: chosen })
+  }
+  const ui = await open(T, agent, 1024)
+  await ui.evaluate("localStorage.removeItem('togle.ui.fold:agents.usage');localStorage.removeItem('togle.ui.fold:agents.limits:codex')")
+  await ui.evaluate("localStorage.setItem('togle.taskviews', JSON.stringify({ 'claude:s2': 'cards' }))")
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("!!document.querySelector('.agent-usage-list')")
+  assert.equal(await ui.evaluate("document.querySelector('.agent-usage-list').open"), false)
+  assert.equal((await ui.calls('runnerUsage')).filter(call => call.args[1] === null).length, 0)
+  await ui.click('.agent-usage-list > summary', 'Agent usage')
+  await ui.wait("document.querySelector('.agent-usage-list')?.textContent.includes('89K') && document.querySelector('.agent-usage-list')?.textContent.includes('1.25')")
+  await ui.click('.usage-account-fold > summary', 'Account limits')
+  await ui.wait("document.querySelector('.usage-account-fold[open]')?.textContent.includes('resets in 4d 5h')")
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("!!document.querySelector('.agent-usage-list[open] .usage-account-fold[open]')")
+  await ui.click('.agent-usage-list > summary', 'Agent usage')
+  await ui.click('.agent-usage-list > summary', 'Agent usage')
+  await ui.wait("!!document.querySelector('.usage-account-fold[open]')")
+  await ui.capture('agent-usage-sidebar')
+  await ui.task('Rebuild the pricing page')
+  await ui.wait("!!document.querySelector('.task-reply input[type=file]')")
+  await checkIconCenter(ui, '.task-reply .attach-files')
+  await ui.evaluate("document.querySelector('.task-reply input[type=file]').addEventListener('change', e => { window.__diskFiles = Array.from(e.target.files) }, {capture:true,once:true})")
+  await select(ui, '.task-reply input[type=file]', files)
+  await ui.wait("document.querySelectorAll('.reply-chip').length===4")
+  await ui.click('.reply-chip .chip-remove', 'Remove clip.mp4')
+  await ui.wait("document.querySelectorAll('.reply-chip').length===3")
+  await ui.evaluate("(()=>{const data = new DataTransfer(); for(const file of window.__diskFiles) data.items.add(file); document.querySelector('.task-panel').dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data})); return true})()")
+  await ui.wait("document.querySelectorAll('.reply-chip').length===4")
+  await ui.fill('.task-reply textarea', 'Review these files')
+  await ui.click('.reply-send', 'Send')
+  await ui.wait("window.togleUITest.calls().some(c=>c.name==='sendToRunnerTask' && c.args[1].includes('clip.mp4'))")
+  const sent = (await ui.calls('sendToRunnerTask')).at(-1).args[1]
+  assert.deepEqual(new Set(T.splitPictures(sent).files), new Set(files))
+  assert.equal(T.splitPictures(sent).words, 'Review these files')
+  assert.equal((await ui.calls('savePastedPicture')).length, 0, 'disk attachments use their original paths')
+  const pub = 'C:\\Release tools\\togle-release.pub'
+  const attachmentHistory = {
+    entries: [
+      { id: 1, at: 1000, kind: 'you', text: 'Check this\r\n\r\nAttached files\r\n' + pub + '\r\n' },
+      { id: 2, at: 2000, kind: 'agent', text: 'I received the file.' },
+      { id: 3, at: 3000, kind: 'you', text: 'Check again Attached files: ' + JSON.stringify([pub]) }
+    ]
+  }
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'codex:file-history', runner: 'codex', title: 'Review attachments', terminal: false, state: 'idle', history: attachmentHistory }) + ', "")')
+  await ui.task('Review attachments')
+  await ui.wait("document.querySelectorAll('.you-row .sent-file').length===2")
+  assert.deepEqual(await texts(ui, '.task-you'), ['Check this', 'Check again'])
+  assert.deepEqual(await texts(ui, '.you-row .sent-file'), ['togle-release.pub', 'togle-release.pub'])
+  assert.deepEqual(await ui.evaluate("Array.from(document.querySelectorAll('.you-row .sent-file'), file => file.title)"), [pub, pub])
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'codex:term-files', runner: 'codex', screen: true, title: 'Attach on terminal', folder: data }) + ',"prompt> ")')
+  await ui.task('Attach on terminal')
+  await ui.click('.view-switch button', 'Terminal')
+  await ui.wait("!!document.querySelector('.terminal-view .xterm-helper-textarea')")
+  for (const [width, height] of [[1440, 900], [400, 420]]) {
+    ui.window.setContentSize(width, height)
+    await ui.wait('innerWidth===' + width + ' && innerHeight===' + height)
+    const edges = await ui.evaluate(`(() => {
+      const panel = document.querySelector('.task-terminal')
+      const bounds = panel.getBoundingClientRect()
+      const terminal = panel.querySelector('.terminal-view').getBoundingClientRect()
+      const button = panel.querySelector('.attach-files').getBoundingClientRect()
+      return { topGap: Math.round(terminal.top - bounds.top), leftGap: Math.round(button.left - terminal.left),
+        bottomGap: Math.round(bounds.bottom - button.bottom), below: button.top >= terminal.bottom, visible: button.bottom <= innerHeight }
+    })()`)
+    assert.deepEqual(edges, { topGap: 0, leftGap: 0, bottomGap: 0, below: true, visible: true }, 'terminal and paperclip at ' + width + ' × ' + height)
+  }
+  await checkIconCenter(ui, '.task-terminal .attach-files')
+  await ui.evaluate("document.querySelector('.task-terminal .attach-files').focus()")
+  await select(ui, '.task-terminal input[type=file]', [files[0]])
+  await ui.wait("window.togleUITest.calls().some(c=>c.name==='terminalWrite' && c.args[1].includes('a recording.m4a'))")
+  assert.equal(await ui.evaluate("document.activeElement === document.querySelector('.terminal-view .xterm-helper-textarea')"), true, 'the prompt has focus after attaching')
+  assert.doesNotMatch((await ui.calls('terminalWrite')).find(call => call.args[1].includes('a recording.m4a')).args[1], /[\r\n]/)
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+  const box = await open(T, agent, 600, 'taskbox')
+  const previousChoice = await box.evaluate("localStorage.getItem('togle.taskbox')")
+  await box.wait("!!document.querySelector('.taskbox input[type=file]') && document.querySelectorAll('.pick-chip').length===2")
+  await checkIconCenter(box, '.taskbox-field .attach-files')
+  await select(box, '.taskbox input[type=file]', [files[1]])
+  await box.wait("document.querySelector('.taskbox-field .primary')?.disabled===false")
+  await box.click('.taskbox-field .primary', 'Start')
+  await box.wait("window.togleUITest.calls().some(c=>c.name==='startRunnerTask')")
+  assert.deepEqual(T.splitPictures((await box.calls('startRunnerTask'))[0].args[0].prompt).files, [files[1]])
+  await select(box, '.taskbox input[type=file]', [files[0]])
+  await box.click('.taskbox-destination button', 'Existing task')
+  await box.click('.taskbox-recipient .pick-chip', 'Existing task')
+  await box.wait("[...document.querySelectorAll('.menu-overlay button')].some(b=>b.textContent.includes('Port the settings screen'))")
+  await box.evaluate("[...document.querySelectorAll('.menu-overlay button')].find(b=>b.textContent.includes('Port the settings screen')).click()")
+  await box.click('.taskbox-field .primary', 'Send')
+  await box.wait("window.togleUITest.calls().some(c=>c.name==='giveToRunnerTask')")
+  const [recipient, prompt] = (await box.calls('giveToRunnerTask'))[0].args
+  assert.equal(recipient, 'codex:t9')
+  assert.deepEqual(T.splitPictures(prompt).files, [files[0]])
+  await box.evaluate(previousChoice === null ? "localStorage.removeItem('togle.taskbox')" : "localStorage.setItem('togle.taskbox'," + JSON.stringify(previousChoice) + ")")
+  assert.deepEqual(box.errors, [])
+  box.window.destroy()
+}
+
+async function checkUserMessageFormatting(T, agent) {
+  const ui = await open(T, agent, 1024)
+  const debuggerSession = ui.window.webContents.debugger
+  debuggerSession.attach('1.3')
+  await debuggerSession.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+  const markdown = '# Device plans\n\nKeep **one account**.\nShow both apps.\n\n| Name | Purpose |\n| --- | --- |\n| Free | Manage agents |\n| Studio | Clean audio |\n\n- Connect a device\n- Read the [roadmap](https://example.com/roadmap)\n\n```js\n  run()\n```'
+  const older = 'review this # Device plans Keep **one account**. | Name | Purpose | | --- | --- | | Free | Manage agents | | Studio | Clean audio | ### 1. Connect a device. ### 2. Read the [roadmap](https://example.com/roadmap).'
+  const entries = [markdown, older].map((text, i) => ({ id: i + 1, kind: 'you', text, at: Date.now() - 60000 + i }))
+  const task = { key: 'claude:formatted', runner: 'claude', title: 'Review the plans', terminal: false, state: 'idle', history: { entries } }
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify(task) + ", '')")
+  await ui.task(task.title)
+  await ui.wait("document.querySelectorAll('.you-more[aria-expanded=false]').length === 2")
+  for (const [i, source] of [markdown, older].entries()) {
+    const turn = '.turn[data-turn="' + (i + 1) + '"]'
+    await ui.click(turn + ' .you-more', 'Show all')
+    assert.deepEqual(await texts(ui, turn + ' th'), ['Name', 'Purpose'])
+    assert.deepEqual(await texts(ui, turn + ' td'), ['Free', 'Manage agents', 'Studio', 'Clean audio'])
+    assert.deepEqual(await texts(ui, turn + ' strong'), ['one account'])
+    assert.equal(await ui.evaluate("document.querySelector(" + JSON.stringify(turn + ' .md a') + ").href"), 'https://example.com/roadmap')
+    await ui.evaluate("Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:async text=>{window.__promptCopy=text}})")
+    await ui.evaluate("document.querySelector(" + JSON.stringify(turn + ' .md p') + ").dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}))")
+    await ui.click('[role=menu] button', 'Copy')
+    assert.equal(await ui.evaluate('window.__promptCopy'), source, 'copy the original prompt')
+  }
+  assert.deepEqual(await texts(ui, '[data-turn="1"] h3'), ['Device plans'])
+  assert.equal(await ui.evaluate("document.querySelector('[data-turn=\"1\"] .md p br') !== null"), true)
+  assert.equal(await ui.evaluate("document.querySelector('[data-turn=\"1\"] .md pre code').textContent"), '  run()')
+  assert.equal(await ui.evaluate("document.querySelectorAll('[data-turn=\"2\"] .md ol li').length"), 2)
+  await ui.click('[data-turn="1"] .you-more', 'Show less')
+  await ui.click('[data-turn="2"] .you-more', 'Show less')
+  await ui.evaluate("document.querySelector('[data-turn=\"2\"] .md a').focus()")
+  await ui.wait("document.querySelector('[data-turn=\"2\"] .you-more').getAttribute('aria-expanded') === 'true'")
+  ui.window.setContentSize(420, 800)
+  await ui.wait("document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('.task-you .md-table')].every(t=>t.clientWidth <= t.closest('.task-you').clientWidth)")
+  assert.deepEqual(ui.errors, [])
+  debuggerSession.detach()
+  ui.window.destroy()
+}
+
+async function checkReplyHistory(T, agent) {
+  const ui = await open(T, agent, 1024)
+  const older = [{ id: 10, kind: 'you', text: 'Earlier prompt', at: Date.now() - 700_000 }]
+  const entries = [
+    { id: 1, kind: 'you', text: 'First prompt' },
+    { id: 2, kind: 'agent', text: 'Agent reply' },
+    { id: 3, kind: 'you', text: 'Second prompt\nwith two lines' }
+  ].map(entry => ({ ...entry, at: Date.now() - 600_000 + entry.id * 1000 }))
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key: 'codex:recall', runner: 'codex', title: 'Recall replies', state: 'idle', terminal: false, history: { entries, older } }) + ", '')")
+  await ui.task('Recall replies')
+  await ui.wait("document.querySelectorAll('.you-row').length === 2")
+  const field = "document.querySelector('.task-reply textarea')"
+  const value = () => ui.evaluate(`${field}.value`)
+  const arrow = async key => {
+    await ui.evaluate(`${field}.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true }))`)
+    await ui.paint()
+    return value()
+  }
+  await ui.fill('.task-reply textarea', 'Unsent draft')
+  await ui.evaluate(`${field}.setSelectionRange(5, 5)`)
+  assert.equal(await arrow('ArrowUp'), 'Unsent draft', 'Up while editing leaves the draft alone')
+  await ui.evaluate(`${field}.focus(); ${field}.setSelectionRange(0, 0)`)
+  assert.equal(await arrow('ArrowUp'), entries[2].text, 'newest prompt, with line breaks')
+  assert.equal(await arrow('ArrowUp'), entries[0].text, 'previous user prompt')
+  await arrow('ArrowUp')
+  await ui.wait(`${field}.value === 'Earlier prompt'`)
+  assert.ok(await ui.evaluate("!!document.querySelector('.task-earlier-turns')"), 'the older turns remain folded')
+  assert.equal(await arrow('ArrowUp'), entries[2].text, 'wrap to the newest prompt')
+  assert.equal(await arrow('ArrowDown'), 'Unsent draft', 'return to the draft past the newest prompt')
+  assert.equal((await ui.calls('sendToRunnerTask')).length, 0, 'navigation sends nothing')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
+async function checkCodexQuestions(T, agent) {
+  const ui = await open(T, agent, 1024)
+  const key = 'codex:async-questions'
+  const questions = ['Which VPS?', 'Which phone?', 'Anything else?'].map((title, i) => ({
+    id: JSON.stringify(['request_user_input_async', 'call', i]), title, options: i === 1 ? ['Android', 'iPhone'] : []
+  }))
+  await ui.evaluate("localStorage.setItem('togle.taskviews', JSON.stringify({ 'codex:async-questions': 'cards' }))")
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.evaluate('window.togleUITest.terminalTask(' + JSON.stringify({ key, runner: 'codex', title: 'Test the lab', state: 'working', terminal: false, history: { entries: [], questions } }) + ", '')")
+  await ui.task('Test the lab')
+  await ui.wait("document.querySelector('.codex-questions h3')?.textContent==='Codex has 3 questions'")
+  await ui.fill('.task-reply textarea', 'my ordinary chat draft')
+  await ui.fill('.codex-questions input', 'ssh TSO')
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("document.querySelector('.codex-questions input')?.value==='ssh TSO'")
+  await ui.click('.codex-questions button', 'Reply')
+  await ui.wait("document.querySelector('.codex-questions p')?.textContent==='Which phone?'")
+  await ui.click('.codex-questions button', 'Android')
+  assert.equal(await ui.evaluate("document.querySelector('.codex-questions input').value"), 'Android')
+  await ui.click('.codex-questions button', 'Reply')
+  await ui.wait("document.querySelector('.codex-questions p')?.textContent==='Anything else?'")
+  await ui.click('.codex-questions button', 'Skip')
+  await ui.wait("!document.querySelector('.codex-questions')")
+  const sent = (await ui.calls('sendToRunnerTask')).map(call => T.codexQuestionReplies(call.args[1]))
+  assert.deepEqual(sent.map(rows => [rows[0].questionItemId, rows[0].answer]), [[questions[0].id, 'ssh TSO'], [questions[1].id, 'Android']])
+  assert.equal(await ui.evaluate("document.querySelector('.task-reply textarea').value"), 'my ordinary chat draft')
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 app.whenReady().then(async () => {
   try {
     const T = await import(pathToFileURL(path.join(__dirname, '.build/togle.mjs')).href)
@@ -3497,6 +4259,9 @@ app.whenReady().then(async () => {
     const only = process.env.TASKS_UI_ONLY?.split(',')
     const go = (check) => !only || only.includes(check.name) ? check(T, agent) : undefined
     await go(checkWindowBar)
+    await go(checkCodexQuestions)
+    await go(checkUserMessageFormatting)
+    await go(checkReplyHistory)
     await go(checkPaste)
     await go(checkPictures)
     await go(checkReplyDock)
@@ -3509,6 +4274,7 @@ app.whenReady().then(async () => {
     await go(checkSecret)
     await go(checkArrange)
     await go(checkGroups)
+    await go(checkProjectSections)
     await go(checkTasks)
     await go(checkNarrow)
     await go(checkSlowMain)
@@ -3529,11 +4295,16 @@ app.whenReady().then(async () => {
     await go(checkPlaceKept)
     await go(checkPanes)
     await go(checkAgentMarks)
+    await go(checkProviderLogos)
     await go(checkPlanList)
     await go(checkSignedOut)
     await go(checkTerminalTask)
     await go(checkAgentSettings)
     await go(checkReach)
+    await go(checkFilesAndUsage)
+    await go(checkF8Attachment)
+    await go(checkUsageNavigation)
+    await go(checkChatLinksAndAgentUsage)
     console.log('Agents screen: list, requests, danger mark, stop and second press, reply, continue, take over, new task, narrow layout, the question before quitting, the notice, the to-do list, no See changes anywhere, the task box, a signed-out agent, a task in a terminal of its own, the offer to change keys, the agents in Settings, other devices’ tasks with Settings → Devices, and the window with main slow to answer passed')
     clearTimeout(timeout)
     app.quit()

@@ -1,8 +1,44 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { externalUrl, richDocument, richPreview, richText } from './.build/togle.mjs'
+import { externalUrl, localFilePath, richDocument, richPreview, richText, userMessageMarkdown } from './.build/togle.mjs'
+
+test('a Codex installer link retains its full local destination including spaces', () => {
+  const path = 'C:/Users/example/togle/dist/Togle Setup 0.1.0.exe'
+  const token = richDocument('[Togle Free Windows installer](</' + path + '>)').blocks[0].tokens[0]
+  assert.equal(token.type, 'link')
+  assert.equal(localFilePath(token.href, 'win32'), path.replaceAll('/', '\\'))
+  assert.equal(localFilePath('file:///C:/a/My%20Notes%23v2.txt', 'win32'), 'C:\\a\\My Notes#v2.txt')
+  assert.equal(localFilePath('C:\\dev\\page.tsx:18:2', 'win32'), 'C:\\dev\\page.tsx')
+  assert.equal(localFilePath('file:///home/user/r%C3%A9sum%C3%A9.pdf', 'linux'), '/home/user/résumé.pdf')
+  assert.equal(localFilePath('/Users/test/100% ready.txt', 'darwin'), '/Users/test/100% ready.txt')
+  for (const target of ['https://example.com/x','javascript:alert(1)','file://server/share/x','//server/share','%2F%2Fserver/share','relative.txt','file:///C:/a%00b']) {
+    assert.equal(localFilePath(target, 'win32'), undefined)
+    assert.equal(localFilePath(target, 'linux'), undefined)
+  }
+})
 
 const nested = tokens => tokens.flatMap(token => [token, ...nested(token.tokens ?? []), ...(token.items ?? []).flatMap(item => nested(item.tokens))])
+
+test('an old one-line prompt with a complete table regains its rows and section boundaries for display', () => {
+  const report = 'review this # Device plans Choose **one plan**. | Name | What you get | |---|:---:| | **Free** | Use one PC. | | **Pro** | Connect devices. | ### 1. Connect a phone. ### 2. Review the [roadmap](https://example.com).'
+  const blocks = richDocument(userMessageMarkdown(report)).blocks
+  const table = blocks.find(block => block.type === 'table')
+  assert.deepEqual(table.header.map(cell => cell.text), ['Name', 'What you get'])
+  assert.deepEqual(table.rows.map(row => row.map(cell => cell.text)), [['**Free**', 'Use one PC.'], ['**Pro**', 'Connect devices.']])
+  assert.equal(table.header[1].align, 'center')
+  assert.equal(blocks[0].text, 'review this')
+  assert.equal(blocks.find(block => block.type === 'list').items.length, 2)
+  assert.equal(nested(blocks).find(token => token.type === 'link').href, 'https://example.com')
+  const symbols = 'Use # for a comment. | A | B | |---|---| | 1 | 2 | ### 1. Handle C# and issue #42. Type # here.'
+  assert.ok(userMessageMarkdown(symbols).startsWith('Use # for a comment.\n\n'))
+  assert.ok(userMessageMarkdown(symbols).endsWith('1. Handle C# and issue #42. Type # here.'))
+})
+
+test('normal Markdown, code examples and ambiguous pipes keep their original text', () => {
+  for (const text of ['# Review\n\n| A | B |\n|---|---|\n| 1 | 2 |', 'C# and issue #42', 'a | b | c', 'Use `| A | B | |---|---| | 1 | 2 |`', '| A | B | C | |---|---| | 1 | 2 |', '| A | B | |---|---| | 1 | 2 | 3 |', '| A | B | |---|---|']) {
+    assert.equal(userMessageMarkdown(text), text)
+  }
+})
 
 test('web and email links are canonical destinations; custom/executable schemes cannot open', () => {
   assert.equal(externalUrl('HTTPS://EXAMPLE.COM/meeting?q=one#notes'), 'https://example.com/meeting?q=one#notes')

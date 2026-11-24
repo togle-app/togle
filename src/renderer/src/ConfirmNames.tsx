@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CallSession, TranscriptEntry } from '@shared/types'
 import { namesToConfirm, type ConfirmVoice } from '@shared/confirm-names'
 import { playVoiceClip, stopNoiseSample } from './audio/playback'
+import { MeetingPeople } from './MeetingControls'
 
 const api = window.togle
 const SAMPLE_RATE = 16000
@@ -34,7 +35,7 @@ export function ConfirmNames({ record, onRecord }: { record: CallSession; onReco
   if (!confirm || confirm.closed || confirm.until <= Date.now()) return null
   const waiting = confirm.voices.filter(voice => voice.answered === undefined)
   const asked = new Set(waiting.map(voice => voice.id))
-  const confirmed = ['You', ...voices.filter(line => !asked.has(line.voiceId!) && line.voiceName).map(line => line.voiceName!)]
+  const named = record.transcript.filter(line => line.speaker === 'me' || (line.voiceId && line.voiceName && !asked.has(line.voiceId)))
   const run = async (key: string, work: () => Promise<CallSession>): Promise<void> => {
     if (busy) return
     setBusy(key); setError('')
@@ -53,7 +54,7 @@ export function ConfirmNames({ record, onRecord }: { record: CallSession; onReco
   return (
     <section className="confirm-names" aria-label="Who spoke?">
       <div className="confirm-head"><h4>Who spoke?</h4><span className="hint">{namesToConfirm(confirm, Date.now())} of {voices.length + 1} to confirm</span></div>
-      <div className="live-people confirmed">{confirmed.map(name => <span key={name} className="person-chip ok">{name}</span>)}</div>
+      <MeetingPeople callId={record.id} transcript={named} onRecord={onRecord} showYou />
       {waiting.map(voice => (
         <ConfirmRow key={voice.id} voice={voice} busy={!!busy} playing={playing === voice.id} onPlay={() => void play(voice)}
           onAnswer={name => void run(voice.id, () => api.confirmAnswer(record.id, voice.id, name))} />

@@ -85,6 +85,7 @@ export class OngoingCall {
   /** Picks up a call saved when Togle last closed. */
   restore(state: CallState): void {
     this.transcript = Array.isArray(state.transcript) ? state.transcript : []
+    for (const line of this.transcript) if (line.speaker === 'me' && !line.voiceId) line.voiceId = 'me'
     this.voiceNames.clear(); this.voiceSegments.clear(); this.voiceAliases.clear()
     for (const line of this.transcript) if (line.voiceId && line.voiceName) this.voiceNames.set(line.voiceId, { name: line.voiceName, by: line.voiceNamedBy ?? 'suggested', identity: line.voiceIdentityId })
     this.toldOthersAt = Number.isFinite(state.toldOthers) ? state.toldOthers! : 0

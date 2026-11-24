@@ -45,8 +45,11 @@ test('agent sections inherit separately and resets do not mutate global defaults
   assert.throws(() => T.validatePreferences({ transcription: { language: [] } }), /Invalid/)
 })
 test('old Claude choices an earlier Togle saved are read as what they stand for now', () => {
-  // Voice typing that Claude cleaned up goes back to the automatic account; a side Claude heard is heard by this PC.
+  // Voice typing that Claude cleaned up goes back to the automatic account.
   assert.equal(T.validatePreferences({ dictation: { speech: 'claude' } }).dictation.speech, 'auto')
-  assert.equal(T.validatePreferences({ transcription: { me: 'claude', them: 'claude' } }).transcription.me, 'local')
+  // A side of a call that Claude, OpenAI's speech API or a server heard: this PC hears every call now, so the sound never
+  // leaves it, and nothing of that choice is kept. The language is.
+  assert.deepEqual(T.validatePreferences({ transcription: { language: 'de', me: 'claude', them: 'openai', openaiModel: 'gpt-transcribe', serverUrl: 'https://speech.example/v1', serverModel: 'any' } }), { transcription: { language: 'de' } })
+  assert.deepEqual(T.validatePreferences({ transcription: { me: 'server', them: 'server' } }), { transcription: {} })
   assert.equal(T.validatePreferences({ dictation: { speech: 'chatgpt' } }).dictation.speech, 'chatgpt')
 })

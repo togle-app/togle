@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs'
-import type { AssistKind, PlanUsage, SpeechApiId } from '@shared/types'
+import type { AssistKind, PlanUsage } from '@shared/types'
 import type { Usage } from './providers/types'
 
 export type AutoDismissal = 'quiet' | 'answered' | 'superseded' | 'stopped'
@@ -41,8 +41,8 @@ export interface AnswerTiming {
 /** One finished utterance: who transcribed it and how long that took. */
 export interface HeardTiming {
   at: string
-  /** This PC's recognizers, or the speech API picked for the side. */
-  by: 'parakeet' | 'whisper' | SpeechApiId
+  /** Which of this PC's recognizers heard it. */
+  by: 'parakeet' | 'whisper'
   noisy: boolean
   seconds: number
   ms: number

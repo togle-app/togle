@@ -97,6 +97,7 @@ button {
 }
 button:hover:not(:disabled) { border-color: var(--muted); }
 button.small { padding: 3px 9px; font-size: 12px; }
+button.icon-only { display: inline-grid; place-items: center; flex: none; width: 28px; min-height: 28px; padding: 0; }
 button.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); font-weight: 600; }
 button.primary:hover:not(:disabled) { background: var(--ink-hover); border-color: var(--ink-hover); }
 button.primary:disabled { opacity: 0.45; }
@@ -211,10 +212,11 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 
 /* The navigation is as wide as the person set it (--nav-width: its words, or its icons only); its edge is a handle (ResizeHandle). */
 .shell-layout { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: var(--nav-width, 136px) minmax(0, 1fr); }
-.shell-nav { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 8px; background: var(--bg); border-right: 1px solid var(--line); }
+/* The right divider completes the 10px inset. A 52px rail leaves a 32px square around each icon. */
+.shell-nav { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 9px 10px 10px; background: var(--bg); border-right: 1px solid var(--line); }
 .shell-nav > .spacer { flex: 1; }
-/* Each place has its icon beside its name, at every width; in a narrow window the icon is all there is room for. */
-.shell-nav button { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 9px; width: 100%; padding: 6px 9px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 13px; font-weight: 600; text-align: left; }
+/* Labels share a row with the icon. Hiding them keeps the icon and its hit area in place. */
+.shell-nav button { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 9px; width: 100%; min-height: 32px; padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 13px; font-weight: 600; text-align: left; }
 .shell-nav button > svg { flex-shrink: 0; }
 /* Whatever the width, a word stays inside its button: it is cut with an ellipsis and never runs over the edge into the pane beside. */
 .shell-nav button { overflow: hidden; }
@@ -236,7 +238,6 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 /* Agents is two panes side by side, each with its own room, the line between them the window's full height. */
 .shell-content:has(> .tasks) { padding: 0; scrollbar-gutter: auto; }
 /* Narrowed by hand to its icons (the person dragged it, or hid it): what a narrow window does, with the window's room as it is. */
-.shell-layout.nav-icons .shell-nav button { justify-content: center; padding: 8px 0; }
 .shell-layout.nav-icons .shell-nav button > span:not(.nav-count):not(.dot) { display: none; }
 .shell-layout.nav-icons .shell-nav .nav-count { position: absolute; top: 1px; right: 2px; padding: 0 5px; line-height: 16px; font-size: 10px; }
 .shell-layout.nav-icons .shell-nav .dot.live { position: absolute; top: 6px; right: 8px; width: 7px; height: 7px; }
@@ -258,7 +259,6 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 @media (max-width: 560px) {
   .nav-handle { display: none; }
   .shell-layout { grid-template-columns: 52px minmax(0, 1fr); }
-  .shell-nav button { justify-content: center; padding: 8px 0; }
   .shell-nav button > span:not(.nav-count):not(.dot) { display: none; }
   .shell-nav .nav-count { position: absolute; top: 1px; right: 2px; padding: 0 5px; line-height: 16px; font-size: 10px; }
   .shell-nav .dot.live { position: absolute; top: 6px; right: 8px; width: 7px; height: 7px; }
@@ -298,6 +298,9 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .todo-line code { padding: 0; border-radius: 0; background: none; color: inherit; font: 0.9em var(--font-mono); }
 .todo-line code.danger { color: var(--danger); }
 .todo-offer { font-size: 13px; overflow-wrap: anywhere; }
+.todo-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.todo-remove { color: var(--muted); }
+.meeting-suggestions { margin-top: 14px; }
 .todo-box { flex: none; width: 14px; height: 14px; padding: 0; border: 1.5px solid var(--muted); border-radius: 4px; background: transparent; }
 .todo-box:hover:not(:disabled) { border-color: var(--ink); }
 .todo-box[aria-checked='true'], .todo-box[aria-checked='true']:hover:not(:disabled) { border-color: var(--ok); background: var(--ok); }
@@ -324,6 +327,51 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 }
 .tasks-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 14px 7px 14px 15px; border-right: 1px solid var(--line); }
 .tasks-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.agent-usage-list { flex: none; min-width: 0; overflow: clip; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.agent-usage-list summary { display: flex; align-items: center; cursor: pointer; list-style: none; }
+.agent-usage-list summary::-webkit-details-marker { display: none; }
+.agent-usage-list > summary { display: grid; grid-template-columns: 16px minmax(0, 1fr) 16px; gap: 8px; min-height: 32px; padding: 6px 10px; border-radius: 7px; font-size: 12px; font-weight: 550; line-height: 18px; }
+.agent-usage-list[open] > summary { border-radius: 7px 7px 0 0; }
+.agent-usage-list > summary:focus-visible { outline: 2px solid var(--togle); outline-offset: -2px; }
+.agent-usage-list > summary > svg { display: block; justify-self: center; }
+.agent-usage-list > summary:hover, .usage-account-fold summary:hover { background: var(--raised); }
+.agent-usage-list > summary > svg:first-child { color: var(--muted); }
+.agent-usage-list > summary > svg:last-child { color: var(--muted); transform: rotate(-90deg); }
+.agent-usage-list[open] > summary > svg:last-child { transform: none; }
+.agent-usage-rows { padding: 0 10px; border-top: 1px solid var(--line); }
+.agent-usage-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 6px; padding: 8px 0; font-size: 12px; }
+.agent-usage-row + .agent-usage-row { border-top: 1px solid var(--line); }
+.agent-usage-row .agent-mark { min-width: 0; overflow-wrap: anywhere; }
+.usage-value, .usage-empty, .usage-caption, .usage-windows { font-size: 11px; color: var(--muted); }
+.usage-value { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 2px 5px; font-variant-numeric: tabular-nums; }
+.usage-value strong, .usage-window strong { font-weight: 600; color: var(--ink); }
+.usage-value small, .usage-window small { font-size: inherit; }
+.usage-count { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 2px 5px; }
+.usage-count > span { white-space: nowrap; }
+.agent-usage-row > .usage-value { flex-direction: column; align-items: flex-end; text-align: end; max-width: 14ch; }
+.agent-usage-row > .usage-value small { font-size: 10px; }
+.usage-account-fold { grid-column: 1 / -1; }
+.usage-account-fold summary { width: fit-content; gap: 3px; color: var(--muted); font-size: 10px; }
+.usage-account-fold:not([open]) summary svg { transform: rotate(-90deg); }
+.usage-account-fold .usage-windows { display: grid; gap: 3px; margin-top: 5px; }
+.usage-windows, .usage-window, .usage-account, .usage-session { display: inline-flex; align-items: flex-start; flex-wrap: wrap; }
+.usage-windows { gap: 3px 14px; }
+.usage-window { gap: 0 4px; font-variant-numeric: tabular-nums; }
+.window-name { text-transform: capitalize; }
+.usage-window small::before { content: '· '; }
+.task-agent-usage { display: flex; align-items: flex-start; flex-wrap: wrap; flex: 0 0 100%; min-width: 0; gap: 3px 13px; margin-top: 2px; font-size: 11px; line-height: 16px; }
+.usage-session { gap: 5px; }
+.usage-sources { display: inline-grid; min-width: 0; gap: 4px; font-size: 11px; }
+.usage-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.usage-source > span { color: var(--muted); overflow-wrap: anywhere; }
+.agent-usage-row:has(.usage-sources) > .usage-sources { grid-column: 1 / -1; }
+.usage-account { gap: 3px 7px; }
+.task-agent-usage .usage-caption { display: inline-flex; align-items: center; gap: 5px; }
+@media (max-width: 760px) {
+  .task-agent-usage { flex-direction: column; }
+}
+.sent-file { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 5px; overflow-wrap: anywhere; }
+button.attach-files { width: 36px; }
 .task-status .shells-hint, .task-status .monitors-hint { min-width: 0; max-width: 34rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tasks-head .tasks-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-list { display: flex; flex-direction: column; gap: 6px; }
@@ -332,8 +380,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
    for a project, the folder it is in; the numbers say what waits, works and is new in it, in the colors of the dots. Its
    tasks are its contents: they have no box of their own until the pointer is on one or it is open. The head folds the box,
    and its menu (beside it, on the pointer or the keys) renames it. A box lights up where a dragged task would go. */
-.tasks-head-actions { display: flex; align-items: center; gap: 4px; }
-.tasks-head-actions .icon-only { display: inline-grid; place-items: center; width: 28px; height: 26px; padding: 0; }
+.tasks-head-actions { display: flex; align-items: stretch; gap: 4px; }
 .task-groups { display: flex; flex-direction: column; gap: 12px; }
 .task-project { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--raised) 55%, transparent); }
 .task-project.drop { border-color: var(--togle); background: color-mix(in srgb, var(--togle-soft) 60%, transparent); }
@@ -357,7 +404,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 .task-project-sub { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .task-project-where { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .project-mark { display: inline-grid; flex: none; place-items: center; border-radius: 7px; color: #12151c; font-weight: 700; line-height: 1; }
-.project-mark::after { content: attr(data-letter); }
+.project-mark[data-letter]::after { content: attr(data-letter); }
 .project-mark.big { width: 28px; height: 28px; font-size: 13px; }
 .project-mark.small { width: 15px; height: 15px; margin-right: 5px; border-radius: 4px; font-size: 9.5px; vertical-align: -2px; }
 .project-mark.scheduled, .project-mark.everyday, .project-mark.device-mark { border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
@@ -430,20 +477,21 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 @media (prefers-reduced-motion: reduce) { .state-mark[data-mark]::before, .state-mark[data-mark]::after { animation: none !important; } }
 /* An agent's mark (AgentMark.tsx): its maker's own mark in the color of the line it is in, a little taller than the text and set
    in the line itself, so the words keep their baseline. Alone in a line (quiet) its name is its tooltip and is there for screen
-   readers, and the dot after it is not shown. An agent the person added shows its first letter in a box, then its name. In a list
+   readers, and the dot after it is not shown. An agent without a known logo shows its first letter in a box, then its name. In a list
    of agents (Settings, the first minute) it fills the square. */
 .agent-mark { white-space: nowrap; }
-.agent-mark svg { display: inline-block; flex: none; width: 1.25em; height: 1.25em; margin-right: 0.4em; vertical-align: -0.28em; }
+.agent-mark .agent-glyph { display: inline-block; flex: none; width: 1.25em; height: 1.25em; margin-right: 0.4em; vertical-align: -0.28em; }
+.agent-mask { background-color: currentColor; mask-position: center; mask-repeat: no-repeat; mask-size: contain; }
 .agent-mark.quiet { position: relative; }
-.agent-mark.quiet svg { margin-right: 0.5em; }
+.agent-mark.quiet .agent-glyph { margin-right: 0.5em; }
 .agent-mark.quiet + .agent-dot { display: none; }
-.state-chip .agent-mark.quiet svg, .todo-chip .agent-mark.quiet svg { margin-right: 0; }
+.state-chip .agent-mark.quiet .agent-glyph, .todo-chip .agent-mark.quiet .agent-glyph { margin-right: 0; }
 /* The letter box is 3/4 of the text and its middle is the middle of the capitals beside it (raised 1/8 of its own size from the
    baseline). `.agent-mark` in the selector keeps a container's rule for every span in it (a row's line sets 12px on them) from
    resizing it. Its vertical margins are negative, so it does not make its line taller. */
 .agent-mark .agent-letter { display: inline-block; width: 1.3em; height: 1.3em; margin: -0.4em 0.45em -0.4em 0; border: 1px solid currentColor; border-radius: 0.3em; overflow: visible; font-size: 0.75em; font-weight: 700; line-height: calc(1.3em - 2px); text-align: center; vertical-align: 0.125em; }
 .agent-mark .agent-letter::before { content: attr(data-letter); }
-.av svg { width: 14px; height: 14px; }
+.av .agent-glyph { width: 14px; height: 14px; }
 /* The window hidden in the tray or minimized: nothing on its page moves until it is back. */
 :root[data-away] *, :root[data-away] *::before, :root[data-away] *::after { animation-play-state: paused !important; }
 .task-copy { display: flex; flex-direction: column; flex: 1; min-width: 0; }
@@ -495,7 +543,7 @@ button.icon:hover, button.icon.active { background: var(--raised); color: var(--
 /* How it stands, at the start of its line, and what else runs (the shells it started) right after it. The switch between its two views is at
    the line's end, with how many files changed before it, as the design draws them: always, whatever else the line says. Without a switch, the
    files are said right after how it stands. */
-.task-status { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
+.task-status { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 4px 10px; }
 .task-status .files-hint:has(+ .view-switch) { margin-left: auto; }
 .task-status .files-hint + .view-switch { margin-left: 0; }
 .task-status .hint { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--muted); font-size: 12px; }
@@ -590,7 +638,9 @@ button.quote-bar-remove:hover:not(:disabled) { background: none; color: var(--in
 @container scroll-state(stuck: top) { .you-fade { opacity: 1; } }
 .you-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .you-label { color: var(--togle); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
-.task-you { min-width: 0; max-height: calc(3 * 1.45em); overflow: hidden; color: var(--ink); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-you { min-width: 0; max-height: 3lh; overflow: hidden; color: var(--ink); line-height: 1.55; overflow-wrap: anywhere; }
+.task-you .md { max-width: 90ch; font: inherit; }
+.task-you .md p { white-space: pre-wrap; }
 .task-you.whole { max-height: none; }
 .task-you.clamped { -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
 .you-row .you-more { align-self: flex-start; margin: 0; padding: 0; color: var(--togle); font-size: 11px; }
@@ -740,7 +790,7 @@ button.plan-head:hover:not(:disabled) { border-color: transparent; }
 /* In a low window what was said shows two lines (Show all still opens all of it), and the checklist a little less, to leave the
    conversation its room. */
 @media (max-height: 560px) {
-  .task-you:not(.whole) { max-height: calc(2 * 1.45em); }
+  .task-you:not(.whole) { max-height: 2lh; }
   .plan-items { max-height: 18vh; }
 }
 /* What is new comes in with a little rise, once; what was there when the conversation opened stays still. */
@@ -765,6 +815,9 @@ button.plan-head:hover:not(:disabled) { border-color: transparent; }
 .task-files { margin: 0; padding-left: 18px; font: 12px/1.5 var(--font-mono); overflow-wrap: anywhere; }
 .task-why { color: var(--danger); font-size: 12px; }
 .task-options { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.codex-questions { max-height: min(40vh, 22rem); overflow-y: auto; }
+.codex-questions input { width: 100%; }
+.codex-questions [aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* A choice is the agent's own words, as long as it wrote them: it goes on more lines rather than out of the card. */
 .task-options button { max-width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .task-always { align-self: flex-start; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 400; text-align: left; white-space: normal; cursor: pointer; }
@@ -871,11 +924,13 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .task-banner.task-words q { color: var(--ink); font-style: italic; overflow-wrap: anywhere; }
 .task-banner code { padding: 0; background: none; color: var(--ink); font: 12px var(--font-mono); }
 .task-terminal { position: relative; display: flex; flex-direction: column; flex: 1; gap: 8px; min-height: 0; }
+.task-terminal > .attach-files { align-self: flex-start; }
 /* Over the top of the agent's screen, so that the screen keeps its size and its prompt stays in view: what Togle kept off it, and what to do instead. */
-.terminal-note { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--wait); border-radius: 10px; background: var(--wait-soft); color: var(--ink); font-size: 12px; box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.6); }
-.terminal-note b { font-weight: 600; }
+.terminal-note { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--wait); border-radius: 10px; background: var(--wait-soft); color: var(--ink); font-size: 12px; box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.6); }
+.terminal-note > span { min-width: 0; overflow-wrap: anywhere; }
+.terminal-note b { display: block; margin-bottom: 2px; font-weight: 600; }
 .terminal-note button { flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin: 0; padding: 0; }
-.terminal-view { flex: 1; min-height: 220px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
+.terminal-view { flex: 1; min-height: 0; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
 .terminal-view .xterm { height: 100%; }
 .no-agents { display: flex; flex-direction: column; gap: 12px; padding: 2px 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
 .no-agents p { margin: 0; }
@@ -906,7 +961,15 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .call-history-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 8px; align-items: stretch; }
 /* The agents for the next call have the same room under them as the search box over them. */
 .meetings > .call-agents-wrap { margin-bottom: 10px; }
-.call-history-list > :not(.past-call-row) { grid-column: 1 / -1; }
+.call-history-list > :not(.past-call-row, .meeting-card) { grid-column: 1 / -1; }
+.call-history-list > .meeting-card { grid-column: auto; display: flex; min-width: 0; align-items: stretch; gap: 2px; border: 1px solid var(--line); border-radius: 10px; }
+.meeting-card:has(.meeting-row:hover), .meeting-card:focus-within { border-color: var(--muted); }
+.meeting-card > .meeting-row { flex: 1; min-width: 0; border: 0; }
+.meeting-card > .meeting-remove { margin: 4px; align-self: center; }
+.meeting-navigation { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 8px; }
+.meeting-navigation .meeting-back { margin: 0; }
+.meeting-remove { padding: 4px 7px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 12px; }
+.meeting-remove:hover:not(:disabled), .meeting-remove:focus-visible { color: var(--danger); background: var(--raised); }
 .past-call-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; align-content: start; gap: 0 9px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 400; text-align: left; white-space: normal; }
 .past-call-row:hover:not(:disabled) { border-color: var(--muted); }
 .past-call-row.live-record { border-color: var(--line); }
@@ -920,6 +983,18 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .history-empty { padding: 20px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .history-empty h3 { margin: 0 0 4px; color: var(--ink); font-size: 13px; }
 /* A call's page: its name with Share and Give to an agent, Notes and Transcript. */
+.meeting-back { display: inline-flex; align-items: center; align-self: flex-start; gap: 5px; width: fit-content; margin: 0 0 8px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; }
+.meeting-back:hover { background: var(--raised); color: var(--ink); }
+.meeting-back svg { flex: none; }
+.meeting-detail > .meeting-people { margin: 0 0 12px; }
+.meeting-people-label { margin-right: 2px; color: var(--muted); font-size: 12px; }
+.meeting-person { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.meeting-person .person-chip { min-width: 0; overflow-wrap: anywhere; }
+.meeting-person:has(.confirm-person) { gap: 0; padding-right: 4px; border: 1px solid var(--wait); border-radius: 12px; background: var(--wait-soft); }
+.meeting-person .person-chip.guess { border-color: transparent; color: var(--ink); }
+.confirm-person { flex: none; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font-size: 12px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.meeting-people .person-chip.naming { flex-wrap: wrap; max-width: 100%; }
+.meeting-people .person-chip.naming input { min-width: 0; max-width: 100%; }
 .call-detail-head { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
 .call-detail-head h2 { flex: 1; min-width: 0; margin: 0; font: 600 13px/1.4 var(--font-body); overflow-wrap: anywhere; cursor: text; }
 .call-detail-head .rename-title { flex: 1; min-width: 0; padding: 3px 8px; font-weight: 600; }
@@ -945,6 +1020,7 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .meeting-notes .notes-empty p { margin: 0; max-width: 56ch; }
 .meeting-notes .notes-empty button { margin-top: 6px; }
 .notes-by { align-self: flex-start; margin: 0; padding: 2px 10px; border-radius: 999px; background: var(--raised); color: var(--muted); font-size: 12px; }
+.notes-recovery { display: flex; flex-wrap: wrap; align-items: center; align-self: flex-start; gap: 8px 12px; max-width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 13px; }
 /* The notes: the lead first, then a card for each section (what was marked, decided, left to do, or is still open) in as many columns
    as the window has room for, a table or a long section on a row of its own. A time in them is a chip, and under To do the name
    of who took an item comes first. (notes-sections.ts splits the text; the text itself is never changed.) */
@@ -954,6 +1030,7 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .notes-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
 @container (min-width: 660px) { .notes-sections { grid-template-columns: repeat(2, minmax(0, 1fr)); } .notes-sections > .notes-section:last-child:nth-child(odd) { grid-column: 1 / -1; } }
 @container (min-width: 1000px) { .notes-sections { grid-template-columns: repeat(3, minmax(0, 1fr)); } .notes-sections > .notes-section:last-child:nth-child(odd) { grid-column: auto; } }
+@container (min-width: 1000px) { .notes-sections:has(> :nth-child(2):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); } .notes-sections > .notes-section:only-child { grid-column: 1 / -1; } }
 .notes-section { --kind: var(--muted); --kind-soft: var(--raised); min-width: 0; padding: 12px 16px 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--raised) 40%, transparent); }
 .notes-sections > .notes-section { margin: 0; }
 .notes-section[data-wide] { grid-column: 1 / -1; }
@@ -977,7 +1054,9 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .notes-section[data-kind='todo'] .md li > strong:first-child { display: inline-block; margin-right: 6px; padding: 0 8px; border-radius: 999px; background: var(--togle-soft); color: var(--togle); font-size: 12px; font-weight: 650; line-height: 19px; }
 .notes-section .md h5, .notes-section .md h6 { margin: 10px 0 4px; color: var(--muted); font-size: 12px; font-weight: 650; }
 .notes-section .md blockquote { margin: 8px 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--kind); color: var(--muted); }
-.md-time { display: inline-block; margin: 0 1px 0 4px; padding: 0 6px; border-radius: 6px; background: var(--raised); color: var(--muted); font: 500 11px/18px var(--font-mono); font-variant-numeric: tabular-nums; vertical-align: 1px; white-space: nowrap; }
+.md-time { display: inline-block; margin: 0 1px 0 3px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--muted); font: 500 11px/18px var(--font-mono); font-variant-numeric: tabular-nums; vertical-align: baseline; white-space: nowrap; }
+button.md-time:hover, button.md-time:focus-visible { border-color: var(--togle); background: var(--togle-soft); color: var(--togle); }
+.history-transcript-line.cited { background: var(--togle-soft); outline: 2px solid var(--togle); outline-offset: -2px; }
 .notes-foot { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 /* A saved call's transcript: its turns (see .call-turn) in one card, as the notes' sections are cards, and a line of time where each 5 minutes
    into the call begin. */
@@ -1037,7 +1116,6 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .tell-tick input[type='checkbox']:checked { border-color: var(--ok); background: var(--ok); }
 .tell-tick input[type='checkbox']:focus-visible { outline: 2px solid var(--togle); outline-offset: 2px; }
 @media (max-height: 700px) { .tell-others .tell-line { display: none; } }
-.notice.first-call strong { color: inherit; }
 .live-people { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 /* Who spoke: green once confirmed, dashed while a guess or without a name. */
 .person-chip { display: inline-flex; align-items: center; padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--ink); font-size: 12px; font-weight: 600; }
@@ -1136,7 +1214,6 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
 .settings .sets .section-head { margin: 0; }
 .settings .sets .section-head h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
 .settings .sets .card { border: 0; border-radius: 0; background: none; }
-.settings .sets .card > * + * { border-top: 0; }
 /* A row as the design draws it: 0.3rem over and under its words, a line under it, and 0.3rem before the next row. */
 .settings .sets .setting { min-height: 0; padding: 0.3rem 0; border-bottom: 1px solid var(--line); column-gap: 10px; font-size: 13px; color: var(--ink); }
 .settings .sets .card > * + .setting { margin-top: 0.3rem; }
@@ -1216,6 +1293,10 @@ button.person-chip:hover:not(:disabled) { border-color: var(--ink); color: var(-
    scroll. In a low window the dialog scrolls in the dimmed layer, so that its buttons can always be reached. */
 .form-backdrop { position: fixed; inset: 36px 0 0; z-index: 80; display: flex; align-items: flex-start; justify-content: center; box-sizing: border-box; padding: min(14vh, 120px) 16px 16px; overflow: auto; background: rgba(8, 10, 14, 0.82); font-weight: 400; cursor: default; }
 .settings .setting-detail.over { flex: none; box-sizing: border-box; width: 100%; max-width: 36rem; margin: 0; padding: 14px; background: var(--surface); box-shadow: 0 22px 36px -26px var(--shadow); }
+.form-backdrop .meeting-consent { width: 100%; max-width: 30rem; box-sizing: border-box; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 22px 36px -26px var(--shadow); }
+.meeting-consent h2 { margin: 0 0 10px; font-size: 17px; }
+.meeting-consent p { margin: 0 0 12px; }
+.meeting-consent .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 body.has-dialog .shell-content { overflow: hidden; }
 /* The row before a dialog that is the last thing in its group keeps no line under it, as when the dialog is not open. */
 .settings .sets .card > .setting:has(+ .form-backdrop:last-child) { border-bottom: 0; }
@@ -1334,8 +1415,6 @@ body.notice-surface { background: transparent; color: var(--ink); overflow: hidd
 .call-notice > span { color: var(--muted); }
 .call-notice-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .call-notice-buttons button { padding: 3px 9px; font-size: 12px; }
-.call-notice-always { padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 400; }
-.call-notice-always:hover:not(:disabled) { color: var(--ink); text-decoration: underline; }
 
 /* The strip during a call with the window closed: a pill with the time, Mark, Stop and the amber reminder. */
 .call-strip-bar { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 100vh; padding: 0 6px 0 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 600; box-shadow: 0 8px 16px -12px var(--shadow); }
@@ -1347,10 +1426,19 @@ body.notice-surface { background: transparent; color: var(--ink); overflow: hidd
 @keyframes strip-pulse { 50% { opacity: 0.35; } }
 
 /* The box over whatever is on screen: the agent and the folder as two chips, then one field with Start in it. */
-body.taskbox-surface { background: var(--surface); color: var(--ink); overflow: hidden; }
+body.taskbox-surface { background: transparent; color: var(--ink); overflow: hidden; }
 .taskbox-surface #root { padding: 0; }
-.taskbox { display: flex; flex-direction: column; gap: 8px; height: auto; padding: 12px 14px 14px; border: 1px solid var(--line); background: var(--surface); }
+.taskbox { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; height: auto; padding: 12px 14px 14px; border: 1px solid var(--line); background: var(--surface); }
+.taskbox > * { grid-column: 1 / -1; }
 .taskbox-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.taskbox > .taskbox-destination { grid-column: 1; grid-row: 1; align-self: start; }
+.taskbox > .taskbox-pick { grid-column: 2; grid-row: 1; align-items: center; min-width: 0; }
+.taskbox-recipient { align-items: center; }
+.taskbox-recipient .menu-anchor { max-width: 100%; }
+.taskbox-recipient .pick-chip { display: flex; align-items: center; gap: 4px; max-width: 100%; }
+.taskbox-recipient .pick-chip .cut { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.taskbox-recipient .pick-chip svg { flex: none; }
+.taskbox-recipient small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .pick-chip { padding: 2px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 600; }
 .taskbox-field { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .taskbox-field:focus-within { border-color: var(--togle); }
@@ -1365,18 +1453,24 @@ body.taskbox-surface { background: var(--surface); color: var(--ink); overflow: 
 .taskbox-attach span, .taskbox-todo span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .taskbox-attach button, .taskbox-todo button { flex: none; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; background: none; color: inherit; }
 
-/* ---- F8 Show: the frozen screen, a dashed frame around the part chosen, and what is drawn on it in indigo ---- */
+/* F8 screenshot crop and annotations. */
 
 body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: crosshair; user-select: none; }
 .show { position: fixed; inset: 0; touch-action: none; }
 .show-shot { position: absolute; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
-.show-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.35); pointer-events: none; }
-.show-part { position: absolute; border: 1.5px dashed var(--muted); border-radius: 10px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45); pointer-events: none; }
+.show-controls { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 12px; width: max-content; max-width: calc(100% - 24px); padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 3px 16px #0005; cursor: default; }
+.show-tools { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; max-width: 100%; }
+.show-voice-hint { display: inline-flex; align-items: center; gap: 5px; padding: 2px 5px; color: var(--muted); font-size: 12px; }
+.show-tools button { min-height: 30px; }
+.show-tools button[aria-pressed] { border-color: transparent; }
+.show-tools button[aria-pressed=true] { color: var(--ink); border-color: var(--show-ink); background: color-mix(in srgb, var(--show-ink) 14%, var(--surface)); }
+.show-tools kbd { font: inherit; opacity: 0.7; }
+.show-part { position: absolute; border: 1.5px dashed var(--show-ink); border-radius: 10px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45); pointer-events: none; }
 .show-ink { position: absolute; inset: 0; width: 100vw; height: 100vh; overflow: visible; pointer-events: none; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7)); }
 .show-ink text { font: 600 15px var(--font-body); }
 /* The words being typed on the picture: where they will be drawn. */
-.show-typing { position: absolute; min-width: 2px; padding: 0; color: var(--togle); font: 600 15px var(--font-body); white-space: pre; pointer-events: none; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7)); }
-.show-typing::after { content: ''; display: inline-block; width: 1.5px; height: 1.05em; margin-left: 1px; vertical-align: -0.15em; background: var(--togle); animation: show-caret 1s steps(1) infinite; }
+.show-typing { position: absolute; min-width: 2px; padding: 0; color: var(--show-ink); font: 600 15px var(--font-body); white-space: pre; pointer-events: none; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7)); }
+.show-typing::after { content: ''; display: inline-block; width: 1.5px; height: 1.05em; margin-left: 1px; vertical-align: -0.15em; background: currentColor; animation: show-caret 1s steps(1) infinite; }
 @keyframes show-caret { 50% { opacity: 0; } }
 
 /* Your voice while you talk, in the first minute: a light pill with dark bars, as the design draws it. */
@@ -1448,3 +1542,7 @@ body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: cross
 .call-answer-head .ghost { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; }
 .call-answer .task-agent { padding: 0; background: none; }
 .give-panel .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.notification-results { display: grid; gap: 5px; padding: 10px 14px; max-height: 35vh; overflow: auto; flex: none; }
+.notification-results header { display: flex; align-items: center; justify-content: space-between; }
+.notification-results h3 { margin: 0; }
+.notification-results .link { justify-self: start; text-align: left; }

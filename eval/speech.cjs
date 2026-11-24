@@ -1,12 +1,9 @@
 // Speech recognition under noise: each question of the end-to-end call (Windows voices, so the exact words are
 // known) through Togle's recognition, Parakeet first and Whisper for unclear speech (the hearing module), with
 // background chatter and line hiss mixed in at falling signal-to-noise ratios. Prints the word error rate
-// and how long each transcript took. Runs on this PC only: no requests to your plan.
+// and how long each transcript took. Runs on this PC only: no requests to your plan, and no sound sent anywhere (Togle
+// hears every call on the computer, so there is no speech service to score beside it).
 //   npm run speech
-// A speech API that Settings can pick for a side is scored beside them with `--server http://localhost:8000/v1` (and
-// `--model`, for a server with several), or `--openai` with OPENAI_API_KEY set (gpt-transcribe unless `--model` says;
-// billed by OpenAI, about a cent a run). A ChatGPT account has no speech recognition of its own (Sign in with ChatGPT
-// doesn't include transcription): what this PC hears is what it gets.
 const { app } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -135,19 +132,6 @@ run(async () => {
   const warm = readWav(path.join(calls, 'q4.wav'))
   await within(60_000, 'Warming up Parakeet', parakeet.transcribe(warm, { partial: false, stream: 'them' }))
   await within(60_000, 'Warming up Whisper', whisper.transcribe(warm, { language: 'en', prompt: '', partial: false, stream: 'them' }))
-  let speechApi = null
-  if (OPTS.chatgpt) throw new Error("A ChatGPT account has no speech recognition of its own: Sign in with ChatGPT doesn't include transcription.")
-  if (OPTS.server || OPTS.openai) {
-    const baseUrl = OPTS.openai ? T.OPENAI_URL : String(OPTS.server)
-    const model = typeof OPTS.model === 'string' ? OPTS.model : OPTS.openai ? T.OPENAI_MODEL : ''
-    speechApi = new T.SpeechApi(OPTS.openai ? 'openai' : 'server', 'eval-speech-key.bin', () => ({ baseUrl, model }))
-    if (OPTS.openai) {
-      if (!process.env.OPENAI_API_KEY) throw new Error('--openai needs OPENAI_API_KEY set.')
-      // Kept in the copy of Togle's data, which is deleted after the run.
-      await speechApi.setKey(process.env.OPENAI_API_KEY)
-    }
-    await within(60_000, `Warming up ${speechApi.label()}`, speechApi.transcribe(warm, { language: 'en', vocabulary: '' }))
-  }
 
   let heard = null
   let byWhisper = false
@@ -183,11 +167,6 @@ run(async () => {
       t = performance.now()
       const alone = await within(60_000, `Whisper on ${clip.name}`, whisper.transcribe(pcm, { language: LANGUAGE, prompt: VOCABULARY, partial: false, stream: 'them' }))
       row.whisper = { wer: wer(clip.text, alone.text), ms: performance.now() - t, heard: alone.text.trim() }
-      if (speechApi) {
-        t = performance.now()
-        const byApi = await within(60_000, `${speechApi.label()} on ${clip.name}`, speechApi.transcribe(pcm, { language: LANGUAGE, vocabulary: VOCABULARY }))
-        row.api = { wer: wer(clip.text, byApi), ms: performance.now() - t, heard: byApi }
-      }
       level.push(row)
       clips.push(row)
     }
@@ -197,7 +176,6 @@ run(async () => {
     for (const part of parts) {
       const list = part === 'all' ? level : level.filter((c) => c.set === part)
       const whispered = list.filter((c) => c.togle.byWhisper).length
-      const api = speechApi ? { api: speechApi.label(), apiWer: errorRate(list, 'api'), apiMs: median(list.map((c) => c.api.ms)), apiP90: p90(list.map((c) => c.api.ms)) } : {}
       const row = {
         snr,
         part,
@@ -208,24 +186,13 @@ run(async () => {
         p90: p90(list.map((c) => c.togle.ms)),
         whispered,
         whisperWer: errorRate(list, 'whisper'),
-        whisperMs: median(list.map((c) => c.whisper.ms)),
-        ...api
+        whisperMs: median(list.map((c) => c.whisper.ms))
       }
       rows.push(row)
       console.log(
         `${label.padEnd(6)} ${part.padEnd(5)} ${String(row.words).padStart(3)} words | this PC ${(100 * row.wer).toFixed(1)}% in ${Math.round(row.ms)} ms (p90 ${Math.round(row.p90)}; Whisper took ${whispered} of ${list.length}) | ` +
-          `Whisper alone ${(100 * row.whisperWer).toFixed(1)}% in ${Math.round(row.whisperMs)} ms` +
-          (speechApi ? ` | ${speechApi.label()} ${(100 * api.apiWer).toFixed(1)}% in ${Math.round(api.apiMs)} ms (p90 ${Math.round(api.apiP90)})` : '')
+          `Whisper alone ${(100 * row.whisperWer).toFixed(1)}% in ${Math.round(row.whisperMs)} ms`
       )
-    }
-  }
-  // Where they differ most: what was said, and what each heard.
-  if (speechApi) {
-    const apart = clips.filter((c) => c.togle.wer !== c.api.wer).sort((a, b) => Math.abs(b.togle.wer - b.api.wer) - Math.abs(a.togle.wer - a.api.wer))
-    for (const c of apart.slice(0, 6)) {
-      console.log(`  ${c.snr === null ? 'clean' : `${c.snr} dB`} ${c.name} said: "${c.said.toLowerCase()}"`)
-      console.log(`    this PC (${(100 * c.togle.wer).toFixed(0)}%): "${c.togle.heard}"`)
-      console.log(`    ${speechApi.label()} (${(100 * c.api.wer).toFixed(0)}%): "${c.api.heard}"`)
     }
   }
   fs.mkdirSync(path.join(__dirname, 'results'), { recursive: true })

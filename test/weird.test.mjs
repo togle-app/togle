@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import { workDir } from './helpers.mjs'
 
 const work = workDir('weird')
-const { AgentStore, getSettings, loadSettings, savedBeforeSpeechChoice, updateSettings } =
+const { AgentStore, getSettings, loadSettings, updateSettings } =
   await import('./.build/togle.mjs')
 
 // ---- An agent's file, damaged ----
@@ -71,7 +71,7 @@ test('a task opens as its agent’s own screen unless Settings say cards, and no
   rmSync(file, { force: true })
   assert.equal((await loadSettings()).tasks.view, 'session', 'a new Togle opens tasks as the agent’s own screen')
   assert.equal((await updateSettings({ tasks: { view: 'cards' } })).tasks.view, 'cards')
-  assert.deepEqual(getSettings().tasks, { notices: true, finished: true, view: 'cards', sortBySubject: true }, 'the notices keep what they were, and sorting by subject is on')
+  assert.deepEqual(getSettings().tasks, { notices: true, finished: true, notificationPreviews: true, view: 'cards', sortBySubject: true }, 'the notices keep what they were, and sorting by subject is on')
   assert.equal((await loadSettings()).tasks.view, 'cards', 'and it is kept')
   assert.equal((await updateSettings({ tasks: { view: 'sideways' } })).tasks.view, 'session', 'a word that is not a view is the default')
   assert.equal((await updateSettings({ tasks: { view: 12 } })).tasks.view, 'session')
@@ -82,7 +82,7 @@ test('a task opens as its agent’s own screen unless Settings say cards, and no
   assert.equal((await loadSettings()).tasks.sortBySubject, false, 'and it is kept')
   assert.equal((await updateSettings({ tasks: { sortBySubject: true } })).tasks.sortBySubject, true)
   writeFileSync(file, JSON.stringify({ activeAgentId: 'work', tasks: { notices: false, finished: true } }))
-  assert.deepEqual((await loadSettings()).tasks, { notices: false, finished: true, view: 'session', sortBySubject: true }, 'settings saved before it keep their notices, open tasks as screens, and sort')
+  assert.deepEqual((await loadSettings()).tasks, { notices: false, finished: true, notificationPreviews: true, view: 'session', sortBySubject: true }, 'existing settings gain previews and retain their notification and view choices')
   rmSync(file, { force: true })
   await loadSettings()
 })
@@ -128,30 +128,30 @@ test('a new Togle remembers no one’s voice until the person turns it on; setti
   await loadSettings()
 })
 
-test("a new Togle hears calls on this PC (ChatGPT's sign-in has no transcription); settings saved before the speech model was a choice say so", async () => {
+test('this PC hears every call: what an earlier Togle saved to send a side of a call to a speech service is gone when settings load, and no change brings it back', async () => {
   const file = path.join(work, 'settings.json')
   rmSync(file, { force: true })
-  const fresh = await loadSettings()
-  assert.deepEqual([fresh.transcription.me, fresh.transcription.them], ['local', 'local'])
-  // Saved when the ChatGPT plan transcribed: this PC hears those calls now.
-  writeFileSync(file, JSON.stringify({ transcription: { me: 'chatgpt', them: 'chatgpt', accountId: 'chatgpt-default' } }))
-  const moved = await loadSettings()
-  assert.deepEqual([moved.transcription.me, moved.transcription.them], ['local', 'local'])
-  // Saved with Claude speech, which was removed: this PC hears those calls too, and a change can't bring it back.
-  writeFileSync(file, JSON.stringify({ transcription: { me: 'claude', them: 'openai', accountId: 'claude-default' } }))
-  const fromClaude = await loadSettings()
-  assert.deepEqual([fromClaude.transcription.me, fromClaude.transcription.them], ['local', 'openai'])
-  await updateSettings({ transcription: { me: 'claude', them: 'claude' } })
-  assert.deepEqual([getSettings().transcription.me, getSettings().transcription.them], ['local', 'local'])
+  assert.deepEqual((await loadSettings()).transcription, { language: 'auto' }, 'a new Togle: only the language is a setting')
+  // Saved by an earlier Togle: a side heard by OpenAI's speech API, by a server of the person's own, by an account. The sound of
+  // a call never leaves this PC now, so none of it is kept. The language is.
+  for (const saved of [
+    { language: 'hr', me: 'openai', them: 'openai', openaiModel: 'gpt-transcribe', serverUrl: '', serverModel: '' },
+    { language: 'hr', me: 'local', them: 'server', openaiModel: '', serverUrl: 'https://speech.example/v1', serverModel: 'whisper-1' },
+    { language: 'hr', me: 'chatgpt', them: 'claude', accountId: 'chatgpt-default' }
+  ]) {
+    writeFileSync(file, JSON.stringify({ transcription: saved }))
+    assert.deepEqual((await loadSettings()).transcription, { language: 'hr' }, JSON.stringify(saved).slice(0, 70))
+  }
+  // A change that names a speech service changes nothing, and one with a language changes the language only.
+  await updateSettings({ transcription: { me: 'openai', them: 'server', serverUrl: 'https://speech.example/v1' } })
+  assert.deepEqual(getSettings().transcription, { language: 'hr' })
+  await updateSettings({ transcription: { language: 'de', me: 'openai' } })
+  assert.deepEqual(getSettings().transcription, { language: 'de' })
+  // The file Togle writes has none of it either.
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).transcription, { language: 'de' })
+  // A language that is not a word (a file edited by hand) is the default one.
+  writeFileSync(file, JSON.stringify({ transcription: { language: 7, them: 'openai' } }))
+  assert.deepEqual((await loadSettings()).transcription, { language: 'auto' })
   rmSync(file, { force: true })
   await loadSettings()
-  assert.equal(savedBeforeSpeechChoice(), false, 'nothing saved yet: a new Togle')
-  // From then: this PC heard every call (Togle keeps it so, where its speech recognition is installed).
-  writeFileSync(file, JSON.stringify({ provider: 'chatgpt', transcription: { language: 'en' } }))
-  await loadSettings()
-  assert.equal(savedBeforeSpeechChoice(), true)
-  await updateSettings({ transcription: { me: 'local', them: 'local' } })
-  const kept = await loadSettings()
-  assert.deepEqual([kept.transcription.me, kept.transcription.them], ['local', 'local'])
-  assert.equal(savedBeforeSpeechChoice(), false, 'once saved with the choice, it is a choice like any other')
 })

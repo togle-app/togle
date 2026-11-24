@@ -118,6 +118,8 @@ app.whenReady().then(async () => {
   await evaluate("document.querySelector('[aria-label=\"Back to Meetings\"]').click()")
   await wait("!!document.querySelector('.page-head .primary')")
   await evaluate("[...document.querySelectorAll('.page-head .primary')].find(b=>b.textContent==='Write down now').click()")
+  await wait("!!document.querySelector('.meeting-consent button[type=submit], .live-lines')")
+  await evaluate("document.querySelector('.meeting-consent button[type=submit]')?.click()")
   await wait("!!document.querySelector('.live-lines')")
   const liveStart = performance.now()
   await evaluate("for(let i=0;i<5000;i++)window.togleUITest.emit('onTranscript',{id:'live-'+i,speaker:i%2?'me':'them',text:(i===4999?'Needle: ':'')+'A realistic meeting turn about the rollout, open questions and who does what next. '+i,at:Date.now()+i,end:Date.now()+i})")

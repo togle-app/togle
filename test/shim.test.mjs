@@ -1,11 +1,16 @@
 // The togle command ships with the app, and can be run from a copy of the source.
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { test } from 'node:test'
 
 const root = path.resolve(import.meta.dirname, '..')
 const read = name => fs.readFileSync(path.join(root, name), 'utf8')
+
+test('Windows setup registers and removes its own CLI path across upgrades', { skip: process.platform !== 'win32' }, () => {
+  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned', '-File', path.join(root, 'test', 'windows-cli-path.ps1')], { windowsHide: true })
+})
 
 test('the togle command ships beside the app and runs the program inside it as plain Node', () => {
   const windows = read('resources/bin/togle.cmd')

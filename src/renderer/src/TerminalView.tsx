@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import { caughtOnEnter, CLEAR_LINE, isLeftArrow, leftLeaves, LEFT_NOTE, noteFor, promptIsEmpty, TypedLine } from '@shared/screen-guard'
 import { Icon } from './Icon'
 import { WaitLine } from './kept'
+import { AttachButton, diskPath, fileDrop, pathWords } from './ReplyPictures'
 
 const api = window.togle
 
@@ -14,7 +15,6 @@ const NOTE_MS = 15_000
 /** The kinds of picture a paste can hold that go into a screen as a file (a screenshot is a PNG; a bitmap is kept as one). */
 const PICTURE = /^image\/(png|jpeg|gif|webp|bmp)$/
 /** A path as it goes into a screen: in quotes when it has a space, as a terminal puts a file dropped on it. */
-const pathWords = (file: string): string => (/\s/.test(file) ? `"${file}"` : file)
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 
 /** The rows of the screen as it is drawn now, as text. */
@@ -249,10 +249,24 @@ export function TerminalView({ taskKey, screenId, guard, active = true }: { task
       term.dispose()
     }
   }, [taskKey, screenId, guard])
+  const attachFiles = (files: File[]): void => {
+    try {
+      const paths = files.map(file => {
+        const path = diskPath(file)
+        if (!path) throw new Error('Choose a file from a folder on your computer.')
+        return pathWords(path)
+      })
+      if (paths.length && screen.current) {
+        screen.current.paste(paths.join(' ') + ' ')
+        screen.current.focus()
+      }
+    } catch (error) { setNote({ title: 'Couldn’t attach the file.', body: errorText(error) }) }
+  }
   return (
     <>
       <WaitLine waiting={!drawn} label="Opening the screen" words="Opening the screen…" />
-      <div className="terminal-view" ref={host} role="group" aria-label="The agent's terminal" />
+      <div className="terminal-view" ref={host} role="group" aria-label="The agent's terminal" {...fileDrop(attachFiles)} />
+      <AttachButton onFiles={attachFiles} />
       {note && (
         <div className="terminal-note" role="status">
           <span>
