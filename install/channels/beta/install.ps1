@@ -8,7 +8,7 @@
   $ProgressPreference = 'SilentlyContinue'
   $Modulus = 'jrG3LNas8oqsyscSaTyo+lpkYkk8DId4RwTZ47fcFs8Cv9FeJKUxhG0+FWjX3Ajn9aYs2SNo8gh5J5M4OmdZNRK3Qk4ua93IvUIzWm70Uq7BD7JGP/fgQrdK4WHBsymwW9ClNJBHbv44H0RWURBoJthGjHNYRn6s4tdTbTrWPjWcXBx1XBe7HvjJqsoihWGdS+00ORCXmKf6VO6uTwIRI2lz4m/1vBEa7xEb7rqF4tmOUM/G3oNMpWyOZdRWuecwfMiNcgPGDmmlGmWX8BsXKfMC6VFEjyC0pky0ViCRdeucT6fQQg7C0UbSuVpWj5mDk/zS0y+Q39NkUk/EmvtfnBu6iMOtLTZravT6jgTnLNIgUJsWo0Owbyav7Ewu2yd7u0BVFl0glN/bI9RcV5dC6xwL5IURkxyv1LlfHpyfiAtIL0C+z9OYaQMtERwSv1JDX//uHY0ypFRGlONATmOk0mF7SUEMwElcTw8uIIyS6p75ofyU+teCqkaR1Dr0+YyT'
   $Exponent = 'AQAB'
-  $ChannelUrl = 'https://api.github.com/repos/togle-app/togle/releases/tags/v0.1.0-beta.2'
+  $ChannelUrl = 'https://api.github.com/repos/togle-app/togle/releases/tags/v0.1.0-beta.3'
   $Stable = $ChannelUrl.EndsWith('/releases/latest')
   $Releases = if ($env:TOGLE_INSTALL_RELEASES) { $env:TOGLE_INSTALL_RELEASES } else { $ChannelUrl }
   $NoStable = 'No stable Windows release of Togle Free is available yet. For the Windows beta, use https://togle.app/beta/install.ps1.'

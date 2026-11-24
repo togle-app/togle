@@ -4,7 +4,7 @@
 # Stable: curl -fsSL https://togle.app/stable/install.sh | sh
 set -eu
 
-RELEASE_SOURCE='https://api.github.com/repos/togle-app/togle/releases/tags/v0.1.0-beta.2'
+RELEASE_SOURCE='https://api.github.com/repos/togle-app/togle/releases/tags/v0.1.0-beta.3'
 RELEASES="${TOGLE_INSTALL_RELEASES:-$RELEASE_SOURCE}"
 PUBLIC_KEY='-----BEGIN PUBLIC KEY-----
 MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAjrG3LNas8oqsyscSaTyo
