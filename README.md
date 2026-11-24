@@ -36,7 +36,7 @@ Run this in a terminal on Ubuntu 22.04 or later on an x64 computer.
 curl -fsSL https://togle.app/beta/install.sh | sh
 ```
 
-The command checks the signed AppImage and installs it for your user. Open **Togle** from your applications menu. [Togle Free beta 2](https://github.com/togle-app/togle/releases/tag/v0.1.0-beta.2)
+The command checks the signed AppImage and installs it for your user. Open **Togle** from your applications menu. [Togle Free releases](https://github.com/togle-app/togle/releases)
 
 ## Four things, one app
 

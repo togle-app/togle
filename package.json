@@ -2,7 +2,7 @@
   "name": "togle",
   "version": "0.1.0",
   "private": true,
-  "description": "An AI assistant for any video call, on Windows, macOS and Linux: it hears both sides and suggests what to say, with agents you train, or get from the agent market.",
+  "description": "Open-source desktop app for managing AI agents on your computer, with dictation and meeting notes.",
   "license": "MIT",
   "author": "Luka Dutina",
   "homepage": "https://github.com/togle-app/togle#readme",
