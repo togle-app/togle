@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Togle Free – Manage AI agents on your computer</title>
+  <meta name="description" content="Open-source desktop app for managing AI agents on your computer, with dictation and meeting notes.">
+  <meta name="theme-color" content="#f5f6fb">
+  <link rel="canonical" href="https://togle.app/">
+  <link rel="icon" href="/assets/img/togle-icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/img/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="stylesheet" href="/assets/css/home.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="/" aria-label="Togle Free home">
+        <img src="/assets/img/togle-icon.svg" width="34" height="34" alt="">
+        <span>Togle Free</span>
+      </a>
+      <a class="source-link" href="https://github.com/togle-app/togle">Source on GitHub</a>
+    </div>
+  </header>
+
+  <main class="container" id="main">
+    <section class="hero" aria-labelledby="headline">
+      <div class="hero-copy">
+        <!-- Update these download links and the release label with the beta install scripts. -->
+        <p class="availability"><a href="https://github.com/togle-app/togle/releases/tag/v0.1.0-beta.3">Beta 3</a> <span aria-hidden="true">·</span> Windows and Linux x64</p>
+        <h1 id="headline">Manage AI agents on your computer</h1>
+        <p class="intro">Track agent tasks, answer requests, dictate into apps, and take meeting notes in one open-source desktop app.</p>
+        <div class="downloads" id="download">
+          <a class="download primary" href="https://github.com/togle-app/togle/releases/download/v0.1.0-beta.3/Togle.Setup.0.1.0-beta.3.exe">Download for Windows</a>
+          <a class="download" href="https://github.com/togle-app/togle/releases/download/v0.1.0-beta.3/Togle-0.1.0-beta.3.AppImage">Download for Linux</a>
+        </div>
+      </div>
+      <img class="app-preview" src="/assets/img/togle-todo.png" alt="Togle’s To-do view showing agent approvals, task status, and meeting follow-ups." width="1024" height="850" fetchpriority="high">
+    </section>
+
+    <details class="install" id="command-line">
+      <summary>Install from the command line</summary>
+      <div class="command-grid">
+        <div>
+          <h2>Windows Command Prompt</h2>
+          <pre><code>powershell -NoProfile -Command "iex (irm https://togle.app/beta/install.ps1 -ErrorAction Stop)"</code></pre>
+        </div>
+        <div>
+          <h2>Linux Terminal</h2>
+          <pre><code>curl -fsSL https://togle.app/beta/install.sh | sh</code></pre>
+        </div>
+      </div>
+    </details>
+  </main>
+
+  <footer class="container footer">
+    <a href="https://github.com/togle-app/togle/releases/tag/v0.1.0-beta.3">Release notes</a>
+    <a href="https://github.com/togle-app/togle/blob/main/LICENSE">MIT license</a>
+  </footer>
+</body>
+</html>
