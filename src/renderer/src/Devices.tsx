@@ -2,9 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ReachDevice, ReachState } from '@shared/reach'
 import { Field, FormOver, Row, Section, Toggle, useOneOpen } from './Rows'
 
-// Settings → Devices: this computer among the person's devices (Reach, part of Togle Studio). The list of devices, adding
-// one by its code and Remove live here, in Togle, which is open: never in the Studio app. Only in development runs with a
-// courier set, until an outside review has tried to break Reach.
+// Settings → Devices: view and manage the devices connected through Togle Pro.
 
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -56,7 +54,7 @@ export function Devices() {
 
 interface PartProps { reach: ReachState; busy: string; run: (what: string, work: () => Promise<unknown>) => Promise<void> }
 
-/** Not one of the person's devices yet: sign in (the first computer), or show a code to add it from one they use. */
+/** Not one of the person's devices yet: connect this computer after signing in, or show a code to add it from one they use. */
 function NotYet({ reach, busy, run }: PartProps) {
   if (reach.code) return <ShowingCode reach={reach} busy={busy} run={run} />
   const showCode = <button className="ghost small" disabled={!!busy} onClick={() => void run('code', () => api.reachShowCode())}>{busy === 'code' ? 'Getting a code…' : 'Show a code'}</button>
@@ -75,37 +73,11 @@ function NotYet({ reach, busy, run }: PartProps) {
   }
   return (
     <>
-      {reach.account && reach.link === 'connecting' && <Row label={false} name="Connecting to Togle Studio…" />}
-      <Row label={false} name="Add this computer from one you use" note={reach.account ? undefined : 'Or sign in to Togle Studio, under Accounts, to start your devices here.'}>{showCode}</Row>
+      {reach.account && <Row label={false} name="Connect this computer" note="Connect it to your Togle account to share its agent tasks with your trusted devices.">
+        <button className="small" disabled={!!busy || reach.link === 'connecting'} onClick={() => void run('connect', () => api.reachConnect())}>{reach.link === 'connecting' ? 'Connecting…' : 'Connect this computer'}</button>
+      </Row>}
+      <Row label={false} name="Add this computer from one you use" note={reach.account ? undefined : 'To start your devices here, sign in to your Togle account under Accounts.'}>{showCode}</Row>
     </>
-  )
-}
-
-/** Signing in with a code sent by email: the first computer you sign in on starts your devices. */
-export function SignIn({ busy, run, onCancel }: Pick<PartProps, 'busy' | 'run'> & { onCancel: () => void }) {
-  const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
-  const [sent, setSent] = useState(false)
-  const submit = (): void => {
-    if (!sent) void run('send', async () => { await api.reachSendCode(email); setSent(true) })
-    else void run('verify', () => api.reachSignIn(email, code))
-  }
-  return (
-    <FormOver label="Sign in to Togle Studio" busy={!!busy} onClose={onCancel} onSubmit={submit}>
-      <span className="tasks-label">Sign in to Togle Studio</span>
-      <Field name={sent ? 'Code' : 'Email'} note={sent ? <>A code is on its way to <span className="free-text">{email}</span>. Type its six digits.</> : 'The first computer you sign in on starts your devices. A server and a phone never sign in: you add them from here.'}>
-        {sent
-          ? <input aria-label="Code from the email" inputMode="numeric" autoComplete="one-time-code" maxLength={10} autoFocus value={code} disabled={!!busy} onChange={(event) => setCode(event.target.value)} />
-          : <input aria-label="Email address" type="email" autoComplete="email" maxLength={200} value={email} disabled={!!busy} onChange={(event) => setEmail(event.target.value)} />}
-      </Field>
-      <div className="row">
-        <button className="primary" disabled={!!busy || (sent ? code.replace(/\s/g, '').length < 6 : !email.includes('@'))}>
-          {busy === 'send' ? 'Sending…' : busy === 'verify' ? 'Signing in…' : sent ? 'Sign in' : 'Email me a code'}
-        </button>
-        {sent && <button type="button" className="ghost" disabled={!!busy} onClick={() => { setSent(false); setCode('') }}>Use another address</button>}
-        <button type="button" className="ghost" disabled={!!busy} onClick={onCancel}>Cancel</button>
-      </div>
-    </FormOver>
   )
 }
 
@@ -149,7 +121,7 @@ function Member({ reach, busy, run }: PartProps) {
         } />
       )}
       {reach.account && (
-        <Row label={false} name={<>Signed in to Togle Studio as <span className="free-text">{reach.account.email}</span></>} note="Signing out leaves this computer one of your devices.">
+        <Row label={false} name={<>Togle account · <span className="free-text">{reach.account.email}</span></>} note="Signing out leaves this computer one of your devices.">
           <button className="ghost small" disabled={!!busy} onClick={() => void run('out', () => api.reachSignOut())}>Sign out</button>
         </Row>
       )}
@@ -159,11 +131,11 @@ function Member({ reach, busy, run }: PartProps) {
 
 function connectionWords(reach: ReachState): string {
   if (reach.link === 'member') {
-    if (reach.connection === 'needs-pro') return 'The connection between your devices is part of Togle Studio Pro. Your agents keep running on their own computers.'
-    if (reach.connection === 'off') return 'The connection is switched off in your Togle Studio account.'
-    return 'Connected through Togle Studio.'
+    if (reach.connection === 'needs-pro') return 'Connect your devices with Togle Pro.'
+    if (reach.connection === 'off') return 'The device connection is off for your Togle account.'
+    return 'Your device connection is on.'
   }
-  if (reach.link === 'refused') return 'Togle Studio turned this computer away. Your agents keep running here.'
+  if (reach.link === 'refused') return 'This computer couldn’t connect to your devices.'
   return 'Not connected right now. Togle keeps working on this computer, and shows the others as offline.'
 }
 

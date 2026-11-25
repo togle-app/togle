@@ -168,20 +168,24 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
 
   // ---- Signing in, and the first computer -----------------------------------------------------------------------------
 
-  /** After the person signed in to Togle Studio here: this computer starts their devices, or is added from one of them. */
+  /** Explicitly connect this computer after sign-in. An existing group still requires pairing. */
   async connectAccount(restart = false): Promise<void> {
     if (this.options.kind !== 'computer') throw new Error('Only a computer signs in. A server or a phone is added from a computer you use.')
     const token = await this.options.account?.token()
-    if (!token) throw new Error('Sign in to Togle Studio first.')
+    if (!token) throw new Error('Sign in to your Togle account first.')
     this.problem = undefined
     this.link!.signInWith(token, restart)
     this.emit('changed')
   }
 
-  /** Signs out of Togle Studio here. This computer stays one of the person's devices: that is its key, not the account. */
+  /** Signs out of the Togle account. This computer stays paired through its device key. */
   async signOut(): Promise<void> {
     await this.options.account?.signOut()
-    this.addFromAnother = false
+    this.accountChanged()
+  }
+
+  accountChanged(): void {
+    if (!this.options.account?.who()) this.addFromAnother = false
     this.emit('changed')
   }
 

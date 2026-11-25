@@ -2,9 +2,9 @@
 
 You talk and decide, and your agents do the work. Togle types what you say, writes down your meetings, shows every agent on your computer and keeps the list of what needs you.
 
-Togle Free is open source under the [MIT license](LICENSE). Install it on each computer where you run agents. Each copy works independently and local tools need no Togle account. You can use your own AI plan or API key for features such as meeting notes. The public beta is available on Windows and Linux x64. macOS builds are in testing. [macOS setup](docs/macos.md) · [Ubuntu setup](docs/linux.md)
+Togle is open source under the [MIT license](LICENSE). Install it on each computer where you run agents. Each copy works independently and local tools need no Togle account. You can use your own AI plan or API key for features such as meeting notes. Togle runs on Windows and macOS. Linux packages build, with platform testing still pending. [macOS setup](docs/macos.md) · [Ubuntu setup](docs/linux.md)
 
-**Togle Studio** is an optional, closed-source desktop app for microphone cleanup in call apps. [Using Studio with Togle](#togle-studio)
+**Togle Pro waitlist.** Planned features include managing agents across computers from your phone and using Togle Studio for microphone cleanup and meeting recording. In a build with account sign-in, open **Settings → Accounts → Togle account**, sign in with the email code, then select **Join waitlist**. Signing in and joining are separate actions. Choose **Leave waitlist** there at any time. Togle and Studio share one Togle account. [Using Studio with Togle](#togle-studio)
 
 ## Install on Windows
 
@@ -26,7 +26,7 @@ For the latest stable Windows release, use this command. It reports when the fir
 powershell -NoProfile -Command "iex (irm https://togle.app/stable/install.ps1 -ErrorAction Stop)"
 ```
 
-Both commands download from GitHub Releases and verify the installer with Togle's release key. Open **Togle** from the Start menu, then open a fresh Command Prompt and run `togle tasks` to list your tasks. [Togle Free releases](https://github.com/togle-app/togle/releases)
+Both commands download from GitHub Releases and verify the installer with Togle's release key. Open **Togle** from the Start menu, then open a fresh Command Prompt and run `togle tasks` to list your tasks. [Togle releases](https://github.com/togle-app/togle/releases)
 
 ## Install on Linux
 
@@ -36,7 +36,7 @@ Run this in a terminal on Ubuntu 22.04 or later on an x64 computer.
 curl -fsSL https://togle.app/beta/install.sh | sh
 ```
 
-The command checks the signed AppImage and installs it for your user. Open **Togle** from your applications menu. [Togle Free releases](https://github.com/togle-app/togle/releases)
+The command checks the signed AppImage and installs it for your user. Open **Togle** from your applications menu. [Togle releases](https://github.com/togle-app/togle/releases)
 
 ## Four things, one app
 
@@ -101,7 +101,7 @@ F9, F8 and F10 are also debugger keys in VS Code, Visual Studio and JetBrains ID
 
 ## Your AI plan
 
-Togle has no account and no bill of its own. **Sign in with ChatGPT** (Settings → Accounts → AI plan) uses your ChatGPT plan: what Togle uses counts toward its limit. Without a ChatGPT plan, **Use a key** from Claude (an Anthropic API key; Togle has no Claude sign-in), Gemini, Grok, Kimi or any OpenAI-compatible service (OpenRouter, Groq, or a model on your computer with Ollama or LM Studio). Togle checks the key by listing the service's models, then uses one model for every job: the key cleans up dictation and writes the notes, as the plan would. The service bills you for it.
+The optional Togle account is separate from the AI service you choose for your local tools. **Sign in with ChatGPT** (Settings → Accounts → AI plan) uses your ChatGPT plan: what Togle uses counts toward its limit. Without a ChatGPT plan, **Use a key** from Claude (an Anthropic API key; Togle has no Claude sign-in), Gemini, Grok, Kimi or any OpenAI-compatible service (OpenRouter, Groq, or a model on your computer with Ollama or LM Studio). Togle checks the key by listing the service's models, then uses one model for every job: the key cleans up dictation and writes the notes, as the plan would. The service bills you for it.
 
 | | With your plan | Without it |
 | --- | --- | --- |
@@ -203,12 +203,12 @@ Tokens and API keys are encrypted with the system's keystore (Electron `safeStor
 
 - **Found by itself.** Togle asks your computer whether Togle Studio is installed: the program its installer puts there. An app that was removed, or a copy run from source and then closed, does not count, and one that never ran does. When Togle Studio runs, it leaves a link file in its own data folder and serves a local socket that only your user can reach. Togle reads the file, proves it with the token in it, and from then on knows whether the clean microphone is on and what it cleans. Only that state travels over the link, never audio. The protocol is in [`src/shared/microphone-link.ts`](src/shared/microphone-link.ts).
 - **On for calls.** With **Turn on during calls** (Settings), a call that starts turns it on first, so the call hears the clean microphone, and turns it off again when the call ends, unless it was already on.
-- **Signed in to Studio.** Studio uses your Togle account. If Studio is signed out, Settings offers **Sign in**, which opens its window. The local microphone connection tells Togle only whether someone is signed in.
-- **What your microphone picks up.** Without it, Togle measures your microphone during calls while nobody speaks: how often the background is loud enough to hear, and short sounds such as typing. Only levels are kept, in memory. After a noisy call (at most every few days, never during one), the call's page says for how many minutes the microphone picked up room noise, with one link: **Clean my microphone**. **Mention Togle Studio** in Settings turns that off.
+- **Studio sign-in.** In Settings, choose **Open Studio** and sign in with your Togle account. The local microphone connection tells Togle only whether someone is signed in to Studio.
+- **What your microphone picks up.** Without it, Togle measures your microphone during calls while nobody speaks: how often the background is loud enough to hear, and short sounds such as typing. Only levels are kept, in memory. After a noisy call (at most every few days, never during one), the call's page says for how many minutes the microphone picked up room noise, with one action. **See Studio** opens its website if Studio is missing. **Open Studio** opens the installed app for setup. **Turn on noise cancellation** enables a ready installation. **Mention Togle Studio** in Settings turns that off.
 
 **Device connections** are a development project for Togle Pro. The open-source Togle clients pair and check each request. The hosted service checks the subscription and carries encrypted messages. Device access stays out of packaged releases pending outside security review. [Development status](docs/reach.md)
 
-The link to Togle Studio's site uses `STUDIO_SITE` in [`src/shared/microphone-link.ts`](src/shared/microphone-link.ts): studio.togle.app. Togle's own site is togle.app (`TOGLE_SITE`); the domain has to be registered before a release.
+The link to Togle Studio's site uses `STUDIO_SITE` in [`src/shared/microphone-link.ts`](src/shared/microphone-link.ts): studio.togle.app. Togle's own site is togle.app (`TOGLE_SITE`).
 
 ## Be upfront with the people you talk to
 

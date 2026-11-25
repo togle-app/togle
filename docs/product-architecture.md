@@ -45,7 +45,9 @@ Togle sends nothing to an AI for the agents: each agent uses its own sign-in, wh
 
 ## Settings and accounts
 
-`settings.ts` keeps the settings in `settings.json` and checks every value as it loads. Sign in with ChatGPT (`auth/chatgpt.ts`) is the one sign-in offered; a key from Claude (Anthropic's own API, `providers/claude.ts`), Gemini, Grok, Kimi or another OpenAI-compatible service can be used instead (`auth/api-connections.ts`, each key encrypted). Togle has no Claude sign-in: Claude Code keeps its own, which Togle never touches. `agent-store.ts` keeps what a call belongs to: one agent, with the words calls are heard with.
+`settings.ts` keeps the settings in `settings.json` and checks every value as it loads. Sign in with ChatGPT (`auth/chatgpt.ts`) supplies an AI plan; a key from Claude (Anthropic's own API, `providers/claude.ts`), Gemini, Grok, Kimi or another OpenAI-compatible service can be used instead (`auth/api-connections.ts`, each key encrypted). Togle has no Claude sign-in: Claude Code keeps its own, which Togle never touches. `agent-store.ts` keeps what a call belongs to: one agent, with the words calls are heard with.
+
+The optional Togle account in Settings → Accounts is the same account as Studio. Togle asks the shared account service to email a code and stores the resulting session on this computer. A signed-in user can join or leave the Togle Pro waitlist explicitly. Local tools work signed out. Pairing devices is a separate, development-only action.
 
 ## What is kept where
 
@@ -60,7 +62,8 @@ In Togle's data folder (`%APPDATA%\togle` on Windows):
 | Remembered voices | `voices/people.bin` | encrypted, only when turned on |
 | F8 pictures | `pictures/` | PNG files |
 | The to-do list | `to-do.md` | plain text |
-| Sign-ins and keys | `chatgpt-auth.bin`, `accounts/`, `connections/` | encrypted |
+| Togle account session | `studio-account.bin` | encrypted with the system keyring |
+| AI sign-ins and keys | `chatgpt-auth.bin`, `accounts/`, `connections/` | encrypted |
 | Settings | `settings.json` | plain text, no secrets |
 | Agents' task names and records | `runner-titles.json`, `runner-tasks.json` | plain text |
 | The Agents list's headings, and how the person arranged it | `runner-subjects.json`, `runner-groups.json` | plain text |

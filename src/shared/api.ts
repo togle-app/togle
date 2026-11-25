@@ -272,14 +272,21 @@ export interface TogleApi {
   pickRunnerFolder(): Promise<string | null>
   /** Something in the tasks changed: ask again for what is shown. */
   onRunnersChanged(cb: () => void): Unsubscribe
-  /** Reach, part of Togle Studio: this device among the person's devices. Only in development runs until reviewed. */
+  togleAccountState(): Promise<import('./togle-account').TogleAccountState>
+  togleAccountSendCode(email: string): Promise<void>
+  togleAccountSignIn(email: string, code: string): Promise<{ email: string }>
+  togleAccountSignOut(): Promise<void>
+  proWaitlist(userId: string, action: 'status' | 'join' | 'leave'): Promise<boolean>
+  onTogleAccountChanged(cb: () => void): Unsubscribe
+  /** Reach, part of Togle Pro: this device among the person's devices. Only in development runs until reviewed. */
   reachState(): Promise<import('./reach').ReachState>
   onReachChanged(cb: () => void): Unsubscribe
   /** The tasks the person's other devices share, by device. */
   reachRemoteTasks(): Promise<import('./reach').DeviceTasks[]>
-  /** Emails a code to sign in to Togle Studio with. */
+  /** Emails a code for signing in to a Togle account. */
   reachSendCode(email: string): Promise<void>
-  /** Signs in with the emailed code: this computer starts the person's devices, or is added from one of them. */
+  /** Connects this computer to the signed-in account after explicit enrollment. */
+  reachConnect(): Promise<import('./reach').ReachState>
   reachSignIn(email: string, code: string): Promise<import('./reach').ReachState>
   /** The only computer was lost: this one starts the person's devices again, and the others are added again from it. */
   reachStartAgain(): Promise<import('./reach').ReachState>

@@ -45,6 +45,7 @@ import type { TodoFile } from './todo'
 import { registerTodo } from './todo-register'
 import { registerRunners } from './runners/register'
 import { registerReach } from './reach/register'
+import { registerTogleAccount } from './register-togle-account'
 import type { Reach } from './reach/reach'
 import { StoredFresh, StoredGroups, StoredRecords, StoredTitles } from './runners/titles'
 import { TaskSubjects } from './runners/subjects'
@@ -2057,7 +2058,14 @@ if (process.argv.includes('--togle-hook')) {
     // Which agents are on this computer is looked up now, so that the task box's list of agents is there the first time it opens
     // (asking each agent for its version takes a second and more: Hermes's takes 1.4 s here).
     void runners.status().catch(() => undefined)
-    // Reach: this computer among the person's devices, its tasks shared with them, and Refuse and Stop from them.
+    const togleAccount = registerTogleAccount((channel, action) => ipcMain.handle(channel, (event, ...args) => {
+      if (event.sender !== win?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('Open Settings in Togle to manage your account.')
+      return action(...args)
+    }), () => {
+      send('togle-account:changed', null)
+      reach?.accountChanged()
+    })
+    // A development courier can use the same signed-in account to connect this computer.
     const hubForReach = runners
     reach = registerReach({
       handle: (channel, listener) => ipcMain.handle(channel, (_event, ...args) => listener(...args)),
@@ -2072,7 +2080,7 @@ if (process.argv.includes('--togle-hook')) {
         if (windowsNotices) windowsNotices.showStatus('devices')
         else if (Notification.isSupported()) new Notification({ title: `${by} acted on this computer`, body: what }).show()
       }
-    })
+    }, togleAccount)
     // The `togle` command reaches the running Togle on its local channel (togle run claude, togle tasks).
     startChannel({ dataFolder: app.getPath('userData'), hub: runners, openBox: opening => taskBox.show(opening) }).then(
       server => { if (quitting) void server.close(); else localChannel = server },

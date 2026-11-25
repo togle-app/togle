@@ -127,6 +127,7 @@ export { Book, RENEW_WITHIN_MS, REMOVAL_KEEP_MS, isPass } from '../src/main/reac
 export { Adding, Joining, WRONG_CODE, codeFor, isCode, roomOf } from '../src/main/reach/pairing'
 export { CourierError, CourierLink } from '../src/main/reach/link'
 export { Reach } from '../src/main/reach/reach'
+export { accountConfig } from '../src/main/account-config'
 export { StudioAccount } from '../src/main/reach/studio-account'
 export { hideSecrets, shareTask, shareTasks } from '../src/main/reach/share'
 export { HELLO_PURPOSE, helloText } from '../src/shared/courier-protocol'

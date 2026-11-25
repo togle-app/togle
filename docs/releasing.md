@@ -4,6 +4,14 @@ Every update is signed with Togle's release key, and Togle checks the signature 
 is kept off every server and off the computers that build Togle. Its public half is published, so anyone can check a
 download.
 
+## Togle account sign-in and the Pro waitlist
+
+Build each desktop installer with `TOGLE_ACCOUNT_SUPABASE_URL` and `TOGLE_ACCOUNT_SUPABASE_KEY` set to the shared Studio account project's HTTPS origin and public publishable key (or legacy anon key). The main-process build embeds these values. An unconfigured build supports local work and shows that account sign-in is unavailable. Set both values before publishing a release that advertises sign-in.
+
+On that project, configure email OTP, allow the redirect URL `https://togle.app`, and install the shared Togle confirmation and sign-in email templates. The desktop asks for this redirect to select its code-only email. Apply the authenticated `my_pro_waitlist`, `join_pro_waitlist` and `leave_pro_waitlist` RPCs. Verify a fresh sign-in, joining, leaving and sign-out in Settings → Accounts. The account service is independent of the development courier.
+
+For a development run, point the same two variables at a local Supabase project. Loopback HTTP is accepted in development. To exercise the built app against local Supabase and Mailpit, set `TOGLE_ACCOUNT_MAILPIT_URL` as well, then run `npx --no-install electron test/account-local.cjs` from the project with its built Electron output available.
+
 ## The key, once
 
 On Windows, the build PC can prepare a portable maintainer kit with `node scripts/package-offline-signer.mjs`. Transfer the ZIP from `dist-release-tools/` to a separate Windows PC of the same architecture that stays offline. Extract the ZIP into a writable folder and double-click **Togle release signing.cmd**. Bring back the **togle-release.pub** file beside the launcher. The private key stays in the offline PC's local Windows profile. When the installer is ready, drag it onto the same launcher on the offline PC to produce and verify its `.sig` file.

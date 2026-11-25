@@ -2,11 +2,11 @@
 
 Reach is the development name for Togle Pro’s hosted device connection. The Togle client pairs devices and checks which actions each may take. The relay checks the account entitlement and carries messages encrypted between the devices. The planned phone client is the open-source Togle app. The separate Studio desktop app handles call audio.
 
-**Status: not reviewed.** Reach stays out of every release until an outside review has tried to break it. Only a development run with a courier set (`TOGLE_COURIER`) has it. A packaged Togle never does.
+**Status: not reviewed.** Reach stays out of every release until an outside review has tried to break it. Only a development run with a courier set (`TOGLE_COURIER`) has it. A packaged Togle never does. Togle account sign-in and the Pro waitlist work independently of the courier.
 
 ## What is built
 
-- **Your devices** (Settings → Devices). In the development client, the first computer starts the group when you sign in under Settings → Accounts. The current sign-in is labeled **Togle Studio**. Pair later devices by entering the new device’s code at a computer you already trust and confirming its name and role. **Remove** revokes a device. **Other devices may act on this computer** controls whether it accepts remote actions.
+- **Your devices** (Settings → Devices). In the development client, sign in under Settings → Accounts → Togle account, then choose **Connect this computer** in Devices to start a group. Pair later devices by entering the new device’s code at a computer you already trust and confirming its name and role. **Remove** revokes a device. **Other devices may act on this computer** controls whether it accepts remote actions.
 - **Tasks on your other computers** (Agents). Each computer's tasks show under its name, with a command it waits on in full. From here you can **Refuse** that command or **Stop** the task. Allowing it from another device will need your fingerprint, face or PIN, and that is not built yet, so for now a command is allowed on its own computer.
 - **A record** (Settings → Devices): what other devices did on this computer, and a system notice each time.
 
@@ -24,7 +24,7 @@ The parts are in `src/main/reach/`:
 | `link.ts` | The connection to the courier: hello with this device's public keys, a signed challenge, and trying again after a drop |
 | `reach.ts` | All of it together: signing in, codes, adding and removing, what passes between devices, and acting on a task |
 | `share.ts` | What a computer tells your other devices about its tasks: the least they need, with text that looks like a key or a password hidden (the command is sent whole: it is what runs) |
-| `studio-account.ts` | Signing in to Togle Studio with a code sent by email |
+| `studio-account.ts` | Signing in to a Togle account with a code sent by email |
 
 **Adding a device.** The new device asks the courier for a room and shows an 8-letter code: the room's two letters, then six secret ones that never reach the courier. You type the code at a computer, which joins the room. The two run CPace on the code through the room and each proves it got the same key before anything else is said. The courier carries every word and can't try codes, and one wrong code ends the exchange (the new device then shows a new code by itself). Locked with that key, the new device says who it is; the computer shows you, and on your yes signs its pass and sends the list of your devices.
 

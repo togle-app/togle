@@ -1313,6 +1313,11 @@ async function checkReach(T, agent) {
 
   await ui.click('.shell-settings', 'Settings')
   await ui.wait("!!document.querySelector('#settings-devices .reach-device')")
+  assert.equal(await ui.evaluate("document.querySelector('#settings-accounts .studio-row .name').textContent"), 'Togle Studio')
+  await ui.click('#settings-accounts button[aria-label="Sign in to your Togle account"]', 'Sign in')
+  await ui.wait("document.querySelector('#settings-accounts .setting-detail .tasks-label')?.textContent==='Sign in to your Togle account'")
+  await ui.click('#settings-accounts .setting-detail button', 'Cancel')
+  await ui.wait("!document.querySelector('#settings-accounts .setting-detail')")
   assert.deepEqual(await texts(ui, '#settings-devices .reach-device'), ['Windows PC', 'MacBook', 'build-server'])
   assert.match(await ui.evaluate("document.querySelector('#settings-devices').innerText"), /MacBook: Stopped Write the release notes/, 'what other devices did here is listed')
   // The form for a device's code is a dialog over the window: its row stays, and so does every other.

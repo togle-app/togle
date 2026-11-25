@@ -20,7 +20,8 @@ import { useAccounts, useKeyConnections } from './Accounts'
 import { Menu } from './Menu'
 import { Choice, Opens } from './Choice'
 import { VocabularyEditor } from './DictationVocabulary'
-import { Devices, SignIn, useReach } from './Devices'
+import { Devices } from './Devices'
+import { TogleAccountRow } from './TogleAccount'
 import { useRememberedVoices } from './VoiceMemory'
 import type { SettingsPart } from './open-settings'
 import { AGENT_CATALOG, AGENTS_FOUND, keepAnswer, keptAnswer, useFoldPreference } from './kept'
@@ -618,7 +619,8 @@ function Accounts({ settings, save }: { settings: Settings; save: (patch: Settin
   return (
     <Section id="settings-accounts" title="Accounts">
       <AIPlan settings={settings} save={save} />
-      <StudioRow />
+      <TogleAccountRow />
+      <StudioApp />
       <Toggle name="Mention Togle Studio" checked={settings.microphone.suggestions} onChange={(suggestions) => void save({ microphone: { suggestions, ...(suggestions ? { dismissals: 0 } : {}) } })} />
     </Section>
   )
@@ -761,36 +763,6 @@ function studioSummary(status: TogleMicrophoneStatus | undefined): string {
   return isMicrophoneOn(status) ? `On${status.state.input ? ` · cleaning ${status.state.input}` : ''}` : 'Off'
 }
 
-/**
- * Togle Studio under Accounts. While Reach is in this Togle, it is Studio's sign-in, as the design has it: the first
- * computer you sign in on starts your devices. Otherwise it is the Studio app that cleans the microphone: where it stands,
- * and the one thing to do next.
- */
-function StudioRow() {
-  const reach = useReach()
-  const [signingIn, setSigningIn] = useOneOpen()
-  const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
-  if (reach?.available) {
-    const run = async (what: string, work: () => Promise<unknown>): Promise<void> => {
-      setBusy(what); setError('')
-      try { await work() } catch (failure) { setError(errorText(failure)) } finally { setBusy('') }
-    }
-    return (
-      <>
-        <Row label={false} name="Togle Studio" className="studio-row">
-          {reach.account
-            ? <Menu className="choice" label={<Opens>{reach.account.email}</Opens>} ariaLabel="Togle Studio account" align="right" items={[{ label: 'Sign out', onSelect: () => void run('out', () => api.reachSignOut()) }]} />
-            : <button className="small" aria-expanded={signingIn} onClick={() => setSigningIn(!signingIn)}>Sign in</button>}
-        </Row>
-        {signingIn && !reach.account && <SignIn busy={busy} run={run} onCancel={() => setSigningIn(false)} />}
-        {error && <p className="error" role="alert">{error}</p>}
-      </>
-    )
-  }
-  return <StudioApp />
-}
-
 function StudioApp() {
   const [status, setStatus] = useState<TogleMicrophoneStatus>()
   const [opening, setOpening] = useState(false)
@@ -811,9 +783,7 @@ function StudioApp() {
         {status?.installed && <span className="setting-value microphone-status">{studioSummary(status)}</span>}
         {!status?.installed
           ? <button className="small" onClick={() => void api.openMicrophonePage('settings')}>See Togle Studio</button>
-          : microphoneNeedsSignIn(status)
-            ? <button className="primary small" disabled={opening} onClick={() => void open()}>{opening ? 'Opening…' : 'Sign in'}</button>
-            : <button className="ghost small" disabled={opening} onClick={() => void open()}>{opening ? 'Opening…' : 'Open'}</button>}
+          : <button className={microphoneNeedsSignIn(status) ? 'primary small' : 'ghost small'} disabled={opening} onClick={() => void open()}>{opening ? 'Opening…' : 'Open Studio'}</button>}
       </Row>
       {error && <p className="error" role="alert">{error}</p>}
     </>

@@ -29,6 +29,20 @@ module.exports = function install(fixture) {
   const subscriptions = [
     { id: 'chatgpt-default', provider: 'chatgpt', label: 'ChatGPT', shared: true, signedIn: fixture.scenario === 'model-settings', email: fixture.scenario === 'model-settings' ? 'personal@example.test' : undefined }
   ]
+  let togleEmail, onWaitlist = false
+  api.togleAccountState = async () => ({ available: true, ...(togleEmail && { user: { id: 'togle-test-account', email: togleEmail } }) })
+  api.togleAccountSendCode = async email => { record('togleAccountSendCode', [email]) }
+  api.togleAccountSignIn = async (email, code) => {
+    if (code !== '123456') throw new Error('Invalid code')
+    togleEmail = email; emit('onTogleAccountChanged'); return { email }
+  }
+  api.togleAccountSignOut = async () => { togleEmail = undefined; emit('onTogleAccountChanged') }
+  api.proWaitlist = async (user, action) => {
+    record('proWaitlist', [user, action])
+    if (!togleEmail || user !== 'togle-test-account') throw new Error('Sign in first.')
+    if (action !== 'status') onWaitlist = action === 'join'
+    return onWaitlist
+  }
   api.subscriptionAccounts = async () => clone(subscriptions)
   api.signInAccount = async id => { record('signInAccount', [id]); const profile = subscriptions.find(item => item.id === id); profile.signedIn = true; profile.email ||= 'connected@example.test'; emit('onAccountsChanged') }
   api.signOutAccount = async id => { record('signOutAccount', [id]); const profile = subscriptions.find(item => item.id === id); profile.signedIn = false; emit('onAccountsChanged') }

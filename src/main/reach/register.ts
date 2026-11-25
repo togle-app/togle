@@ -6,21 +6,12 @@ import os from 'node:os'
 import type { ReachState, RemoteAct } from '@shared/reach'
 import { readSecret, writeSecret } from '../storage'
 import { Reach, type ReachStore, type ReachTasks } from './reach'
-import { StudioAccount, type StudioSession } from './studio-account'
+import type { StudioAccount } from './studio-account'
 
-/** Studio's courier and Studio's sign-in, once they run for everyone: empty until then. */
-export const COURIER_URL = ''
-export const STUDIO_URL = ''
-export const STUDIO_PUBLIC_KEY = ''
-
-interface ReachConfig { courier: string; studio?: { url: string; key: string } }
-
-export function reachConfig(): ReachConfig | undefined {
+export function reachConfig(): { courier: string } | undefined {
   if (app.isPackaged) return undefined
-  const courier = process.env.TOGLE_COURIER || COURIER_URL
-  if (!/^wss?:\/\//.test(courier)) return undefined
-  const url = process.env.TOGLE_STUDIO_SUPABASE_URL || STUDIO_URL, key = process.env.TOGLE_STUDIO_SUPABASE_KEY || STUDIO_PUBLIC_KEY
-  return { courier, ...(url && key ? { studio: { url, key } } : {}) }
+  const courier = process.env.TOGLE_COURIER
+  return courier && /^wss?:\/\//.test(courier) ? { courier } : undefined
 }
 
 /** A real keystore: not Linux's basic_text fallback, whose key is the same on every computer. */
@@ -49,7 +40,7 @@ const text = (value: unknown, what: string, max = 200): string => {
   return value
 }
 
-export function registerReach(deps: ReachDeps): Reach | undefined {
+export function registerReach(deps: ReachDeps, account?: StudioAccount): Reach | undefined {
   const config = reachConfig()
   const { handle } = deps
   if (!config) {
@@ -57,11 +48,6 @@ export function registerReach(deps: ReachDeps): Reach | undefined {
     handle('reach:remote-tasks', () => [])
     return undefined
   }
-  const account = config.studio ? new StudioAccount({
-    url: config.studio.url,
-    publicKey: config.studio.key,
-    store: { read: () => store.read<StudioSession>('studio-account'), write: (session) => store.write('studio-account', session) }
-  }) : undefined
   const reach = new Reach({
     courier: config.courier,
     store,
@@ -79,15 +65,16 @@ export function registerReach(deps: ReachDeps): Reach | undefined {
   handle('reach:state', () => reach.state())
   handle('reach:remote-tasks', () => reach.remoteTasks())
   handle('reach:send-code', async (email) => {
-    if (!account) throw new Error('Signing in to Togle Studio isn’t set up in this Togle.')
+    if (!account) throw new Error('Togle account sign-in isn’t set up in this build.')
     await account.sendCode(text(email, 'The email address'))
   })
   handle('reach:sign-in', async (email, code) => {
-    if (!account) throw new Error('Signing in to Togle Studio isn’t set up in this Togle.')
+    if (!account) throw new Error('Togle account sign-in isn’t set up in this build.')
     await account.verify(text(email, 'The email address'), text(code, 'The code', 20))
-    await reach.connectAccount()
+    deps.send('reach:changed', null)
     return reach.state()
   })
+  handle('reach:connect', async () => { await reach.connectAccount(); return reach.state() })
   handle('reach:start-again', async () => { await reach.connectAccount(true); return reach.state() })
   handle('reach:sign-out', async () => { await reach.signOut(); return reach.state() })
   handle('reach:show-code', async () => { await reach.showCode(); return reach.state() })

@@ -6,7 +6,23 @@ import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { fakeCourier } from './fake-courier.mjs'
 
-const { CourierLink, Reach, StudioAccount, WRONG_CODE, makeIdentity } = await import('./.build/togle.mjs')
+const { accountConfig, CourierLink, Reach, StudioAccount, WRONG_CODE, makeIdentity } = await import('./.build/togle.mjs')
+
+test('only public account keys and HTTPS origins can enter release packages', () => {
+  const key = 'sb_publishable_test'
+  const origin = 'https://account.example.com'
+  const jwt = role => ['header', Buffer.from(JSON.stringify({ role })).toString('base64url'), 'signature'].join('.')
+  assert.equal(accountConfig(), undefined)
+  assert.deepEqual(accountConfig(origin + '/', key), { url: origin, publicKey: key })
+  assert.equal(accountConfig(origin, jwt('anon')).url, origin)
+  assert.throws(() => accountConfig(origin))
+  assert.throws(() => accountConfig(undefined, key))
+  for (const secret of ['sb_secret_private', jwt('service_role')]) assert.throws(() => accountConfig(origin, secret))
+  for (const unsafe of ['http://example.com', 'http://127.0.0.1:54321', 'https://localhost', 'https://one:two@example.com', origin + '/unexpected']) {
+    assert.throws(() => accountConfig(unsafe, key))
+  }
+  assert.equal(accountConfig('http://127.0.0.1:54321', key, true).url, 'http://127.0.0.1:54321')
+})
 
 const memoryStore = () => {
   const files = new Map()
@@ -211,35 +227,74 @@ test('a computer that signs in to an account with devices is added from one of t
   assert.deepEqual(other.state().devices.map((item) => item.name), ['New PC'])
 })
 
-test('Togle’s sign-in to Studio: a code by email, a session kept encrypted, renewed before it runs out', async () => {
+test('Togle account sign-in: an email code and an encrypted session that renews before it expires', async () => {
   const calls = []
   let clock = 1_000_000
   const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   const fetcher = async (url, init) => {
     const path = new URL(url).pathname + new URL(url).search
     calls.push([path, JSON.parse(init.body ?? '{}'), init.headers.authorization])
-    if (path === '/auth/v1/otp') return reply(200, {})
+    if (path === '/auth/v1/otp?redirect_to=https%3A%2F%2Ftogle.app') return reply(200, {})
     if (path === '/auth/v1/verify') return JSON.parse(init.body).token === '123456' ? reply(200, { access_token: 'a1', refresh_token: 'f1', expires_in: 3600, user: { id: 'u1', email: 'ana@example.com' } }) : reply(403, {})
     if (path === '/auth/v1/token?grant_type=refresh_token') return reply(200, { access_token: 'a2', refresh_token: 'f2', expires_in: 3600, user: { id: 'u1', email: 'ana@example.com' } })
+    if (path === '/rest/v1/rpc/my_pro_waitlist') return reply(200, false)
+    if (path === '/rest/v1/rpc/join_pro_waitlist') return reply(200, true)
+    if (path === '/rest/v1/rpc/leave_pro_waitlist') return reply(200, false)
     if (path === '/rest/v1/rpc/my_plan') return reply(200, [{ plan: 'trial', trial_ends: '2026-11-20T09:00:00Z', pro_ends: null }])
-    if (path === '/auth/v1/logout') return reply(204, {})
+    if (path === '/auth/v1/logout?scope=local') return new Response(null, { status: 204 })
     return reply(404, {})
   }
   const kept = memoryStore()
   const account = new StudioAccount({ url: 'http://studio.test', publicKey: 'public', fetch: fetcher, now: () => clock, store: { read: () => kept.read('s'), write: (value) => kept.write('s', value) } })
   await assert.rejects(account.sendCode('not an address'), /email address/)
   await account.sendCode(' ana@example.com ')
-  assert.deepEqual(calls[0].slice(0, 2), ['/auth/v1/otp', { email: 'ana@example.com', create_user: true }])
+  assert.deepEqual(calls[0].slice(0, 2), ['/auth/v1/otp?redirect_to=https%3A%2F%2Ftogle.app', { email: 'ana@example.com', create_user: true }])
   await assert.rejects(account.verify('ana@example.com', '000000'), /didn’t work/)
   await account.verify('ana@example.com', '123 456')
   assert.equal(account.who().email, 'ana@example.com')
   assert.equal(await account.token(), 'a1')
+  assert.equal(await account.waitlist('u1', 'status'), false)
+  assert.deepEqual(calls.at(-1), ['/rest/v1/rpc/my_pro_waitlist', {}, 'Bearer a1'])
+  const before = calls.length
+  await assert.rejects(account.waitlist('other', 'join'), /Sign in/)
+  assert.equal(calls.length, before, 'a stale window cannot change a different account')
+  assert.equal(await account.waitlist('u1', 'join'), true)
+  assert.equal(await account.waitlist('u1', 'leave'), false)
   clock += 3600_000
   assert.equal(await account.token(), 'a2', 'renewed when it runs out')
   assert.equal((await kept.read('s')).refresh, 'f2', 'kept for the next start')
   assert.deepEqual(await account.plan(), { plan: 'trial', trialEnds: Date.parse('2026-11-20T09:00:00Z') })
   await account.signOut()
+  assert.deepEqual(calls.at(-1), ['/auth/v1/logout?scope=local', {}, 'Bearer a2'])
   assert.equal(account.who(), undefined)
+  assert.equal(await kept.read('s'), null)
+  await assert.rejects(account.waitlist('u1', 'join'), /Sign in/)
+})
+
+test('a stored Togle session stays bound to its service and a revoked refresh token signs out locally', async () => {
+  const kept = memoryStore()
+  const url = 'https://accounts.example.test'
+  const user = { id: 'u1', email: 'ana@example.com' }
+  const token = 'header.' + Buffer.from(JSON.stringify({ iss: url + '/auth/v1' })).toString('base64url') + '.signature'
+  const saved = { access: token, refresh: 'old-refresh', expiresAt: 10000000, user: user.id, email: user.email }
+  const opts = { url, publicKey: 'public', now: () => 1000000, store: { read: () => kept.read('s'), write: value => kept.write('s', value) } }
+  await kept.write('s', saved)
+  const previous = new StudioAccount(opts)
+  await previous.load()
+  assert.equal((await previous.token()), token, 'old sessions without an explicit origin can reopen against their issuer')
+  for (const record of [saved, { ...saved, origin: url }]) {
+    await kept.write('s', record)
+    const another = new StudioAccount({ ...opts, url: 'https://elsewhere.example.test' })
+    assert.equal(await another.token(), undefined)
+  }
+  let changed = 0
+  const fetch = async address => {
+    assert.equal(new URL(address).pathname, '/auth/v1/token')
+    return new Response('{}', { status: 401 })
+  }
+  const expired = new StudioAccount({ ...opts, now: () => saved.expiresAt, fetch, changed: () => { changed++ } })
+  await assert.rejects(expired.waitlist(user.id, 'join'), /Sign in/)
+  assert.equal(changed, 1)
   assert.equal(await kept.read('s'), null)
 })
 
