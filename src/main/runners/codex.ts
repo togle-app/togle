@@ -43,7 +43,7 @@ export interface CodexOptions {
   env?: NodeJS.ProcessEnv
   /** Togle's version, told to Codex. */
   version?: string
-  /** Request the blocking input tool on a new private pilot thread, without changing Codex's saved settings. */
+  /** Request the input tool on a new private pilot thread, without changing Codex's saved settings. */
   pilotInputTool?: boolean
   /** Where what its screens print goes, for the window. Required: a screen whose words are not told shows only what it had printed when it was opened. */
   told: (chunk: TerminalChunk) => void
@@ -499,7 +499,8 @@ class CodexTask extends TaskBase implements ScreenSide {
           secret: q.isSecret === true
         }
       })
-      const answer = await this.ask({ id, kind: 'question', questions, offersAlways: false, ...(params.isBlocking !== false ? { codexInputId: randomUUID() } : {}) })
+      // isBlocking describes whether Codex can work while it waits. The outstanding RPC can take an answer in either case.
+      const answer = await this.ask({ id, kind: 'question', questions, offersAlways: false, codexInputId: randomUUID() })
       if (this.unanswered(id, answer)) return NO_ANSWER
       if (answer.kind !== 'text') throw new RpcError(NOT_ANSWERED, -32000)
       return { answers: Object.fromEntries(questions.map((q, at) => [q.id, { answers: at === 0 ? [answer.text] : [] }])) }

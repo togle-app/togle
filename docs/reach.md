@@ -26,7 +26,7 @@ Run the desktop host from source with a fresh Togle profile, a local development
 
 Sign in under **Settings → Accounts → Togle account**. Open **Settings → Devices**, choose **Connect this computer**, enter the phone’s code under **Add a device** and confirm its displayed name and phone role. Enable **Other devices may act on this computer**.
 
-Start a Codex task in the demo folder. Ask it to use its blocking input tool to offer one non-secret question, such as **Which color should I print?**, with **Blue** and **Green** as the options. Ask it to print the chosen color in its next message. Select **Green** on the phone and verify that same task prints **Green** on the host.
+Start a Codex task in the demo folder. Ask it to use its input tool to offer one non-secret question, such as **Which color should I print?**, with **Blue** and **Green** as the options. Ask it to wait for the choice and print it in its next message. Select **Green** on the phone and verify that same task prints **Green** on the host.
 
 The phone receives `pending[].choices` and sends the zero-based option index, task key and opaque request ID inside the existing encrypted action. The host checks the current question and gives Codex the corresponding label. Each new instance of a question gets a fresh ID.
 

@@ -209,8 +209,12 @@ function core() {
       return finish('completed')
     }
     if (/^ask/.test(prompt)) {
-      const answer = await ask(thread, 'item/tool/requestUserInput', { itemId: 'q1', threadId: thread.id, turnId: turn.id, isBlocking: true, questions: [{ id: 'which', header: 'Table', question: 'Which pricing table?', isOther: true, options: [{ label: 'Two plans', description: '' }] }] })
-      say(`you said ${answer?.result?.answers?.which?.answers?.[0] ?? 'nothing'}`)
+      const pilot = prompt === 'ask pilot color'
+      const question = pilot
+        ? { id: 'pilot_color', header: 'Color', question: 'Which pilot color should I report?', isOther: true, isSecret: false, options: [{ label: 'Blue', description: '' }, { label: 'Green', description: '' }] }
+        : { id: 'which', header: 'Table', question: 'Which pricing table?', isOther: true, options: [{ label: 'Two plans', description: '' }] }
+      const answer = await ask(thread, 'item/tool/requestUserInput', { itemId: 'q1', threadId: thread.id, turnId: turn.id, isBlocking: !pilot, questions: [question] })
+      say(`you said ${answer?.result?.answers?.[question.id]?.answers?.[0] ?? 'nothing'}`)
       return finish('completed')
     }
     if (/^unload/.test(prompt)) {
