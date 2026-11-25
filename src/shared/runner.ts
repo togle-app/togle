@@ -617,6 +617,8 @@ export interface PendingRequest {
   /** The files an edit changes, or the folder it asks to write in. */
   files?: string[]
   questions?: AgentQuestion[]
+  /** Per-instance identifier issued by the Codex adapter for a live requestUserInput, distinct from its reusable RPC id. */
+  codexInputId?: string
   /** The agent also offers "always allow this". It is never passed on to another device. */
   offersAlways: boolean
   /**

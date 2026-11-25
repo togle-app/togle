@@ -16,6 +16,7 @@
 // - A thread started with no `approvalPolicy` and `sandbox` follows the person's own Codex settings, as in their terminal.
 // - The server may report a thread `notLoaded` in the middle of a turn: that is not read as "not running" while a turn is.
 import { execFile, spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -42,6 +43,8 @@ export interface CodexOptions {
   env?: NodeJS.ProcessEnv
   /** Togle's version, told to Codex. */
   version?: string
+  /** Request the blocking input tool on a new private pilot thread, without changing Codex's saved settings. */
+  pilotInputTool?: boolean
   /** Where what its screens print goes, for the window. Required: a screen whose words are not told shows only what it had printed when it was opened. */
   told: (chunk: TerminalChunk) => void
   /** A folder of Togle's own where the threads Togle runs are listed between runs: those that go on while Togle is closed are heard again. Without one, nothing is kept. */
@@ -496,7 +499,7 @@ class CodexTask extends TaskBase implements ScreenSide {
           secret: q.isSecret === true
         }
       })
-      const answer = await this.ask({ id, kind: 'question', questions, offersAlways: false })
+      const answer = await this.ask({ id, kind: 'question', questions, offersAlways: false, ...(params.isBlocking !== false ? { codexInputId: randomUUID() } : {}) })
       if (this.unanswered(id, answer)) return NO_ANSWER
       if (answer.kind !== 'text') throw new RpcError(NOT_ANSWERED, -32000)
       return { answers: Object.fromEntries(questions.map((q, at) => [q.id, { answers: at === 0 ? [answer.text] : [] }])) }
@@ -936,7 +939,12 @@ export class CodexBackend implements Backend {
 
   async start(options: StartOptions): Promise<TaskHandle> {
     const server = await this.join(true)
-    const started = rec(await server.peer.request('thread/start', { cwd: options.folder, ephemeral: false, ...policy(options.asks) }))
+    const started = rec(await server.peer.request('thread/start', {
+      cwd: options.folder,
+      ephemeral: false,
+      ...policy(options.asks),
+      ...(this.options.pilotInputTool ? { config: { features: { default_mode_request_user_input: true } } } : {})
+    }))
     const task = server.adopt(started)
     const trackBilling = this.billing(server).then(mode => apiBilling(mode) && task.id ? this.costs.track(task.id) : undefined).catch(() => undefined)
     if (!task.folder) task.folder = options.folder

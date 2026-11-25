@@ -12,6 +12,24 @@ Reach is the development name for Togle Pro’s hosted device connection. The To
 
 Not built yet: Allow and Start from another device (with Windows Hello, Touch ID or a phone's face or fingerprint), keys kept in the computer's security chip, **Stop all**, the to-do list and notes shared between devices, Togle for a server (the connector), and the phone app.
 
+## Private phone question pilot
+
+Run the desktop host from source with a fresh Togle profile, a local development courier and an account with pilot access. Configure these variables before starting Electron.
+
+| Variable | Value |
+| --- | --- |
+| `TOGLE_COURIER` | Local pilot courier WebSocket URL |
+| `TOGLE_ACCOUNT_SUPABASE_URL`, `TOGLE_ACCOUNT_SUPABASE_KEY` | Local pilot account URL and public client key |
+| `TOGLE_PHONE_PILOT` | `1` to allow a paired phone to select an answer |
+| `TOGLE_PHONE_PILOT_FOLDER` | Full path to a new temporary demo folder. Use the same path for the Codex task. This limits the host's shared tasks and remote actions to that exact folder. |
+| `TOGLE_GENUINE_QUESTION_SMOKE` | `1` to enable the Codex input tool on new threads for this test |
+
+Sign in under **Settings → Accounts → Togle account**. Open **Settings → Devices**, choose **Connect this computer**, enter the phone’s code under **Add a device** and confirm its displayed name and phone role. Enable **Other devices may act on this computer**.
+
+Start a Codex task in the demo folder. Ask it to use its blocking input tool to offer one non-secret question, such as **Which color should I print?**, with **Blue** and **Green** as the options. Ask it to print the chosen color in its next message. Select **Green** on the phone and verify that same task prints **Green** on the host.
+
+The phone receives `pending[].choices` and sends the zero-based option index, task key and opaque request ID inside the existing encrypted action. The host checks the current question and gives Codex the corresponding label. Each new instance of a question gets a fresh ID.
+
 ## How it works
 
 The parts are in `src/main/reach/`:

@@ -5,6 +5,7 @@ import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
 import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, taskHandoffProblem, type Decision, type LogEntry, type ModelInfo, type RunnerKind, type RunnerStatus, type SignInChoice, type StartRequest, type StepDetail, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
+import { phoneChoices } from '../reach/share'
 import type { RunnerUsage, UsageWindow } from '@shared/runner-usage'
 import { codexQuestionReplies } from '@shared/codex-questions'
 import { withQuote } from '@shared/quote'
@@ -697,6 +698,16 @@ export class RunnerHub {
 
   reply(key: string, requestId: string, text: string): void {
     this.mine(key).handle.reply(requestId, text)
+  }
+
+  /** Resolve a phone choice against the live, owned Codex request and consume it synchronously. */
+  replyChoice(key: string, inputId: string, choice: number): void {
+    const { handle } = this.mine(key)
+    const request = handle.pending.find(item => item.codexInputId === inputId)
+    const choices = handle.runner === 'codex' && (!handle.terminal || handle.screen) && request ? phoneChoices(request) : undefined
+    if (!request || !choices) throw new Error('That Codex question is no longer available on this phone.')
+    if (!Number.isSafeInteger(choice) || choice < 0 || choice >= choices.length) throw new Error('Select one of the answers shown.')
+    handle.reply(request.id, choices[choice])
   }
 
   /** What the reply box of a task lists when "/" is typed: its agent's own commands and models. None for a task Togle does not run. */

@@ -23,6 +23,8 @@ export interface RemoteRequest {
   files?: string[]
   /** A question's words, with text that looks like a key or a password hidden. */
   question?: string
+  /** On a paired pilot phone, the listed answers to this one live Codex question. */
+  choices?: string[]
   /** Why the command looks dangerous, in plain words. */
   danger?: string
 }
@@ -59,11 +61,11 @@ export interface DeviceTasks {
 }
 
 /** What another device may ask a computer to do with one of its tasks without proof that the person is there. */
-export interface RemoteAct {
+export type RemoteAct = {
   what: 'refuse' | 'stop' | 'end-commands'
   task: string
   request?: string
-}
+} | { what: 'reply-choice'; task: string; request: string; choice: number }
 
 /** Something another device did on this computer, for the record this computer keeps. */
 export interface ActedHere {
@@ -77,6 +79,8 @@ export interface ActedHere {
 export interface ReachState {
   /** Reach is in this Togle: a development run with a courier set. */
   available: boolean
+  /** This development host allows paired phones to choose an answer to a Codex question. */
+  phonePilot?: boolean
   /** Signed in to Togle Studio on this computer. */
   account?: { email: string }
   link: 'off' | 'connecting' | 'guest' | 'member' | 'refused'

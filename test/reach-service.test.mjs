@@ -3,6 +3,7 @@
 // the other computer and not the server, Refuse and Stop from another device are done and recorded, and a removed
 // device is let go. Also Togle's sign-in to Studio and its connection, against stand-ins.
 import assert from 'node:assert/strict'
+import path from 'node:path'
 import { after, before, test } from 'node:test'
 import { fakeCourier } from './fake-courier.mjs'
 
@@ -78,7 +79,7 @@ const device = async (name, kind = 'computer', extra = {}) => {
   return reach
 }
 
-before(async () => { courier = await fakeCourier({ tokens: new Map([['token-ana', 'ana']]) }) })
+before(async () => { courier = await fakeCourier({ tokens: new Map([['token-ana', 'ana'], ['token-pilot', 'pilot']]) }) })
 after(async () => {
   for (const reach of started) reach.stop()
   await courier.close()
@@ -116,6 +117,44 @@ test('the first computer to sign in starts the devices; a computer and a server 
   assert.deepEqual(pc.state().devices.map((item) => item.name), ['Windows PC', 'build-server', 'MacBook'], 'this computer first, then by name')
   assert.equal(courier.records.get(server.state().me.device).kind, 'server')
   assert.equal(courier.records.get(server.state().me.device).addedBy, pc.state().me.device)
+})
+
+test('only a paired phone receives the pilot choices and can submit one when the host permits it', async () => {
+  const tasks = new Tasks()
+  const task = tasks.tasks[0]
+  task.pending = [{ id: 'rpc-1', kind: 'question', codexInputId: 'one-live-question', questions: [
+    { id: 'color', text: 'Which color?', options: ['Blue', 'Green'], secret: false, free: false }
+  ], offersAlways: false }]
+  tasks.replyChoice = (...args) => tasks.done.push(args)
+  const host = await device('Pilot PC', 'computer', { account: signedIn('token-pilot'), tasks, phonePilot: true, pilotFolder: path.resolve(task.folder) })
+  await host.connectAccount()
+  await until(() => host.state().standing === 'member', 'the pilot host')
+  const other = await device('Other PC', 'computer', { tasks })
+  const phone = await device('Pilot phone', 'phone')
+  await add(host, other)
+  await add(host, phone)
+  const hostId = host.state().me.device
+  const otherId = other.state().me.device
+  const requestOn = (viewer, host) => viewer.remoteTasks().find(entry => entry.device === host)?.tasks.find(item => item.key === task.key)?.pending[0]
+  const request = await until(() => requestOn(phone, hostId)?.choices && requestOn(phone, hostId), 'listed choices on the phone')
+  assert.deepEqual(request, { id: 'one-live-question', kind: 'question', question: 'Which color?', choices: ['Blue', 'Green'] })
+  assert.deepEqual(phone.remoteTasks().find(entry => entry.device === hostId).tasks.map(task => task.key), [task.key])
+  await assert.rejects(phone.act(hostId, { what: 'stop', task: 'claude:bg1' }), /task is gone/)
+  assert.equal((await until(() => requestOn(other, hostId), 'the host task on a computer')).choices, undefined)
+  assert.equal((await until(() => requestOn(phone, otherId), 'the non-pilot task on the phone')).choices, undefined)
+  const act = { what: 'reply-choice', task: task.key, request: request.id, choice: 1 }
+  await assert.rejects(other.act(hostId, act), /not accepting phone choices/)
+  await assert.rejects(phone.act(otherId, act), /not accepting phone choices/)
+  await host.setActOnThis(false)
+  await assert.rejects(phone.act(hostId, act), /doesn’t take answers/)
+  await until(() => !requestOn(phone, hostId)?.choices, 'the choices to disappear')
+  await host.setActOnThis(true)
+  await until(() => requestOn(phone, hostId)?.choices, 'the choices to return')
+  await assert.rejects(phone.act(hostId, { ...act, choice: 'Green' }), /Select one/)
+  assert.deepEqual(tasks.done, [])
+  await phone.act(hostId, act)
+  assert.deepEqual(tasks.done, [[task.key, request.id, 1]])
+  assert.equal(host.state().acted[0].name, 'Pilot phone')
 })
 
 test('a wrong code adds nothing, and the device shows a new code by itself', async () => {

@@ -270,6 +270,24 @@ test('an answer is taken once, and a question is not answered with Allow', { tim
   }
 })
 
+test('a phone choice resolves the live Codex input once and the same thread continues', { timeout: 30_000 }, async () => {
+  const hub = new T.RunnerHub({ backends: [codex()], changed() {} })
+  try {
+    const { key } = await hub.start({ runner: 'codex', folder: scratch(), prompt: 'ask', asks: true })
+    const snapshot = await until(async () => (await hub.list()).find(task => task.key === key && task.pending.length), 'the Codex question')
+    const request = T.shareTask(snapshot, true).pending[0]
+    assert.deepEqual(request.choices, ['Two plans'])
+    assert.notEqual(request.id, snapshot.pending[0].id)
+    for (const index of [-1, 1, 0.5, 'Two plans']) assert.throws(() => hub.replyChoice(key, request.id, index), /Select one/)
+    assert.throws(() => hub.replyChoice(key, snapshot.pending[0].id, 0), /no longer available/)
+    hub.replyChoice(key, request.id, 0)
+    assert.throws(() => hub.replyChoice(key, request.id, 0), /no longer available/)
+    await until(async () => (await hub.detail(key)).log.some(item => item.kind === 'agent' && item.text === 'you said Two plans'), 'Codex to continue with the selected text')
+  } finally {
+    await hub.dispose()
+  }
+})
+
 test('an edit waits with the files it changes', { timeout: 30_000 }, async () => {
   const backend = codex()
   try {

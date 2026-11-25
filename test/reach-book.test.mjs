@@ -155,6 +155,19 @@ test('adding by code: out of order or tampered, the exchange stops', () => {
   assert.throws(() => adding.welcome({}), /no device waiting/)
 })
 
+test('phone choices need an owned Codex request with one non-secret question and fully visible labels', () => {
+  const question = { id: 'color', text: 'Which color?', options: ['Blue', 'Green'], secret: false, free: true }
+  const request = { id: '1', codexInputId: 'this-question', kind: 'question', questions: [question], offersAlways: false }
+  const task = { key: 'codex:t1', runner: 'codex', title: 'Choose a color', folder: '/work/demo', state: 'waiting', mine: true, line: '', pending: [request] }
+  assert.deepEqual(shareTask(task, true).pending[0].choices, question.options)
+  for (const override of [{ runner: 'claude' }, { mine: false }, { terminal: true }])
+    assert.equal(shareTask({ ...task, ...override }, true).pending[0].choices, undefined)
+  for (const override of [{ codexInputId: undefined }, { kind: 'command' }, { kind: 'edit' }, { questions: [question, question] },
+    { questions: [{ ...question, secret: true }] }, { questions: [{ ...question, options: [] }] },
+    { questions: [{ ...question, options: ['password: something-private'] }] }])
+    assert.equal(shareTask({ ...task, pending: [{ ...request, ...override }] }, true).pending[0].choices, undefined)
+})
+
 test('what a computer shares about a task: the command whole, keys and passwords hidden elsewhere', () => {
   const shared = shareTask({
     key: 'codex:t1', id: 't1', runner: 'codex', agent: 'Codex', title: 'Deploy with token=ghp_abcdefghijklmnopqrstuvwxyz123456',

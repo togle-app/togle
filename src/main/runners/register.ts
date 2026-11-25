@@ -35,6 +35,8 @@ export function addedBackend(agent: AddedAgent, version: string, told?: (chunk: 
 }
 
 export interface RunnerDeps {
+  /** Enable Codex's input tool for threads in the private phone smoke test. */
+  pilotInputTool?: boolean
   /** `ipcMain.handle`, without the event the window's message came with. */
   handle(channel: string, listener: (...args: unknown[]) => unknown): void
   send(channel: string, payload: unknown): void
@@ -94,7 +96,7 @@ export function registerRunners(deps: RunnerDeps): RunnerHub {
   // The agents Togle finds by itself, one by its id: what is started again when one is added back.
   const known = (runner: string): Backend | undefined =>
     runner === 'codex'
-      ? new CodexBackend({ version: deps.version, told, ...(deps.keepIn ? { keep: path.join(deps.keepIn, 'codex') } : {}) })
+      ? new CodexBackend({ version: deps.version, told, pilotInputTool: deps.pilotInputTool, ...(deps.keepIn ? { keep: path.join(deps.keepIn, 'codex') } : {}) })
       : runner === 'claude'
         ? new ClaudeBackend({ told, ...(deps.keep ? { keep: deps.keep } : {}) })
         : runner === 'hermes'

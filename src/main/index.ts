@@ -2026,6 +2026,7 @@ if (process.argv.includes('--togle-hook')) {
     void todo.watch()
     runners = registerRunners({
       backends: standIns,
+      pilotInputTool: !app.isPackaged && process.env.TOGLE_PHONE_PILOT === '1' && process.env.TOGLE_GENUINE_QUESTION_SMOKE === '1',
       // What Claude Code's tasks need to go on while Togle is closed: its address, each task's settings and the list of tasks.
       keep: path.join(app.getPath('userData'), 'claude'),
       // The same for Codex, and for Hermes the names of its sessions: a folder of each one's name in Togle's own.
@@ -2073,6 +2074,7 @@ if (process.argv.includes('--togle-hook')) {
       tasks: {
         list: () => hubForReach.list(),
         answer: (key, request, decision) => hubForReach.answer(key, request, decision),
+        replyChoice: (key, inputId, choice) => hubForReach.replyChoice(key, inputId, choice),
         stop: (key) => hubForReach.stop(key),
         endCommands: (key) => hubForReach.endCommands(key)
       },

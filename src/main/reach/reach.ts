@@ -9,6 +9,7 @@
 // Not reviewed yet: Reach stays out of every release until an outside review has tried to break it.
 import { EventEmitter } from 'node:events'
 import { randomBytes } from 'node:crypto'
+import path from 'node:path'
 import type { Box, DeviceKind } from '@shared/courier-protocol'
 import type { ActedHere, DeviceTasks, ReachDevice, ReachState, RemoteAct, RemoteTask } from '@shared/reach'
 import type { TaskView } from '@shared/runner'
@@ -29,6 +30,7 @@ export interface ReachStore {
 export interface ReachTasks {
   list(): Promise<TaskView[]>
   answer(key: string, request: string, decision: 'refuse'): void
+  replyChoice(key: string, inputId: string, choice: number): void
   stop(key: string): Promise<void>
   endCommands(key: string): Promise<number>
 }
@@ -42,6 +44,10 @@ export interface ReachOptions {
   name: () => string
   account?: StudioAccount
   tasks?: ReachTasks
+  /** Opt-in for an unpackaged desktop host in the private phone pilot. */
+  phonePilot?: boolean
+  /** When supplied in the pilot, only this exact absolute workspace is shared or acted upon. */
+  pilotFolder?: string
   now?: () => number
   open?: LinkOptions['open']
   delays?: number[]
@@ -76,8 +82,8 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
   private readonly remote = new Map<string, DeviceTasks>()
   private readonly keys = new Map<string, Buffer>()
   private readonly seen = new Map<string, number>()
-  private readonly asked = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
-  private shared = ''
+  private readonly asked = new Map<string, { device: string; resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
+  private readonly shared = new Map<string, string>()
   private sharing?: ReturnType<typeof setTimeout>
   private renewing?: ReturnType<typeof setInterval>
   private code?: { room: string; joining: Joining; expiresAt: number; joined: boolean; problem?: string }
@@ -140,6 +146,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     const who = this.options.account?.who()
     return {
       available: true,
+      ...(this.options.phonePilot && this.options.kind === 'computer' ? { phonePilot: true } : {}),
       ...(who ? { account: { email: who.email } } : {}),
       link: this.link?.state ?? 'off',
       ...(this.link?.state === 'member' && this.link.welcome?.connection ? { connection: this.link.welcome.connection } : {}),
@@ -319,6 +326,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
 
   async setActOnThis(on: boolean): Promise<void> {
     this.actOnThis = on
+    this.tasksChanged()
     await this.options.store.write(FILES.settings, { actOnThis: on })
     this.emit('changed')
   }
@@ -341,7 +349,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     const answered = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => { this.asked.delete(n); reject(new Error(`${pass.name} didn’t answer in time.`)) }, 15_000)
       timer.unref?.()
-      this.asked.set(n, { resolve, reject, timer })
+      this.asked.set(n, { device, resolve, reject, timer })
     })
     try {
       await this.send(device, { kind: 'act', act, n, at: this.now })
@@ -485,7 +493,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     if (!pass) return
     try {
       await this.send(device, { kind: 'book', book: this.book!.for(pass) })
-      if (pass.role !== 'server' && this.options.tasks) await this.send(device, { kind: 'tasks', tasks: await this.myTasks(), at: this.now })
+      if (pass.role !== 'server' && this.options.tasks) await this.sendTasks(pass)
       await this.send(device, { kind: 'want', at: this.now })
     } catch { /* offline again; it is greeted when it is back */ }
   }
@@ -497,20 +505,32 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     }
   }
 
-  private async myTasks(): Promise<RemoteTask[]> {
-    return shareTasks(await this.options.tasks!.list(), this.now)
+  private async sendTasks(pass: Pass, updated?: TaskView[]): Promise<void> {
+    const list = updated ?? await this.localTasks()
+    const forPilotPhone = this.options.kind === 'computer' && !!this.options.phonePilot && this.actOnThis && pass.role === 'phone'
+    const tasks = shareTasks(list, this.now, forPilotPhone)
+    const snapshot = JSON.stringify(tasks)
+    if (updated && this.shared.get(pass.device) === snapshot) return
+    await this.send(pass.device, { kind: 'tasks', tasks, at: this.now })
+    this.shared.set(pass.device, snapshot)
+  }
+
+  private async localTasks(): Promise<TaskView[]> {
+    const tasks = await this.options.tasks!.list()
+    const folder = this.options.pilotFolder
+    if (!this.options.phonePilot || folder === undefined) return tasks
+    if (!path.isAbsolute(folder)) return []
+    const workspace = path.resolve(folder)
+    return tasks.filter(task => path.isAbsolute(task.folder) && path.resolve(task.folder) === workspace)
   }
 
   private async shareTasks(): Promise<void> {
     if (this.standing !== 'member' || !this.options.tasks) return
-    const tasks = await this.myTasks()
-    const text = JSON.stringify(tasks)
-    if (text === this.shared) return
-    this.shared = text
+    const list = await this.localTasks()
     for (const device of this.online) {
       const pass = this.book?.trusted(device, this.now)
       // A server only runs agents: it doesn't see the person's other devices.
-      if (pass && pass.role !== 'server') await this.send(device, { kind: 'tasks', tasks, at: this.now }).catch(() => undefined)
+      if (pass && pass.role !== 'server') await this.sendTasks(pass, list).catch(() => undefined)
     }
   }
 
@@ -547,14 +567,14 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
         return
       }
       case 'want':
-        if (pass.role !== 'server' && this.options.tasks) await this.send(pass.device, { kind: 'tasks', tasks: await this.myTasks(), at: this.now }).catch(() => undefined)
+        if (pass.role !== 'server' && this.options.tasks) await this.sendTasks(pass).catch(() => undefined)
         return
       case 'act':
         await this.actOn(pass, note)
         return
       case 'acted': {
         const waiter = this.asked.get(note.n)
-        if (!waiter) return
+        if (!waiter || waiter.device !== pass.device) return
         this.asked.delete(note.n)
         clearTimeout(waiter.timer)
         if (note.ok) waiter.resolve(); else waiter.reject(new Error(note.message ?? 'It wasn’t done.'))
@@ -566,7 +586,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
   /** Another device asks this one to refuse a request or stop a task. Checked here; nothing the courier says counts. */
   private async actOn(pass: Pass, note: Extract<Note, { kind: 'act' }>): Promise<void> {
     const answer = (ok: boolean, message?: string): Promise<void> => this.send(pass.device, { kind: 'acted', n: note.n, ok, ...(message ? { message } : {}), at: this.now }).catch(() => undefined)
-    if (typeof note.n !== 'string' || note.n.length > 40 || this.seen.has(note.n) || Math.abs(this.now - note.at) > ACT_FRESH_MS) return
+    if (typeof note.n !== 'string' || !note.n.length || note.n.length > 40 || this.seen.has(note.n) || !Number.isFinite(note.at) || Math.abs(this.now - note.at) > ACT_FRESH_MS) return
     this.seen.set(note.n, this.now)
     for (const [n, at] of this.seen) if (this.now - at > 10 * 60_000) this.seen.delete(n)
     if (pass.role === 'server') return answer(false, 'A server only runs agents. It can’t act on your other devices.')
@@ -574,7 +594,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     const tasks = this.options.tasks
     const act = note.act
     if (!tasks || !act || typeof act.task !== 'string') return answer(false, 'That task is not here.')
-    const task = (await tasks.list()).find((item) => item.key === act.task)
+    const task = (await this.localTasks()).find((item) => item.key === act.task)
     if (!task) return answer(false, 'That task is gone.')
     if (!task.mine) return answer(false, 'Togle doesn’t run that task, so it is answered where it runs.')
     // A task in a terminal of Togle's own that Togle does not hear is answered only there. One that runs in the background
@@ -583,7 +603,13 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     if (task.terminal && !task.screen) return answer(false, 'That task runs in a terminal. It is answered only at its own computer.')
     try {
       let what: string
-      if (act.what === 'refuse') {
+      if (act.what === 'reply-choice') {
+        if (!this.options.phonePilot || this.options.kind !== 'computer' || this.book?.trusted(pass.device, this.now)?.role !== 'phone' || !this.actOnThis)
+          return answer(false, 'This computer is not accepting phone choices.')
+        if (typeof act.request !== 'string' || !act.request || !Number.isSafeInteger(act.choice)) return answer(false, 'Select one of the answers shown.')
+        tasks.replyChoice(task.key, act.request, act.choice)
+        what = `Answered a Codex question in ${task.title}`
+      } else if (act.what === 'refuse') {
         const request = task.pending.find((item) => item.id === act.request)
         if (!request || request.kind === 'question') return answer(false, 'That request was answered already.')
         tasks.answer(task.key, request.id, 'refuse')
@@ -613,6 +639,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     this.standing = 'removed'
     this.book = undefined
     this.remote.clear()
+    this.shared.clear()
     this.online.clear()
     this.keys.clear()
     this.problem = undefined

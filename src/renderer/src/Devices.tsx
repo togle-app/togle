@@ -113,7 +113,7 @@ function Member({ reach, busy, run }: PartProps) {
           )}
         </Row>
       ))}
-      <Toggle name="Other devices may act on this computer" note="Refuse a request or stop a task here from your other devices. Off, they can only look." checked={reach.actOnThis} disabled={!!busy} onChange={(on) => void run('act', () => api.reachActOnThis(on))} />
+      <Toggle name="Other devices may act on this computer" note={reach.phonePilot ? 'Your paired phone can select a listed answer to a Codex question. Your devices can also refuse a request or stop a task. Turn this off for view-only access.' : 'Refuse a request or stop a task here from your other devices. Off, they can only look.'} checked={reach.actOnThis} disabled={!!busy} onChange={(on) => void run('act', () => api.reachActOnThis(on))} />
       {isComputer && <AddDevice reach={reach} busy={busy} run={run} />}
       {!!reach.acted.length && (
         <Row label={false} name="Done here from other devices" note={
@@ -148,7 +148,7 @@ function AddDevice({ reach, busy, run }: PartProps) {
     return (
       <div className="setting stacked" role="group" aria-label="Add this device?">
         <span className="name">Add {adding.name}?</span>
-        <span className="note">{adding.name} {JOINS_AS[adding.role ?? 'computer']}</span>
+        <span className="note">{adding.name} {adding.role === 'phone' && reach.phonePilot ? 'joins as a phone. It can see tasks, choose a listed answer to a Codex question, refuse a request or stop a task.' : JOINS_AS[adding.role ?? 'computer']}</span>
         <span className="control row">
           <button className="primary" disabled={!!busy || adding.stage === 'adding'} onClick={() => void run('confirm', () => api.reachConfirmAdd())}>{adding.stage === 'adding' ? 'Adding…' : 'Add'}</button>
           <button className="ghost" disabled={!!busy || adding.stage === 'adding'} onClick={() => void run('cancel-add', () => api.reachCancelAdd())}>Cancel</button>

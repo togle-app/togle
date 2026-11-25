@@ -2,7 +2,7 @@
 // name, state and one line, and each request with the command whole (the command is always sent whole: it is what runs).
 // Text that looks like a key or a password is hidden in the rest. Long output and the conversation stay on the computer.
 import path from 'node:path'
-import type { TaskView } from '@shared/runner'
+import type { PendingRequest, TaskView } from '@shared/runner'
 import type { RemoteTask } from '@shared/reach'
 
 const HIDDEN = '••••'
@@ -40,8 +40,19 @@ export function hideSecrets(text: string): string {
 
 const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
 
+/** Only offer choices whose complete labels and question can be displayed as issued. */
+export function phoneChoices(request: PendingRequest): string[] | undefined {
+  if (!request.codexInputId || request.kind !== 'question' || request.questions?.length !== 1) return
+  const [question] = request.questions
+  if (question.secret || !question.id || !question.text.trim() || question.text.length > 1000 || hideSecrets(question.text) !== question.text) return
+  const options = question.options
+  if (!options.length || options.length > 10 || options.some(label => !label.trim() || label.length > 200 || hideSecrets(label) !== label)) return
+  return options
+}
+
 /** A task as another device sees it. */
-export function shareTask(task: TaskView): RemoteTask {
+export function shareTask(task: TaskView, forPilotPhone = false): RemoteTask {
+  const canReply = forPilotPhone && task.runner === 'codex' && task.mine && (!task.terminal || task.screen)
   return {
     key: task.key,
     title: clip(hideSecrets(task.title || 'A task'), 160),
@@ -49,14 +60,18 @@ export function shareTask(task: TaskView): RemoteTask {
     folder: path.basename(task.folder.replace(/[\\/]+$/, '')) || task.folder,
     state: task.state,
     line: clip(hideSecrets(task.line), 240),
-    pending: task.pending.map((request) => ({
-      id: request.id,
-      kind: request.kind,
-      ...(request.command !== undefined ? { command: request.command } : {}),
-      ...(request.files?.length ? { files: request.files.slice(0, 20).map((file) => path.basename(file)) } : {}),
-      ...(request.questions?.length ? { question: clip(hideSecrets(request.questions.map((question) => question.text).join('\n')), 1000) } : {}),
-      ...(request.danger ? { danger: request.danger } : {})
-    })),
+    pending: task.pending.map((request) => {
+      const choices = canReply ? phoneChoices(request) : undefined
+      return {
+        id: choices ? request.codexInputId! : request.id,
+        kind: request.kind,
+        ...(request.command !== undefined ? { command: request.command } : {}),
+        ...(request.files?.length ? { files: request.files.slice(0, 20).map((file) => path.basename(file)) } : {}),
+        ...(request.questions?.length ? { question: clip(hideSecrets(request.questions.map((question) => question.text).join('\n')), 1000) } : {}),
+        ...(choices ? { choices } : {}),
+        ...(request.danger ? { danger: request.danger } : {})
+      }
+    }),
     mine: task.mine,
     // A task in the background (Claude Code) is refused and stopped from here like any other, whether its screen is open on
     // that computer or not: the mark is for a terminal Togle only watches.
@@ -67,10 +82,10 @@ export function shareTask(task: TaskView): RemoteTask {
 }
 
 /** The tasks a device shares: those of the last week, newest first, at most 40. */
-export function shareTasks(tasks: TaskView[], now = Date.now()): RemoteTask[] {
+export function shareTasks(tasks: TaskView[], now = Date.now(), forPilotPhone = false): RemoteTask[] {
   return tasks
     .filter((task) => task.state === 'waiting' || task.state === 'working' || now - task.updatedAt < 7 * 86_400_000)
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 40)
-    .map(shareTask)
+    .map(task => shareTask(task, forPilotPhone))
 }

@@ -50,6 +50,8 @@ export function registerReach(deps: ReachDeps, account?: StudioAccount): Reach |
   }
   const reach = new Reach({
     courier: config.courier,
+    phonePilot: process.env.TOGLE_PHONE_PILOT === '1',
+    pilotFolder: process.env.TOGLE_PHONE_PILOT_FOLDER,
     store,
     kind: 'computer',
     // Two Togles tried on one computer would share its name: a development run can give each its own.
