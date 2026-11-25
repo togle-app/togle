@@ -17,7 +17,7 @@ import { issuePass, lock, makeIdentity, normalCode, pairKey, unlock, type Identi
 import { Book, type BookData } from './book'
 import { CourierError, CourierLink, type LinkOptions } from './link'
 import { Adding, Joining, codeFor, isCode, roomOf, type Candidate, type Welcome } from './pairing'
-import { shareTasks } from './share'
+import { phoneQuestion, sharePhoneTasks, shareTasks } from './share'
 import type { StudioAccount } from './studio-account'
 
 /** Where Reach keeps what it must remember, encrypted by the system's keystore in the app. */
@@ -506,13 +506,18 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
   }
 
   private async sendTasks(pass: Pass, updated?: TaskView[]): Promise<void> {
-    const list = updated ?? await this.localTasks()
-    const forPilotPhone = this.options.kind === 'computer' && !!this.options.phonePilot && this.actOnThis && pass.role === 'phone'
-    const tasks = shareTasks(list, this.now, forPilotPhone)
+    const phone = pass.role === 'phone'
+    const list = phone && !this.phoneQuestionsOn() ? [] : updated ?? await this.localTasks()
+    const tasks = phone ? sharePhoneTasks(this.phoneQuestionsOn() ? list : []) : shareTasks(list, this.now)
     const snapshot = JSON.stringify(tasks)
     if (updated && this.shared.get(pass.device) === snapshot) return
     await this.send(pass.device, { kind: 'tasks', tasks, at: this.now })
     this.shared.set(pass.device, snapshot)
+  }
+
+  private phoneQuestionsOn(): boolean {
+    return this.options.kind === 'computer' && this.options.phonePilot === true && this.actOnThis
+      && path.isAbsolute(this.options.pilotFolder ?? '')
   }
 
   private async localTasks(): Promise<TaskView[]> {
@@ -583,33 +588,35 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     }
   }
 
-  /** Another device asks this one to refuse a request or stop a task. Checked here; nothing the courier says counts. */
+  /** This host checks the sending device's role and the current request before acting. */
   private async actOn(pass: Pass, note: Extract<Note, { kind: 'act' }>): Promise<void> {
     const answer = (ok: boolean, message?: string): Promise<void> => this.send(pass.device, { kind: 'acted', n: note.n, ok, ...(message ? { message } : {}), at: this.now }).catch(() => undefined)
     if (typeof note.n !== 'string' || !note.n.length || note.n.length > 40 || this.seen.has(note.n) || !Number.isFinite(note.at) || Math.abs(this.now - note.at) > ACT_FRESH_MS) return
     this.seen.set(note.n, this.now)
     for (const [n, at] of this.seen) if (this.now - at > 10 * 60_000) this.seen.delete(n)
     if (pass.role === 'server') return answer(false, 'A server only runs agents. It can’t act on your other devices.')
-    if (!this.actOnThis) return answer(false, `${this.book?.get(this.identity!.device)?.name ?? 'That computer'} doesn’t take answers from other devices right now.`)
-    const tasks = this.options.tasks
     const act = note.act
+    if (pass.role === 'phone' && act?.what !== 'reply-choice') return answer(false, 'A phone can only select an answer to a Codex question.')
+    if (!this.actOnThis) return answer(false, `${this.book?.get(this.identity!.device)?.name ?? 'That computer'} doesn’t take answers from other devices right now.`)
+    if (act?.what === 'reply-choice' && (pass.role !== 'phone' || !this.phoneQuestionsOn())) return answer(false, 'This computer is not accepting phone choices.')
+    const tasks = this.options.tasks
     if (!tasks || !act || typeof act.task !== 'string') return answer(false, 'That task is not here.')
-    const task = (await this.localTasks()).find((item) => item.key === act.task)
-    if (!task) return answer(false, 'That task is gone.')
-    if (!task.mine) return answer(false, 'Togle doesn’t run that task, so it is answered where it runs.')
-    // A task in a terminal of Togle's own that Togle does not hear is answered only there. One that runs in the background
-    // (Claude Code), with a screen or not, is refused and stopped like any other: through what Claude Code asks, and through
-    // its own command to stop a session. No device ever types into its screen: a key could answer "1. Yes".
-    if (task.terminal && !task.screen) return answer(false, 'That task runs in a terminal. It is answered only at its own computer.')
     try {
+      const task = (await this.localTasks()).find((item) => item.key === act.task)
       let what: string
       if (act.what === 'reply-choice') {
-        if (!this.options.phonePilot || this.options.kind !== 'computer' || this.book?.trusted(pass.device, this.now)?.role !== 'phone' || !this.actOnThis)
+        if (!this.phoneQuestionsOn() || this.book?.trusted(pass.device, this.now)?.role !== 'phone')
           return answer(false, 'This computer is not accepting phone choices.')
-        if (typeof act.request !== 'string' || !act.request || !Number.isSafeInteger(act.choice)) return answer(false, 'Select one of the answers shown.')
-        tasks.replyChoice(task.key, act.request, act.choice)
+        const question = task && phoneQuestion(task)
+        if (!task || !question || question.id !== act.request) return answer(false, 'That Codex question is no longer available on this phone.')
+        if (!Number.isSafeInteger(act.choice) || act.choice < 0 || act.choice >= question.choices.length) return answer(false, 'Select one of the answers shown.')
+        tasks.replyChoice(task.key, question.id, act.choice)
         what = `Answered a Codex question in ${task.title}`
-      } else if (act.what === 'refuse') {
+      } else if (!task) return answer(false, 'That task is gone.')
+      else if (!task.mine) return answer(false, 'Togle doesn’t run that task, so it is answered where it runs.')
+      // A terminal Togle only watches is answered at its computer. A background task uses the agent's own controls.
+      else if (task.terminal && !task.screen) return answer(false, 'That task runs in a terminal. It is answered only at its own computer.')
+      else if (act.what === 'refuse') {
         const request = task.pending.find((item) => item.id === act.request)
         if (!request || request.kind === 'question') return answer(false, 'That request was answered already.')
         tasks.answer(task.key, request.id, 'refuse')

@@ -122,37 +122,56 @@ test('the first computer to sign in starts the devices; a computer and a server 
 test('only a paired phone receives the pilot choices and can submit one when the host permits it', async () => {
   const tasks = new Tasks()
   const task = tasks.tasks[0]
-  task.pending = [{ id: 'rpc-1', kind: 'question', codexInputId: 'one-live-question', questions: [
+  const [command] = task.pending
+  const question = { id: 'rpc-1', kind: 'question', codexInputId: 'one-live-question', questions: [
     { id: 'color', text: 'Which color?', options: ['Blue', 'Green'], secret: false, free: false }
-  ], offersAlways: false }]
-  tasks.replyChoice = (...args) => tasks.done.push(args)
+  ], offersAlways: false }
+  task.pending = [question, command]
+  tasks.tasks.push({ ...task, key: 'codex:outside', folder: path.join(task.folder, 'other'), pending: [question] })
+  tasks.tasks.push({ ...task, key: 'codex:command', pending: [command] })
+  tasks.replyChoice = (...args) => {
+    tasks.done.push(args)
+    task.pending = [command]
+    host.tasksChanged()
+  }
   const host = await device('Pilot PC', 'computer', { account: signedIn('token-pilot'), tasks, phonePilot: true, pilotFolder: path.resolve(task.folder) })
   await host.connectAccount()
   await until(() => host.state().standing === 'member', 'the pilot host')
-  const other = await device('Other PC', 'computer', { tasks })
+  const other = await device('Other PC', 'computer', { tasks, phonePilot: true })
   const phone = await device('Pilot phone', 'phone')
   await add(host, other)
   await add(host, phone)
   const hostId = host.state().me.device
   const otherId = other.state().me.device
-  const requestOn = (viewer, host) => viewer.remoteTasks().find(entry => entry.device === host)?.tasks.find(item => item.key === task.key)?.pending[0]
+  const tasksOn = (viewer, host) => viewer.remoteTasks().find(entry => entry.device === host)?.tasks
+  const requestOn = (viewer, host) => tasksOn(viewer, host)?.find(item => item.key === task.key)?.pending[0]
   const request = await until(() => requestOn(phone, hostId)?.choices && requestOn(phone, hostId), 'listed choices on the phone')
   assert.deepEqual(request, { id: 'one-live-question', kind: 'question', question: 'Which color?', choices: ['Blue', 'Green'] })
-  assert.deepEqual(phone.remoteTasks().find(entry => entry.device === hostId).tasks.map(task => task.key), [task.key])
-  await assert.rejects(phone.act(hostId, { what: 'stop', task: 'claude:bg1' }), /task is gone/)
+  assert.deepEqual(tasksOn(phone, hostId), [{
+    key: task.key, title: task.title, agent: 'Codex', folder: '', state: 'waiting', line: '',
+    pending: [request], mine: true, commandsRunning: false, updatedAt: 0
+  }])
+  for (const what of ['refuse', 'stop', 'end-commands', 'allow']) {
+    await assert.rejects(phone.act(hostId, { what, task: task.key, request: command.id }), /only select an answer/)
+  }
   assert.equal((await until(() => requestOn(other, hostId), 'the host task on a computer')).choices, undefined)
-  assert.equal((await until(() => requestOn(phone, otherId), 'the non-pilot task on the phone')).choices, undefined)
+  assert.equal(tasksOn(other, hostId).find(item => item.key === task.key).pending[1].command, command.command)
+  await until(() => tasksOn(phone, otherId)?.length === 0, 'a host without a workspace shares no tasks with the phone')
   const act = { what: 'reply-choice', task: task.key, request: request.id, choice: 1 }
   await assert.rejects(other.act(hostId, act), /not accepting phone choices/)
   await assert.rejects(phone.act(otherId, act), /not accepting phone choices/)
   await host.setActOnThis(false)
   await assert.rejects(phone.act(hostId, act), /doesn’t take answers/)
-  await until(() => !requestOn(phone, hostId)?.choices, 'the choices to disappear')
+  await until(() => tasksOn(phone, hostId)?.length === 0, 'the phone task to disappear')
   await host.setActOnThis(true)
   await until(() => requestOn(phone, hostId)?.choices, 'the choices to return')
-  await assert.rejects(phone.act(hostId, { ...act, choice: 'Green' }), /Select one/)
+  for (const choice of [-1, 2, 'Green']) await assert.rejects(phone.act(hostId, { ...act, choice }), /Select one/)
+  await assert.rejects(phone.act(hostId, { ...act, task: 'codex:outside' }), /no longer available/)
+  await assert.rejects(phone.act(hostId, { ...act, request: question.id }), /no longer available/)
   assert.deepEqual(tasks.done, [])
   await phone.act(hostId, act)
+  await until(() => tasksOn(phone, hostId)?.length === 0, 'the answered task to disappear from the phone')
+  await assert.rejects(phone.act(hostId, act), /no longer available/)
   assert.deepEqual(tasks.done, [[task.key, request.id, 1]])
   assert.equal(host.state().acted[0].name, 'Pilot phone')
 })

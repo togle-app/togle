@@ -50,9 +50,31 @@ export function phoneChoices(request: PendingRequest): string[] | undefined {
   return options
 }
 
+/** The one live question a phone can answer for this task. */
+export function phoneQuestion(task: TaskView): { id: string; kind: 'question'; question: string; choices: string[] } | undefined {
+  if (task.runner !== 'codex' || !task.mine || task.state !== 'waiting' || (task.terminal && !task.screen)) return
+  for (const request of task.pending) {
+    const choices = phoneChoices(request)
+    if (choices) return { id: request.codexInputId!, kind: 'question', question: request.questions![0].text, choices }
+  }
+}
+
+/** A phone gets questions, with the existing task fields kept empty when they carry no phone information. */
+export function sharePhoneTasks(tasks: TaskView[]): RemoteTask[] {
+  return tasks
+    .flatMap((task): RemoteTask[] => {
+      const question = phoneQuestion(task)
+      if (!question) return []
+      return [{
+        key: task.key, title: clip(hideSecrets(task.title || 'A task'), 160), agent: 'Codex',
+        folder: '', state: 'waiting', line: '', pending: [question], mine: true, commandsRunning: false, updatedAt: 0
+      }]
+    })
+    .slice(0, 40)
+}
+
 /** A task as another device sees it. */
-export function shareTask(task: TaskView, forPilotPhone = false): RemoteTask {
-  const canReply = forPilotPhone && task.runner === 'codex' && task.mine && (!task.terminal || task.screen)
+export function shareTask(task: TaskView): RemoteTask {
   return {
     key: task.key,
     title: clip(hideSecrets(task.title || 'A task'), 160),
@@ -60,18 +82,14 @@ export function shareTask(task: TaskView, forPilotPhone = false): RemoteTask {
     folder: path.basename(task.folder.replace(/[\\/]+$/, '')) || task.folder,
     state: task.state,
     line: clip(hideSecrets(task.line), 240),
-    pending: task.pending.map((request) => {
-      const choices = canReply ? phoneChoices(request) : undefined
-      return {
-        id: choices ? request.codexInputId! : request.id,
-        kind: request.kind,
-        ...(request.command !== undefined ? { command: request.command } : {}),
-        ...(request.files?.length ? { files: request.files.slice(0, 20).map((file) => path.basename(file)) } : {}),
-        ...(request.questions?.length ? { question: clip(hideSecrets(request.questions.map((question) => question.text).join('\n')), 1000) } : {}),
-        ...(choices ? { choices } : {}),
-        ...(request.danger ? { danger: request.danger } : {})
-      }
-    }),
+    pending: task.pending.map((request) => ({
+      id: request.id,
+      kind: request.kind,
+      ...(request.command !== undefined ? { command: request.command } : {}),
+      ...(request.files?.length ? { files: request.files.slice(0, 20).map((file) => path.basename(file)) } : {}),
+      ...(request.questions?.length ? { question: clip(hideSecrets(request.questions.map((question) => question.text).join('\n')), 1000) } : {}),
+      ...(request.danger ? { danger: request.danger } : {})
+    })),
     mine: task.mine,
     // A task in the background (Claude Code) is refused and stopped from here like any other, whether its screen is open on
     // that computer or not: the mark is for a terminal Togle only watches.
@@ -82,10 +100,10 @@ export function shareTask(task: TaskView, forPilotPhone = false): RemoteTask {
 }
 
 /** The tasks a device shares: those of the last week, newest first, at most 40. */
-export function shareTasks(tasks: TaskView[], now = Date.now(), forPilotPhone = false): RemoteTask[] {
+export function shareTasks(tasks: TaskView[], now = Date.now()): RemoteTask[] {
   return tasks
     .filter((task) => task.state === 'waiting' || task.state === 'working' || now - task.updatedAt < 7 * 86_400_000)
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 40)
-    .map(task => shareTask(task, forPilotPhone))
+    .map(shareTask)
 }

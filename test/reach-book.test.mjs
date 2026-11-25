@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto'
 import { test } from 'node:test'
 
 const {
-  Adding, Book, Joining, RENEW_WITHIN_MS, WRONG_CODE, codeFor, hideSecrets, isCode, issuePass, makeIdentity, normalCode, publicKeys, roomOf, shareTask
+  Adding, Book, Joining, RENEW_WITHIN_MS, WRONG_CODE, codeFor, hideSecrets, isCode, issuePass, makeIdentity, normalCode, publicKeys, roomOf, sharePhoneTasks, shareTask
 } = await import('./.build/togle.mjs')
 
 const DAY = 86_400_000
@@ -159,13 +159,13 @@ test('phone choices need an owned Codex request with one non-secret question and
   const question = { id: 'color', text: 'Which color?', options: ['Blue', 'Green'], secret: false, free: true }
   const request = { id: '1', codexInputId: 'this-question', kind: 'question', questions: [question], offersAlways: false }
   const task = { key: 'codex:t1', runner: 'codex', title: 'Choose a color', folder: '/work/demo', state: 'waiting', mine: true, line: '', pending: [request] }
-  assert.deepEqual(shareTask(task, true).pending[0].choices, question.options)
-  for (const override of [{ runner: 'claude' }, { mine: false }, { terminal: true }])
-    assert.equal(shareTask({ ...task, ...override }, true).pending[0].choices, undefined)
+  assert.deepEqual(sharePhoneTasks([task])[0].pending[0], { id: 'this-question', kind: 'question', question: question.text, choices: question.options })
+  for (const override of [{ runner: 'claude' }, { mine: false }, { terminal: true }, { state: 'stopped' }])
+    assert.deepEqual(sharePhoneTasks([{ ...task, ...override }]), [])
   for (const override of [{ codexInputId: undefined }, { kind: 'command' }, { kind: 'edit' }, { questions: [question, question] },
     { questions: [{ ...question, secret: true }] }, { questions: [{ ...question, options: [] }] },
     { questions: [{ ...question, options: ['password: something-private'] }] }])
-    assert.equal(shareTask({ ...task, pending: [{ ...request, ...override }] }, true).pending[0].choices, undefined)
+    assert.deepEqual(sharePhoneTasks([{ ...task, pending: [{ ...request, ...override }] }]), [])
 })
 
 test('what a computer shares about a task: the command whole, keys and passwords hidden elsewhere', () => {

@@ -275,7 +275,7 @@ test('a phone choice resolves the live Codex input with isBlocking false once an
   try {
     const { key } = await hub.start({ runner: 'codex', folder: scratch(), prompt: 'ask pilot color', asks: true })
     const snapshot = await until(async () => (await hub.list()).find(task => task.key === key && task.pending.length), 'the Codex question')
-    const request = T.shareTask(snapshot, true).pending[0]
+    const request = T.sharePhoneTasks([snapshot])[0].pending[0]
     assert.equal(request.question, 'Which pilot color should I report?')
     assert.deepEqual(request.choices, ['Blue', 'Green'])
     assert.notEqual(request.id, snapshot.pending[0].id)
