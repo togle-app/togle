@@ -148,6 +148,8 @@ const parse = (line: string): Json | null => {
 // What Claude Code adds to a message of theirs: reminders, a command's own output, notices of work done meanwhile.
 const INJECTED = /<(system-reminder|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|task-notification|bash-input|bash-stdout|bash-stderr|user-prompt-submit-hook)>[\s\S]*?<\/\1>/g
 const NOT_SAID = /^\[Request interrupted by user[^\]]*\]$|^No response requested\.?$/
+// Claude Code queues subagent messages in this envelope without separate sender metadata.
+const AGENT_MESSAGE_OPEN = /^<agent-message from="[^"\r\n]+">\r?\n/
 /**
  * Pasted text as Claude Code writes it into what the person said: between two tags that carry the same id, with a line break of its own after
  * the opening tag and before the closing one, and blank lines around the whole (seen on 2.1.318 to 2.1.329: two or three line breaks before
@@ -170,6 +172,7 @@ const withoutPasteTags = (text: string): string =>
  * they typed it ("/fix-issue SSO login fails"): the words are what they asked.
  */
 const theirWords = (text: string): string => {
+  if (AGENT_MESSAGE_OPEN.test(text.trimStart()) && text.trimEnd().endsWith('\n</agent-message>')) return ''
   const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1].trim()
   const name = /<command-name>\s*([^<]*?)\s*<\/command-name>/.exec(text)?.[1]
   const typed = args ? `${name ? `${name.startsWith('/') ? name : `/${name}`} ` : ''}${args}` : ''

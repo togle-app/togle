@@ -440,6 +440,46 @@ test('a long reply handed to the screen as one paste is one block with its parag
   assert.deepEqual(T.placeSent([{ ...message, text: quoted }], history.entries, [], []).map((one) => one.place), ['thread'])
 })
 
+test('Claude Code subagent messages are omitted from the queue and chat while pasted examples are kept', async () => {
+  const report = '<agent-message from="01ab23cd45ef6789">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to.\n\n  Checked the file.\n</agent-message>'
+  const update = '<agent-message from="01ab23cd45ef6789">\r\nStill checking the file.\r\n</agent-message>'
+  write(100, line(asked(100, 'Check the file.')) + line(enqueue(100, update, 2)) + line(enqueue(100, report, 3)))
+  assert.equal((await claudeConversation(id(100))).queued, undefined)
+
+  const example = pasted(report, 'ab12')
+  appendFileSync(file(100), line(enqueue(100, example, 4)) + line(remove(100, report, 5)) +
+    line(takenIn(100, report, 5, { origin: { kind: 'peer' }, humanTurn: undefined })) +
+    line(asked(100, report, { origin: undefined })))
+  assert.deepEqual((await claudeConversation(id(100))).queued, [report])
+  assert.deepEqual(await saidIn(100), [['you', 'Check the file.']])
+
+  appendFileSync(file(100), line(takenIn(100, example, 6)))
+  assert.equal((await claudeConversation(id(100))).queued, undefined)
+  assert.deepEqual(await saidIn(100), [['you', 'Check the file.'], ['you', report]])
+})
+
+test('a helper agent\'s report that reaches an idle session starts a turn of its own, and is never left in the queue as if the person had typed it', async () => {
+  // Seen on a real session (Claude Code 2.1.332): the report was enqueued in its envelope with the notice of the finished helper behind it, and
+  // dequeued a tenth of a second later. Its turn began with a line that is not the person's (isMeta, origin "peer", promptSource "system") and
+  // that holds the envelope between words of Claude Code's own, so it never read the same as what was queued. The report stayed in the Queued
+  // card for good, as a message the person never typed, and the next one beside it.
+  const report = '<agent-message from="01ab23cd45ef6789">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to.\n\n  Found two defects.\n</agent-message>'
+  const notice = '<task-notification>\n<task-id>01ab23cd45ef6789</task-id>\n<status>completed</status>\n</task-notification>'
+  const handed = asked(101, `Another Claude session sent a message:\n${report}\n\nThe message above is from another session, not from the person.`, { isMeta: true, promptSource: 'system', origin: { kind: 'peer', from: '01ab23cd45ef6789', name: 'general-purpose' } })
+  write(101, line(asked(101, 'Review the page.')) + line(said(101, [{ type: 'text', text: 'A helper is reading it.' }])) +
+    line(enqueue(101, report, 3)) + line(enqueue(101, notice, 3)))
+  assert.equal((await claudeConversation(id(101))).queued, undefined, 'while it waits, it is not shown as words of theirs')
+  appendFileSync(file(101), line({ type: 'queue-operation', operation: 'dequeue', timestamp: stamp(3), sessionId: id(101) }) + line(handed) +
+    line(said(101, [{ type: 'text', text: 'Two defects, both fixed.' }])))
+  assert.equal((await claudeConversation(id(101))).queued, undefined, 'and nothing of it is left once its turn began')
+  assert.deepEqual(await saidIn(101), [['you', 'Review the page.'], ['agent', 'A helper is reading it.'], ['agent', 'Two defects, both fixed.']])
+  // Words of theirs typed meanwhile still wait, and still leave when their own turn begins.
+  appendFileSync(file(101), line(enqueue(101, 'And the footer?', 8)) + line(enqueue(101, report, 9)))
+  assert.deepEqual((await claudeConversation(id(101))).queued, ['And the footer?'])
+  appendFileSync(file(101), line({ type: 'queue-operation', operation: 'dequeue', timestamp: stamp(10), sessionId: id(101) }) + line(asked(101, 'And the footer?')))
+  assert.equal((await claudeConversation(id(101))).queued, undefined)
+})
+
 test('text the person pasted on the screen: one line of it stays in the line it went into, several lines stand on lines of their own, and words that only name the tag stay', async () => {
   // A long address pasted between typed words: it is part of their line.
   write(94, line(asked(94, 'See \n' + pasted('https://example.test/a/long/address', 'a1') + '\n and tell me.')))
