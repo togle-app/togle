@@ -643,6 +643,6 @@ test('the connection to the courier: a refused device is not tried again', async
   assert.equal(link.refusal.code, 'elsewhere')
   await new Promise((resolve) => setTimeout(resolve, 200))
   assert.equal(link.state, 'refused', 'and not tried again')
-  await assert.rejects(link.request({ t: 'room-open', session: 'x'.repeat(22) }), /isn’t connected/)
+  await assert.rejects(link.request({ t: 'room-open', session: 'x'.repeat(22) }), /The device connection is unavailable/)
   twin.stop()
 })

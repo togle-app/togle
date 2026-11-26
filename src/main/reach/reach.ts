@@ -386,7 +386,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
       } else link.start()
       await this.until(() => link.state === 'guest' || link.state === 'member' || link.state === 'refused', 20_000)
     }
-    if (link.state === 'refused') throw new Error(link.refusal?.message ?? 'Togle Studio turned this device away.')
+    if (link.state === 'refused') throw new Error(link.refusal?.message ?? 'This computer couldn’t connect to your devices.')
     const session = randomBytes(16)
     if (!this.codeWanted || this.accountPaused()) return
     const opened = await link.request({ t: 'room-open', session: session.toString('base64url') })
@@ -394,7 +394,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
       if (opened.room) link.say({ t: 'room-close', room: opened.room })
       return
     }
-    if (!opened.room) throw new Error('Togle Studio gave no code.')
+    if (!opened.room) throw new Error('We couldn’t get a pairing code. Try again.')
     const code = codeFor(opened.room)
     const { device, sign, agree } = this.identity!
     const me: Candidate = { device, sign, agree, kind: this.options.kind, name: this.options.name().slice(0, 60) || 'Computer' }
@@ -465,7 +465,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
       throw error
     }
     const session = Buffer.from(joined.session ?? '', 'base64url')
-    if (session.length < 16) { this.adding = { ...this.adding, stage: 'failed', message: 'Togle Studio gave no session for that code.' }; this.emit('changed'); return }
+    if (session.length < 16) { this.adding = { ...this.adding, stage: 'failed', message: 'We couldn’t start pairing with that code. Try again.' }; this.emit('changed'); return }
     const adding = new Adding(code, session)
     this.adding = { room: roomOf(code), adding, stage: 'joining' }
     this.link!.say({ t: 'room-say', room: this.adding.room, data: adding.open() })
@@ -1095,7 +1095,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
   private async until(check: () => boolean, ms: number): Promise<void> {
     const began = Date.now()
     while (!check()) {
-      if (Date.now() - began > ms) throw new CourierError('later', 'Togle Studio didn’t answer. Check the connection and try again.')
+      if (Date.now() - began > ms) throw new CourierError('later', 'The device connection timed out. Try again.')
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
   }

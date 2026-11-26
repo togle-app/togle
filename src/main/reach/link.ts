@@ -109,13 +109,13 @@ export class CourierLink extends EventEmitter<LinkEvents> {
   request(frame: Record<string, unknown>, ms = 15_000): Promise<Ok> {
     const socket = this.socket
     if (!socket || socket.readyState !== WebSocket.OPEN || (this.state !== 'member' && this.state !== 'guest')) {
-      return Promise.reject(new CourierError('later', 'Togle isn’t connected to Togle Studio right now.'))
+      return Promise.reject(new CourierError('later', 'The device connection is unavailable right now.'))
     }
     const id = `r${++this.ids}`
     return new Promise<Ok>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiting.delete(id)
-        reject(new CourierError('later', 'Togle Studio didn’t answer in time.'))
+        reject(new CourierError('later', 'The device connection timed out.'))
       }, ms)
       timer.unref?.()
       this.waiting.set(id, { resolve, reject, timer })
@@ -225,7 +225,7 @@ export class CourierLink extends EventEmitter<LinkEvents> {
   private failWaiting(): void {
     for (const [id, waiter] of this.waiting) {
       clearTimeout(waiter.timer)
-      waiter.reject(new CourierError('later', 'The connection to Togle Studio closed.'))
+      waiter.reject(new CourierError('later', 'The device connection closed.'))
       this.waiting.delete(id)
     }
   }
