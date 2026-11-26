@@ -4,13 +4,13 @@ const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
 /** Inspect the actual bundle, including the runtime architecture (not just its output directory name). */
-function verifyMacPackage(bundle, arch = process.arch) {
+function verifyMacPackage(bundle, arch = process.arch, appId = process.env.TOGLE_RELEASE_CHANNEL === 'beta' ? 'io.togle.app.beta' : 'io.togle.app') {
   const cpu = { arm64: 'arm64', x64: 'x86_64' }[arch]
   assert.ok(cpu, 'Verify arm64 and x64 packages separately.')
   const contents = path.join(bundle, 'Contents')
   const resources = path.join(contents, 'Resources')
   const info = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', path.join(contents, 'Info.plist')], { encoding: 'utf8' }))
-  assert.equal(info.CFBundleIdentifier, 'io.togle.app')
+  assert.equal(info.CFBundleIdentifier, appId)
   assert.equal(info.LSMinimumSystemVersion, '14.2.0', 'System audio requires macOS 14.2 or later.')
   for (const key of ['NSMicrophoneUsageDescription', 'NSAudioCaptureUsageDescription']) {
     assert.ok(typeof info[key] === 'string' && info[key].trim(), 'Missing macOS permission description: ' + key)

@@ -9,6 +9,7 @@
   $Modulus = '__TOGLE_RELEASE_MODULUS__'
   $Exponent = '__TOGLE_RELEASE_EXPONENT__'
   $ChannelUrl = 'https://api.github.com/repos/togle-app/togle/releases/__TOGLE_RELEASE_TARGET__'
+  $ProductName = if ('__TOGLE_RELEASE_INSTALL_CHANNEL__' -eq 'beta') { 'Togle Beta' } else { 'Togle' }
   $Stable = $ChannelUrl.EndsWith('/releases/latest')
   $Releases = if ($env:TOGLE_INSTALL_RELEASES) { $env:TOGLE_INSTALL_RELEASES } else { $ChannelUrl }
   $NoStable = 'No stable Windows release of Togle Free is available yet. For the Windows beta, use https://togle.app/beta/install.ps1.'
@@ -85,7 +86,7 @@
   $file = Join-Path $folder 'TogleSetup.exe'
   $signatureFile = $file + '.sig'
   try {
-    Write-Host "Downloading Togle $($release.tag_name)..."
+    Write-Host "Downloading $ProductName $($release.tag_name)..."
     Save-ReleaseAsset $installer $file -Resume
     Save-ReleaseAsset $signature $signatureFile
     if (-not (Test-Signature ([IO.File]::ReadAllBytes($file)) ([IO.File]::ReadAllBytes($signatureFile)))) {
@@ -95,7 +96,7 @@
     if ($env:TOGLE_INSTALL_DRY_RUN -eq '1') { Write-Host "Checked, not installed: $($installer.name)"; return }
     $process = Start-Process -FilePath $file -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw "The installer stopped with code $($process.ExitCode)." }
-    Write-Host 'Togle is installed. Open it from the Start menu, then hold F9 and talk.'
+    Write-Host "$ProductName is installed. Open it from the Start menu, then hold F9 and talk."
   } finally {
     Remove-Item -LiteralPath $file, $signatureFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $folder -ErrorAction SilentlyContinue

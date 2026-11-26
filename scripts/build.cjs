@@ -57,6 +57,16 @@ async function main() {
   }
   options.push('--config.directories.output=' + output)
   if (!options.some(arg => /^--publish(?:=|$)/.test(arg))) options.push('--publish', 'never')
+  if (process.env.TOGLE_RELEASE_CHANNEL === 'beta') {
+    options.push(
+      '--config.appId=io.togle.app.beta',
+      '--config.productName=Togle Beta',
+      '--config.extraMetadata.name=togle-beta',
+      '--config.nsis.artifactName=Togle.Setup.${version}.${ext}',
+      '--config.appImage.artifactName=Togle-${version}.${ext}',
+      '--config.mac.artifactName=Togle-${version}-${arch}-mac.${ext}'
+    )
+  }
   // Reuse the exact installed Electron version on this platform. This also
   // avoids a network download merely to rebuild an unchanged local runtime.
   const target = options.some(arg => /^(?:--mac|-m)(?:=|$)/.test(arg)) ? 'darwin' : options.some(arg => /^(?:--linux|-l)(?:=|$)/.test(arg)) ? 'linux' : options.some(arg => /^(?:--win|-w)(?:=|$)/.test(arg)) ? 'win32' : process.platform

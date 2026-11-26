@@ -73,6 +73,8 @@ test('the release key signs and checks a file, and the scripts get the key writt
     assert.ok(script.includes('https://api.github.com/repos/togle-app/togle/releases/tags/beta%2Ftest%271'))
     assert.ok(!script.includes('https://api.github.com/repos/togle-app/togle/releases/latest'))
   }
+  assert.match(installers(pub, 'v0.1.0-beta.4').sh, /\[ 'default' = beta \]/)
+  assert.match(installers(pub, 'v0.1.0-beta.5').sh, /\[ 'beta' = beta \]/)
 })
 
 const powershell = process.platform === 'win32' && spawnSync('powershell.exe', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { windowsHide: true }).status === 0
@@ -255,7 +257,7 @@ test('the shell installer reports an empty stable channel', { skip: !shell }, as
   assert.match(result.out, /No stable release of Togle Free is available yet/)
 })
 
-test('the Linux installer recovers from a partial download and installs the signed x64 build for the current user', {
+test('the Linux installer recovers from a partial download and installs the signed Beta alongside Togle', {
   skip: !shell || process.platform !== 'linux'
 }, async t => {
   const tag = 'v0.2.0-beta.1'
@@ -267,6 +269,12 @@ test('the Linux installer recovers from a partial download and installs the sign
       const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'togle-install-'))
       const script = path.join(folder, 'install.sh')
       const dataHome = path.join(folder, 'user data')
+      const stableApp = path.join(dataHome, 'togle', 'Togle.AppImage')
+      const stableShortcut = path.join(dataHome, 'applications', 'togle.desktop')
+      for (const file of [stableApp, stableShortcut]) {
+        fs.mkdirSync(path.dirname(file), { recursive: true })
+        fs.writeFileSync(file, 'existing Togle')
+      }
       const ranges = []
       fs.writeFileSync(script, installers(pub, tag).sh)
       t.after(() => fs.rmSync(folder, { recursive: true, force: true }))
@@ -294,13 +302,14 @@ test('the Linux installer recovers from a partial download and installs the sign
         TOGLE_INSTALL_RELEASES: release.url, TOGLE_INSTALL_PLATFORM: 'linux-x64', XDG_DATA_HOME: dataHome, HOME: folder
       })
       assert.equal(result.code, 0, result.out)
-      assert.match(result.out, /Togle Free is installed/)
+      assert.match(result.out, /Togle Beta is installed/)
       const expected = [undefined, `bytes=${cut}-`]
       if (!acceptsRange) expected.push(undefined)
       assert.deepEqual(ranges, expected)
-      assert.deepEqual(fs.readFileSync(path.join(dataHome, 'togle', 'Togle.AppImage')), bytes)
-      const launch = path.join(dataHome, 'togle', 'togle')
-      assert.ok(fs.readFileSync(path.join(dataHome, 'applications', 'togle.desktop'), 'utf8').includes(`Exec="${launch}"`))
+      assert.deepEqual(fs.readFileSync(path.join(dataHome, 'togle-beta', 'Togle.AppImage')), bytes)
+      const launch = path.join(dataHome, 'togle-beta', 'togle-beta')
+      assert.ok(fs.readFileSync(path.join(dataHome, 'applications', 'togle-beta.desktop'), 'utf8').includes(`Exec="${launch}"`))
+      for (const file of [stableApp, stableShortcut]) assert.equal(fs.readFileSync(file, 'utf8'), 'existing Togle')
       assert.deepEqual(await run(launch, [], {}), { code: 0, out: 'app started\n' })
     })
   }

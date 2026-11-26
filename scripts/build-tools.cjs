@@ -81,14 +81,14 @@ function checkBuild(root = ROOT) {
 
 function runningApps() {
   if (process.platform === 'win32') {
-    const command = "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); @(Get-CimInstance Win32_Process -Filter \"Name = 'Togle.exe'\" | Select-Object ProcessId,ExecutablePath) | ConvertTo-Json -Compress"
+    const command = "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); @(Get-CimInstance Win32_Process -Filter \"Name = 'Togle.exe' OR Name = 'Togle Beta.exe'\" | Select-Object ProcessId,ExecutablePath) | ConvertTo-Json -Compress"
     const output = execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', windowsHide: true, timeout: 10_000 }).trim()
     const items = output ? JSON.parse(output) : []
     return (Array.isArray(items) ? items : [items]).filter(item => item.ExecutablePath).map(item => ({ pid: item.ProcessId, file: item.ExecutablePath }))
   }
   return execFileSync('ps', ['-axo', 'pid=,comm='], { encoding: 'utf8' }).split('\n').flatMap(line => {
     const match = /^\s*(\d+)\s+(.+)$/.exec(line)
-    if (!match || !/(?:^|\/)[Tt]ogle(?:\.app\/|$)/.test(match[2])) return []
+    if (!match || !/(?:^|\/)togle(?: beta|-beta)?(?:\.app\/|$)/i.test(match[2])) return []
     let file = match[2]
     if (process.platform === 'linux') { try { file = fs.readlinkSync('/proc/' + match[1] + '/exe') } catch { return [] } }
     return [{ pid: Number(match[1]), file }]

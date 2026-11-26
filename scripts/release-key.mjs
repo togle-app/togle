@@ -43,13 +43,16 @@ export function installers(pub, tag) {
   if (tag !== undefined && !tag.trim()) throw new Error('The release tag must have a name.')
   // The tag occupies one URL path segment inside a quoted shell string.
   const target = tag === undefined ? 'latest' : 'tags/' + encodeURIComponent(tag).replace(/'/g, '%27')
+  // The first four beta builds used the regular Togle installation identity.
+  const beta = /^v?\d+\.\d+\.\d+-beta\.\d+$/.test(tag ?? '') && !/^v?0\.1\.0-beta\.[1-4]$/.test(tag)
+  const channel = beta ? 'beta' : 'default'
   const ps1 = fs.readFileSync(path.join(here, '..', 'install', 'install.ps1'), 'utf8')
     .replace('__TOGLE_RELEASE_MODULUS__', modulus).replace('__TOGLE_RELEASE_EXPONENT__', exponent)
-    .replace('__TOGLE_RELEASE_TARGET__', target)
+    .replace('__TOGLE_RELEASE_TARGET__', target).replace('__TOGLE_RELEASE_INSTALL_CHANNEL__', channel)
   // A shell script must end its lines with LF alone, even when this runs on a Windows checkout.
   const sh = fs.readFileSync(path.join(here, '..', 'install', 'install.sh'), 'utf8').replace(/\r\n/g, '\n')
     .replace('__TOGLE_RELEASE_PUBLIC_KEY__', publicPem.trim())
-    .replace('__TOGLE_RELEASE_TARGET__', target)
+    .replace('__TOGLE_RELEASE_TARGET__', target).replace('__TOGLE_RELEASE_INSTALL_CHANNEL__', channel)
   return { ps1, sh }
 }
 

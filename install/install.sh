@@ -7,6 +7,14 @@ set -eu
 RELEASE_SOURCE='https://api.github.com/repos/togle-app/togle/releases/__TOGLE_RELEASE_TARGET__'
 RELEASES="${TOGLE_INSTALL_RELEASES:-$RELEASE_SOURCE}"
 PUBLIC_KEY='__TOGLE_RELEASE_PUBLIC_KEY__'
+app_name=Togle
+app_directory=togle
+install_name='Togle Free'
+if [ '__TOGLE_RELEASE_INSTALL_CHANNEL__' = beta ]; then
+  app_name='Togle Beta'
+  app_directory=togle-beta
+  install_name='Togle Beta'
+fi
 
 die() {
   printf '%s\n' "$1" >&2
@@ -137,47 +145,47 @@ case "$platform" in
     need ditto
     need syspolicy_check
     applications="$HOME/Applications"
-    app="$applications/Togle.app"
+    app="$applications/$app_name.app"
     mkdir -p "$applications"
-    if ! mkdir "$applications/.togle-install-lock" 2>/dev/null; then
-      die 'Another Togle Free installation is in progress in ~/Applications.'
+    if ! mkdir "$applications/.$app_directory-install-lock" 2>/dev/null; then
+      die "Another $install_name installation is in progress in ~/Applications."
     fi
-    lock="$applications/.togle-install-lock"
-    stage=$(mktemp -d "$applications/.togle-install.XXXXXX")
+    lock="$applications/.$app_directory-install-lock"
+    stage=$(mktemp -d "$applications/.$app_directory-install.XXXXXX")
     ditto -x -k "$work/$name" "$stage"
-    if [ ! -d "$stage/Togle.app" ] || ! syspolicy_check distribution "$stage/Togle.app"; then
-      die "macOS could not verify the Togle Free app. Your previous installation is still available if you had one."
+    if [ ! -d "$stage/$app_name.app" ] || ! syspolicy_check distribution "$stage/$app_name.app"; then
+      die "macOS could not verify the $install_name app. Your previous installation is still available if you had one."
     fi
-    if pgrep -u "$(id -u)" -x Togle >/dev/null 2>&1; then
-      die 'Quit Togle and run the install command again.'
+    if pgrep -u "$(id -u)" -x "$app_name" >/dev/null 2>&1; then
+      die "Quit $app_name and run the install command again."
     fi
     if [ -e "$app" ] || [ -L "$app" ]; then
       backup="$stage/previous.app"
       mv "$app" "$backup"
     fi
-    mv "$stage/Togle.app" "$app"
-    echo 'Togle Free is installed in ~/Applications. Open Togle from Finder.'
+    mv "$stage/$app_name.app" "$app"
+    echo "$install_name is installed in ~/Applications. Open $app_name from Finder."
     ;;
   *)
     data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
     case "$data_home" in /*) ;; *) data_home="$HOME/.local/share" ;; esac
-    dir="$data_home/togle"
+    dir="$data_home/$app_directory"
     mkdir -p "$dir" "$data_home/applications"
-    stage=$(mktemp -d "$data_home/.togle-install.XXXXXX")
+    stage=$(mktemp -d "$data_home/.$app_directory-install.XXXXXX")
     cp "$work/$name" "$stage/Togle.AppImage"
-    cat > "$stage/togle" <<'LAUNCHER'
+    cat > "$stage/$app_directory" <<'LAUNCHER'
 #!/bin/sh
 if [ ! -r /dev/fuse ] || [ ! -w /dev/fuse ] || ! ldconfig -p 2>/dev/null | grep -Fq 'libfuse.so.2'; then
   export APPIMAGE_EXTRACT_AND_RUN=1
 fi
 exec "$(dirname "$0")/Togle.AppImage" "$@"
 LAUNCHER
-    chmod 755 "$stage/Togle.AppImage" "$stage/togle"
+    chmod 755 "$stage/Togle.AppImage" "$stage/$app_directory"
     # Desktop Entry quoting escapes special characters twice inside a quoted Exec argument.
-    executable=$(printf '%s' "$dir/togle" | sed 's/\\/\\\\\\\\/g; s/["$`]/\\\\&/g; s/%/%%/g')
-    printf '[Desktop Entry]\nType=Application\nName=Togle\nExec="%s"\nTerminal=false\nCategories=Office;\n' "$executable" > "$stage/togle.desktop"
-    mv -f "$stage/Togle.AppImage" "$stage/togle" "$dir/"
-    mv -f "$stage/togle.desktop" "$data_home/applications/togle.desktop"
-    echo 'Togle Free is installed. Open Togle from your applications menu.'
+    executable=$(printf '%s' "$dir/$app_directory" | sed 's/\\/\\\\\\\\/g; s/["$`]/\\\\&/g; s/%/%%/g')
+    printf '[Desktop Entry]\nType=Application\nName=%s\nExec="%s"\nTerminal=false\nCategories=Office;\n' "$app_name" "$executable" > "$stage/$app_directory.desktop"
+    mv -f "$stage/Togle.AppImage" "$stage/$app_directory" "$dir/"
+    mv -f "$stage/$app_directory.desktop" "$data_home/applications/$app_directory.desktop"
+    echo "$install_name is installed. Open $app_name from your applications menu."
     ;;
 esac

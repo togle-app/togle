@@ -48,6 +48,27 @@ Copy the command into the published release notes. Verify it from a signed-out W
 
 The tag matters because GitHub's latest-release endpoint skips prereleases. For the stable website command, generate the scripts without a tag so they follow the latest stable release. [GitHub release API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)
 
+## Togle Beta builds
+
+Starting with `v0.1.0-beta.5`, build prereleases with `TOGLE_RELEASE_CHANNEL=beta` and the exact prerelease version in
+`package.json` and `package-lock.json`. Togle Beta has its own app identity, application data, and menu entry. The
+installed command is `togle-beta`. Stable builds use the regular Togle identity and `togle` command.
+
+```powershell
+$env:TOGLE_RELEASE_CHANNEL = 'beta'
+npm run dist -- --win --x64 --config.directories.output=dist-beta
+Remove-Item Env:TOGLE_RELEASE_CHANNEL
+```
+
+```sh
+TOGLE_RELEASE_CHANNEL=beta npm run dist -- --linux AppImage --x64 --config.directories.output=dist-beta
+```
+
+The public asset names still follow `Togle.Setup.<version>.exe` and `Togle-<version>.AppImage`. Installing from the
+beta shell command places the Linux app in `$XDG_DATA_HOME/togle-beta`, or `~/.local/share/togle-beta`, with a separate
+**Togle Beta** launcher. The stable install remains available from **Togle**. The first four published beta builds
+used the regular install identity and keep that behavior when their install scripts are regenerated from the tag.
+
 ## Each release
 
 1. Build from the commit at the release tag. Use `npm run dist -- --linux AppImage --x64` on an x64 Linux system. Follow the [macOS distribution steps](macos.md#distribution) for Apple silicon and Intel ZIPs.

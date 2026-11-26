@@ -2,7 +2,7 @@
 
 Reach is the development name for Togle Pro’s hosted device connection. The Togle client pairs devices and checks which actions each may take. The relay checks the account entitlement and carries messages encrypted between the devices. The Android pilot uses the Togle mobile app. The separate Studio desktop app handles call audio.
 
-**Status: not reviewed.** Reach stays out of every release until an outside review has tried to break it. Only a development run with a courier set (`TOGLE_COURIER`) has it. A packaged Togle never does. Togle account sign-in and the Pro waitlist work independently of the courier.
+**Status.** Togle Beta connects to the hosted relay for accounts enabled for device testing. Use Settings → Devices to choose a shared folder and enable remote actions on each host you want to control. Public Togle keeps device access off pending independent security review. Togle account sign-in and the Pro waitlist are available separately.
 
 ## What is built
 
@@ -11,7 +11,7 @@ Reach is the development name for Togle Pro’s hosted device connection. The To
 - **Agents across devices.** **This computer** comes first. Each paired computer and server has its own foldable section, including an offline device or one with no recent tasks. Open a task to see its reported state and current request. Paired computers can **Refuse** a command or **Stop** a managed task when the host allows it. Command approval takes place on the computer running the task.
 - **A record** (Settings → Devices): what other devices did on this computer, and a system notice each time.
 
-The release roadmap includes remote approval and starting tasks with presence verification, earlier conversation history and desktop follow-ups, synced to-dos and notes, a server connector and the public mobile app.
+The release roadmap includes remote approval and starting tasks with presence verification, earlier conversation history and desktop follow-ups, synced to-dos and notes, a headless server connector and the public mobile app. Togle Beta on Linux uses the same graphical app as other desktops.
 
 ## Private device control pilot
 
@@ -62,7 +62,7 @@ The parts are in `src/main/reach/`:
 
 **First setup and recovery.** Each managing computer proves possession of its own key and creates an isolated group. One Togle account supplies Pro access to multiple groups. Account access alone does not grant any device’s permissions or reserve a first-computer slot. The managing computer can add devices, and paired devices can use the agent controls each host enables. Recovery proves possession of the saved key for the old group and binds the proof to the replacement’s fresh challenge and new recovery public key. The relay replaces only that group atomically. The saved old key expires when recovery succeeds.
 
-**Local confirmation.** The development build prompts for Touch ID on supported Macs. Windows, Linux, and Macs without Touch ID use a native consent dialog in the development pilot. That dialog confirms intent in the active desktop session. Operating-system user verification on those platforms remains future work.
+**Local confirmation.** Togle prompts for Touch ID on supported Macs. Windows, Linux, and Macs without Touch ID use a native consent dialog. That dialog confirms intent in the active desktop session. Operating-system user verification on those platforms remains future work.
 
 **Limits.** Remote actions require a current relay membership check at dispatch. Long-lived device keys provide no forward secrecy. Compromising an authorized endpoint exposes whatever that endpoint can access. Independent review is still required before public release.
 
