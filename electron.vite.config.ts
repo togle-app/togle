@@ -5,10 +5,17 @@ import { accountConfig } from './src/main/account-config'
 
 const shared = { '@shared': resolve(__dirname, 'src/shared') }
 
-export default defineConfig(({ command }) => ({
+export default defineConfig(({ command }) => {
+  const beta = process.env.TOGLE_RELEASE_CHANNEL === 'beta'
+  const account = accountConfig(process.env.TOGLE_ACCOUNT_SUPABASE_URL, process.env.TOGLE_ACCOUNT_SUPABASE_KEY, command === 'serve')
+  if (beta && account?.url !== 'https://ipqnsfzjepjhdbbpwjfu.supabase.co') {
+    throw new Error('Build Togle Beta with the hosted Togle account origin and its public key.')
+  }
+  return {
   main: {
     define: {
-      __TOGLE_ACCOUNT_CONFIG__: JSON.stringify(accountConfig(process.env.TOGLE_ACCOUNT_SUPABASE_URL, process.env.TOGLE_ACCOUNT_SUPABASE_KEY, command === 'serve')) ?? 'undefined'
+      __TOGLE_ACCOUNT_CONFIG__: JSON.stringify(account) ?? 'undefined',
+      __TOGLE_RELEASE_CHANNEL__: JSON.stringify(beta ? 'beta' : 'stable')
     },
     resolve: { alias: shared },
     build: {
@@ -37,4 +44,5 @@ export default defineConfig(({ command }) => ({
     // Bind IPv4 explicitly; "localhost" can resolve to ::1 for Vite but 127.0.0.1 for Electron.
     server: { host: '127.0.0.1' }
   }
-}))
+  }
+})

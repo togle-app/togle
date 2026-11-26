@@ -119,6 +119,14 @@ function Member({ reach, busy, run }: PartProps) {
   return (
     <>
       <Row label={false} name="Connection" note={connectionWords(reach)} />
+      {reach.hostedBeta && (
+        <Row label={false} name="Shared agent folder" note={reach.sharedFolder || 'Choose a folder to share its agent sessions with your paired devices.'}>
+          <div className="row">
+            <button className="small" disabled={!!busy} onClick={() => void run('folder', () => api.reachShareFolder(true))}>{reach.sharedFolder ? 'Change folder' : 'Choose folder'}</button>
+            {reach.sharedFolder && <button className="ghost small" disabled={!!busy} onClick={() => void run('folder', () => api.reachShareFolder(false))}>Stop sharing</button>}
+          </div>
+        </Row>
+      )}
       {reach.devices.map((device) => (
         <Row key={device.device} label={false} name={<span className="reach-device"><span className={`reach-dot ${device.online ? 'on' : ''}`} aria-hidden="true" /><span className="free-text">{device.name}</span></span>} note={device.me ? 'This computer' : `${ROLE_WORDS[device.role]}${device.online ? '' : ' · offline'}`}>
           {!device.me && manages && (
@@ -204,7 +212,7 @@ function AddDevice({ reach, busy, run }: PartProps) {
     return (
       <div className="setting stacked" role="group" aria-label="Add this device?">
         <span className="name">Add {adding.name}?</span>
-          <span className="note">{adding.name} {adding.role === 'phone' && reach.phonePilot ? 'joins as a phone. It can see eligible Codex questions and select a listed answer.' : JOINS_AS[adding.role ?? 'computer']}</span>
+          <span className="note">{adding.name} {adding.role === 'phone' && reach.hostedBeta ? 'joins as a phone. It can see sessions you share and use the controls you enable on each computer.' : adding.role === 'phone' && reach.phonePilot ? 'joins as a phone. It can see eligible Codex questions and select a listed answer.' : JOINS_AS[adding.role ?? 'computer']}</span>
         <span className="control row">
           <button className="primary" disabled={!!busy || adding.stage === 'adding'} onClick={() => void run('confirm', () => api.reachConfirmAdd())}>{adding.stage === 'adding' ? 'Adding…' : 'Add'}</button>
           <button className="ghost" disabled={!!busy || adding.stage === 'adding'} onClick={() => void run('cancel-add', () => api.reachCancelAdd())}>Cancel</button>

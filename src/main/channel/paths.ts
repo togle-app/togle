@@ -4,6 +4,7 @@ import { promises as fs, realpathSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { secretOf } from './protocol'
+import { betaBuild, betaProfile } from '../release-channel'
 
 /**
  * Where an installed Togle keeps its data, for a program that is not Togle and cannot ask it (the `togle` command in a
@@ -11,9 +12,10 @@ import { secretOf } from './protocol'
  */
 export function defaultDataFolder(env: NodeJS.ProcessEnv = process.env, home: string = os.homedir(), platform: string = process.platform): string {
   if (env.TOGLE_DATA?.trim()) return env.TOGLE_DATA.trim()
-  if (platform === 'win32') return path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Togle')
-  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'Togle')
-  return path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'Togle')
+  const name = betaBuild ? betaProfile : 'Togle'
+  if (platform === 'win32') return path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), name)
+  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', name)
+  return path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), name)
 }
 
 /** The folder Togle keeps the channel's secret in. */

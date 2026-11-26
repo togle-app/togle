@@ -1,15 +1,15 @@
 // Reach in the app: where it keeps its keys and book (encrypted by the system's keystore), what the window may ask of it,
-// and when it is in this Togle at all. It stays out of every release until an outside review has tried to break it:
-// only a development run with a courier set (TOGLE_COURIER) has it.
+// and when it is enabled. Installed beta builds use the account-restricted hosted relay.
 import { app, BrowserWindow, clipboard, dialog, safeStorage, systemPreferences } from 'electron'
 import os from 'node:os'
 import type { ReachState, RemoteAct } from '@shared/reach'
 import { readSecret, writeSecret } from '../storage'
 import { Reach, type ReachStore, type ReachTasks } from './reach'
 import type { StudioAccount } from './studio-account'
+import { betaBuild, betaRelay } from '../release-channel'
 
-export function reachConfig(): { courier: string } | undefined {
-  if (app.isPackaged) return undefined
+export function reachConfig(): { courier: string; hostedBeta?: boolean } | undefined {
+  if (app.isPackaged) return betaBuild ? { courier: betaRelay, hostedBeta: true } : undefined
   try {
     const url = new URL(process.env.TOGLE_COURIER ?? '')
     const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
@@ -58,7 +58,7 @@ async function approveDeviceChange(operation: keyof typeof DEVICE_CHANGE): Promi
     await systemPreferences.promptTouchID(title).catch(() => { throw new Error('Device confirmation was cancelled.') })
     return
   }
-  // This development-only dialog asks for local consent. A platform unlock requires native support.
+  // The beta uses a local consent dialog on platforms without Touch ID.
   const options = { type: 'question' as const, title, message: title, detail, buttons: ['Cancel', action], defaultId: 0, cancelId: 0 }
   const parent = BrowserWindow.getFocusedWindow()
   const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
@@ -75,17 +75,18 @@ export function registerReach(deps: ReachDeps, account?: StudioAccount): Reach |
   }
   const reach = new Reach({
     courier: config.courier,
+    hostedBeta: config.hostedBeta,
     approveDeviceChange,
-    phonePilot: process.env.TOGLE_PHONE_PILOT === '1',
-    phoneActivity: process.env.TOGLE_PHONE_PILOT_ACTIVITY === '1',
-    accountUsage: process.env.TOGLE_PILOT_ACCOUNT_USAGE === '1',
-    desktopActivity: process.env.TOGLE_DESKTOP_PILOT_ACTIVITY === '1',
-    phoneMessages: process.env.TOGLE_PHONE_PILOT_MESSAGES === '1',
-    pilotFolder: process.env.TOGLE_PHONE_PILOT_FOLDER,
+    phonePilot: config.hostedBeta || process.env.TOGLE_PHONE_PILOT === '1',
+    phoneActivity: config.hostedBeta || process.env.TOGLE_PHONE_PILOT_ACTIVITY === '1',
+    accountUsage: !config.hostedBeta && process.env.TOGLE_PILOT_ACCOUNT_USAGE === '1',
+    desktopActivity: config.hostedBeta || process.env.TOGLE_DESKTOP_PILOT_ACTIVITY === '1',
+    phoneMessages: config.hostedBeta || process.env.TOGLE_PHONE_PILOT_MESSAGES === '1',
+    pilotFolder: config.hostedBeta ? undefined : process.env.TOGLE_PHONE_PILOT_FOLDER,
     store,
     kind: 'computer',
     // Two Togles tried on one computer would share its name: a development run can give each its own.
-    name: () => process.env.TOGLE_DEVICE_NAME || os.hostname(),
+    name: () => (!config.hostedBeta && process.env.TOGLE_DEVICE_NAME) || os.hostname(),
     account,
     tasks: deps.tasks
   })
@@ -119,6 +120,17 @@ export function registerReach(deps: ReachDeps, account?: StudioAccount): Reach |
   handle('reach:cancel-add', () => { reach.cancelAdd(); return reach.state() })
   handle('reach:remove', async (device) => { await reach.remove(text(device, 'The device', 40)); return reach.state() })
   handle('reach:act-on-this', async (on) => { await reach.setActOnThis(on === true); return reach.state() })
+  handle('reach:share-folder', async (choose) => {
+    if (!config.hostedBeta) throw new Error('Choose a shared folder in Togle Beta.')
+    if (choose === false) await reach.setSharedFolder(null)
+    else {
+      const options = { title: 'Choose a folder to share with your paired devices', properties: ['openDirectory'] as ['openDirectory'] }
+      const parent = BrowserWindow.getFocusedWindow()
+      const selected = await (parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options))
+      if (!selected.canceled && selected.filePaths[0]) await reach.setSharedFolder(selected.filePaths[0])
+    }
+    return reach.state()
+  })
   handle('reach:act', async (device, act) => {
     const given = (act ?? {}) as Record<string, unknown>
     const what = given.what

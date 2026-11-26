@@ -79,7 +79,7 @@ const device = async (name, kind = 'computer', extra = {}) => {
   return reach
 }
 
-before(async () => { courier = await fakeCourier({ tokens: new Map([['token-ana', 'ana'], ['token-pause', 'pause'], ['token-pilot', 'pilot'], ['token-reports', 'reports'], ['token-desktop-reports', 'desktop-reports']]) }) })
+before(async () => { courier = await fakeCourier({ tokens: new Map([['token-ana', 'ana'], ['token-pause', 'pause'], ['token-pilot', 'pilot'], ['token-reports', 'reports'], ['token-desktop-reports', 'desktop-reports'], ['token-beta', 'beta']]) }) })
 after(async () => {
   for (const reach of started) reach.stop()
   await courier.close()
@@ -96,6 +96,29 @@ async function add(computer, newDevice) {
   await until(() => newDevice.state().standing === 'member' && computer.state().adding?.stage === 'added', 'the device to be added')
   return shown
 }
+
+test('hosted beta shares only the selected folder, with remote actions off until enabled', async () => {
+  const tasks = new Tasks()
+  for (const task of tasks.tasks) task.folder = path.resolve(task.folder)
+  const store = memoryStore()
+  const host = await device('Beta PC', 'computer', {
+    account: signedIn('token-beta'), tasks, store, hostedBeta: true, phonePilot: true, desktopActivity: true
+  })
+  await host.connectAccount()
+  await until(() => host.state().standing === 'member', 'the hosted beta computer')
+  const viewer = await device('Beta laptop')
+  await add(host, viewer)
+  const remote = () => viewer.remoteTasks().find(item => item.device === host.state().me.device)
+  await until(() => remote()?.at, 'the initial empty host report')
+  assert.deepEqual(remote().tasks, [])
+  assert.equal(host.state().actOnThis, false)
+  await host.setSharedFolder(tasks.tasks[0].folder)
+  await until(() => remote()?.tasks.length === 1, 'the selected folder report')
+  assert.equal(remote().tasks[0].key, tasks.tasks[0].key)
+  assert.equal(store.files.get('reach-settings').sharedFolder, tasks.tasks[0].folder)
+  await host.setSharedFolder(null)
+  await until(() => remote()?.tasks.length === 0, 'the folder to stop sharing')
+})
 
 let pc, laptop, server, pcTasks
 test('the first computer to sign in starts the devices; a computer and a server are added by their codes', async () => {

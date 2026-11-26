@@ -191,6 +191,7 @@ const api: TogleApi = {
   reachCancelAdd: () => ipcRenderer.invoke('reach:cancel-add'),
   reachRemove: device => ipcRenderer.invoke('reach:remove', device),
   reachActOnThis: on => ipcRenderer.invoke('reach:act-on-this', on),
+  reachShareFolder: choose => ipcRenderer.invoke('reach:share-folder', choose),
   reachAct: (device, act) => ipcRenderer.invoke('reach:act', device, act),
   onTaskNotice: cb => subscribe('notice:state', cb),
   sizeTaskNotice: height => ipcRenderer.send('notice:size', height),

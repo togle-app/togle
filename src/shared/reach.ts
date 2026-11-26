@@ -88,8 +88,10 @@ export interface ActedHere {
 }
 
 export interface ReachState {
-  /** Reach is in this Togle: a development run with a courier set. */
+  /** Whether device connections are enabled in this build. */
   available: boolean
+  hostedBeta?: boolean
+  sharedFolder?: string
   /** This development host allows paired phones and computers to answer eligible Codex questions. */
   phonePilot?: boolean
   /** Signed in to Togle Studio on this computer. */

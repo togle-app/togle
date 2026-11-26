@@ -305,6 +305,7 @@ export interface TogleApi {
   reachRemove(device: string): Promise<import('./reach').ReachState>
   /** Whether other devices may act on this computer. */
   reachActOnThis(on: boolean): Promise<import('./reach').ReachState>
+  reachShareFolder(choose: boolean): Promise<import('./reach').ReachState>
   /** Refuses a request or stops a task on another device. */
   reachAct(device: string, act: import('./reach').RemoteAct): Promise<void>
   /** The small notice window is told what to show: a task that waits or finished, or null for nothing. */

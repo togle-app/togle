@@ -7,10 +7,11 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
 import type { UpdateState } from '@shared/updates'
+import { betaBuild } from './release-channel'
 export type { UpdatePhase, UpdateState } from '@shared/updates'
 
 export interface ReleaseAsset { name: string; browser_download_url: string }
-export interface Release { tag_name: string; assets: ReleaseAsset[] }
+export interface Release { tag_name: string; assets: ReleaseAsset[]; prerelease?: boolean }
 
 /** Whether version `a` is newer than `b` ("v0.2.0" > "0.1.9"); anything after a "-" is a pre-release, older than without. */
 export function newer(a: string, b: string): boolean {
@@ -21,6 +22,10 @@ export function newer(a: string, b: string): boolean {
   const [x, xp] = parse(a), [y, yp] = parse(b)
   for (let index = 0; index < 3; index++) if ((x[index] ?? 0) !== (y[index] ?? 0)) return (x[index] ?? 0) > (y[index] ?? 0)
   if (xp === yp) return false
+  const beta = /^beta\.(\d+)$/
+  const xa = beta.exec(xp)
+  const ya = beta.exec(yp)
+  if (xa && ya) return Number(xa[1]) > Number(ya[1])
   return !xp ? true : !yp ? false : xp > yp
 }
 
@@ -80,9 +85,13 @@ export class Updates {
     const now = (this.options.now ?? Date.now)()
     this.set({ phase: 'checking', checkedAt: now })
     try {
-      const response = await this.options.fetch(this.options.releases, { headers: { Accept: 'application/vnd.github+json' } })
+      const releases = betaBuild ? 'https://togle.app/beta/release.json' : this.options.releases
+      const response = await this.options.fetch(releases, { headers: { Accept: 'application/vnd.github+json' } })
       if (!response.ok) throw new Error(`The release list answered ${response.status}.`)
       const release = await response.json() as Release
+      if (betaBuild && (!release.prerelease || !/^v\d+\.\d+\.\d+-beta\.\d+$/.test(release.tag_name))) {
+        throw new Error('The update does not belong to the Togle Beta channel.')
+      }
       if (!release?.tag_name || !Array.isArray(release.assets) || !newer(release.tag_name, this.options.current)) { this.set({ phase: 'none', checkedAt: now }); return }
       const version = release.tag_name.replace(/^v/i, '')
       const found = assetFor(this.platform, this.arch, release.assets)

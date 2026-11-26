@@ -16,6 +16,8 @@ test('which version is newer, and which build is for this system', () => {
   assert.equal(newer('0.1.0', '0.2.0'), false)
   assert.equal(newer('0.2.0', '0.2.0-beta.1'), true, 'a release is newer than its pre-release')
   assert.equal(newer('0.2.0-beta.1', '0.1.9'), true)
+  assert.equal(newer('v0.1.0-beta.10', '0.1.0-beta.9'), true)
+  assert.equal(newer('v0.1.0-beta.9', '0.1.0-beta.10'), false)
   const assets = ['Togle.Setup.0.2.0.exe', 'Togle.Setup.0.2.0.exe.sig', 'Togle-0.2.0-arm64-mac.zip', 'Togle-0.2.0-arm64-mac.zip.sig', 'Togle-0.2.0-mac.zip', 'Togle-0.2.0-mac.zip.sig', 'Togle-0.2.0.AppImage', 'Togle-0.2.0.AppImage.sig', 'togle_0.2.0_amd64.deb']
     .map((name) => ({ name, browser_download_url: 'https://example.test/' + name }))
   assert.equal(assetFor('win32', 'x64', assets).build.name, 'Togle.Setup.0.2.0.exe')

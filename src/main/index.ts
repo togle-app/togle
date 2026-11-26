@@ -1903,7 +1903,7 @@ if (process.argv.includes('--togle-hook')) {
     started.ready = Date.now()
     // Electron adopts any existing activator on its shortcut. Migrate our own older installation first.
     if (windowsNotices && app.isPackaged) {
-      const link = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Togle.lnk')
+      const link = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', APP_ID.endsWith('.beta') ? 'Togle Beta.lnk' : 'Togle.lnk')
       if (existsSync(link)) try {
         const old = shell.readShortcutLink(link)
         if (old.appUserModelId === APP_ID && old.target.toLowerCase() === process.execPath.toLowerCase() && old.toastActivatorClsid?.toUpperCase() !== TOAST_ACTIVATOR) {

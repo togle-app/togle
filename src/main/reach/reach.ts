@@ -6,7 +6,7 @@
 // on a task from another device. This first part carries the acts that need no proof that the person is there: Refuse,
 // Stop and its second press. Allow and Start, which need that proof, come with the proof.
 //
-// Not reviewed yet: Reach stays out of every release until an outside review has tried to break it.
+// Hosted device access is limited to the beta accounts authorized by the relay.
 import { EventEmitter } from 'node:events'
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
@@ -42,6 +42,7 @@ export interface ReachTasks {
 }
 
 export interface ReachOptions {
+  hostedBeta?: boolean
   approveDeviceChange?: (operation: 'enable' | 'recover' | 'save') => Promise<void>
   courier: string
   store: ReachStore
@@ -94,6 +95,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
   private addFromAnother = false
   private problem?: string
   private actOnThis = true
+  private sharedFolder?: string
   private acted: ActedHere[] = []
   private readonly online = new Set<string>()
   private readonly remote = new Map<string, DeviceTasks>()
@@ -156,8 +158,11 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     else if (this.book?.get(this.identity.device)) this.standing = 'member'
     const seen = await this.options.store.read<[string, number][]>('reach-action-receipts')
     for (const [key, expires] of seen ?? []) if (Number.isFinite(expires) && expires >= this.now) this.seen.set(key, expires)
-    const settings = await this.options.store.read<{ actOnThis?: boolean }>(FILES.settings)
-    this.actOnThis = settings?.actOnThis !== false
+    const settings = await this.options.store.read<{ actOnThis?: boolean; sharedFolder?: string }>(FILES.settings)
+    this.actOnThis = this.options.hostedBeta ? settings?.actOnThis === true : settings?.actOnThis !== false
+    if (this.options.hostedBeta && typeof settings?.sharedFolder === 'string' && path.isAbsolute(settings.sharedFolder)) {
+      this.sharedFolder = settings.sharedFolder
+    }
     this.acted = (await this.options.store.read<ActedHere[]>(FILES.acted)) ?? []
     this.link = new CourierLink({
       url: this.options.courier, identity: this.identity, kind: this.options.kind, open: this.options.open, delays: this.options.delays,
@@ -201,6 +206,7 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     const who = this.options.account?.who()
     return {
       available: true,
+      ...(this.options.hostedBeta ? { hostedBeta: true, sharedFolder: this.sharedFolder } : {}),
       ...(this.options.phonePilot && this.options.kind === 'computer' ? { phonePilot: true } : {}),
       ...(who ? { account: { email: who.email } } : {}),
       link: this.link?.state ?? 'off',
@@ -531,8 +537,20 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
   async setActOnThis(on: boolean): Promise<void> {
     this.actOnThis = on
     this.tasksChanged()
-    await this.options.store.write(FILES.settings, { actOnThis: on })
+    await this.saveSharingSettings()
     this.emit('changed')
+  }
+
+  async setSharedFolder(folder: string | null): Promise<void> {
+    if (!this.options.hostedBeta || (folder !== null && !path.isAbsolute(folder))) throw new Error('Choose a local folder to share.')
+    this.sharedFolder = folder === null ? undefined : path.resolve(folder)
+    this.tasksChanged()
+    await this.saveSharingSettings()
+    this.emit('changed')
+  }
+
+  private saveSharingSettings(): Promise<void> {
+    return this.options.store.write(FILES.settings, { actOnThis: this.actOnThis, sharedFolder: this.sharedFolder })
   }
 
   /** Something changed in this computer's tasks: shared with the person's other devices a moment later. */
@@ -808,13 +826,13 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
 
   private pilotChoicesOn(): boolean {
     return this.options.kind === 'computer' && this.options.phonePilot === true && this.actOnThis
-      && path.isAbsolute(this.options.pilotFolder ?? '')
+      && path.isAbsolute(this.sharingFolder() ?? '')
   }
 
   private canShareReports(role: DeviceKind): boolean {
     const enabled = role === 'computer' ? this.options.desktopActivity === true
       : role === 'phone' && this.options.phonePilot === true && this.options.phoneActivity === true
-    return enabled && this.options.kind === 'computer' && !!this.options.tasks?.phone && path.isAbsolute(this.options.pilotFolder ?? '')
+    return enabled && this.options.kind === 'computer' && !!this.options.tasks?.phone && path.isAbsolute(this.sharingFolder() ?? '')
   }
 
   private phoneChatOn(): boolean {
@@ -825,13 +843,18 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     return recentTasks(tasks.filter(task => task.mine), this.now)
   }
 
+  private sharingFolder(): string | undefined {
+    return this.options.hostedBeta ? this.sharedFolder : this.options.pilotFolder
+  }
+
   private async localTasks(): Promise<TaskView[]> {
     const tasks = await this.options.tasks!.list()
-    const folder = this.options.pilotFolder
+    const folder = this.sharingFolder()
+    if (this.options.hostedBeta && !folder) return []
     if ((!this.options.phonePilot && !this.options.desktopActivity) || folder === undefined) return tasks
     if (!path.isAbsolute(folder)) return []
     const workspace = path.resolve(folder)
-    return tasks.filter(task => path.isAbsolute(task.folder) && path.resolve(task.folder) === workspace)
+    return tasks.filter(task => path.isAbsolute(task.folder) && path.relative(workspace, path.resolve(task.folder)) === '')
   }
 
   private async shareTasks(): Promise<void> {
@@ -919,12 +942,15 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
       return
     }
     this.reporting.add(key)
+    const scope = this.sharedFolder
     try {
       const tasks = this.reportTasks(await this.localTasks().catch((): TaskView[] => []))
       if (!this.connectedDevice(pass.device, pass.role)) return
       const includeQueue = pass.role === 'phone' && this.options.phoneMessages === true
       const report = await phoneReport(this.options.tasks!.phone!, tasks, query, includeQueue, this.options.accountUsage === true).catch(() => undefined)
-      if (this.connectedDevice(pass.device, pass.role)) await this.send(pass.device, { kind: 'phone-report', n, report })
+      if (this.connectedDevice(pass.device, pass.role)) {
+        await this.send(pass.device, { kind: 'phone-report', n, report: scope === this.sharedFolder ? report : undefined })
+      }
     } finally {
       this.reporting.delete(key)
     }
@@ -1005,8 +1031,9 @@ export class Reach extends EventEmitter<{ changed: []; acted: [ActedHere] }> {
     const tasks = this.options.tasks
     if (!tasks || !act || typeof act.task !== 'string') return answer(false, 'That task is not here.')
     try {
+      const scope = this.sharedFolder
       const task = (await this.localTasks()).find((item) => item.key === act.task)
-      if (!await this.canDispatch(pass, note)) return answer(false, 'Remote access to this task is unavailable.')
+      if (!await this.canDispatch(pass, note) || scope !== this.sharedFolder) return answer(false, 'Remote access to this task is unavailable.')
       let what: string
       let delivery: PhoneDelivery | undefined
       if (chatAct) {
