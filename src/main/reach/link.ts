@@ -1,11 +1,11 @@
 // Togle's connection to Studio's courier: one WebSocket, kept open while Reach is on, tried again after it drops (a
 // second, then longer, up to a minute). It says hello with this device's public keys and signs the courier's challenge
-// with its key. A computer signing in also gives the account's access token, once: that is how the first computer starts
-// a person's devices. After that, the device's key is all it shows.
+// with its key. An account-bound connection also proves account sign-in.
 import { EventEmitter } from 'node:events'
 import WebSocket from 'ws'
 import { COURIER_VERSION, HELLO_PURPOSE, MAX_FRAME_BYTES, type Box, type DeviceKind, type Down, type ErrorCode } from '@shared/courier-protocol'
 import { signWith, type Identity } from './crypto'
+import { proveRecovery, type RecoveryKey } from './recovery'
 
 export type LinkState = 'off' | 'connecting' | 'guest' | 'member' | 'refused'
 
@@ -39,6 +39,7 @@ export interface LinkOptions {
   url: string
   identity: Identity
   kind: DeviceKind
+  accountToken?: () => Promise<string | undefined>
   /** Opens a socket (a test can hand its own). */
   open?: (url: string) => WebSocket
   /** How long to wait before each try after a drop. */
@@ -47,7 +48,7 @@ export interface LinkOptions {
 
 const DELAYS = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000]
 /** Refusals that another try would only repeat. */
-const FINAL: Refused['code'][] = ['elsewhere', 'bad-hello', 'bad-proof', 'version']
+const FINAL: Refused['code'][] = ['elsewhere', 'bad-hello', 'bad-proof', 'version', 'account', 'recovery']
 
 export class CourierLink extends EventEmitter<LinkEvents> {
   state: LinkState = 'off'
@@ -58,7 +59,7 @@ export class CourierLink extends EventEmitter<LinkEvents> {
   private wanted = false
   private tries = 0
   private retry?: ReturnType<typeof setTimeout>
-  private signIn?: { account: string; restart?: boolean }
+  private signIn?: { account: string; pairOnly?: boolean; recovery?: string; previous?: RecoveryKey }
   private ids = 0
   private readonly waiting = new Map<string, { resolve: (frame: Ok) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
 
@@ -74,11 +75,10 @@ export class CourierLink extends EventEmitter<LinkEvents> {
   }
 
   /**
-   * Connects again, this time giving the account's access token: a computer signing in. `restart` starts the account's
-   * devices again from this computer (the only computer was lost).
+   * Connects using the account token and an optional explicit activation or recovery.
    */
-  signInWith(account: string, restart = false): void {
-    this.signIn = { account, ...(restart ? { restart: true } : {}) }
+  signInWith(account: string, purpose: { pairOnly?: boolean; recovery?: string; previous?: RecoveryKey } = {}): void {
+    this.signIn = { account, ...purpose }
     this.wanted = true
     this.refusal = undefined
     const old = this.socket
@@ -91,6 +91,8 @@ export class CourierLink extends EventEmitter<LinkEvents> {
   }
 
   stop(): void {
+    this.signIn = undefined
+    this.welcome = undefined
     this.wanted = false
     clearTimeout(this.retry)
     const old = this.socket
@@ -99,7 +101,8 @@ export class CourierLink extends EventEmitter<LinkEvents> {
     old?.on('error', () => {})
     old?.close()
     this.failWaiting()
-    if (this.state !== 'refused') this.set('off')
+    this.refusal = undefined
+    this.set('off')
   }
 
   /** Asks the courier something and waits for its answer. */
@@ -142,15 +145,31 @@ export class CourierLink extends EventEmitter<LinkEvents> {
     socket.on('error', () => { /* close follows */ })
   }
 
+  private async prove(socket: WebSocket, nonce: string): Promise<void> {
+    const explicit = this.signIn
+    const account = explicit ? undefined : await this.options.accountToken?.()
+    if (socket !== this.socket || socket.readyState !== WebSocket.OPEN) return
+    const signature = signWith(this.options.identity, HELLO_PURPOSE, { device: this.options.identity.device, nonce })
+    const auth = explicit?.account ?? account
+    const recovery = explicit?.recovery
+    const previous = explicit?.previous
+    const operation = recovery && (previous
+      ? { recover: { owner: previous.owner, recovery, proof: proveRecovery(previous, nonce, this.options.identity.device, recovery) } }
+      : { activate: { recovery } })
+    socket.send(JSON.stringify({
+      t: 'prove', signature, ...(auth ? { account: auth } : {}),
+      ...(explicit?.pairOnly ? { pairOnly: true } : {}), ...(operation || {})
+    }))
+  }
+
   private receive(socket: WebSocket, frame: Down): void {
     switch (frame.t) {
       case 'challenge': {
-        const signature = signWith(this.options.identity, HELLO_PURPOSE, { device: this.options.identity.device, nonce: frame.nonce })
-        socket.send(JSON.stringify({ t: 'prove', signature, ...(this.signIn ?? {}) }))
+        void this.prove(socket, frame.nonce).catch(() => socket.close())
         return
       }
       case 'welcome':
-        // The token was for this one hello: a member from now on shows its key alone.
+        // Each reconnect fetches a current token for an account-bound desktop.
         this.signIn = undefined
         this.tries = 0
         this.welcome = frame
@@ -160,7 +179,7 @@ export class CourierLink extends EventEmitter<LinkEvents> {
         return
       case 'refused':
         this.refusal = frame
-        if (frame.code === 'account') this.signIn = undefined
+        if (frame.code === 'account' || frame.code === 'recovery') this.signIn = undefined
         if (FINAL.includes(frame.code)) { this.wanted = false; this.set('refused') }
         this.emit('refused', frame)
         return

@@ -6,9 +6,9 @@ import { DELIVERY_WORDS, type Delivery } from '@shared/sent-messages'
  * agent, two grey ticks when the agent has it (in its own queue), two ticks in the accent when the agent took it in, and a red mark
  * when it could not be sent. It says the same in words (the tooltip and the screen reader).
  */
-export function Ticks({ state, title }: { state: Delivery; title?: string }): ReactNode {
+export function Ticks({ state, title, label = DELIVERY_WORDS[state] }: { state: Delivery; title?: string; label?: string }): ReactNode {
   return (
-    <span className="ticks" data-state={state} role="img" aria-label={DELIVERY_WORDS[state]} title={title ?? DELIVERY_WORDS[state]}>
+    <span className="ticks" data-state={state} role="img" aria-label={label} title={title ?? label}>
       {state === 'sending' && (
         <svg viewBox="0 0 14 14" aria-hidden="true">
           <circle cx="7" cy="7" r="5.2" />

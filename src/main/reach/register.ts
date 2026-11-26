@@ -1,7 +1,7 @@
 // Reach in the app: where it keeps its keys and book (encrypted by the system's keystore), what the window may ask of it,
 // and when it is in this Togle at all. It stays out of every release until an outside review has tried to break it:
 // only a development run with a courier set (TOGLE_COURIER) has it.
-import { app, safeStorage } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, safeStorage, systemPreferences } from 'electron'
 import os from 'node:os'
 import type { ReachState, RemoteAct } from '@shared/reach'
 import { readSecret, writeSecret } from '../storage'
@@ -10,8 +10,13 @@ import type { StudioAccount } from './studio-account'
 
 export function reachConfig(): { courier: string } | undefined {
   if (app.isPackaged) return undefined
-  const courier = process.env.TOGLE_COURIER
-  return courier && /^wss?:\/\//.test(courier) ? { courier } : undefined
+  try {
+    const url = new URL(process.env.TOGLE_COURIER ?? '')
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    const allowed = loopback ? ['ws:', 'wss:'].includes(url.protocol) : url.protocol === 'wss:' && url.hostname.endsWith('.togle.app')
+    if (allowed && url.pathname === '/v1' && !url.username && !url.password && !url.search && !url.hash) return { courier: url.href }
+  } catch { /* no valid development endpoint configured */ }
+  return undefined
 }
 
 /** A real keystore: not Linux's basic_text fallback, whose key is the same on every computer. */
@@ -40,6 +45,26 @@ const text = (value: unknown, what: string, max = 200): string => {
   return value
 }
 
+const DEVICE_CHANGE = {
+  enable: { title: 'Enable remote access?', detail: 'This computer will manage a private group. You can add devices to it in Togle.', action: 'Enable' },
+  recover: { title: 'Recover remote access?', detail: 'Your old device group will disconnect. Pair the devices you still use after recovery.', action: 'Recover' },
+  save: { title: 'Copy recovery key?', detail: 'Paste this key into your password manager. Anyone who has the key and access to your Togle account can replace this group.', action: 'Copy key' }
+} as const
+
+async function approveDeviceChange(operation: keyof typeof DEVICE_CHANGE): Promise<void> {
+  const { title, detail, action } = DEVICE_CHANGE[operation]
+  if (!keystore()) throw new Error('Set up your system key store to use remote access.')
+  if (process.platform === 'darwin' && systemPreferences.canPromptTouchID()) {
+    await systemPreferences.promptTouchID(title).catch(() => { throw new Error('Device confirmation was cancelled.') })
+    return
+  }
+  // This development-only dialog asks for local consent. A platform unlock requires native support.
+  const options = { type: 'question' as const, title, message: title, detail, buttons: ['Cancel', action], defaultId: 0, cancelId: 0 }
+  const parent = BrowserWindow.getFocusedWindow()
+  const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options)
+  if (result.response !== 1) throw new Error('Device confirmation was cancelled.')
+}
+
 export function registerReach(deps: ReachDeps, account?: StudioAccount): Reach | undefined {
   const config = reachConfig()
   const { handle } = deps
@@ -50,7 +75,12 @@ export function registerReach(deps: ReachDeps, account?: StudioAccount): Reach |
   }
   const reach = new Reach({
     courier: config.courier,
+    approveDeviceChange,
     phonePilot: process.env.TOGLE_PHONE_PILOT === '1',
+    phoneActivity: process.env.TOGLE_PHONE_PILOT_ACTIVITY === '1',
+    accountUsage: process.env.TOGLE_PILOT_ACCOUNT_USAGE === '1',
+    desktopActivity: process.env.TOGLE_DESKTOP_PILOT_ACTIVITY === '1',
+    phoneMessages: process.env.TOGLE_PHONE_PILOT_MESSAGES === '1',
     pilotFolder: process.env.TOGLE_PHONE_PILOT_FOLDER,
     store,
     kind: 'computer',
@@ -66,6 +96,7 @@ export function registerReach(deps: ReachDeps, account?: StudioAccount): Reach |
 
   handle('reach:state', () => reach.state())
   handle('reach:remote-tasks', () => reach.remoteTasks())
+  handle('reach:session', (device, task) => reach.readSession(text(device, 'The device', 40), text(task, 'The task')))
   handle('reach:send-code', async (email) => {
     if (!account) throw new Error('Togle account sign-in isn’t set up in this build.')
     await account.sendCode(text(email, 'The email address'))
@@ -77,7 +108,9 @@ export function registerReach(deps: ReachDeps, account?: StudioAccount): Reach |
     return reach.state()
   })
   handle('reach:connect', async () => { await reach.connectAccount(); return reach.state() })
-  handle('reach:start-again', async () => { await reach.connectAccount(true); return reach.state() })
+  handle('reach:start-again', async (key) => { await reach.connectAccount(text(key, 'Your recovery key', 120)); return reach.state() })
+  handle('reach:invite', async () => { await reach.openInvite(); return reach.state() })
+  handle('reach:copy-recovery', async () => { clipboard.writeText(await reach.recoveryKeyForCopy()) })
   handle('reach:sign-out', async () => { await reach.signOut(); return reach.state() })
   handle('reach:show-code', async () => { await reach.showCode(); return reach.state() })
   handle('reach:cancel-code', () => { reach.cancelCode(); return reach.state() })
@@ -89,7 +122,15 @@ export function registerReach(deps: ReachDeps, account?: StudioAccount): Reach |
   handle('reach:act', async (device, act) => {
     const given = (act ?? {}) as Record<string, unknown>
     const what = given.what
-    if (what !== 'refuse' && what !== 'stop' && what !== 'end-commands') throw new Error('From another device, a task can be refused or stopped.')
+    if (what === 'reply-choice') {
+      const choice = given.choice
+      if (typeof choice !== 'number' || !Number.isSafeInteger(choice) || choice < 0) throw new Error('Select one of the answers shown.')
+      await reach.act(text(device, 'The device', 40), {
+        what, task: text(given.task, 'The task'), request: text(given.request, 'The question'), choice
+      })
+      return
+    }
+    if (what !== 'refuse' && what !== 'stop' && what !== 'end-commands') throw new Error('That action is not available from another device.')
     const remote: RemoteAct = { what, task: text(given.task, 'The task'), ...(typeof given.request === 'string' ? { request: given.request } : {}) }
     await reach.act(text(device, 'The device', 40), remote)
   })

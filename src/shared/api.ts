@@ -283,13 +283,17 @@ export interface TogleApi {
   onReachChanged(cb: () => void): Unsubscribe
   /** The tasks the person's other devices share, by device. */
   reachRemoteTasks(): Promise<import('./reach').DeviceTasks[]>
+  /** Recent conversation shared by an opted-in computer. */
+  reachSession(device: string, task: string): Promise<import('./phone-report').PhoneSessionReport>
   /** Emails a code for signing in to a Togle account. */
   reachSendCode(email: string): Promise<void>
   /** Connects this computer to the signed-in account after explicit enrollment. */
   reachConnect(): Promise<import('./reach').ReachState>
   reachSignIn(email: string, code: string): Promise<import('./reach').ReachState>
   /** The only computer was lost: this one starts the person's devices again, and the others are added again from it. */
-  reachStartAgain(): Promise<import('./reach').ReachState>
+  reachStartAgain(key: string): Promise<import('./reach').ReachState>
+  reachInvite(): Promise<import('./reach').ReachState>
+  reachCopyRecovery(): Promise<void>
   reachSignOut(): Promise<import('./reach').ReachState>
   /** Shows a code to type into a computer that is one of the person's devices. */
   reachShowCode(): Promise<import('./reach').ReachState>

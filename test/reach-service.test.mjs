@@ -7,7 +7,7 @@ import path from 'node:path'
 import { after, before, test } from 'node:test'
 import { fakeCourier } from './fake-courier.mjs'
 
-const { accountConfig, CourierLink, Reach, StudioAccount, WRONG_CODE, makeIdentity } = await import('./.build/togle.mjs')
+const { accountConfig, CourierLink, Reach, StudioAccount, WRONG_CODE, makeIdentity, unlock } = await import('./.build/togle.mjs')
 
 test('only public account keys and HTTPS origins can enter release packages', () => {
   const key = 'sb_publishable_test'
@@ -79,7 +79,7 @@ const device = async (name, kind = 'computer', extra = {}) => {
   return reach
 }
 
-before(async () => { courier = await fakeCourier({ tokens: new Map([['token-ana', 'ana'], ['token-pilot', 'pilot']]) }) })
+before(async () => { courier = await fakeCourier({ tokens: new Map([['token-ana', 'ana'], ['token-pause', 'pause'], ['token-pilot', 'pilot'], ['token-reports', 'reports'], ['token-desktop-reports', 'desktop-reports']]) }) })
 after(async () => {
   for (const reach of started) reach.stop()
   await courier.close()
@@ -119,7 +119,7 @@ test('the first computer to sign in starts the devices; a computer and a server 
   assert.equal(courier.records.get(server.state().me.device).addedBy, pc.state().me.device)
 })
 
-test('only a paired phone receives the pilot choices and can submit one when the host permits it', async () => {
+test('paired computers control each other and phones can answer a current Codex choice in the pilot workspace', async () => {
   const tasks = new Tasks()
   const task = tasks.tasks[0]
   const [command] = task.pending
@@ -129,22 +129,32 @@ test('only a paired phone receives the pilot choices and can submit one when the
   task.pending = [question, command]
   tasks.tasks.push({ ...task, key: 'codex:outside', folder: path.join(task.folder, 'other'), pending: [question] })
   tasks.tasks.push({ ...task, key: 'codex:command', pending: [command] })
-  tasks.replyChoice = (...args) => {
-    tasks.done.push(args)
-    task.pending = [command]
-    host.tasksChanged()
+  const answerChoice = (owned, key, request, choice) => {
+    const current = owned.tasks.find(item => item.key === key && item.pending.some(pending => pending.codexInputId === request))
+    if (!current) throw new Error('That Codex question is no longer available.')
+    owned.done.push([key, request, choice])
+    current.pending = current.pending.filter(pending => pending.codexInputId !== request)
   }
+  tasks.replyChoice = (...args) => answerChoice(tasks, ...args)
+  const otherTasks = new Tasks()
+  const otherTask = otherTasks.tasks[0]
+  const otherQuestion = { ...question, codexInputId: 'other-live-question' }
+  otherTask.pending = [otherQuestion]
+  otherTasks.replyChoice = (...args) => answerChoice(otherTasks, ...args)
   const host = await device('Pilot PC', 'computer', { account: signedIn('token-pilot'), tasks, phonePilot: true, pilotFolder: path.resolve(task.folder) })
   await host.connectAccount()
   await until(() => host.state().standing === 'member', 'the pilot host')
-  const other = await device('Other PC', 'computer', { tasks, phonePilot: true })
+  const other = await device('Other PC', 'computer', { tasks: otherTasks, phonePilot: true, pilotFolder: path.resolve(otherTask.folder) })
+  const spare = await device('Spare PC', 'computer', { phonePilot: true })
   const phone = await device('Pilot phone', 'phone')
   await add(host, other)
+  await add(host, spare)
   await add(host, phone)
   const hostId = host.state().me.device
   const otherId = other.state().me.device
-  const tasksOn = (viewer, host) => viewer.remoteTasks().find(entry => entry.device === host)?.tasks
-  const requestOn = (viewer, host) => tasksOn(viewer, host)?.find(item => item.key === task.key)?.pending[0]
+  const report = (viewer, device) => viewer.remoteTasks().find(entry => entry.device === device)
+  const tasksOn = (viewer, device) => report(viewer, device)?.tasks
+  const requestOn = (viewer, device) => tasksOn(viewer, device)?.find(item => item.key === task.key)?.pending[0]
   const request = await until(() => requestOn(phone, hostId)?.choices && requestOn(phone, hostId), 'listed choices on the phone')
   assert.deepEqual(request, { id: 'one-live-question', kind: 'question', question: 'Which color?', choices: ['Blue', 'Green'] })
   assert.deepEqual(tasksOn(phone, hostId), [{
@@ -154,26 +164,245 @@ test('only a paired phone receives the pilot choices and can submit one when the
   for (const what of ['refuse', 'stop', 'end-commands', 'allow']) {
     await assert.rejects(phone.act(hostId, { what, task: task.key, request: command.id }), /only select an answer/)
   }
-  assert.equal((await until(() => requestOn(other, hostId), 'the host task on a computer')).choices, undefined)
+  assert.deepEqual(await until(() => requestOn(other, hostId)?.choices && requestOn(other, hostId), 'listed choices on the other computer'), request)
+  assert.deepEqual(await until(() => requestOn(host, otherId)?.choices && requestOn(host, otherId), 'the first computer sees the other one’s question'), { ...request, id: otherQuestion.codexInputId })
   assert.equal(tasksOn(other, hostId).find(item => item.key === task.key).pending[1].command, command.command)
-  await until(() => tasksOn(phone, otherId)?.length === 0, 'a host without a workspace shares no tasks with the phone')
+  assert.ok(!tasksOn(other, hostId).some(item => item.key === 'codex:outside'))
+  const spareId = spare.state().me.device
+  const spareReport = await until(() => report(other, spareId)?.online && report(other, spareId), 'a paired computer before its first task report')
+  assert.equal(spareReport.at, 0)
+  assert.deepEqual(spareReport.tasks, [])
+  assert.equal(report(phone, spareId), undefined)
   const act = { what: 'reply-choice', task: task.key, request: request.id, choice: 1 }
-  await assert.rejects(other.act(hostId, act), /not accepting phone choices/)
-  await assert.rejects(phone.act(otherId, act), /not accepting phone choices/)
+  await until(() => phone.state().devices.some(device => device.device === spareId && device.online), 'the phone sees the spare computer')
+  await assert.rejects(phone.act(spareId, act), /not accepting remote answers/)
+  spare.stop()
+  await until(() => report(other, spareId)?.online === false, 'the spare computer stays in the list when offline')
+  await assert.rejects(phone.act(otherId, act), /no longer available/)
   await host.setActOnThis(false)
   await assert.rejects(phone.act(hostId, act), /doesn’t take answers/)
+  await assert.rejects(other.act(hostId, act), /doesn’t take answers/)
   await until(() => tasksOn(phone, hostId)?.length === 0, 'the phone task to disappear')
+  await until(() => report(other, hostId)?.canAct === false && !requestOn(other, hostId)?.choices, 'the other desktop sees view-only access')
   await host.setActOnThis(true)
-  await until(() => requestOn(phone, hostId)?.choices, 'the choices to return')
-  for (const choice of [-1, 2, 'Green']) await assert.rejects(phone.act(hostId, { ...act, choice }), /Select one/)
-  await assert.rejects(phone.act(hostId, { ...act, task: 'codex:outside' }), /no longer available/)
-  await assert.rejects(phone.act(hostId, { ...act, request: question.id }), /no longer available/)
+  await until(() => requestOn(phone, hostId)?.choices && requestOn(other, hostId)?.choices, 'both controllers see the choices again')
+  for (const choice of [-1, 2, 'Green']) await assert.rejects(other.act(hostId, { ...act, choice }), /Select one/)
+  await assert.rejects(other.act(hostId, { ...act, task: 'codex:outside' }), /no longer available/)
+  await assert.rejects(other.act(hostId, { ...act, request: question.id }), /no longer available/)
   assert.deepEqual(tasks.done, [])
-  await phone.act(hostId, act)
+  await other.act(hostId, act)
+  await host.act(otherId, { ...act, request: otherQuestion.codexInputId, choice: 0 })
   await until(() => tasksOn(phone, hostId)?.length === 0, 'the answered task to disappear from the phone')
   await assert.rejects(phone.act(hostId, act), /no longer available/)
   assert.deepEqual(tasks.done, [[task.key, request.id, 1]])
+  assert.deepEqual(otherTasks.done, [[otherTask.key, otherQuestion.codexInputId, 0]])
+  assert.equal(host.state().acted[0].name, 'Other PC')
+  assert.equal(other.state().acted[0].name, 'Pilot PC')
+
+  const fresh = { ...question, codexInputId: 'fresh-question' }
+  task.pending = [fresh, command]
+  host.tasksChanged()
+  await until(() => requestOn(phone, hostId)?.id === fresh.codexInputId && requestOn(other, hostId)?.id === fresh.codexInputId, 'the next question on both devices')
+  const concurrent = await Promise.allSettled([
+    phone.act(hostId, { ...act, request: fresh.codexInputId }),
+    other.act(hostId, { ...act, request: fresh.codexInputId, choice: 0 })
+  ])
+  assert.equal(concurrent.filter(answer => answer.status === 'fulfilled').length, 1)
+  assert.match(concurrent.find(answer => answer.status === 'rejected').reason.message, /no longer available/)
+  assert.equal(tasks.done.filter(([, requestId]) => requestId === fresh.codexInputId).length, 1)
+
+  const phoneQuestion = { ...question, codexInputId: 'phone-answer' }
+  task.pending = [phoneQuestion]
+  host.tasksChanged()
+  await until(() => requestOn(phone, hostId)?.id === phoneQuestion.codexInputId, 'the phone has a fresh question')
+  await phone.act(hostId, { ...act, request: phoneQuestion.codexInputId })
   assert.equal(host.state().acted[0].name, 'Pilot phone')
+  assert.deepEqual(tasks.done.at(-1), [task.key, phoneQuestion.codexInputId, 1])
+})
+
+test('phone reports are limited to managed sessions in the opted-in folder', async () => {
+  const tasks = new Tasks()
+  const task = tasks.tasks[0]
+  task.folder = path.resolve(task.folder)
+  const outside = { ...task, key: 'codex:outside', folder: path.join(task.folder, 'other') }
+  const observed = { ...task, key: 'codex:observed', mine: false }
+  const hermes = { ...task, key: 'hermes:inside', agent: 'Hermes', runner: 'hermes', state: 'idle', pending: [] }
+  tasks.tasks.push(outside, observed, hermes)
+  const details = []
+  const meter = []
+  const messages = []
+  const queued = []
+  const revision = 'q'.repeat(43)
+  tasks.phoneMessage = async (key, text, quote) => {
+    messages.push([key, text, quote])
+    queued.push(text)
+    return 'queued'
+  }
+  tasks.phoneQueue = async (key, version, action, index) => {
+    assert.equal(key, task.key)
+    if (version !== revision) throw new Error('The queue changed.')
+    assert.equal(action, 'remove')
+    queued.splice(index, 1)
+  }
+  const at = Date.now()
+  const log = [
+    { id: 1, at, kind: 'you', text: 'Check the release' },
+    { id: 2, at, kind: 'command', text: 'private command output' },
+    { id: 3, at, kind: 'agent', text: 'Check complete. password=demo-secret-123' },
+  ]
+  tasks.phone = {
+    detail: async key => {
+      details.push(key)
+      return { task, log }
+    },
+    history: async () => null,
+    model: async () => ({ model: 'gpt-6.2-sol', effort: 'high', fast: true }),
+    usage: async (runner, id) => {
+      meter.push([runner, id])
+      if (runner === 'hermes') return { kind: 'providers', period: 'all', sources: [
+        { provider: 'OpenAI', billing: 'subscription', tokens: 456 },
+        { provider: 'Kimi', billing: 'api', tokens: 789, cost: { currency: 'USD', amount: 0.04 } }
+      ] }
+      return { kind: 'tokens', period: id ? 'session' : '7d', total: id ? 123 : 567 }
+    },
+    limits: () => [{ label: 'weekly', usedPercent: 32, resetsAt: Date.now() + 100_000 }],
+    queue: () => queued.length ? { revision, messages: [...queued], canSend: false } : undefined
+  }
+  const host = await device('Reports computer', 'computer', {
+    account: signedIn('token-reports'), tasks, phonePilot: true,
+    phoneActivity: true, phoneMessages: true, accountUsage: true, pilotFolder: task.folder
+  })
+  await host.connectAccount()
+  await until(() => host.state().connection === 'on', 'the reports host')
+  await host.setActOnThis(false)
+  const phone = await device('Reports phone', 'phone')
+  const laptop = await device('Reports laptop', 'computer')
+  await add(host, phone)
+  await add(host, laptop)
+  const hostId = host.state().me.device
+  const report = await until(() => phone.remoteTasks().find(peer => peer.phoneReports && peer.device === hostId), 'the phone’s report capability')
+  assert.equal(report.canAct, false)
+  assert.deepEqual(report.tasks.map(item => [item.key, item.line, item.pending]), [[task.key, '', []], [hermes.key, '', []]])
+  assert.equal(laptop.remoteTasks().find(peer => peer.device === hostId)?.phoneReports, undefined)
+  await assert.rejects(laptop.readSession(hostId, task.key), /not sharing/)
+  const replies = new Map()
+  phone.link.on('box', box => {
+    if (box.from !== hostId) return
+    const note = unlock(phone.keyFor(phone.book.get(hostId)), box)
+    if (note.kind === 'phone-report') replies.set(note.n, note.report)
+  })
+  const send = (sender, n, query) => sender.send(hostId, { kind: 'phone-read', n, at: Date.now(), query })
+  const read = async (n, query) => {
+    await send(phone, n, query)
+    await until(() => replies.has(n), `the report ${n}`)
+    return replies.get(n)
+  }
+  assert.equal(await read('outside', { kind: 'session', task: outside.key }), undefined)
+  assert.equal(await read('observed', { kind: 'session', task: observed.key }), undefined)
+  await send(laptop, 'computer', { kind: 'session', task: task.key })
+  const result = await read('activity', { kind: 'session', task: task.key })
+  assert.equal(result.model, 'GPT 6.2 Sol · high · Fast')
+  assert.deepEqual(result.activity, [
+    { kind: 'you', text: 'Check the release' },
+    { kind: 'work', text: '1 step: ran 1 command' },
+    { kind: 'agent', text: 'Check complete. password=••••' },
+  ])
+  assert.deepEqual(result.usage.readings, ['123 tokens'])
+  const measured = await read('usage', { kind: 'usage' })
+  assert.deepEqual(measured.agents.map(agent => agent.runner), ['codex', 'hermes'])
+  assert.deepEqual(measured.agents[0].usage.readings, ['567 tokens · Last 7 days'])
+  assert.equal(measured.agents[0].usage.limits[0].usedPercent, 32)
+  assert.match(measured.agents[1].usage.readings[0], /^OpenAI subscription · 456 tokens$/)
+  assert.match(measured.agents[1].usage.readings[1], /^Kimi API · /)
+  assert.deepEqual(details, [task.key])
+  assert.deepEqual(meter, [['codex', task.id], ['codex', undefined], ['hermes', undefined]])
+  const message = '## Results\n\n' + 'Each check passed. '.repeat(90).trimEnd()
+  log.push({ id: 4, at, kind: 'agent', text: message })
+  const chat = await read('chat', { kind: 'session', task: task.key, view: 'chat' })
+  assert.equal(chat.activity[0].delivery, 'delivered')
+  assert.deepEqual(chat.activity.at(-1), { kind: 'agent', text: message, id: 4, at })
+  assert.equal(chat.activity[1].text, '1 step: ran 1 command')
+  const earlier = await read('older-phone', { kind: 'session', task: task.key })
+  assert.equal(earlier.activity.at(-1).text.length, 800)
+  assert.equal(earlier.activity.at(-1).id, undefined)
+
+  const messageAct = { what: 'send-message', task: task.key, id: 'a'.repeat(24), text: 'Review the checks', quote: 'Check complete.' }
+  await assert.rejects(phone.act(hostId, messageAct), /doesn’t take answers/)
+  await host.setActOnThis(true)
+  await until(() => phone.remoteTasks().find(peer => peer.device === hostId)?.tasks.some(row => row.key === task.key && row.canSend && row.canStop), 'the writable conversation')
+  await assert.rejects(laptop.act(hostId, messageAct))
+  await assert.rejects(phone.act(hostId, { ...messageAct, task: outside.key }), /Continue this conversation/)
+  await assert.rejects(phone.act(hostId, { ...messageAct, task: observed.key }), /Continue this conversation/)
+  assert.equal(await phone.act(hostId, messageAct), 'queued')
+  assert.equal(await phone.act(hostId, messageAct), 'queued')
+  assert.deepEqual(messages, [[task.key, 'Review the checks', 'Check complete.']])
+  await assert.rejects(phone.act(hostId, { ...messageAct, text: 'Different text' }), /already sent/)
+  const withQueue = await read('queue', { kind: 'session', task: task.key, view: 'chat' })
+  assert.deepEqual(withQueue.queue, { revision, messages: ['Review the checks'], canSend: false })
+  log.push({ id: 5, at, kind: 'you', text: 'In transit', delivery: 'sent' })
+  const forwarding = await read('forwarding', { kind: 'session', task: task.key, view: 'chat' })
+  assert.equal(forwarding.activity.at(-1).delivery, 'sent')
+  await assert.rejects(phone.act(hostId, { what: 'manage-queue', task: task.key, revision: 'b'.repeat(43), action: 'remove', index: 0 }), /queue changed/)
+  await phone.act(hostId, { what: 'manage-queue', task: task.key, revision, action: 'remove', index: 0 })
+  await phone.act(hostId, { what: 'stop', task: task.key })
+  assert.deepEqual(queued, [])
+  assert.deepEqual(tasks.done.at(-1), ['stop', task.key])
+})
+
+test('a paired desktop reads a shared conversation from its host with remote actions off', async () => {
+  const tasks = new Tasks()
+  const task = tasks.tasks[0]
+  task.folder = path.resolve(task.folder)
+  const outside = { ...task, key: 'codex:outside', folder: path.join(task.folder, 'other') }
+  const observed = { ...task, key: 'codex:observed', mine: false }
+  tasks.tasks.push(outside, observed)
+  const at = Date.now()
+  const log = [
+    { id: 1, at, kind: 'you', text: 'Check the new layout', delivery: 'delivered' },
+    { id: 2, at, kind: 'command', text: 'Private command output' },
+    { id: 3, at, kind: 'agent', text: 'The **checks** passed. password=demo-secret-123' }
+  ]
+  const details = []
+  tasks.phone = {
+    detail: async key => { details.push(key); return { task, log } },
+    history: async () => null,
+    model: async () => ({ model: 'gpt-6.2-sol', effort: 'high', fast: true }),
+    usage: async () => ({ kind: 'tokens', period: 'session', total: 305, trackedApi: { kind: 'cost', scope: 'agent-sessions', amounts: [{ currency: 'USD', amount: 9 }] } }),
+    limits: () => [{ label: 'weekly', usedPercent: 92 }]
+  }
+  const host = await device('Desktop reports host', 'computer', {
+    account: signedIn('token-desktop-reports'), tasks, desktopActivity: true, pilotFolder: task.folder
+  })
+  await host.connectAccount()
+  await until(() => host.state().connection === 'on', 'the desktop report host')
+  await host.setActOnThis(false)
+  const other = await device('Desktop report reader', 'computer')
+  const phone = await device('Phone without reports', 'phone')
+  await add(host, other)
+  await add(host, phone)
+  const hostId = host.state().me.device
+  const shared = await until(() => other.remoteTasks().find(peer => peer.device === hostId && peer.desktopReports), 'the shared desktop session')
+  assert.equal(shared.canAct, false)
+  assert.equal(shared.phoneReports, undefined)
+  await assert.rejects(phone.readSession(hostId, task.key), /not sharing/)
+  await assert.rejects(other.readSession(hostId, observed.key), /not sharing/)
+  await assert.rejects(other.readSession(hostId, outside.key), /not sharing/)
+  const report = await other.readSession(hostId, task.key)
+  assert.deepEqual(report.activity, [
+    { kind: 'you', text: 'Check the new layout', id: 1, at, delivery: 'delivered' },
+    { kind: 'work', text: '1 step: ran 1 command', id: 2, at },
+    { kind: 'agent', text: 'The **checks** passed. password=••••', id: 3, at }
+  ])
+  assert.equal(report.model, 'GPT 6.2 Sol · high · Fast')
+  assert.deepEqual(report.usage, { readings: ['305 tokens'], limits: [] }, 'sharing this session alone keeps broader cost and limits private')
+  assert.deepEqual(details, [task.key])
+  // The host still checks the scope when a session changes between listing and opening it.
+  task.folder = outside.folder
+  await assert.rejects(other.readSession(hostId, task.key), /conversation is unavailable/)
+  assert.deepEqual(details, [task.key])
+  await host.remove(other.state().me.device)
+  await until(() => other.state().standing === 'removed', 'the reader to be removed')
+  await assert.rejects(other.readSession(hostId, task.key), /not sharing/)
 })
 
 test('a wrong code adds nothing, and the device shows a new code by itself', async () => {
@@ -219,6 +448,16 @@ test('a computer’s tasks reach the other computer, never the server; Refuse an
   await assert.rejects(laptop.act(pcId, { what: 'stop', task: 'codex:t1' }), /doesn’t take answers from other devices/)
   await pc.setActOnThis(true)
   assert.equal(pcTasks.done.length, 2, 'nothing else was done')
+})
+
+test('the host honors its remote-actions switch even while a validated request is in flight', async () => {
+  const host = pc.state().me.device
+  const total = pcTasks.done.length
+  courier.beforeDirectory.set(host, () => { void pc.setActOnThis(false) })
+  try {
+    await assert.rejects(laptop.act(host, { what: 'stop', task: 'codex:t1' }), /unavailable/)
+    assert.equal(pcTasks.done.length, total)
+  } finally { await pc.setActOnThis(true) }
 })
 
 test('a task in the background is refused and stopped from another device like any other, its screen open or not; a terminal Togle only watches is not', async () => {
@@ -273,16 +512,53 @@ test('the devices find each other again after the courier drops every connection
   await until(() => pc.state().devices.find((item) => item.name === 'build-server')?.online, 'the server to show online again', 10_000)
 })
 
-test('a computer that signs in to an account with devices is added from one of them, or starts them again', async () => {
-  const other = await device('New PC', 'computer', { account: signedIn('token-ana') })
+test('a signed-in computer can start an isolated group and a saved key can recover only its old group', async () => {
+  const account = signedIn('token-ana')
+  const other = await device('Another group', 'computer', { account })
   await other.connectAccount()
-  await until(() => other.state().addFromAnother, 'the advice to add it from another computer')
-  assert.equal(other.state().standing, 'alone')
-  assert.equal(pc.state().link, 'member', 'the old devices are connected when it starts again')
-  await other.connectAccount(true)
-  await until(() => other.state().standing === 'member', 'the new start')
-  await until(() => pc.state().standing === 'removed' && server.state().standing === 'removed', 'the old devices to be let go')
-  assert.deepEqual(other.state().devices.map((item) => item.name), ['New PC'])
+  assert.equal(other.state().standing, 'member')
+  assert.deepEqual(other.state().devices.map(item => item.name), ['Another group'])
+  assert.equal(pc.state().link, 'member')
+
+  const key = await pc.recoveryKeyForCopy()
+  assert.match(key, /^togle-recovery:v1:[A-Za-z0-9_-]{22}:[A-Za-z0-9_-]{43}$/)
+  assert.ok(!JSON.stringify(pc.state()).includes(key))
+  const fresh = await device('Replacement computer', 'computer', { account })
+  const wrongKey = key.slice(0, -43) + 'A'.repeat(43)
+  await assert.rejects(fresh.connectAccount(wrongKey), /recovery key/)
+  assert.equal(pc.state().link, 'member')
+  await fresh.connectAccount(key)
+  await until(() => pc.state().standing === 'removed' && server.state().standing === 'removed', 'the old group to be disconnected')
+  assert.deepEqual(fresh.state().devices.map(item => item.name), ['Replacement computer'])
+  assert.equal(other.state().link, 'member', 'recovery leaves other groups alone')
+  assert.notEqual(await fresh.recoveryKeyForCopy(), key)
+})
+
+test('sign-out hides the group and the same account resumes it after an app restart', async () => {
+  let who = { email: 'test@example.com', user: 'pause' }
+  const account = { who: () => who, token: async () => who?.user === 'pause' ? 'token-pause' : undefined, signOut: async () => { who = undefined } }
+  const store = memoryStore()
+  const approved = []
+  const approveDeviceChange = async operation => { approved.push(operation) }
+  const host = await device('Bound PC', 'computer', { account, store, approveDeviceChange })
+  const id = host.state().me.device
+  await host.connectAccount()
+  await until(() => host.state().canManageDevices, 'first verification')
+  await host.signOut()
+  assert.equal(host.state().accountPaused, true)
+  assert.deepEqual(host.state().devices, [])
+  await until(() => !courier.online.has(id), 'sign-out to disconnect the host')
+  host.stop()
+  const resumed = await device('Bound PC', 'computer', { account, store, approveDeviceChange })
+  who = { email: 'elsewhere@example.com', user: 'another' }
+  resumed.accountChanged()
+  assert.equal(resumed.state().accountPaused, true)
+  assert.deepEqual(resumed.remoteTasks(), [])
+  who = { email: 'test@example.com', user: 'pause' }
+  resumed.accountChanged()
+  await until(() => resumed.state().link === 'member', 'the verified account to resume')
+  assert.equal(resumed.state().me.device, id)
+  assert.deepEqual(approved, ['enable'], 'routine reconnect does not prompt again')
 })
 
 test('Togle account sign-in: an email code and an encrypted session that renews before it expires', async () => {

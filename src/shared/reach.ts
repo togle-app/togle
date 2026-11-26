@@ -23,7 +23,7 @@ export interface RemoteRequest {
   files?: string[]
   /** A question's words, with text that looks like a key or a password hidden. */
   question?: string
-  /** On a paired pilot phone, the listed answers to this one live Codex question. */
+  /** The listed answers to a live Codex question this device may answer. */
   choices?: string[]
   /** Why the command looks dangerous, in plain words. */
   danger?: string
@@ -46,6 +46,9 @@ export interface RemoteTask {
   terminal?: boolean
   /** A command may still run after Stop, so a second press is offered. */
   commandsRunning: boolean
+  /** This pilot phone can send text to, or stop, this managed session. */
+  canSend?: boolean
+  canStop?: boolean
   updatedAt: number
 }
 
@@ -55,8 +58,14 @@ export interface DeviceTasks {
   name: string
   role: DeviceKind
   online: boolean
+  /** Whether the host accepts remote actions. Earlier hosts may omit this. */
+  canAct?: boolean
+  /** An opted-in host can send recent phone session activity and usage on request. */
+  phoneReports?: boolean
+  /** An opted-in host shares recent conversations with paired computers. */
+  desktopReports?: boolean
   tasks: RemoteTask[]
-  /** When they were shared. */
+  /** When the host shared its tasks, or zero while awaiting its first report. */
   at: number
 }
 
@@ -66,6 +75,8 @@ export type RemoteAct = {
   task: string
   request?: string
 } | { what: 'reply-choice'; task: string; request: string; choice: number }
+  | { what: 'send-message'; task: string; id: string; text: string; quote?: string }
+  | { what: 'manage-queue'; task: string; revision: string; action: 'send' | 'remove'; index?: number }
 
 /** Something another device did on this computer, for the record this computer keeps. */
 export interface ActedHere {
@@ -79,7 +90,7 @@ export interface ActedHere {
 export interface ReachState {
   /** Reach is in this Togle: a development run with a courier set. */
   available: boolean
-  /** This development host allows paired phones to choose an answer to a Codex question. */
+  /** This development host allows paired phones and computers to answer eligible Codex questions. */
   phonePilot?: boolean
   /** Signed in to Togle Studio on this computer. */
   account?: { email: string }
@@ -88,6 +99,10 @@ export interface ReachState {
   connection?: Connection
   /** Whether this device is one of the person's devices, or was removed from them. */
   standing: 'alone' | 'member' | 'removed'
+  canManageDevices?: boolean
+  /** One-time phone pairing invitation, while shown by the managing computer. */
+  invite?: { code: string; expiresAt: number; joined: boolean }
+  accountPaused?: boolean
   /** Signed in to an account that has devices already: this computer is added from one of them, or starts again. */
   addFromAnother?: boolean
   me?: { device: string; name: string; role: DeviceKind }

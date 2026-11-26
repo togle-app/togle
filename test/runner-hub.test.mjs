@@ -425,7 +425,18 @@ test('a message that could not be sent is not left in the task’s log as someth
     const view = await hub.start({ runner: 'codex', folder, prompt: 'Write the notes' })
     const task = codex.started[0]
     const said = async () => (await hub.detail(view.key)).log.filter((entry) => entry.kind === 'you').map((entry) => entry.text)
-    await hub.send(view.key, 'And the changelog')
+    const send = task.send.bind(task)
+    let accept
+    const received = new Promise(resolve => { accept = resolve })
+    task.send = async text => {
+      await received
+      await send(text)
+    }
+    const delivery = hub.send(view.key, 'And the changelog')
+    assert.equal((await hub.detail(view.key)).log.at(-1).delivery, 'sent')
+    accept()
+    await delivery
+    assert.equal((await hub.detail(view.key)).log.at(-1).delivery, 'delivered')
     assert.deepEqual(await said(), ['Write the notes', 'And the changelog'])
     // The agent does not take the next one: as far as the conversation goes it was not said.
     task.send = async () => { throw new Error('It is not there.') }

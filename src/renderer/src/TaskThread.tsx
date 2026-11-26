@@ -161,7 +161,7 @@ function dayOf(at: number, now: number): string {
   return new Date(at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
 }
 
-function When({ at }: { at: number }): ReactNode {
+export function When({ at }: { at: number }): ReactNode {
   return (
     <time className="said-at" dateTime={new Date(at).toISOString()} title={new Date(at).toLocaleString()}>
       {timeOf(at)}

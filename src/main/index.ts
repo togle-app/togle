@@ -2069,14 +2069,27 @@ if (process.argv.includes('--togle-hook')) {
     // A development courier can use the same signed-in account to connect this computer.
     const hubForReach = runners
     reach = registerReach({
-      handle: (channel, listener) => ipcMain.handle(channel, (_event, ...args) => listener(...args)),
+      handle: (channel, listener) => ipcMain.handle(channel, (event, ...args) => {
+        if (!win || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('Open Devices in Togle to manage remote access.')
+        return listener(...args)
+      }),
       send,
       tasks: {
         list: () => hubForReach.list(),
         answer: (key, request, decision) => hubForReach.answer(key, request, decision),
         replyChoice: (key, inputId, choice) => hubForReach.replyChoice(key, inputId, choice),
         stop: (key) => hubForReach.stop(key),
-        endCommands: (key) => hubForReach.endCommands(key)
+        endCommands: (key) => hubForReach.endCommands(key),
+        phoneMessage: (key, text, quote) => hubForReach.sendFromPhone(key, text, quote),
+        phoneQueue: (key, revision, action, index) => hubForReach.changePhoneQueue(key, revision, action, index),
+        phone: {
+          detail: (key) => hubForReach.detail(key),
+          history: (key) => hubForReach.history(key, false),
+          model: (key) => hubForReach.model(key),
+          usage: (runner, sessionId) => hubForReach.usage(runner, sessionId),
+          limits: (runner) => hubForReach.limits(runner),
+          queue: (key) => hubForReach.phoneQueue(key)
+        }
       },
       acted: (what, by) => {
         if (windowsNotices) windowsNotices.showStatus('devices')

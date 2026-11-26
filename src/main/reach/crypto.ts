@@ -188,7 +188,9 @@ export function issuePass(issuer: Identity, device: Omit<Pass, 'v' | 'issuedAt' 
 export function passHolds(pass: Pass, issuers: Pick<Pass, 'device' | 'sign' | 'role'>[], now = Date.now()): boolean {
   const { signature, ...body } = pass
   const issuer = issuers.find((entry) => entry.device === pass.issuer && entry.role === 'computer')
-  return !!issuer && pass.v === 1 && now >= pass.issuedAt - 60_000 && now < pass.expiresAt
+  return !!issuer && pass.v === 1 && Number.isFinite(pass.issuedAt) && Number.isFinite(pass.expiresAt)
+    && pass.expiresAt > pass.issuedAt && pass.expiresAt <= pass.issuedAt + PASS_DAYS * 86_400_000
+    && now >= pass.issuedAt - 60_000 && now < pass.expiresAt
     && pass.device === deviceId(pass.sign, pass.agree) && signedBy(issuer.sign, 'togle-reach-pass', body, signature)
 }
 

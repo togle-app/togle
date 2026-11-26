@@ -28,18 +28,24 @@ export interface DeviceSeen { device: string; kind: DeviceKind; online: boolean;
 /** The account's connection: on, waiting for Pro, or switched off by the account. */
 export type Connection = 'on' | 'needs-pro' | 'off'
 
+export interface GroupActivation { recovery: string }
+export interface GroupRecovery extends GroupActivation { owner: string; proof: string }
+
 /** From a device to the courier. `id` ties an answer to its question. */
 export type Up =
   /** The first frame: the device's public keys and what it is. */
   | { t: 'hello'; v: number; device: string; sign: string; agree: string; kind: DeviceKind }
   /** The challenge, signed with the device's key. A computer signing in also gives the account's access token. */
-  | { t: 'prove'; signature: string; account?: string; restart?: boolean }
-  | { t: 'send'; id: string; box: Box }
+  | { t: 'prove'; signature: string; account?: string; pairOnly?: boolean; activate?: GroupActivation; recover?: GroupRecovery }
+  | { t: 'send'; id: string; box: Box; keep?: boolean }
   /** A computer adds a device to the account, once the person added it there. */
   | { t: 'enroll'; id: string; device: string; sign: string; agree: string; kind: DeviceKind }
   /** A computer removes a device from the account. */
   | { t: 'forget'; id: string; device: string }
   | { t: 'devices'; id: string }
+  | { t: 'set-recovery'; id: string; recovery: string }
+  | { t: 'invite-open'; id: string; session: string }
+  | { t: 'invite-join'; id: string; room: string }
   /** A device about to be added opens a room and shows its code. `session` is its random id for the exchange. */
   | { t: 'room-open'; id: string; session: string }
   /** A computer the code was typed into joins the room by the code's first two letters. A room takes one join, ever. */
@@ -55,7 +61,7 @@ export type Down =
    * and whether the connection is on. `first`: a computer signing in started the account's devices. `group`: a computer
    * signed in to an account that has devices already, so it is added from one of them.
    */
-  | { t: 'welcome'; member: boolean; first?: boolean; group?: boolean; online: string[]; connection?: Connection }
+  | { t: 'welcome'; member: boolean; first?: boolean; group?: boolean; owner?: string; recoveryConfigured?: boolean; online: string[]; connection?: Connection }
   | { t: 'refused'; code: RefusedCode; message: string }
   | { t: 'box'; box: Box; at: number }
   | { t: 'ok'; id: string; queued?: boolean; devices?: DeviceSeen[]; room?: string; session?: string; expiresAt?: number }
@@ -70,12 +76,15 @@ export type Down =
   /** This device was removed from its account, or the account started again from another computer. */
   | { t: 'forgotten' }
 
-export type RefusedCode = 'version' | 'bad-hello' | 'bad-proof' | 'account' | 'elsewhere' | 'busy'
+export type RefusedCode = 'version' | 'bad-hello' | 'bad-proof' | 'account' | 'elsewhere' | 'busy' | 'recovery'
 export type ErrorCode = 'bad-frame' | 'not-member' | 'not-computer' | 'not-yours' | 'connection' | 'no-room' | 'room-used' | 'too-many' | 'full' | 'later'
 
 /** What a device signs to prove it holds its key: the text Togle's signWith makes for HELLO_PURPOSE and { device, nonce }. */
 export const HELLO_PURPOSE = 'togle-courier-hello'
 export const helloText = (nonce: string, device: string): string => `${HELLO_PURPOSE}\n{"device":${JSON.stringify(device)},"nonce":${JSON.stringify(nonce)}}`
+export const RECOVERY_PURPOSE = 'togle-reach-recovery'
+export const recoveryText = (nonce: string, device: string, owner: string, recovery: string): string =>
+  `${RECOVERY_PURPOSE}\n${JSON.stringify({ device, nonce, owner, recovery })}`
 
 /** The letters codes are made of (Crockford's base32). A room is named by two of them. */
 export const CODE_LETTERS = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'

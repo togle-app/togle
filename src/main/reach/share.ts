@@ -1,8 +1,8 @@
 // What a computer tells the person's other devices about its tasks: the least they need. A task's title, agent, folder
-// name, state and one line, and each request with the command whole (the command is always sent whole: it is what runs).
+// name, state and one line. Commands with recognized credentials stay on the host.
 // Text that looks like a key or a password is hidden in the rest. Long output and the conversation stay on the computer.
 import path from 'node:path'
-import type { PendingRequest, TaskView } from '@shared/runner'
+import { taskHandoffProblem, type PendingRequest, type TaskView } from '@shared/runner'
 import type { RemoteTask } from '@shared/reach'
 
 const HIDDEN = '••••'
@@ -50,8 +50,8 @@ export function phoneChoices(request: PendingRequest): string[] | undefined {
   return options
 }
 
-/** The one live question a phone can answer for this task. */
-export function phoneQuestion(task: TaskView): { id: string; kind: 'question'; question: string; choices: string[] } | undefined {
+/** The live question a paired controller can answer in the pilot. */
+export function pilotQuestion(task: TaskView): { id: string; kind: 'question'; question: string; choices: string[] } | undefined {
   if (task.runner !== 'codex' || !task.mine || task.state !== 'waiting' || (task.terminal && !task.screen)) return
   for (const request of task.pending) {
     const choices = phoneChoices(request)
@@ -63,7 +63,7 @@ export function phoneQuestion(task: TaskView): { id: string; kind: 'question'; q
 export function sharePhoneTasks(tasks: TaskView[]): RemoteTask[] {
   return tasks
     .flatMap((task): RemoteTask[] => {
-      const question = phoneQuestion(task)
+      const question = pilotQuestion(task)
       if (!question) return []
       return [{
         key: task.key, title: clip(hideSecrets(task.title || 'A task'), 160), agent: 'Codex',
@@ -74,21 +74,22 @@ export function sharePhoneTasks(tasks: TaskView[]): RemoteTask[] {
 }
 
 /** A task as another device sees it. */
-export function shareTask(task: TaskView): RemoteTask {
+export function shareTask(task: TaskView, offerChoices = false): RemoteTask {
+  const question = offerChoices ? pilotQuestion(task) : undefined
   return {
     key: task.key,
     title: clip(hideSecrets(task.title || 'A task'), 160),
     agent: task.agent ?? task.runner,
-    folder: path.basename(task.folder.replace(/[\\/]+$/, '')) || task.folder,
+    folder: hideSecrets(path.basename(task.folder.replace(/[\\/]+$/, '')) || task.folder),
     state: task.state,
     line: clip(hideSecrets(task.line), 240),
-    pending: task.pending.map((request) => ({
+    pending: task.pending.map((request) => question && request.codexInputId === question.id ? question : ({
       id: request.id,
       kind: request.kind,
-      ...(request.command !== undefined ? { command: request.command } : {}),
-      ...(request.files?.length ? { files: request.files.slice(0, 20).map((file) => path.basename(file)) } : {}),
-      ...(request.questions?.length ? { question: clip(hideSecrets(request.questions.map((question) => question.text).join('\n')), 1000) } : {}),
-      ...(request.danger ? { danger: request.danger } : {})
+      ...(request.command !== undefined ? { command: hideSecrets(request.command) === request.command ? request.command : 'Review this command on its computer' } : {}),
+      ...(request.files?.length ? { files: request.files.slice(0, 20).map((file) => hideSecrets(path.basename(file))) } : {}),
+      ...(request.questions?.length && !request.questions.some(question => question.secret) ? { question: clip(hideSecrets(request.questions.map((question) => question.text).join('\n')), 1000) } : {}),
+      ...(request.danger ? { danger: hideSecrets(request.danger) } : {})
     })),
     mine: task.mine,
     // A task in the background (Claude Code) is refused and stopped from here like any other, whether its screen is open on
@@ -100,10 +101,47 @@ export function shareTask(task: TaskView): RemoteTask {
 }
 
 /** The tasks a device shares: those of the last week, newest first, at most 40. */
-export function shareTasks(tasks: TaskView[], now = Date.now()): RemoteTask[] {
+export function recentTasks(tasks: TaskView[], now: number): TaskView[] {
   return tasks
     .filter((task) => task.state === 'waiting' || task.state === 'working' || now - task.updatedAt < 7 * 86_400_000)
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 40)
-    .map(shareTask)
+}
+
+export function shareTasks(tasks: TaskView[], now = Date.now(), offerChoices = false): RemoteTask[] {
+  return recentTasks(tasks, now).map(task => shareTask(task, offerChoices))
+}
+
+/** A phone sees the session summary and an eligible choice, with activity fetched separately. */
+export function canMessageFromPhone(task: TaskView): boolean {
+  return task.mine && !taskHandoffProblem(task)
+}
+
+export function sharePhoneSummaries(tasks: TaskView[], choices: boolean, chat = false): RemoteTask[] {
+  const shown: RemoteTask[] = []
+  let bytes = 0
+  for (const task of tasks) {
+    const question = choices ? pilotQuestion(task) : undefined
+    const summary: RemoteTask = {
+      key: task.key,
+      title: clip(hideSecrets(task.title || 'A task'), 160),
+      agent: clip(hideSecrets(task.agent || task.runner), 80),
+      folder: clip(hideSecrets(path.basename(task.folder.replace(/[\\/]+$/, ''))), 120),
+      state: task.state,
+      line: '',
+      pending: question ? [question] : [],
+      mine: true,
+      ...(chat && canMessageFromPhone(task) ? {
+        canSend: true,
+        ...(task.state === 'working' || task.state === 'waiting' ? { canStop: true } : {})
+      } : {}),
+      commandsRunning: false,
+      updatedAt: task.updatedAt
+    }
+    bytes += Buffer.byteLength(JSON.stringify(summary)) + 1
+    // Leave room for the encrypted envelope and Base64 encoding in a 256 KiB relay frame.
+    if (bytes > 160 * 1024) break
+    shown.push(summary)
+  }
+  return shown
 }

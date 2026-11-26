@@ -416,14 +416,15 @@ module.exports = function install(fixture) {
   }
   api.removeCodingAgent = async id => { record('removeCodingAgent', [id]); if (['claude', 'codex', 'hermes'].includes(id)) removedKnown.add(id); else addedAgents.splice(addedAgents.findIndex(agent => agent.runner === id), 1); return api.runnerStatus() }
   api.restoreCodingAgent = async id => { record('restoreCodingAgent', [id]); removedKnown.delete(id); return api.runnerStatus() }
-  // Reach (Togle Studio), when a check asks for it: this computer, a MacBook and a server whose task waits on a command.
+  // Devices and their tasks, when a check asks for Reach.
   if (fixture.reach) {
     let reach = {
-      available: true, link: 'member', connection: 'on', standing: 'member', me: { device: 'pc', name: 'Windows PC', role: 'computer' },
+      available: true, link: 'member', connection: 'on', standing: 'member', canManageDevices: true, me: { device: 'pc', name: 'Windows PC', role: 'computer' },
       devices: [
         { device: 'pc', name: 'Windows PC', role: 'computer', me: true, online: true },
         { device: 'mac', name: 'MacBook', role: 'computer', me: false, online: true },
-        { device: 'srv', name: 'build-server', role: 'server', me: false, online: true }
+        { device: 'srv', name: 'build-server', role: 'server', me: false, online: true },
+        { device: 'travel', name: 'Travel laptop', role: 'computer', me: false, online: false }
       ],
       actOnThis: true,
       acted: [{ at: Date.UTC(2026, 10, 13, 9, 12), device: 'mac', name: 'MacBook', what: 'Stopped Write the release notes' }]
@@ -431,20 +432,61 @@ module.exports = function install(fixture) {
     const remote = [{ device: 'srv', name: 'build-server', role: 'server', online: true, at: Date.now(), tasks: [
       { key: 'codex:apply', title: 'Apply the staging plan', agent: 'Codex', folder: 'infra', state: 'waiting', line: 'The plan is ready. 3 resources change and none are destroyed.', pending: [{ id: 'r1', kind: 'command', command: 'terraform apply -var-file=staging.tfvars', danger: 'It changes what runs in a live environment.' }], mine: true, commandsRunning: false, updatedAt: Date.now() },
       { key: 'hermes:report', title: 'Write the nightly report', agent: 'Hermes', folder: 'reports', state: 'working', line: 'Reading the logs', pending: [], mine: true, commandsRunning: false, updatedAt: Date.now() }
-    ] }]
+    ] }, { device: 'mac', name: 'MacBook', role: 'computer', online: true, canAct: true, desktopReports: true, at: Date.now(), tasks: [
+      { key: 'codex:color', title: 'Set the chart color', agent: 'Codex', folder: 'website', state: 'waiting', line: 'Asks: Which color should I use?', pending: [{ id: 'live-color', kind: 'question', question: 'Which color should I use?', choices: ['Blue', 'Green'] }], mine: true, commandsRunning: false, updatedAt: Date.now() }
+    ] }, { device: 'travel', name: 'Travel laptop', role: 'computer', online: false, at: 0, tasks: [] }]
     const reachChanged = () => emit('onReachChanged')
     api.reachState = async () => clone(reach)
     api.reachRemoteTasks = async () => clone(remote)
+    api.reachSession = async (device, key) => {
+      record('reachSession', [device, key])
+      const host = remote.find(item => item.device === device && item.desktopReports)
+      const task = host?.tasks.find(item => item.key === key)
+      if (!task) throw new Error('The conversation is unavailable.')
+      const at = task.updatedAt
+      const activity = [
+        { id: 1, at, kind: 'you', text: 'Use the chart colors from the design.', delivery: 'delivered' },
+        { id: 2, at, kind: 'agent', text: 'I reviewed the **chart** colors.' }
+      ]
+      if (!task.pending.length) activity.push({ id: 3, at, kind: 'agent', text: task.line })
+      return clone({ kind: 'session', task: key, model: 'GPT 6.2 Sol · high · Fast', activity,
+        usage: { readings: ['480 tokens'], limits: [{ label: 'weekly', usedPercent: 32, resetsAt: Date.now() + 4 * 86_400_000 + 5 * 3_600_000 }] } })
+    }
     api.reachAct = async (device, act) => {
       record('reachAct', [device, act])
-      const task = remote[0].tasks.find(item => item.key === act.task)
+      const task = remote.find(item => item.device === device)?.tasks.find(item => item.key === act.task)
+      if (!task) throw new Error('That task is gone.')
       if (act.what === 'refuse') task.pending = task.pending.filter(item => item.id !== act.request)
       if (act.what === 'stop') task.state = 'stopped'
+      if (act.what === 'reply-choice') {
+        const request = task.pending.find(item => item.id === act.request)
+        if (!request?.choices?.[act.choice]) throw new Error('That question is no longer available.')
+        task.line = 'Selected ' + request.choices[act.choice]
+        task.state = 'working'
+        task.pending = []
+      }
       reachChanged()
+    }
+    api.reachInvite = async () => {
+      reach = { ...reach, invite: { code: 'togle-pair:v1:' + 'x'.repeat(22) + ':' + 'A'.repeat(64), expiresAt: Date.now() + 600_000, joined: false }, adding: { stage: 'joining' } }
+      reachChanged()
+      return clone(reach)
+    }
+    api.reachCancelAdd = async () => {
+      reach = { ...reach, invite: undefined, adding: undefined }
+      reachChanged()
+      return clone(reach)
     }
     api.reachAdd = async code => { record('reachAdd', [code]); reach = { ...reach, adding: { stage: 'confirm', name: 'gpu-box', role: 'server' } }; reachChanged(); return clone(reach) }
     api.reachConfirmAdd = async () => { record('reachConfirmAdd', []); reach = { ...reach, adding: { stage: 'added', name: 'gpu-box', role: 'server' }, devices: [...reach.devices, { device: 'gpu', name: 'gpu-box', role: 'server', me: false, online: true }] }; reachChanged(); return clone(reach) }
-    api.reachRemove = async device => { record('reachRemove', [device]); reach = { ...reach, devices: reach.devices.filter(item => item.device !== device) }; reachChanged(); return clone(reach) }
+    api.reachRemove = async device => {
+      record('reachRemove', [device])
+      reach = { ...reach, devices: reach.devices.filter(item => item.device !== device) }
+      const index = remote.findIndex(item => item.device === device)
+      if (index >= 0) remote.splice(index, 1)
+      reachChanged()
+      return clone(reach)
+    }
     api.reachActOnThis = async on => { record('reachActOnThis', [on]); reach = { ...reach, actOnThis: on }; reachChanged(); return clone(reach) }
   }
   api.runnerTasks = async () => clone(runnerTasks.map(runnerView)).sort((a, b) => runnerRank(a) - runnerRank(b) || b.updatedAt - a.updatedAt)

@@ -1,10 +1,9 @@
 // The group: which devices are this person's, what each may do, and which were removed. Every device keeps its own copy
-// and checks every change it is sent: a pass counts only when a computer of the group signed it, and a removal only when a
-// computer did. Studio's courier never sees this book, and nothing the courier says changes it.
+// and verifies passes and removals against the original managing computer’s pinned key.
 import { deviceId, issuePass, passHolds, signWith, signedBy, type Identity, type Pass, type PresenceKey, type Role } from './crypto'
 
 export interface Removal { device: string; by: string; at: number; signature: string }
-export interface BookData { v: 1; members: Pass[]; removed: Removal[] }
+export interface BookData { v: 1; owner?: string; members: Pass[]; removed: Removal[] }
 
 /** A computer renews a pass once less than this is left of its week. */
 export const RENEW_WITHIN_MS = 3 * 86_400_000
@@ -34,6 +33,7 @@ function isRemoval(value: unknown): value is Removal {
 
 export class Book {
   readonly me: string
+  private owner?: string
   private readonly members = new Map<string, Pass>()
   private readonly removed = new Map<string, Removal>()
 
@@ -41,13 +41,27 @@ export class Book {
     this.me = me
     for (const pass of data?.members ?? []) if (isPass(pass)) this.members.set(pass.device, pass)
     for (const removal of data?.removed ?? []) if (isRemoval(removal)) this.removed.set(removal.device, removal)
+    if (data?.owner) this.bindOwner(data.owner)
   }
+
+  /** Pin the original computer once, using keys already held in the encrypted local book. */
+  bindOwner(device: string): boolean {
+    const member = this.members.get(device)
+    if ((this.owner && this.owner !== device) || member?.role !== 'computer' || this.removed.has(device)
+      || member.issuer !== device || deviceId(member.sign, member.agree) !== device || !passHolds(member, [member], member.issuedAt)) return false
+    this.owner = device
+    return true
+  }
+
+  manages(device: string): boolean { return this.owner === device }
+  ownerPass(device: string): Pass | undefined { return this.manages(device) ? this.members.get(device) : undefined }
 
   /** A group of one: this computer, its pass signed by itself. */
   static start(identity: Identity, name: string, presence?: PresenceKey, now = Date.now()): Book {
     const book = new Book(identity.device)
     const { device, sign, agree } = identity
     book.members.set(device, issuePass(identity, { device, sign, agree, name, role: 'computer', ...(presence ? { presence } : {}) }, now))
+    book.owner = device
     return book
   }
 
@@ -56,19 +70,21 @@ export class Book {
    * that computer sent, each pass checked as usual. Undefined when the new device's own pass doesn't hold.
    */
   static joined(me: string, adder: Pass, sent: BookData, now = Date.now()): Book | undefined {
-    if (!isPass(adder) || adder.role !== 'computer' || adder.device !== deviceId(adder.sign, adder.agree)) return undefined
+    if (!isPass(adder) || adder.role !== 'computer' || (sent.owner && sent.owner !== adder.device)
+      || !passHolds(adder, [adder], now)) return undefined
     const book = new Book(me)
     book.members.set(adder.device, adder)
+    book.owner = adder.device
     book.merge(sent, now)
     return book.trusted(me, now) ? book : undefined
   }
 
-  data(): BookData { return { v: 1, members: [...this.members.values()], removed: [...this.removed.values()] } }
+  data(): BookData { return { v: 1, owner: this.owner, members: [...this.members.values()], removed: [...this.removed.values()] } }
 
   /** What a device is sent: a server gets its own pass and the devices that may act on it, never the other servers. */
   for(recipient: Pass): BookData {
     const members = [...this.members.values()].filter((pass) => recipient.role !== 'server' || pass.role !== 'server' || pass.device === recipient.device)
-    return { v: 1, members, removed: [...this.removed.values()] }
+    return { v: 1, owner: this.owner, members, removed: [...this.removed.values()] }
   }
 
   /** Every device of the group, this one included. */
@@ -76,8 +92,10 @@ export class Book {
   get(device: string): Pass | undefined { return this.members.get(device) }
   wasRemoved(device: string): boolean { return this.removed.has(device) }
 
-  /** The computers that sign passes and removals: each computer of the group, whether or not its own pass is current. */
-  issuers(): Pass[] { return [...this.members.values()].filter((pass) => pass.role === 'computer') }
+  issuers(): Pass[] {
+    const owner = this.owner && this.members.get(this.owner)
+    return owner ? [owner] : []
+  }
 
   /** A device of the group whose pass holds now; undefined for any other. */
   trusted(device: string, now = Date.now()): Pass | undefined {
@@ -97,6 +115,7 @@ export class Book {
 
   /** Removes a device, signed by this computer. The removal travels with the book to every other device. */
   remove(identity: Identity, device: string, now = Date.now()): Removal {
+    if (!this.manages(identity.device) || this.manages(device)) throw new Error('Remove a paired device on the computer that manages the group.')
     const body = { device, by: identity.device, at: now }
     const removal = { ...body, signature: signWith(identity, REMOVAL, body) }
     this.removed.set(device, removal)
@@ -109,10 +128,10 @@ export class Book {
    * its own too: a group of one has nobody else to.
    */
   renew(identity: Identity, now = Date.now()): Pass[] {
-    if (this.members.get(identity.device)?.role !== 'computer') return []
+    if (!this.manages(identity.device)) return []
     const renewed: Pass[] = []
     for (const pass of this.members.values()) {
-      if (this.removed.has(pass.device) || pass.expiresAt - now > RENEW_WITHIN_MS) continue
+      if (this.removed.has(pass.device) || pass.issuer !== identity.device || pass.expiresAt - now > RENEW_WITHIN_MS) continue
       const { v: _v, issuedAt: _issued, expiresAt: _expires, issuer: _issuer, signature: _signature, ...device } = pass
       const fresh = issuePass(identity, device, now)
       this.members.set(pass.device, fresh)
@@ -128,10 +147,12 @@ export class Book {
    * Returns whether anything changed.
    */
   merge(incoming: BookData, now = Date.now()): boolean {
-    if (!incoming || incoming.v !== 1 || !Array.isArray(incoming.members) || !Array.isArray(incoming.removed)) return false
+    if (!incoming || incoming.v !== 1 || (incoming.owner && incoming.owner !== this.owner)
+      || !Array.isArray(incoming.members) || !Array.isArray(incoming.removed)) return false
     let changed = false
     for (const removal of incoming.removed) {
-      if (!isRemoval(removal) || now - removal.at > REMOVAL_KEEP_MS) continue
+      if (!isRemoval(removal) || !Number.isFinite(removal.at) || removal.at > now + 60_000 || now - removal.at > REMOVAL_KEEP_MS
+        || !this.manages(removal.by) || this.manages(removal.device)) continue
       const known = this.removed.get(removal.device)
       if (known && known.at >= removal.at) continue
       const signer = this.members.get(removal.by)
@@ -143,20 +164,16 @@ export class Book {
       this.members.delete(removal.device)
       changed = true
     }
-    // A pass can be signed by a computer that arrives in the same book, so go round until nothing more is taken.
-    for (let taken = true; taken;) {
-      taken = false
-      for (const pass of incoming.members) {
-        if (!isPass(pass)) continue
-        const removal = this.removed.get(pass.device)
-        if (removal && pass.issuedAt <= removal.at) continue
-        const current = this.members.get(pass.device)
-        if (current && (current.issuedAt >= pass.issuedAt || current.sign !== pass.sign || current.agree !== pass.agree)) continue
-        if (!passHolds(pass, this.issuers(), now)) continue
-        if (removal) this.removed.delete(pass.device)
-        this.members.set(pass.device, pass)
-        taken = changed = true
-      }
+    for (const pass of incoming.members) {
+      if (!isPass(pass)) continue
+      const removal = this.removed.get(pass.device)
+      if (removal && pass.issuedAt <= removal.at) continue
+      const current = this.members.get(pass.device)
+      if (current && (current.issuedAt >= pass.issuedAt || current.sign !== pass.sign || current.agree !== pass.agree)) continue
+      if (!passHolds(pass, this.issuers(), now)) continue
+      if (removal) this.removed.delete(pass.device)
+      this.members.set(pass.device, pass)
+      changed = true
     }
     return changed
   }

@@ -20,7 +20,7 @@ function group() {
   return { pc, laptop, phone, server, book }
 }
 
-test('a group starts with one computer, and only a computer of the group adds a device', () => {
+test('only the original computer can sign membership or renew a paired device', () => {
   const { pc, laptop, phone, server, book } = group()
   assert.deepEqual(book.list().map((pass) => pass.name).sort(), ['MacBook', 'Phone', 'Windows PC', 'build-server'])
   assert.ok(book.trusted(pc.device, now) && book.trusted(phone.device, now))
@@ -28,7 +28,18 @@ test('a group starts with one computer, and only a computer of the group adds a 
   assert.equal(book.add(issuePass(stranger, { ...publicKeys(stranger), name: 'Mine', role: 'computer' }, now), now), false, 'a device that signs its own pass is not added')
   assert.equal(book.add(issuePass(phone, { ...publicKeys(stranger), name: 'Friend', role: 'phone' }, now), now), false, 'a phone adds nobody')
   assert.equal(book.add(issuePass(server, { ...publicKeys(stranger), name: 'Friend', role: 'server' }, now), now), false, 'nor does a server')
+  assert.equal(book.add(issuePass(laptop, { ...publicKeys(stranger), name: 'Extra', role: 'computer' }, now), now), false)
+  assert.equal(book.bindOwner(laptop.device), false)
+  assert.deepEqual(book.renew(laptop, now + 8 * DAY), [])
+  assert.throws(() => book.remove(laptop, phone.device, now))
   assert.equal(book.trusted(laptop.device, now + 8 * DAY), undefined, 'a pass lasts a week')
+  const old = Book.joined(laptop.device, book.get(pc.device), book.data(), now)
+  const later = now + 9 * DAY
+  assert.equal(old.trusted(pc.device, later), undefined)
+  assert.equal(old.ownerPass(pc.device).device, pc.device)
+  book.renew(pc, later)
+  assert.equal(old.merge(book.data(), later), true)
+  assert.ok(old.trusted(laptop.device, later), 'the pinned computer can renew the group after a long absence')
 })
 
 test('a server is told about the devices that may act on it, never about the other servers', () => {
@@ -180,7 +191,7 @@ test('what a computer shares about a task: the command whole, keys and passwords
   assert.doesNotMatch(shared.title, /ghp_/)
   assert.match(shared.line, /password: ••••/)
   assert.doesNotMatch(shared.line, /hunter2/)
-  assert.match(shared.pending[0].command, /sk-live-abcdefghijklmnopqrstuvwx/, 'the command is what runs, so it is sent whole')
+  assert.equal(shared.pending[0].command, 'Review this command on its computer')
   assert.equal(shared.pending[0].always, undefined, 'always-allow is never offered to another device')
   assert.equal(hideSecrets('postgres://ana:s3cretpass@db.local/app'), 'postgres://ana:••••@db.local/app')
   assert.equal(hideSecrets('AKIAABCDEFGHIJKLMNOP and eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.c2lnbmF0dXJlLXNpZ25hdHVyZQ'), '•••• and ••••')

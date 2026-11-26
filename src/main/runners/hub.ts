@@ -5,6 +5,8 @@ import { promises as fs } from 'node:fs'
 import { homedir } from 'node:os'
 import { isSignedOut, KNOWN_AGENTS, SIGN_IN_COMMANDS, taskHandoffProblem, type Decision, type LogEntry, type ModelInfo, type RunnerKind, type RunnerStatus, type SignInChoice, type StartRequest, type StepDetail, type TaskAttention, type TaskDetail, type TaskEvent, type TaskHistory, type TaskInfo, type TaskOffers, type TaskState, type TaskView, type ViewRequest } from '@shared/runner'
 import { dangerOf } from '@shared/runner-command'
+import type { PhoneDelivery, PhoneQueue } from '@shared/phone-report'
+import { queueRevision } from '../reach/phone-report'
 import { phoneChoices } from '../reach/share'
 import type { RunnerUsage, UsageWindow } from '@shared/runner-usage'
 import { codexQuestionReplies } from '@shared/codex-questions'
@@ -483,21 +485,25 @@ export class RunnerHub {
     if (!message) return
     const replies = owned.handle.runner === 'codex' ? codexQuestionReplies(message) : null
     const said = this.log(owned, 'you', replies ? replies.map(reply => withQuote(reply.question, reply.answer)).join('\n\n') : message)
+    said.delivery = 'sent'
     this.touch(owned)
+    this.changedSoon()
     // A reply goes on from where it stopped: what went wrong is past.
     owned.problem = undefined
     owned.fault = undefined
     try {
       await owned.handle.send(message)
+      said.delivery = 'delivered'
     } catch (error) {
       // It did not go in, so it is not something the person said as far as the conversation goes: the window says why, and offers to send it
       // again. (Left in the log, it would be drawn as a message the agent took in, next to the one that failed.)
       const at = owned.log.indexOf(said)
       if (at >= 0) owned.log.splice(at, 1)
-      this.fresh()
       throw error
+    } finally {
+      this.touch(owned)
+      this.fresh()
     }
-    this.fresh()
   }
 
   /**
@@ -517,6 +523,53 @@ export class RunnerHub {
       return
     }
     refuseCommand(message)
+    this.holdMessage(owned, message)
+  }
+
+  async sendFromPhone(key: string, text: string, quote?: string): Promise<PhoneDelivery> {
+    const owned = this.mine(key)
+    const words = text.trim()
+    if (!words) throw new Error('Enter a message.')
+    refuseCommand(words)
+    const message = quote ? withQuote(quote, words) : words
+    if (!this.phoneMustWait(owned)) {
+      await this.send(key, message)
+      return 'sent'
+    }
+    if ((owned.held?.length ?? 0) >= HELD_MOST) throw new Error('The message queue is full.')
+    this.holdMessage(owned, message)
+    return 'queued'
+  }
+
+  phoneQueue(key: string): PhoneQueue | undefined {
+    const owned = this.owned.get(key)
+    if (!owned?.held?.length) return
+    return {
+      revision: queueRevision(owned.held), messages: [...owned.held], canSend: !this.phoneMustWait(owned),
+      ...(owned.heldNote ? { note: owned.heldNote } : {})
+    }
+  }
+
+  async changePhoneQueue(key: string, revision: string, action: 'send' | 'remove', index?: number): Promise<void> {
+    const owned = this.mine(key)
+    if (!owned.held?.length || queueRevision(owned.held) !== revision) throw new Error('The queue changed. Check it and try again.')
+    if (action === 'send') {
+      if (this.phoneMustWait(owned)) throw new Error('The agent is still working or waiting for an answer.')
+      await this.held(key, 'send')
+      return
+    }
+    if (typeof index !== 'number' || !Number.isSafeInteger(index) || index < 0 || index >= owned.held.length)
+      throw new Error('That message is no longer queued.')
+    this.dropOneHeld(owned, index)
+    this.touch(owned)
+    this.fresh()
+  }
+
+  private phoneMustWait(owned: Owned): boolean {
+    return owned.handle.state === 'waiting' || !!owned.handle.waitingFor || !!owned.handle.pending.length || this.takesNoWords(owned)
+  }
+
+  private holdMessage(owned: Owned, message: string): void {
     owned.held = [...(owned.held ?? []), message].slice(-HELD_MOST)
     owned.heldNote = undefined
     owned.heldPaused = false
@@ -700,14 +753,18 @@ export class RunnerHub {
     this.mine(key).handle.reply(requestId, text)
   }
 
-  /** Resolve a phone choice against the live, owned Codex request and consume it synchronously. */
+  /** Resolve a remote choice against the live, owned Codex request and consume it synchronously. */
   replyChoice(key: string, inputId: string, choice: number): void {
-    const { handle } = this.mine(key)
+    const owned = this.mine(key)
+    const { handle } = owned
     const request = handle.pending.find(item => item.codexInputId === inputId)
     const choices = handle.runner === 'codex' && (!handle.terminal || handle.screen) && request ? phoneChoices(request) : undefined
-    if (!request || !choices) throw new Error('That Codex question is no longer available on this phone.')
+    if (!request || !choices) throw new Error('That Codex question is no longer available.')
     if (!Number.isSafeInteger(choice) || choice < 0 || choice >= choices.length) throw new Error('Select one of the answers shown.')
-    handle.reply(request.id, choices[choice])
+    const answer = choices[choice]
+    handle.reply(request.id, answer)
+    const entry = this.log(owned, 'you', withQuote(request.questions![0].text, answer))
+    entry.replyTo = inputId
   }
 
   /** What the reply box of a task lists when "/" is typed: its agent's own commands and models. None for a task Togle does not run. */

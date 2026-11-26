@@ -221,6 +221,10 @@ export interface LogEntry {
    */
   kind: 'you' | 'agent' | 'command' | 'files' | 'step' | 'asked' | 'note'
   text: string
+  /** Live question this quoted answer was sent to, when the host knows the request. */
+  replyTo?: string
+  /** A live prompt is sent to this host first, then handed to its agent. */
+  delivery?: 'sent' | 'delivered'
   /** A command's outcome, or a step's where its agent's record tells one. `stopped`: the person stopped it (Esc, Stop) while it ran. */
   status?: 'running' | 'finished' | 'declined' | 'failed' | 'stopped'
   /** The files a `files` step changed, or a `read` step read. */

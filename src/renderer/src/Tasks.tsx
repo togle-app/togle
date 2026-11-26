@@ -23,6 +23,7 @@ import { StateMark, type MarkKind } from './StateMark'
 import { clock, currentPlan, lastTurnKey, PlanCard, promptsOf, Thread, turnStart, useHistory, useModel, youWords, type Sending } from './TaskThread'
 import { modelLine, modelTitle } from '@shared/model-words'
 import { Ticks } from './Ticks'
+import { SharedConversation, SharedUsage, useSharedConversation } from './SharedConversation'
 import { ThreadRail } from './ThreadRail'
 import { TerminalView } from './TerminalView'
 
@@ -172,20 +173,22 @@ function useTaskViews(): { of: (key: string) => View; pick: (key: string, view: 
   }
 }
 
-/** The tasks the person's other devices share (Reach, part of Togle Studio), kept current. */
-function useRemoteTasks(): DeviceTasks[] {
-  const reach = useReach()
+/** The tasks the person's other devices share, kept current. */
+function useRemoteTasks(member: boolean): DeviceTasks[] {
   const [remote, setRemote] = useState<DeviceTasks[]>([])
-  const member = !!reach?.available && reach.standing === 'member'
   useEffect(() => {
     if (!member) { setRemote([]); return }
     let live = true
-    const read = (): void => { void api.reachRemoteTasks().then((list) => { if (live) setRemote(Array.isArray(list) ? list : []) }, () => undefined) }
+    let reading = 0
+    const read = (): void => {
+      const request = ++reading
+      void api.reachRemoteTasks().then(list => { if (live && request === reading) setRemote(Array.isArray(list) ? list : []) }, () => undefined)
+    }
     read()
     const off = api.onReachChanged(read)
     return () => { live = false; off() }
   }, [member])
-  return remote
+  return member ? remote : []
 }
 
 // ---- How the list is organized: by project, then by what the work is about, then by where each task stands ----
@@ -382,7 +385,7 @@ function useFolded(): [Set<string>, (key: string, fold?: boolean) => void] {
       const stored = JSON.parse(localStorage.getItem(FOLDED) ?? '[]') as unknown
       const keys = Array.isArray(stored) ? stored.filter((key): key is string => typeof key === 'string') : []
       // Existing unscoped preferences applied to both sections.
-      return new Set(keys.flatMap(key => /^(recent|earlier):/.test(key) ? [key] : [groupFoldKey(key, false), groupFoldKey(key, true)]))
+      return new Set(keys.flatMap(key => /^(recent|earlier|device):/.test(key) ? [key] : [groupFoldKey(key, false), groupFoldKey(key, true)]))
     } catch {
       return new Set()
     }
@@ -461,7 +464,8 @@ export function Tasks({ focus, resultKeys, closeResults }: { focus?: { key: stri
   const [takingOver, setTakingOver] = useState<string>()
   // A task handed back: the line that goes on in the person's own terminal, shown where the task was.
   const [handedBack, setHandedBack] = useState<{ key: string; command: string; folder: string; held?: string }>()
-  const remote = useRemoteTasks()
+  const reach = useReach()
+  const remote = useRemoteTasks(!!reach?.available && reach.standing === 'member')
   const views = useTaskViews()
   const selectedNow = useRef(selected)
   selectedNow.current = selected
@@ -785,7 +789,6 @@ export function Tasks({ focus, resultKeys, closeResults }: { focus?: { key: stri
     api.taskOnScreen(onScreen)
   }, [onScreen])
   useEffect(() => () => api.taskOnScreen(null), [])
-  const reach = useReach()
   const remoteSelected = selected?.startsWith(REMOTE)
     ? remote.flatMap((device) => device.tasks.map((task) => ({ device, task }))).find(({ device, task }) => remoteKey(device.device, task.key) === selected)
     : undefined
@@ -819,20 +822,34 @@ export function Tasks({ focus, resultKeys, closeResults }: { focus?: { key: stri
           </div>
         )}
         {loaded && !!installed.length && !tasks.length && <p className="empty">No tasks yet. Start one, or let an agent run in a terminal and it shows here.</p>}
-        {remote.map((device) => (
-          <div key={device.device} className="task-device" aria-label={`Agent tasks on ${device.name}`}>
-            <div className="tasks-head">
-              <span className="tasks-label">{device.name}{device.role === 'server' ? ' · server' : ''}{device.online ? '' : ' · offline'}</span>
-            </div>
-            {device.tasks.length ? (
-              <div role="list">
-                {device.tasks.map((task) => (
-                  <RemoteRow key={task.key} task={task} now={now} selected={remoteKey(device.device, task.key) === selected} onSelect={() => setSelected(remoteKey(device.device, task.key))} />
-                ))}
+        {remote.map(device => {
+          const foldKey = `device:${device.device}`
+          const isFolded = folded.has(foldKey)
+          const listId = `device-tasks-${device.device}`
+          return (
+            <section key={device.device} className="task-device" aria-label={`Agent tasks on ${device.name}`}>
+              <div className="tasks-head">
+                <button type="button" className="group-fold device-fold" aria-expanded={!isFolded} aria-controls={listId} onClick={() => toggleFold(foldKey)}>
+                  <span className="fold-chevron"><Icon name="chevron" size={14} /></span>
+                  <span className="project-mark big device-mark"><Icon name="monitor" size={15} /></span>
+                  <span className="task-project-title">
+                    <span className="tasks-label" title={device.name}>{device.name}{device.role === 'server' ? ' · server' : ''}</span>
+                    <span className="task-project-where">{device.online ? (device.canAct === false ? 'Online · View only' : 'Online') : 'Offline'}</span>
+                  </span>
+                </button>
               </div>
-            ) : <p className="empty">No tasks there in the last week.</p>}
-          </div>
-        ))}
+              <div id={listId} hidden={isFolded}>
+                {!isFolded && (device.tasks.length ? (
+                  <div className="task-list" role="list">
+                    {device.tasks.map(task => (
+                      <RemoteRow key={task.key} task={task} now={now} selected={remoteKey(device.device, task.key) === selected} onSelect={() => setSelected(remoteKey(device.device, task.key))} />
+                    ))}
+                  </div>
+                ) : <p className="empty">{device.at ? 'No recent tasks on this device.' : 'No tasks shared yet.'}</p>)}
+              </div>
+            </section>
+          )
+        })}
         {/* With Reach in this Togle and no other device yet: where the design says Togle mentions more than one device. */}
         {reach?.available && reach.standing !== 'member' && (
           <div className="task-device task-devices-mention">
@@ -875,8 +892,9 @@ export function Tasks({ focus, resultKeys, closeResults }: { focus?: { key: stri
             device={remoteSelected.device}
             task={remoteSelected.task}
             now={now}
+            connected={reach?.link === 'member' && reach.connection === 'on'}
             onBack={() => setSelected(undefined)}
-            act={(remoteAct) => act(() => api.reachAct(remoteSelected.device.device, remoteAct))}
+            act={remoteAct => api.reachAct(remoteSelected.device.device, remoteAct)}
           />
         ) : selected?.startsWith(REMOTE) ? (
           <div className="tasks-empty">
@@ -2038,13 +2056,37 @@ function RemoteRow({ task, now, selected, onSelect }: { task: RemoteTask; now: n
 }
 
 /**
- * A task on another device: what it waits for, with the command whole, and what can be done about it from here. Refuse
- * and Stop need no proof that you are there; Allow does (your fingerprint, face or PIN), and that comes later, so for now
- * a command is allowed on its own computer.
+ * A shared task, its current request, and the actions the host offers.
  */
-function RemotePanel({ device, task, now, onBack, act }: { device: DeviceTasks; task: RemoteTask; now: number; onBack: () => void; act: (remote: RemoteAct) => void }) {
+function RemotePanel({ device, task, now, connected, onBack, act }: { device: DeviceTasks; task: RemoteTask; now: number; connected: boolean; onBack: () => void; act: (remote: RemoteAct) => Promise<void> }) {
+  const inFlight = useRef(false)
+  const [busy, setBusy] = useState(false)
+  const [answered, setAnswered] = useState<string>()
+  const [error, setError] = useState('')
   const running = task.state === 'working' || task.state === 'waiting'
   const here = task.mine && !task.terminal
+  const canAct = connected && device.online && device.canAct !== false && here
+  const canRead = connected && device.online && device.desktopReports === true && task.mine
+  const { report, retry } = useSharedConversation(device.device, task.key, task.updatedAt, canRead)
+  const latest = task.line?.trim()
+  const repeatsQuestion = task.pending.some(request => request.question && (latest === request.question || latest === `Asks: ${request.question}`))
+
+  async function perform(action: RemoteAct): Promise<void> {
+    if (!canAct || inFlight.current) return
+    inFlight.current = true
+    setBusy(true)
+    setError('')
+    try {
+      await act(action)
+      if (action.what === 'reply-choice') setAnswered(action.request)
+      retry()
+    } catch (failure) {
+      setError(errorText(failure))
+    } finally {
+      inFlight.current = false
+      setBusy(false)
+    }
+  }
   return (
     <div className="task-panel">
       <header className="task-header">
@@ -2067,9 +2109,9 @@ function RemotePanel({ device, task, now, onBack, act }: { device: DeviceTasks; 
           <h2 title={task.title}>{task.title}</h2>
         </div>
         <div className="task-actions">
-          {here && running && <button className="small" disabled={!device.online} onClick={() => act({ what: 'stop', task: task.key })}>Stop</button>}
+          {here && running && <button className="small" disabled={!canAct || busy} onClick={() => void perform({ what: 'stop', task: task.key })}>Stop</button>}
           {here && task.commandsRunning && task.state === 'stopped' && (
-            <button className="small" disabled={!device.online} onClick={() => act({ what: 'end-commands', task: task.key })} title="Stop ended the agent's turn. The command it started is still running.">
+            <button className="small" disabled={!canAct || busy} onClick={() => void perform({ what: 'end-commands', task: task.key })} title="Stop ended the agent's turn. The command it started is still running.">
               End the running command
             </button>
           )}
@@ -2078,39 +2120,60 @@ function RemotePanel({ device, task, now, onBack, act }: { device: DeviceTasks; 
       <div className="task-status">
         <span className="state-chip" data-state={task.state}><StateMark kind={chipMark(task.state)} still />{STATE_WORDS[task.state]}</span>
         <span className="task-agent-name"><AgentMark name={task.agent} /></span>
+        {report?.model && <span className="hint status-model">{report.model}</span>}
         {!running && <span className="hint">{ago(task.updatedAt, now)}</span>}
+        {report && <SharedUsage usage={report.usage} now={now} />}
       </div>
 
       {!device.online && <div className="task-banner" role="note"><span>{device.name} is offline. It can be answered once it is back.</span></div>}
+      {device.online && device.canAct === false && <div className="task-banner" role="note"><span>Remote actions are off on {device.name}.</span></div>}
       {task.terminal && <div className="task-banner" role="note"><span>This task runs in a terminal on {device.name}. It is watched from here and answered only there.</span></div>}
       {!task.mine && !task.terminal && <div className="task-banner" role="note"><span>Togle doesn’t run this task on {device.name}, so it is answered there.</span></div>}
 
-      <div className="task-log" role="log" aria-label="Where it stands">
-        <div className="task-agent task-latest"><p>{task.line || 'Nothing yet.'}</p></div>
-      </div>
+      {report ? <SharedConversation activity={report.activity} /> : latest && !repeatsQuestion && (
+        <div className="task-log" role="log" aria-label="Latest update">
+          <div className="task-agent task-latest"><p>{latest}</p></div>
+        </div>
+      )}
+      {canRead && report === undefined && <p className="hint" role="status">Opening conversation…</p>}
+      {report === null && <p className="hint">Conversation unavailable. <button type="button" className="link" onClick={retry}>Try again</button></p>}
 
-      {task.pending.map((request) => (
-        <section key={request.id} className={`task-request ${request.danger ? 'danger' : ''}`} aria-label={request.kind === 'question' ? 'The agent asks' : request.kind === 'edit' ? 'The agent wants to change files' : 'The agent wants to run a command'}>
-          <h3>
-            {request.kind === 'question' ? 'Asks' : request.kind === 'edit' ? 'Wants to change' : 'Wants to run'}
-            {request.danger && <span className="task-danger">Dangerous</span>}
-          </h3>
-          {request.kind === 'command' && <pre className="task-command">{request.command}</pre>}
-          {request.kind === 'edit' && <ul className="task-files">{(request.files ?? []).map((file) => <li key={file}>{file}</li>)}</ul>}
-          {request.kind === 'question' && <p>{request.question}</p>}
-          {request.danger && <p className="task-why">{request.danger}</p>}
-          {here && request.kind !== 'question' && (
-            <div className="row">
-              <button className="small" disabled={!device.online} onClick={() => act({ what: 'refuse', task: task.key, request: request.id })}>Refuse</button>
-            </div>
-          )}
-          <p className="hint">
-            {request.kind === 'question'
-              ? `Answer it on ${device.name}.`
-              : `Allowing it from another device needs your fingerprint, face or PIN, and this Togle can’t ask for that yet. Allow it on ${device.name}.`}
-          </p>
-        </section>
-      ))}
+      {error && <p className="error" role="alert">{error}</p>}
+      {answered && <p className="hint remote-answer" role="status">Answer sent to {device.name}.</p>}
+      {task.pending.map(request => {
+        const choices = request.kind === 'question' && Array.isArray(request.choices)
+          && request.choices.length <= 10 && request.choices.every(label => typeof label === 'string' && label.trim() && label.length <= 200)
+          ? request.choices : []
+        return (
+          <section key={request.id} className={`task-request ${request.danger ? 'danger' : ''}`} aria-label={request.kind === 'question' ? 'The agent asks' : request.kind === 'edit' ? 'The agent wants to change files' : 'The agent wants to run a command'}>
+            <h3>
+              {request.kind === 'question' ? 'Asks' : request.kind === 'edit' ? 'Wants to change' : 'Wants to run'}
+              {request.danger && <span className="task-danger">Dangerous</span>}
+            </h3>
+            {request.kind === 'command' && <pre className="task-command">{request.command}</pre>}
+            {request.kind === 'edit' && <ul className="task-files">{(request.files ?? []).map(file => <li key={file}>{file}</li>)}</ul>}
+            {request.kind === 'question' && <p>{request.question}</p>}
+            {choices.length > 0 && (
+              <div className="row remote-choices" role="group" aria-label="Listed answers">
+                {choices.map((label, choice) => (
+                  <button key={choice} type="button" className="small" disabled={!canAct || busy || answered === request.id} onClick={() => void perform({ what: 'reply-choice', task: task.key, request: request.id, choice })}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {request.danger && <p className="task-why">{request.danger}</p>}
+            {here && request.kind !== 'question' && (
+              <div className="row">
+                <button className="small" disabled={!canAct || busy} onClick={() => void perform({ what: 'refuse', task: task.key, request: request.id })}>Refuse</button>
+              </div>
+            )}
+            {!choices.length && <p className="hint">
+              {request.kind === 'question' ? `Answer it on ${device.name}.` : `Allow it on ${device.name}.`}
+            </p>}
+          </section>
+        )
+      })}
     </div>
   )
 }

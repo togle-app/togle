@@ -7,7 +7,7 @@ const crypto = require('node:crypto')
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
-const { app, globalShortcut, ipcMain } = require('electron')
+const { app, BrowserWindow, dialog, globalShortcut, ipcMain } = require('electron')
 
 const [, , workArg, fixtureArg] = process.argv
 assert.ok(workArg && path.isAbsolute(workArg) && fixtureArg && path.isAbsolute(fixtureArg), 'Use absolute paths for the new pilot directory and local account fixture.')
@@ -42,7 +42,15 @@ ipcMain.handle = (name, listener) => {
   handlers.set(name, listener)
   return register(name, listener)
 }
-const call = (name, ...args) => handlers.get(name)({}, ...args)
+// The headless loopback fixture stands in for the operator's local activation consent.
+const showMessageBox = dialog.showMessageBox.bind(dialog)
+dialog.showMessageBox = (...args) => args.at(-1)?.title === 'Enable remote access?'
+  ? Promise.resolve({ response: 1, checkboxChecked: false })
+  : showMessageBox(...args)
+const call = (name, ...args) => {
+  const sender = BrowserWindow.getAllWindows().find(window => window.getTitle() === 'Togle')?.webContents
+  return handlers.get(name)({ sender, senderFrame: sender?.mainFrame }, ...args)
+}
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 async function until(check, label, ms = 30000) {
   const expiry = Date.now() + ms
