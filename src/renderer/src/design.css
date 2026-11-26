@@ -441,9 +441,10 @@ button.attach-files { width: 36px; }
    that calls while it waits for you, its halo growing out of it and fading; a tick on a soft disc when done; an exclamation
    mark when an error stopped it; a stop symbol (a square on a disc) when it was stopped; an empty ring for a scheduled job
    between its runs. Only transform and opacity move, and nothing moves with less motion asked for. */
-/* A mark is one 16px box, centered where the 8px dot was, so the words keep their place. What is inside it is whole numbers
+/* A mark is one 16px box, centered where the 8px dot was, so the words keep their place. What is inside it is even numbers
    (an 8px dot, a 14px ring, a 6px square), so each sits in the middle of the box at any screen scale, and the halo is the dot's
-   own size and place, grown: it can only be around the dot. */
+   own size and place, grown: it can only be around the dot. An odd size has half a pixel left over in an even box, and is drawn
+   that half pixel to the right and down: the 5px dot in the ring was (test/state-marks.test.mjs holds every part to this). */
 .task-row > .state-mark { margin: 0 -4px; }
 .state-mark { position: relative; display: inline-grid; flex: none; place-items: center; box-sizing: border-box; width: 16px; height: 16px; border-radius: 50%; color: var(--muted); }
 .state-mark svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -455,7 +456,7 @@ button.attach-files { width: 36px; }
 /* Waiting on something it started (a shell, a monitor): a ring that holds still, with a dot in it that slowly fades and comes back. It is
    not the turning ring of work and not the calling amber dot of a task that asks for the person. */
 .state-mark[data-mark='watching']::before { content: ''; box-sizing: border-box; width: 14px; height: 14px; border: 1.75px solid color-mix(in srgb, var(--togle) 55%, transparent); border-radius: 50%; }
-.state-mark[data-mark='watching']::after { content: ''; position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--togle); animation: mark-watch 2.6s ease-in-out infinite; }
+.state-mark[data-mark='watching']::after { content: ''; position: absolute; width: 6px; height: 6px; border-radius: 50%; background: var(--togle); animation: mark-watch 2.6s ease-in-out infinite; }
 @keyframes mark-watch { 50% { opacity: 0.25; } }
 .state-mark[data-mark='done'] { background: var(--ok-soft); color: var(--ok); }
 .state-mark[data-mark='failed'] { background: var(--danger-soft); color: var(--danger); }
