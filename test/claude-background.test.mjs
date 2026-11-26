@@ -118,6 +118,7 @@ test('the hook server answers a task that Claude Code asks about, and only that 
     assert.equal(config.hooks.PermissionRequest[0].hooks[0].type, 'http')
     assert.deepEqual(Object.keys(config.hooks), ['PermissionRequest'], 'only the permission hook: Claude Code prints an error under every turn for one whose address is dead')
     assert.deepEqual(config.permissions.ask, ['Bash', 'PowerShell', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'], 'with asks, every command and edit stops for the person')
+    assert.deepEqual(config.worktree, { bgIsolation: 'none' }, 'the task changes files in its own folder: left alone, Claude Code refuses a background session every change there until it has moved into a copy of the project')
     const post = (to, body = {}, method = 'POST') => fetch(to, { method, headers: { 'content-type': 'application/json' }, body: method === 'POST' ? JSON.stringify(body) : undefined })
     const allowed = await post(url, { tool_name: 'Bash', tool_input: { command: 'ls' } })
     assert.deepEqual(await allowed.json(), { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
@@ -262,6 +263,41 @@ test('a task started without asks leaves the person\'s own rules alone', { timeo
     assert.equal(task.state, 'idle', 'nothing was asked of it yet')
   } finally {
     await backend.close()
+  }
+})
+
+test('a task changes files in the folder it was started in: its settings tell Claude Code not to move it into a copy of the project', { timeout: 60_000 }, async () => {
+  const where = (file) => JSON.parse(readFileSync(file, 'utf8')).worktree
+  const home = scratch()
+  const keep = scratch()
+  const dir = scratch()
+  const id = 'abcdef12-0000-4000-8000-000000000031'
+  const a = claude({ home, keep, backend: { stored: async () => [{ id, title: 'From a terminal', cwd: dir, updatedAt: 5 }] } })
+  let settings
+  try {
+    // A task started here.
+    const started = await a.backend.start({ folder: scratch(), prompt: '', title: 'Started here' })
+    settings = job(home, started.screen.job).settings
+    assert.deepEqual(where(settings), { bgIsolation: 'none' })
+    // A conversation from a terminal that goes on in the background, which is what Take over does: it wrote in that folder a moment before.
+    const taken = await a.backend.resume(id, { folder: dir })
+    assert.deepEqual(job(home, taken.screen.job).args.slice(0, 2), ['--resume', id])
+    assert.deepEqual(where(job(home, taken.screen.job).settings), { bgIsolation: 'none' })
+  } finally {
+    await a.backend.close()
+  }
+  // A task from a Togle before this had no such line in its file. The next run writes the file again, at the same address,
+  // and the session reads it the next time it is opened from a stop.
+  const before = JSON.parse(readFileSync(settings, 'utf8'))
+  writeFileSync(settings, JSON.stringify({ hooks: before.hooks }))
+  assert.equal(where(settings), undefined)
+  const b = claude({ home, keep })
+  try {
+    await b.backend.restore(() => undefined)
+    assert.deepEqual(where(settings), { bgIsolation: 'none' })
+    assert.deepEqual(JSON.parse(readFileSync(settings, 'utf8')).hooks, before.hooks, 'and it is heard at the address it had')
+  } finally {
+    await b.backend.close()
   }
 })
 

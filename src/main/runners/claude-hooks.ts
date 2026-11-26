@@ -13,6 +13,15 @@
 // the same from one run of Togle to the next, and each task's settings file stays until the task is removed. Only the
 // permission hook is given: Claude Code prints nothing when that address is dead (it asks on its own screen), while a
 // hook for the end of a turn would print "Stop hook error" under every turn while Togle is closed.
+//
+// The same file says where the task changes files: in the folder it was started in. Left alone, Claude Code keeps a session
+// that runs in the background out of that folder: it refuses each change there until the session has moved into a copy of
+// the project (a git worktree under `.claude/worktrees`, on a branch of its own). A conversation taken over from a terminal
+// would stop writing where it wrote a moment before, and a new task's work would end up where the person does not look.
+// `worktree.bgIsolation: "none"` turns that off for the session (checked with 2.1.332, for a conversation that goes on in
+// the background and for a new task: with the line the file is written in the folder, without it the change is refused).
+// Like the address, it is read when the session starts: a running session does not pick it up, and one that is stopped and
+// opened again does. A session that has already moved into a copy stays in that copy.
 import { randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -33,6 +42,8 @@ const WAIT_SECONDS = 3_600
 const MAX_BODY = 4 * 1024 * 1024
 /** What asks about every use with `asks`: whatever the person's own allow rules say (an ask rule wins over an allow rule). */
 const ASKING = ['Bash', 'PowerShell', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']
+/** The task changes files in the folder it was started in: Claude Code does not move it into a copy of the project (see the top). */
+const SAME_FOLDER = { bgIsolation: 'none' }
 
 interface Address {
   port: number
@@ -71,9 +82,9 @@ export class HookServer {
   }
 
   /**
-   * The settings file Claude Code is started with (`--settings`) so it asks this task's address about permission. With
-   * `key`, a task Togle knew before: the same address, and its settings file written again. With `asks`, every command, edit
-   * and write asks, so the task stops at each one and Togle can show it.
+   * The settings file Claude Code is started with (`--settings`) so it asks this task's address about permission, and
+   * changes files in the task's own folder. With `key`, a task Togle knew before: the same address, and its settings file
+   * written again. With `asks`, every command, edit and write asks, so the task stops at each one and Togle can show it.
    */
   async attach(target: HookTarget, asks: boolean, key?: string): Promise<{ key: string; settings: string }> {
     const port = await this.listen()
@@ -84,6 +95,7 @@ export class HookServer {
     const at = `http://127.0.0.1:${port}/hook/${this.secret}/${id}/permission`
     const content = {
       hooks: { PermissionRequest: [{ hooks: [{ type: 'http', url: at, timeout: WAIT_SECONDS }] }] },
+      worktree: SAME_FOLDER,
       ...(asks ? { permissions: { ask: ASKING } } : {})
     }
     await fs.writeFile(settings, JSON.stringify(content), { mode: 0o600 })
