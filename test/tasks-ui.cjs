@@ -3866,7 +3866,7 @@ async function checkChatLinksAndAgentUsage(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.evaluate("localStorage.removeItem('togle.ui.fold:agents.usage')")
   const key = 'codex:installer-link'
-  const folder = process.platform === 'win32' ? '/C:/Users/Cool/togle-opensource/dist-agent-usage-files-dev' : '/home/user/togle'
+  const folder = process.platform === 'win32' ? '/C:/Users/example/togle/dist' : '/home/user/togle'
   const target = folder + '/Togle Setup 0.1.0.exe'
   const shownPath = process.platform === 'win32' ? target.slice(1).replaceAll('/', '\\') : target
   const reply = '[Togle Free Windows installer](<' + target + '>)\n\n[Missing log](<' + folder + '/missing.log>) and [website](https://example.org).'
