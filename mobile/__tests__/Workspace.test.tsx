@@ -111,7 +111,7 @@ test('opens a To-do reply in Agents and keeps the list filter and usage fold', a
   await Renderer.act(() => tree.unmount());
 });
 
-test('refreshes an open usage group each minute and hides it when reporting is revoked', async () => {
+test('refreshes an open usage group every three minutes and hides it when reporting is revoked', async () => {
   jest.useFakeTimers();
   const host = { ...state.devices[0], phoneReports: true };
   const readReport = jest.fn().mockResolvedValue({
@@ -161,9 +161,11 @@ test('refreshes an open usage group each minute and hides it when reporting is r
     expect(readReport).toHaveBeenLastCalledWith('host', { kind: 'usage' });
     expect(visible('1,234 tokens')).toBe(true);
     await Renderer.act(async () => jest.advanceTimersByTime(60_000));
+    expect(readReport).toHaveBeenCalledTimes(1);
+    await Renderer.act(async () => jest.advanceTimersByTime(120_000));
     expect(readReport).toHaveBeenCalledTimes(2);
     await Renderer.act(async () => button('To-do').props.onPress());
-    await Renderer.act(async () => jest.advanceTimersByTime(60_000));
+    await Renderer.act(async () => jest.advanceTimersByTime(180_000));
     expect(readReport).toHaveBeenCalledTimes(2);
     await Renderer.act(async () =>
       update({ ...state, devices: [{ ...host, phoneReports: false }] }),
@@ -238,14 +240,14 @@ test('keeps a chat draft across tabs and retries the same message after a missed
     await press('To-do');
     await press('Agents');
     expect(draft().props.value).toBe('Check both routes');
-    await press('Send message');
+    await press('Queue message');
     expect(draft().props.value).toBe('Check both routes');
     expect(
       tree.root
         .findAllByType(Text)
         .some(node => node.props.children === 'Could not confirm delivery.'),
     ).toBe(true);
-    await press('Send message');
+    await press('Queue message');
     expect(chat).toHaveBeenCalledTimes(2);
     expect(chat.mock.calls[0]).toEqual(chat.mock.calls[1]);
     expect(chat.mock.calls[0]).toEqual([

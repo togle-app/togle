@@ -61,6 +61,23 @@ export async function readPlan(): Promise<Plan> {
   throw Error('Your Togle plan is unavailable. Try again.');
 }
 
+const waitlistCalls = {
+  status: 'my_pro_waitlist',
+  join: 'join_pro_waitlist',
+  leave: 'leave_pro_waitlist',
+} as const;
+
+/** Whether this account is on the Togle Pro waitlist, after joining or leaving it when asked to. */
+export async function proWaitlist(
+  action: keyof typeof waitlistCalls,
+): Promise<boolean> {
+  if (!account) throw Error('Togle account sign-in is unavailable.');
+  const { data, error } = await account.rpc(waitlistCalls[action]);
+  if (error || typeof data !== 'boolean')
+    throw Error('The Togle Pro waitlist is unavailable. Try again.');
+  return data;
+}
+
 export async function tokenFor(userId: string): Promise<string | undefined> {
   const result = await account?.auth.getSession();
   const session = result?.data.session;

@@ -16,6 +16,8 @@ const icons = {
   doubleCheck: require('../assets/icons/check-double.png'),
   usage: require('../assets/icons/usage.png'),
   clock: require('../assets/icons/clock.png'),
+  lock: require('../assets/icons/lock.png'),
+  send: require('../assets/icons/send.png'),
 };
 
 const agents = {
@@ -94,39 +96,45 @@ export function DeliveryTicks({ state }: { state: PhoneReceipt | 'sending' }) {
   );
 }
 
+/** An agent's mark in its grey tile, or bare beside the agent's name. */
 export function AgentMark({
   agent,
-  size = 32,
+  size = 31,
+  bare,
 }: {
   agent: string;
   size?: number;
+  bare?: boolean;
 }) {
   const { colors, s } = useTheme();
   const mark = provider(agent);
+  const drawn = Math.round(size * (bare ? 0.9 : 0.64));
   return (
     <View
       style={[
         styles.mark,
-        { width: size, height: size, backgroundColor: colors.raised },
+        { width: size, height: size },
+        !bare && {
+          backgroundColor: colors.raised,
+          borderRadius: Math.round(size * 0.28),
+        },
       ]}
     >
       {mark ? (
         <Image
           source={mark.image}
           accessible={false}
-          style={{
-            width: size * 0.64,
-            height: size * 0.64,
-            tintColor: colors.ink,
-          }}
+          style={{ width: drawn, height: drawn, tintColor: colors.ink }}
         />
       ) : (
-        <Text style={s.label}>{agent.trim().charAt(0).toUpperCase()}</Text>
+        <Text style={bare ? s.small : s.label}>
+          {agent.trim().charAt(0).toUpperCase()}
+        </Text>
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  mark: { borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  mark: { alignItems: 'center', justifyContent: 'center' },
 });

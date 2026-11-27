@@ -38,7 +38,7 @@ export const ChatText = memo(function MessageMarkdown({
   const document = useMemo(() => parseChat(text), [text]);
   const border = { borderColor: colors.line };
   const code = [styles.mono, { backgroundColor: colors.raised }];
-  const bold = { fontFamily: s.h2.fontFamily };
+  const bold = s.semibold;
 
   function inline(tokens: Token[], depth = 0): ReactNode {
     if (depth > 24) return tokens.map(token => token.raw).join('');
@@ -117,7 +117,7 @@ export const ChatText = memo(function MessageMarkdown({
           <Text
             key={position}
             selectable
-            style={[s.text, styles.cell, border, header && bold]}
+            style={[s.message, styles.cell, border, header && bold]}
           >
             {inline(cell.tokens)}
           </Text>
@@ -129,7 +129,7 @@ export const ChatText = memo(function MessageMarkdown({
   function blocks(tokens: Token[], depth = 0): ReactNode {
     if (depth > 24)
       return (
-        <Text selectable style={s.text}>
+        <Text selectable style={s.message}>
           {tokens.map(token => token.raw).join('')}
         </Text>
       );
@@ -156,7 +156,10 @@ export const ChatText = memo(function MessageMarkdown({
                 </Text>
               )}
               <ScrollView horizontal nestedScrollEnabled>
-                <Text selectable style={[s.text, styles.mono, styles.codeBody]}>
+                <Text
+                  selectable
+                  style={[s.message, styles.mono, styles.codeBody]}
+                >
                   {token.text}
                 </Text>
               </ScrollView>
@@ -174,7 +177,7 @@ export const ChatText = memo(function MessageMarkdown({
             <View key={index} style={styles.list}>
               {list.items.map((item, position) => (
                 <View key={position} style={styles.listItem}>
-                  <Text style={s.text}>
+                  <Text style={s.message}>
                     {list.ordered ? `${Number(list.start) + position}.` : '•'}
                   </Text>
                   <View style={[s.grow, styles.blocks]}>
@@ -207,14 +210,14 @@ export const ChatText = memo(function MessageMarkdown({
               key={index}
               accessibilityRole="header"
               selectable
-              style={s.h2}
+              style={[s.message, s.semibold, styles.heading]}
             >
               {inline(token.tokens ?? [])}
             </Text>
           );
         default:
           return (
-            <Text key={index} selectable style={s.text}>
+            <Text key={index} selectable style={s.message}>
               {inline([token])}
             </Text>
           );
@@ -227,7 +230,7 @@ export const ChatText = memo(function MessageMarkdown({
       {document ? (
         blocks(document)
       ) : (
-        <Text selectable style={s.text}>
+        <Text selectable style={s.message}>
           {text}
         </Text>
       )}
@@ -236,7 +239,8 @@ export const ChatText = memo(function MessageMarkdown({
 });
 
 const styles = StyleSheet.create({
-  blocks: { gap: 8 },
+  blocks: { gap: 6 },
+  heading: { fontSize: 16 },
   list: { gap: 4 },
   listItem: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
   mono: {

@@ -20,7 +20,7 @@ test('opens sign-in when the account has not been configured', async () => {
     tree = ReactTestRenderer.create(<App />);
   });
   const labels = tree.root.findAllByType(Text).map(node => node.props.children);
-  expect(labels).toContain('Sign in to Togle');
+  expect(labels).toContain('Sign in to your Togle account');
   expect(labels).toContain(
     'Togle account sign-in is unavailable in this build.',
   );

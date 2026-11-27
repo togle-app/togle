@@ -1,5 +1,11 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import type { Device, Task } from './device-client';
 import { AgentMark, agentName, Icon } from './icons';
 import {
@@ -9,7 +15,7 @@ import {
   type LoadReport,
 } from './ReportUsage';
 import { StatusPill } from './Session';
-import { useTheme } from './ui';
+import { Block, Button, usePageTitle, useTheme } from './ui';
 
 type Filter = 'all' | 'waiting' | 'working';
 type Props = {
@@ -17,11 +23,28 @@ type Props = {
   active: boolean;
   loadReport: LoadReport;
   notice?: React.ReactNode;
+  /** The line under the heading while no computer is listed. */
+  hint?: string;
   onOpen(device: Device, task: Task): void;
 };
 
-export function Agents({ devices, active, loadReport, notice, onOpen }: Props) {
+const many = (count: number, one: string) =>
+  `${count} ${one}${count === 1 ? '' : 's'}`;
+
+export function Agents({
+  devices,
+  active,
+  loadReport,
+  notice,
+  hint,
+  onOpen,
+}: Props) {
   const { s, colors } = useTheme();
+  const heading = usePageTitle();
+  const { width } = useWindowDimensions();
+  // A narrow phone gets tighter rows, a tablet two columns of computers.
+  const compact = width <= 390;
+  const columns = width >= 800 ? 2 : 1;
   const [filter, setFilter] = useState<Filter>('all');
   const [folded, setFolded] = useState<Record<string, boolean>>({});
   const [usageOpen, setUsageOpen] = useState(false);
@@ -49,25 +72,49 @@ export function Agents({ devices, active, loadReport, notice, onOpen }: Props) {
       Number(b.online) - Number(a.online) ||
       a.name.localeCompare(b.name),
   );
+  const shown = ordered
+    .map(device => ({
+      device,
+      tasks:
+        filter === 'all'
+          ? device.tasks
+          : device.tasks.filter(task => task.state === filter),
+    }))
+    .filter(entry => filter === 'all' || entry.tasks.length);
+  const rows: (typeof shown)[] = [];
+  for (let index = 0; index < shown.length; index += columns)
+    rows.push(shown.slice(index, index + columns));
 
   const toggle = (key: string) =>
     setFolded(value => ({ ...value, [key]: !value[key] }));
+  const card = ({ device, tasks }: (typeof shown)[number]) => (
+    <DeviceCard
+      key={device.device}
+      device={device}
+      tasks={tasks}
+      compact={compact}
+      folded={folded}
+      toggle={toggle}
+      onOpen={task => onOpen(device, task)}
+    />
+  );
   return (
     <>
       <View style={styles.heading}>
-        <Text accessibilityRole="header" style={s.h1}>
+        <Text accessibilityRole="header" style={heading}>
           Agents
         </Text>
-        {!!devices.length && (
-          <Text style={s.secondary}>
-            {count} {count === 1 ? 'agent' : 'agents'} · {devices.length}{' '}
-            {devices.length === 1 ? 'device' : 'devices'}
+        {devices.length ? (
+          <Text style={s.subtitle}>
+            {many(count, 'agent') + ' across ' + many(devices.length, 'device')}
           </Text>
+        ) : (
+          !!hint && <Text style={s.subtitle}>{hint}</Text>
         )}
       </View>
       {notice}
       {!!count && (
-        <View style={s.panel}>
+        <View style={[s.panel, styles.usage]}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Agent usage"
@@ -75,12 +122,14 @@ export function Agents({ devices, active, loadReport, notice, onOpen }: Props) {
             onPress={() => setUsageOpen(open => !open)}
             style={styles.usageHeading}
           >
-            <Icon name="usage" color={colors.muted} />
-            <Text style={[s.h2, s.grow]}>Agent usage</Text>
+            <Icon name="usage" color={colors.muted} size={18} />
+            <Text style={[styles.usageTitle, s.strong, s.grow]}>
+              Agent usage
+            </Text>
             <Icon
               name={usageOpen ? 'down' : 'right'}
               color={colors.muted}
-              size={16}
+              size={14}
             />
           </Pressable>
           {usageOpen &&
@@ -98,22 +147,25 @@ export function Agents({ devices, active, loadReport, notice, onOpen }: Props) {
         </View>
       )}
       {(counts.all > 0 || filter !== 'all') && (
-        <View style={s.actions}>
+        <View style={styles.filters}>
           {(
             [
               ['all', 'All agents'],
-              ['waiting', 'Waiting ' + counts.waiting],
-              ['working', 'Working ' + counts.working],
+              ['waiting', 'Waiting', counts.waiting],
+              ['working', 'Working', counts.working],
             ] as const
-          ).map(([value, label]) => (
+          ).map(([value, name, amount]) => (
             <Pressable
               key={value}
               accessibilityRole="button"
-              accessibilityLabel={label}
+              accessibilityLabel={
+                amount === undefined ? name : `${name} ${amount}`
+              }
               accessibilityState={{ selected: filter === value }}
               onPress={() => setFilter(value)}
               style={[
                 styles.filter,
+                compact && styles.filterCompact,
                 filter === value
                   ? { backgroundColor: colors.tint, borderColor: colors.accent }
                   : {
@@ -128,31 +180,34 @@ export function Agents({ devices, active, loadReport, notice, onOpen }: Props) {
                   { color: filter === value ? colors.accent : colors.muted },
                 ]}
               >
-                {label}
+                {name}
+                {amount !== undefined && (
+                  <Text style={styles.amount}>{' ' + amount}</Text>
+                )}
               </Text>
             </Pressable>
           ))}
         </View>
       )}
-      {ordered.map(device => {
-        const tasks =
-          filter === 'all'
-            ? device.tasks
-            : device.tasks.filter(task => task.state === filter);
-        if (filter !== 'all' && !tasks.length) return null;
-        return (
-          <DeviceCard
-            key={device.device}
-            device={device}
-            tasks={tasks}
-            folded={folded}
-            toggle={toggle}
-            onOpen={task => onOpen(device, task)}
-          />
-        );
-      })}
+      {columns === 1
+        ? shown.map(card)
+        : rows.map(row => (
+            <View key={row[0].device.device} style={styles.columns}>
+              {row.map(entry => (
+                <View key={entry.device.device} style={s.grow}>
+                  {card(entry)}
+                </View>
+              ))}
+              {row.length < columns && <View style={s.grow} />}
+            </View>
+          ))}
       {filter !== 'all' && counts[filter] === 0 && (
-        <Text style={s.secondary}>No {filter} sessions right now.</Text>
+        <Block style={styles.empty}>
+          <Text accessibilityRole="header" style={s.h2}>
+            {'No agents ' + filter}
+          </Text>
+          <Button title="Show all agents" onPress={() => setFilter('all')} />
+        </Block>
       )}
     </>
   );
@@ -178,8 +233,10 @@ function DeviceUsage({
   const agents = report?.kind === 'usage' ? report.agents : [];
   return (
     <View style={[s.divider, styles.usageGroup]}>
-      <Text style={s.label}>{device.name}</Text>
-      {providers.map(name => {
+      <Text style={[s.label, styles.usageHost, { color: colors.muted }]}>
+        {device.name}
+      </Text>
+      {providers.map((name, index) => {
         const entry = agents.find(agent => agentName(agent.name) === name);
         const limits = entry?.usage.limits;
         const key = JSON.stringify([
@@ -189,11 +246,15 @@ function DeviceUsage({
         ]);
         const open = !!folded[key];
         return (
-          <View key={name} style={styles.usageAgent}>
-            <AgentMark agent={name} />
-            <View style={[s.grow, styles.usageDetails]}>
-              <Text style={s.label}>{name}</Text>
-              <UsageReadings readings={entry?.usage.readings} />
+          <View key={name} style={[styles.usageAgent, index > 0 && s.divider]}>
+            <AgentMark agent={name} size={25} />
+            <View style={s.grow}>
+              <View style={styles.usageLine}>
+                <Text style={[styles.usageTitle, s.strong]}>{name}</Text>
+                <View style={styles.usageValue}>
+                  <UsageReadings readings={entry?.usage.readings} end />
+                </View>
+              </View>
               {!!limits?.length && (
                 <>
                   <Pressable
@@ -203,16 +264,18 @@ function DeviceUsage({
                     onPress={() => toggle(key)}
                     style={styles.limits}
                   >
-                    <Text style={[s.label, { color: colors.accent }]}>
-                      Account limits
-                    </Text>
+                    <Text style={s.small}>Account limits</Text>
                     <Icon
                       name={open ? 'down' : 'right'}
-                      color={colors.accent}
-                      size={15}
+                      color={colors.muted}
+                      size={12}
                     />
                   </Pressable>
-                  {open && <AccountLimits limits={limits} />}
+                  {open && (
+                    <View style={styles.limitRows}>
+                      <AccountLimits limits={limits} />
+                    </View>
+                  )}
                 </>
               )}
             </View>
@@ -226,12 +289,14 @@ function DeviceUsage({
 function DeviceCard({
   device,
   tasks,
+  compact,
   folded,
   toggle,
   onOpen,
 }: {
   device: Device;
   tasks: Task[];
+  compact: boolean;
   folded: Record<string, boolean>;
   toggle(key: string): void;
   onOpen(task: Task): void;
@@ -239,54 +304,57 @@ function DeviceCard({
   const { s, colors } = useTheme();
   const deviceKey = JSON.stringify([device.device]);
   const expanded = !folded[deviceKey];
+  const server = device.role === 'server';
+  const [ink, fill] = !device.online
+    ? [colors.muted, colors.raised]
+    : server
+    ? [colors.good, colors.green]
+    : [colors.accent, colors.tint];
+  // A computer with one folder lists its sessions straight away: a row names its folder.
+  const folders = new Set(device.tasks.map(task => task.folder));
   const groups = new Map<string, Task[]>();
   const prioritized = [...tasks].sort(
     (a, b) => Number(b.state === 'waiting') - Number(a.state === 'waiting'),
   );
   for (const item of prioritized) {
-    const folder = groups.get(item.folder);
+    const name = folders.size > 1 ? item.folder : '';
+    const folder = groups.get(name);
     if (folder) folder.push(item);
-    else groups.set(item.folder, [item]);
+    else groups.set(name, [item]);
   }
+  const side = compact && styles.sideCompact;
   return (
     <View style={s.panel}>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
         onPress={() => toggle(deviceKey)}
-        style={styles.row}
+        style={[styles.deviceHead, side]}
       >
-        <View
-          style={[
-            styles.deviceIcon,
-            { backgroundColor: device.online ? colors.tint : colors.raised },
-          ]}
-        >
-          <Icon
-            name={device.role === 'server' ? 'server' : 'laptop'}
-            color={device.online ? colors.accent : colors.muted}
-            size={22}
-          />
+        <View style={[styles.deviceIcon, { backgroundColor: fill }]}>
+          <Icon name={server ? 'server' : 'laptop'} color={ink} size={19} />
         </View>
         <View style={s.grow}>
-          <Text style={s.h2}>{device.name}</Text>
-          <View style={s.topRow}>
+          <Text style={s.device}>{device.name}</Text>
+          <View style={[s.topRow, styles.deviceMeta]}>
             <View
               style={[
                 styles.dot,
-                { backgroundColor: device.online ? colors.good : colors.muted },
+                device.online
+                  ? { backgroundColor: colors.good }
+                  : [styles.dotOff, { borderColor: colors.muted }],
               ]}
             />
-            <Text style={s.secondary}>
+            <Text style={s.meta}>
               {device.online ? 'Online' : 'Offline'} ·{' '}
-              {device.role === 'server' ? 'Server' : 'Computer'}
+              {server ? 'Server' : 'Computer'}
             </Text>
           </View>
         </View>
         <Icon
           name={expanded ? 'down' : 'right'}
           color={colors.muted}
-          size={17}
+          size={19}
         />
       </Pressable>
       {expanded &&
@@ -305,14 +373,14 @@ function DeviceCard({
                     <Icon
                       name={folded[key] ? 'right' : 'down'}
                       color={colors.muted}
-                      size={16}
+                      size={14}
                     />
                     <Text style={[s.label, { color: colors.muted }]}>
                       {folder}
                     </Text>
                   </Pressable>
                 )}
-                {!folded[key] &&
+                {!(folder && folded[key]) &&
                   items.map(item => (
                     <Pressable
                       key={item.key}
@@ -320,24 +388,33 @@ function DeviceCard({
                       onPress={() => onOpen(item)}
                       style={({ pressed }) => [
                         styles.row,
+                        side,
+                        compact && styles.rowCompact,
                         s.divider,
                         pressed && { backgroundColor: colors.raised },
                       ]}
                     >
-                      <AgentMark agent={item.agent} />
+                      <AgentMark agent={item.agent} size={compact ? 27 : 31} />
                       <View style={s.grow}>
-                        <Text style={s.h2}>{item.title}</Text>
-                        <Text style={s.secondary}>{agentName(item.agent)}</Text>
+                        <Text style={[s.title, compact && styles.titleCompact]}>
+                          {item.title}
+                        </Text>
+                        <Text style={[s.meta, styles.sub]}>
+                          {agentName(item.agent) +
+                            (item.folder ? ' · ' + item.folder : '')}
+                        </Text>
                       </View>
                       <StatusPill state={item.state} />
-                      <Icon name="right" color={colors.muted} size={15} />
+                      {!compact && (
+                        <Icon name="right" color={colors.muted} size={15} />
+                      )}
                     </Pressable>
                   ))}
               </React.Fragment>
             );
           })
         ) : (
-          <Text style={[s.secondary, s.divider, styles.empty]}>
+          <Text style={[s.secondary, s.divider, styles.none]}>
             {device.online
               ? 'No sessions shared right now.'
               : 'Shared sessions appear when this device is online.'}
@@ -348,33 +425,34 @@ function DeviceCard({
 }
 
 const styles = StyleSheet.create({
-  heading: { gap: 4 },
-  filter: {
-    minHeight: 44,
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: 23,
-    paddingHorizontal: 14,
-  },
-  row: {
-    minHeight: 65,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
+  heading: { gap: 7, marginBottom: 8 },
+  usage: { borderRadius: 8 },
   usageHeading: {
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 13,
+  },
+  usageTitle: { fontSize: 14 },
+  usageGroup: { paddingHorizontal: 13, paddingBottom: 4 },
+  usageHost: { paddingTop: 11, paddingBottom: 5 },
+  usageAgent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 8,
-    paddingHorizontal: 14,
     paddingVertical: 9,
   },
-  usageGroup: { padding: 14, gap: 11 },
-  usageAgent: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  usageDetails: { gap: 4 },
+  usageLine: {
+    minHeight: 25,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: 9,
+    rowGap: 3,
+  },
+  usageValue: { flexShrink: 1, marginLeft: 'auto' },
   limits: {
     minHeight: 44,
     flexDirection: 'row',
@@ -382,21 +460,66 @@ const styles = StyleSheet.create({
     gap: 6,
     alignSelf: 'flex-start',
   },
-  empty: { padding: 15 },
+  limitRows: { paddingBottom: 5 },
+  filters: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 7,
+    marginBottom: 7,
+  },
+  filter: {
+    minHeight: 48,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 24,
+    paddingHorizontal: 15,
+  },
+  filterCompact: { paddingHorizontal: 9 },
+  amount: { opacity: 0.8 },
+  columns: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 18,
+    marginBottom: 4,
+  },
+  empty: { alignItems: 'center', paddingVertical: 26, gap: 10 },
+  deviceHead: {
+    minHeight: 73,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 15,
+  },
   deviceIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 11,
+    width: 39,
+    height: 39,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dot: { width: 7, height: 7, borderRadius: 4 },
+  deviceMeta: { gap: 6, marginTop: 3 },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  dotOff: { borderWidth: 1 },
   folder: {
-    minHeight: 47,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 5,
   },
+  row: {
+    minHeight: 65,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 11,
+  },
+  sideCompact: { paddingHorizontal: 11 },
+  rowCompact: { gap: 8 },
+  titleCompact: { fontSize: 14 },
+  sub: { marginTop: 3 },
+  none: { padding: 15 },
 });

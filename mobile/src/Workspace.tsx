@@ -28,9 +28,16 @@ import { Icon } from './icons';
 import type { LoadReport } from './ReportUsage';
 import { Session } from './Session';
 import { Todo, type WaitingQuestion } from './Todo';
-import { Block, Button, ErrorMessage, useTheme } from './ui';
+import { Block, Button, ErrorMessage, useGutter, useTheme } from './ui';
 
 type Tab = 'Agents' | 'To-do';
+/** The account's place on the Togle Pro waitlist: unknown until the account service has answered. */
+export type Waitlist = {
+  joined?: boolean;
+  busy: boolean;
+  error: string;
+  change(): void;
+};
 type PairingAction = 'scan' | 'paste' | 'code';
 type Selection = { host: string; task: string; title: string; agent: string };
 const sessionKey = (host: string, task: string) => JSON.stringify([host, task]);
@@ -50,10 +57,14 @@ export function Workspace({
   userId,
   email,
   plan,
+  waitlist,
+  onAccount,
 }: {
   userId: string;
   email: string;
   plan: Plan;
+  waitlist?: Waitlist;
+  onAccount?(): void;
 }) {
   const { s, colors } = useTheme();
   const [tab, setTab] = useState<Tab>('Agents');
@@ -305,12 +316,32 @@ export function Workspace({
     setRetry(value => value + 1);
   };
   const notice = !permitted ? (
-    <Block>
-      <Text style={s.h2}>Connect your devices with Togle Pro</Text>
-      <Text style={s.secondary}>
-        With Pro, you can pair this phone with your computers and see the agents
-        they share.
+    <Block style={styles.gate}>
+      <Icon name="agents" color={colors.ink} size={19} />
+      <Text accessibilityRole="header" style={[s.h2, styles.centered]}>
+        See your agents with Togle Pro
       </Text>
+      <Text style={[s.secondary, styles.centered]}>
+        {waitlist?.joined
+          ? 'You’re on the Pro waitlist.'
+          : 'Pro brings the agents on your computers and servers to your phone.'}
+      </Text>
+      <ErrorMessage message={waitlist?.error ?? ''} />
+      {waitlist && (waitlist.joined !== undefined || !!waitlist.error) && (
+        <Button
+          title={
+            waitlist.joined === undefined
+              ? 'Try again'
+              : waitlist.joined
+              ? 'Leave waitlist'
+              : 'Join waitlist'
+          }
+          primary={waitlist.joined === false}
+          disabled={waitlist.busy}
+          onPress={waitlist.change}
+        />
+      )}
+      {onAccount && <Button title="View account" link onPress={onAccount} />}
     </Block>
   ) : !config.relay ? (
     <Block>
@@ -453,10 +484,11 @@ export function Workspace({
             active={tab === 'Agents' && !activeSession}
             loadReport={loadReport}
             notice={notice}
+            hint={permitted ? 'Your computers and servers' : undefined}
             onOpen={openSession}
           />
         </Pane>
-        <Pane active={tab === 'To-do'}>
+        <Pane active={tab === 'To-do'} narrow>
           <Todo userId={userId} waiting={waiting} onOpen={openSession} />
         </Pane>
         {selected && host && (
@@ -481,51 +513,53 @@ export function Workspace({
         )}
       </View>
       <View
-        accessibilityRole="tablist"
         style={[
-          styles.tabs,
+          styles.tabBar,
           { backgroundColor: colors.surface, borderColor: colors.line },
         ]}
       >
-        {(['To-do', 'Agents'] as const).map(name => (
-          <Pressable
-            key={name}
-            accessibilityRole="tab"
-            accessibilityLabel={name}
-            accessibilityState={{ selected: tab === name }}
-            style={styles.tab}
-            onPress={() => {
-              Keyboard.dismiss();
-              if (name === 'Agents' && tab === name) setSelected(undefined);
-              setTab(name);
-            }}
-          >
-            <View style={styles.tabIcon}>
-              {tab === name && (
-                <View
-                  pointerEvents="none"
-                  style={[
-                    StyleSheet.absoluteFill,
-                    styles.tabHighlight,
-                    { backgroundColor: colors.tint },
-                  ]}
-                />
-              )}
-              <Icon
-                name={name === 'To-do' ? 'todo' : 'agents'}
-                color={tab === name ? colors.accent : colors.muted}
-              />
-            </View>
-            <Text
-              style={[
-                s.label,
-                { color: tab === name ? colors.accent : colors.muted },
-              ]}
+        <View accessibilityRole="tablist" style={styles.tabs}>
+          {(['To-do', 'Agents'] as const).map(name => (
+            <Pressable
+              key={name}
+              accessibilityRole="tab"
+              accessibilityLabel={name}
+              accessibilityState={{ selected: tab === name }}
+              style={styles.tab}
+              onPress={() => {
+                Keyboard.dismiss();
+                if (name === 'Agents' && tab === name) setSelected(undefined);
+                setTab(name);
+              }}
             >
-              {name}
-            </Text>
-          </Pressable>
-        ))}
+              <View style={styles.tabIcon}>
+                {tab === name && (
+                  <View
+                    pointerEvents="none"
+                    style={[
+                      StyleSheet.absoluteFill,
+                      styles.tabHighlight,
+                      { backgroundColor: colors.tint },
+                    ]}
+                  />
+                )}
+                <Icon
+                  name={name === 'To-do' ? 'todo' : 'agents'}
+                  color={tab === name ? colors.accent : colors.muted}
+                  size={19}
+                />
+              </View>
+              <Text
+                style={[
+                  s.tiny,
+                  { color: tab === name ? colors.accent : colors.muted },
+                ]}
+              >
+                {name}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
       </View>
     </View>
   );
@@ -535,13 +569,17 @@ export function Workspace({
 function Pane({
   active,
   detail,
+  narrow,
   children,
 }: {
   active: boolean;
   detail?: boolean;
+  /** A single list reads best as a column; the Agents page takes the width for two columns of computers. */
+  narrow?: boolean;
   children: React.ReactNode;
 }) {
   const { s } = useTheme();
+  const gutter = useGutter();
   return (
     <View
       style={[StyleSheet.absoluteFill, !active && styles.hidden]}
@@ -554,7 +592,12 @@ function Pane({
       ) : (
         <ScrollView
           style={s.fill}
-          contentContainerStyle={[s.page, styles.page]}
+          contentContainerStyle={[
+            s.page,
+            styles.page,
+            { paddingHorizontal: gutter },
+            narrow ? { maxWidth: 660 + 2 * gutter } : styles.wide,
+          ]}
           keyboardShouldPersistTaps="handled"
         >
           {children}
@@ -565,8 +608,16 @@ function Pane({
 }
 
 const styles = StyleSheet.create({
-  page: { alignSelf: 'center', width: '100%', maxWidth: 704 },
+  page: { alignSelf: 'center', width: '100%' },
+  wide: { maxWidth: 1040 },
   hidden: { opacity: 0 },
+  gate: {
+    alignItems: 'center',
+    paddingVertical: 26,
+    paddingHorizontal: 20,
+    gap: 10,
+  },
+  centered: { textAlign: 'center' },
   code: {
     alignSelf: 'flex-start',
     fontSize: 25,
@@ -574,20 +625,25 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
   },
-  tabs: { flexDirection: 'row', borderTopWidth: 1 },
+  tabBar: { borderTopWidth: 1 },
+  tabs: {
+    flexDirection: 'row',
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 550,
+  },
   tab: {
     flex: 1,
-    minHeight: 62,
-    gap: 3,
+    minHeight: 64,
+    gap: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 6,
   },
   tabIcon: {
-    width: 48,
+    width: 49,
     height: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tabHighlight: { borderRadius: 14 },
+  tabHighlight: { borderRadius: 17 },
 });

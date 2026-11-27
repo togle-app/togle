@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Text,
   useColorScheme,
+  useWindowDimensions,
   View,
   type StyleProp,
   type ViewStyle,
@@ -51,15 +52,15 @@ const dark: typeof light = {
   raised: '#1e2330',
 };
 
+// Sizes and weights are those of the product design's Android pages. A phone control is 48 high.
 const makeTheme = (colors: typeof light, isDark: boolean) => ({
   colors,
   isDark,
   s: StyleSheet.create({
     fill: { flex: 1, backgroundColor: colors.bg },
-    page: { padding: 18, paddingBottom: 26, gap: 18 },
+    page: { paddingTop: 32, paddingBottom: 26, gap: 14 },
     header: {
-      height: 58,
-      paddingHorizontal: 18,
+      minHeight: 60,
       alignItems: 'center',
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -70,62 +71,113 @@ const makeTheme = (colors: typeof light, isDark: boolean) => ({
     logo: { width: 32, height: 32, borderRadius: 8 },
     wordmark: {
       color: colors.ink,
-      fontSize: 22,
+      fontSize: 23,
       fontFamily: font.display,
-      letterSpacing: -0.75,
+      letterSpacing: -1,
     },
     topRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     block: {
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.line,
-      borderRadius: 12,
-      padding: 15,
+      borderRadius: 10,
+      padding: 18,
       gap: 12,
     },
     h1: {
-      fontSize: 30,
+      fontSize: 32,
       fontFamily: font.display,
-      letterSpacing: -0.8,
+      letterSpacing: -1.4,
       color: colors.ink,
     },
-    h2: { fontSize: 17, fontFamily: font.bold, color: colors.ink },
+    // A card's or a sheet's heading.
+    h2: {
+      fontSize: 20,
+      fontFamily: font.display,
+      letterSpacing: -0.5,
+      color: colors.ink,
+    },
+    // A computer's name on its card.
+    device: {
+      fontSize: 18,
+      fontFamily: font.display,
+      letterSpacing: -0.45,
+      color: colors.ink,
+    },
+    // The name of a row: a session, a waiting request.
+    title: {
+      fontSize: 15,
+      lineHeight: 20,
+      fontFamily: font.semibold,
+      letterSpacing: -0.35,
+      color: colors.ink,
+    },
     section: {
       fontSize: 12,
-      fontFamily: font.bold,
-      letterSpacing: 0.85,
+      fontFamily: font.semibold,
+      letterSpacing: 0.84,
       color: colors.muted,
       textTransform: 'uppercase',
     },
     text: {
       fontSize: 15,
-      lineHeight: 21,
+      lineHeight: 22,
       color: colors.ink,
+      fontFamily: font.regular,
+    },
+    // What was said in a conversation.
+    message: {
+      fontSize: 14,
+      lineHeight: 22,
+      color: colors.ink,
+      fontFamily: font.regular,
+    },
+    // The line under a page's heading.
+    subtitle: {
+      fontSize: 14,
+      lineHeight: 20,
+      color: colors.muted,
       fontFamily: font.regular,
     },
     secondary: {
       fontSize: 13,
-      lineHeight: 19,
+      lineHeight: 20,
+      color: colors.muted,
+      fontFamily: font.regular,
+    },
+    // The small grey line under a row's name, and readings.
+    meta: {
+      fontSize: 12,
+      lineHeight: 17,
       color: colors.muted,
       fontFamily: font.regular,
     },
     label: { fontSize: 13, fontFamily: font.semibold, color: colors.ink },
+    small: { fontSize: 12, fontFamily: font.semibold, color: colors.muted },
+    tiny: {
+      fontSize: 11,
+      lineHeight: 16,
+      fontFamily: font.semibold,
+      color: colors.muted,
+    },
+    semibold: { fontFamily: font.semibold },
+    strong: { fontFamily: font.semibold, color: colors.ink },
     field: {
       minHeight: 48,
       borderColor: colors.line,
       borderWidth: 1,
-      borderRadius: 9,
+      borderRadius: 10,
       backgroundColor: colors.surface,
       color: colors.ink,
-      paddingHorizontal: 12,
+      paddingHorizontal: 13,
       fontSize: 16,
       fontFamily: font.regular,
     },
     button: {
-      minHeight: 46,
-      paddingHorizontal: 13,
-      paddingVertical: 9,
-      borderRadius: 9,
+      minHeight: 48,
+      paddingHorizontal: 15,
+      paddingVertical: 10,
+      borderRadius: 10,
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 1,
@@ -134,14 +186,20 @@ const makeTheme = (colors: typeof light, isDark: boolean) => ({
     },
     buttonText: {
       fontSize: 14,
+      lineHeight: 19,
       fontFamily: font.bold,
       textAlign: 'center',
       color: colors.ink,
     },
     primary: { backgroundColor: colors.ink, borderColor: colors.ink },
     primaryText: { color: colors.bg },
-    link: { backgroundColor: 'transparent', borderColor: 'transparent' },
+    link: {
+      backgroundColor: 'transparent',
+      borderColor: 'transparent',
+      paddingHorizontal: 7,
+    },
     linkText: { color: colors.accent },
+    dangerText: { color: colors.danger },
     loading: {
       flex: 1,
       alignItems: 'center',
@@ -150,8 +208,8 @@ const makeTheme = (colors: typeof light, isDark: boolean) => ({
     },
     error: {
       color: colors.danger,
-      fontSize: 14,
-      lineHeight: 20,
+      fontSize: 13,
+      lineHeight: 19,
       fontFamily: font.regular,
     },
     grow: { flex: 1, minWidth: 0 },
@@ -165,16 +223,17 @@ const makeTheme = (colors: typeof light, isDark: boolean) => ({
       borderWidth: 1,
       borderColor: colors.line,
       backgroundColor: colors.surface,
-      borderRadius: 12,
+      borderRadius: 10,
       overflow: 'hidden',
     },
     divider: { borderTopWidth: 1, borderColor: colors.line },
     sheet: {
       backgroundColor: colors.surface,
-      borderTopLeftRadius: 18,
-      borderTopRightRadius: 18,
-      padding: 20,
-      gap: 14,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      paddingHorizontal: 16,
+      paddingTop: 18,
+      gap: 13,
     },
   }),
 });
@@ -190,11 +249,26 @@ export function Palette({ children }: { children: React.ReactNode }) {
   return <Theme.Provider value={value}>{children}</Theme.Provider>;
 }
 
+/** The room beside a page: 16 on a phone, a little less on a narrow one, up to 38 on a tablet. */
+export function useGutter() {
+  const { width } = useWindowDimensions();
+  return width <= 390 ? 12 : Math.round(Math.min(38, Math.max(16, width / 25)));
+}
+
+/** A page's heading grows with the window: 32 on a phone, up to 46 on a tablet. */
+export function usePageTitle() {
+  const { s } = useTheme();
+  const { width } = useWindowDimensions();
+  const size = Math.round(Math.min(46, Math.max(32, width / 20)));
+  return [s.h1, { fontSize: size, letterSpacing: -0.045 * size }];
+}
+
 export function Button({
   title,
   onPress,
   primary,
   link,
+  danger,
   disabled,
   accessibilityLabel,
   testID,
@@ -204,6 +278,7 @@ export function Button({
   onPress(): void;
   primary?: boolean;
   link?: boolean;
+  danger?: boolean;
   disabled?: boolean;
   accessibilityLabel?: string;
   testID?: string;
@@ -223,11 +298,16 @@ export function Button({
         primary && s.primary,
         link && s.link,
         style,
-        (pressed || disabled) && { opacity: disabled ? 0.45 : 0.72 },
+        (pressed || disabled) && { opacity: disabled ? 0.5 : 0.72 },
       ]}
     >
       <Text
-        style={[s.buttonText, primary && s.primaryText, link && s.linkText]}
+        style={[
+          s.buttonText,
+          primary && s.primaryText,
+          link && s.linkText,
+          danger && s.dangerText,
+        ]}
       >
         {title}
       </Text>
@@ -244,9 +324,15 @@ export function ErrorMessage({ message }: { message: string }) {
   ) : null;
 }
 
-export function Block({ children }: { children: React.ReactNode }) {
+export function Block({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
   const { s } = useTheme();
-  return <View style={s.block}>{children}</View>;
+  return <View style={[s.block, style]}>{children}</View>;
 }
 
 export function Sheet({
@@ -256,11 +342,14 @@ export function Sheet({
   onClose(): void;
   children: React.ReactNode;
 }) {
-  const { s } = useTheme();
+  const { s, colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  // From the bottom on a phone, a box in the middle on a tablet.
+  const wide = width > 600;
   return (
     <Modal transparent animationType="fade" onRequestClose={onClose}>
-      <View style={sheetStyles.scrim}>
+      <View style={[sheetStyles.scrim, wide && sheetStyles.middle]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Close"
@@ -268,7 +357,12 @@ export function Sheet({
           style={StyleSheet.absoluteFill}
         />
         <View
-          style={[s.sheet, { paddingBottom: 20 + insets.bottom }]}
+          style={[
+            s.sheet,
+            wide
+              ? [sheetStyles.box, { borderColor: colors.line }]
+              : { paddingBottom: 18 + insets.bottom },
+          ]}
           accessibilityViewIsModal
         >
           {children}
@@ -282,6 +376,19 @@ const sheetStyles = StyleSheet.create({
   scrim: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(16,20,30,.46)',
+    backgroundColor: 'rgba(17,20,43,.43)',
+  },
+  middle: { justifyContent: 'center', alignItems: 'center' },
+  box: {
+    width: 430,
+    maxWidth: '100%',
+    borderWidth: 1,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    paddingHorizontal: 21,
+    paddingTop: 21,
+    paddingBottom: 21,
   },
 });

@@ -59,7 +59,8 @@ export function usePhoneReport(
     };
     refreshRef.current = refresh;
     refresh();
-    const timer = setInterval(refresh, 60_000);
+    // A conversation is read again each minute, account limits every three.
+    const timer = setInterval(refresh, session ? 60_000 : 180_000);
     const appState = AppState.addEventListener('change', next => {
       if (next === 'active') refresh();
     });
@@ -88,12 +89,18 @@ function resetCountdown(at: number, now = Date.now()): string {
   return `resets in ${minutes}m`;
 }
 
-export function UsageReadings({ readings }: { readings?: string[] }) {
+export function UsageReadings({
+  readings,
+  end,
+}: {
+  readings?: string[];
+  end?: boolean;
+}) {
   const { s } = useTheme();
   return (
-    <View style={styles.readings}>
+    <View style={[styles.readings, end && styles.end]}>
       {(readings?.length ? readings : ['Not reported']).map((line, index) => (
-        <Text key={index} selectable style={s.secondary}>
+        <Text key={index} selectable style={[s.meta, end && styles.endText]}>
           {line}
         </Text>
       ))}
@@ -111,8 +118,9 @@ export function AccountLimits({ limits }: { limits: PhoneUsage['limits'] }) {
   return (
     <View style={styles.readings}>
       {limits.map((limit, index) => (
-        <Text key={index} style={s.secondary}>
-          {limit.label} · {Math.round(limit.usedPercent)}% used
+        <Text key={index} style={s.meta}>
+          {limit.label}{' '}
+          <Text style={s.strong}>{Math.round(limit.usedPercent)}% used</Text>
           {limit.resetsAt ? ` · ${resetCountdown(limit.resetsAt, now)}` : ''}
         </Text>
       ))}
@@ -120,4 +128,8 @@ export function AccountLimits({ limits }: { limits: PhoneUsage['limits'] }) {
   );
 }
 
-const styles = StyleSheet.create({ readings: { gap: 3 } });
+const styles = StyleSheet.create({
+  readings: { gap: 3 },
+  end: { alignItems: 'flex-end' },
+  endText: { textAlign: 'right' },
+});

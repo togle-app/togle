@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { ChatText } from './ChatText';
-import { DeliveryTicks } from './icons';
+import { AgentMark, DeliveryTicks } from './icons';
 import type { PhoneActivity, PhoneReceipt } from './phone-report';
 import { useTheme } from './ui';
 
@@ -80,16 +80,12 @@ function YouCard({
       testID="chat-prompt"
       style={[
         styles.prompt,
-        {
-          backgroundColor: colors.tint,
-          borderColor: colors.line,
-          borderLeftColor: colors.accent,
-        },
+        { backgroundColor: colors.bg, borderColor: colors.line },
       ]}
     >
       <View style={styles.meta}>
-        <Text style={[s.label, { color: colors.accent }]}>You</Text>
-        {!!time && <Text style={s.secondary}>{time}</Text>}
+        <Text style={s.small}>You</Text>
+        {!!time && <Text style={s.meta}>{time}</Text>}
         <View style={styles.receipt}>
           <DeliveryTicks state={delivery} />
         </View>
@@ -97,7 +93,7 @@ function YouCard({
       {!!quote && (
         <Text
           selectable
-          style={[s.secondary, styles.quoted, { borderColor: colors.accent }]}
+          style={[s.secondary, styles.quoted, { borderColor: colors.line }]}
         >
           {quote}
         </Text>
@@ -107,8 +103,8 @@ function YouCard({
   );
 }
 
-function Message({ entry }: { entry: PhoneActivity }) {
-  const { colors, s } = useTheme();
+function Message({ entry, agent }: { entry: PhoneActivity; agent?: string }) {
+  const { s } = useTheme();
   if (entry.kind === 'you') {
     const quoted = splitQuote(entry.text);
     return (
@@ -121,58 +117,87 @@ function Message({ entry }: { entry: PhoneActivity }) {
     );
   }
   if (entry.kind === 'work') {
+    // The computer sends "2 steps: read 1 file, ran 1 command".
+    const steps = /^(\d+ steps?): (.+)$/.exec(entry.text);
     return (
-      <View
-        testID="chat-work"
-        style={[styles.work, { borderColor: colors.line }]}
-      >
-        <Text style={s.secondary}>{entry.text}</Text>
+      <View testID="chat-work" style={styles.work}>
+        <Text style={s.secondary}>
+          {steps ? (
+            <>
+              <Text style={s.semibold}>{steps[1]}</Text>
+              {' · ' + steps[2]}
+            </>
+          ) : (
+            entry.text
+          )}
+        </Text>
       </View>
     );
   }
   const time = timeOf(entry.at);
   return (
     <View testID="chat-agent" style={styles.reply}>
+      {(!!agent || !!time) && (
+        <View style={styles.author}>
+          {!!agent && <AgentMark agent={agent} size={19} bare />}
+          {!!agent && <Text style={s.small}>{agent}</Text>}
+          {!!time && <Text style={s.meta}>{time}</Text>}
+        </View>
+      )}
       <ChatText text={entry.text} />
-      {!!time && <Text style={s.secondary}>{time}</Text>}
     </View>
   );
 }
 
+/** The conversation, a line between one request of yours and the next. `agent` is the name shown over its replies. */
 export function ChatThread({
   activity,
   answers,
+  agent,
 }: {
   activity: PhoneActivity[];
   answers: Answer[];
+  agent?: string;
 }) {
+  const { s } = useTheme();
   const receipts = useMemo(
     () => placeAnswers(activity, answers),
     [activity, answers],
   );
-  const renderAnswers = (position: number) =>
-    receipts
-      .get(position)
-      ?.map(answer => (
-        <YouCard
-          key={answer.request}
-          text={answer.choice}
-          quote={answer.question}
-          at={answer.at}
-          delivery={answer.phase === 'sending' ? 'sending' : 'sent'}
-        />
-      ));
+  const items: { key: string; yours: boolean; node: React.ReactNode }[] = [];
+  const addAnswers = (position: number) => {
+    for (const answer of receipts.get(position) ?? []) {
+      items.push({
+        key: 'answer:' + answer.request,
+        yours: true,
+        node: (
+          <YouCard
+            text={answer.choice}
+            quote={answer.question}
+            at={answer.at}
+            delivery={answer.phase === 'sending' ? 'sending' : 'sent'}
+          />
+        ),
+      });
+    }
+  };
+  activity.forEach((entry, index) => {
+    addAnswers(index);
+    items.push({
+      key: entry.id === undefined ? 'at:' + index : activityKey(entry),
+      yours: entry.kind === 'you',
+      node: <Message entry={entry} agent={agent} />,
+    });
+  });
+  addAnswers(activity.length);
   return (
     <>
-      {activity.map((entry, index) => (
-        <React.Fragment
-          key={entry.id === undefined ? index : activityKey(entry)}
-        >
-          {renderAnswers(index)}
-          <Message entry={entry} />
+      {items.map((item, index) => (
+        <React.Fragment key={item.key}>
+          {item.yours && index > 0 && <View style={[s.divider, styles.turn]} />}
+          {item.node}
         </React.Fragment>
       ))}
-      {renderAnswers(activity.length)}
     </>
   );
 }
@@ -180,10 +205,10 @@ export function ChatThread({
 const styles = StyleSheet.create({
   prompt: {
     borderWidth: 1,
-    borderLeftWidth: 3,
-    borderRadius: 10,
-    gap: 6,
-    padding: 11,
+    borderRadius: 8,
+    gap: 4,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
   },
   meta: {
     flexDirection: 'row',
@@ -193,11 +218,8 @@ const styles = StyleSheet.create({
   },
   receipt: { marginLeft: 'auto' },
   quoted: { paddingLeft: 9, borderLeftWidth: 2 },
-  reply: { gap: 5, paddingHorizontal: 2 },
-  work: {
-    borderLeftWidth: 2,
-    paddingLeft: 10,
-    paddingVertical: 2,
-    marginLeft: 2,
-  },
+  reply: { gap: 4, paddingTop: 10, paddingBottom: 5, paddingHorizontal: 2 },
+  author: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  work: { paddingTop: 10, paddingHorizontal: 2 },
+  turn: { marginVertical: 12 },
 });

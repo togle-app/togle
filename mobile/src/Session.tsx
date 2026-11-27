@@ -15,6 +15,7 @@ import {
   ChatDock,
   ChatQueue,
   EMPTY_DRAFT,
+  ReplyNotice,
   type ChatDraft,
   type ChangeDraft,
 } from './ChatDock';
@@ -52,17 +53,26 @@ export function StatusPill({ state }: { state: Task['state'] }) {
     failed: [colors.danger, colors.dangerSoft],
   };
   const [ink, fill] = palette[state];
-  const ring = state === 'idle' || state === 'working';
+  // Waiting is a dot, Idle a ring, Working a ring open on one side. Each side of the open ring is named, so that no
+  // colour for the whole edge can close it again.
+  const mark =
+    state === 'working'
+      ? [
+          styles.ring,
+          styles.openRing,
+          {
+            borderTopColor: ink,
+            borderBottomColor: ink,
+            borderLeftColor: ink,
+          },
+        ]
+      : state === 'idle'
+      ? [styles.ring, { borderColor: ink }]
+      : [{ backgroundColor: ink }, state === 'stopped' && styles.square];
   return (
     <View style={[styles.pill, { backgroundColor: fill }]}>
-      <View
-        style={[
-          ring ? styles.ring : styles.dot,
-          ring ? { borderColor: ink } : { backgroundColor: ink },
-          state === 'working' && styles.openRing,
-        ]}
-      />
-      <Text style={[s.label, { color: ink }]}>{statuses[state]}</Text>
+      <View style={[styles.dot, mark]} />
+      <Text style={[s.tiny, { color: ink }]}>{statuses[state]}</Text>
     </View>
   );
 }
@@ -73,6 +83,7 @@ function SessionHeader({
   title,
   agent,
   details,
+  side,
   onBack,
 }: {
   host: Device;
@@ -80,19 +91,18 @@ function SessionHeader({
   title: string;
   agent: string;
   details?: PhoneSessionReport;
+  side: number;
   onBack(): void;
 }) {
   const { s, colors } = useTheme();
+  const { fontScale } = useWindowDimensions();
   const model = details?.model;
   const limits = details?.usage.limits;
+  // Both captions take the room of the longer one, so the readings line up.
+  const caption = { width: Math.round(104 * Math.min(fontScale, 1.6)) };
   return (
-    <View
-      style={[
-        styles.headerBand,
-        { borderColor: colors.line, backgroundColor: colors.surface },
-      ]}
-    >
-      <View style={[styles.inner, styles.header]}>
+    <View style={[styles.headerBand, { borderColor: colors.line }]}>
+      <View style={[styles.header, { paddingHorizontal: side }]}>
         <View style={styles.breadcrumb}>
           <Pressable
             accessibilityRole="button"
@@ -100,12 +110,12 @@ function SessionHeader({
             onPress={onBack}
             style={styles.back}
           >
-            <Icon name="left" color={colors.accent} />
+            <Icon name="left" color={colors.accent} size={19} />
             <Text style={[s.label, { color: colors.accent }]}>Agents</Text>
           </Pressable>
-          <Text numberOfLines={1} style={[s.secondary, s.grow]}>
+          <Text numberOfLines={1} style={[s.meta, s.grow]}>
             {host.name}
-            {task?.folder ? ' / ' + task.folder : ''}
+            {task?.folder ? '  /  ' + task.folder : ''}
           </Text>
         </View>
         <Text
@@ -115,22 +125,25 @@ function SessionHeader({
         >
           {title}
         </Text>
-        <View style={s.actions}>
+        <View testID="session-identity" style={styles.identity}>
           {task && <StatusPill state={task.state} />}
-          <View style={styles.identity}>
-            <AgentMark agent={agent} size={24} />
-            <Text style={[s.label, styles.agentName]}>
-              {agent}
-              {!!model && <Text style={s.secondary}>{' · ' + model}</Text>}
-            </Text>
+          <View style={styles.agent}>
+            <AgentMark agent={agent} size={19} bare />
+            <Text style={[s.small, { color: colors.ink }]}>{agent}</Text>
           </View>
+          {!!model && <Text style={[s.meta, styles.model]}>{model}</Text>}
         </View>
+        {!host.online && (
+          <Text style={[s.meta, styles.offline]}>
+            {host.name + ' is offline.'}
+          </Text>
+        )}
         {task && (
           <View style={styles.usage}>
             <View style={styles.usageRow}>
-              <View style={[s.topRow, styles.usageLabel]}>
-                <Icon name="usage" color={colors.muted} size={17} />
-                <Text style={[s.label, styles.wrapping]}>This session</Text>
+              <View style={[styles.usageLabel, caption]}>
+                <Icon name="usage" color={colors.muted} size={14} />
+                <Text style={[s.small, styles.wrapping]}>This session</Text>
               </View>
               <View style={s.grow}>
                 <UsageReadings readings={details?.usage.readings} />
@@ -138,9 +151,9 @@ function SessionHeader({
             </View>
             {!!limits?.length && (
               <View style={styles.usageRow}>
-                <View style={[s.topRow, styles.usageLabel]}>
-                  <Icon name="clock" color={colors.muted} size={17} />
-                  <Text style={[s.label, styles.wrapping]}>Account limits</Text>
+                <View style={[styles.usageLabel, caption]}>
+                  <Icon name="clock" color={colors.muted} size={14} />
+                  <Text style={[s.small, styles.wrapping]}>Account limits</Text>
                 </View>
                 <View style={s.grow}>
                   <AccountLimits limits={limits} />
@@ -199,8 +212,10 @@ export function Session({
   onChat?(action: PhoneChatAction): Promise<PhoneDelivery | undefined>;
 }) {
   const { s, colors } = useTheme();
-  const { height, fontScale } = useWindowDimensions();
+  const { width, height, fontScale } = useWindowDimensions();
   const fixedHeader = height >= 620 && fontScale <= 1.35;
+  // The conversation keeps 14 beside it on a phone and up to 26 on a tablet, where it is a column with an edge each side.
+  const side = Math.round(Math.min(26, Math.max(14, width * 0.03)));
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const followsLatest = useRef(true);
   const [away, setAway] = useState(false);
@@ -218,7 +233,15 @@ export function Session({
     (!currentAnswer || currentAnswer.phase === 'failed')
       ? request
       : undefined;
+  // The agent waits for something this phone was not given: the answer is made on its computer.
+  const handBack =
+    host.online &&
+    task?.state === 'waiting' &&
+    !pending &&
+    !currentAnswer;
+  const stopInCard = handBack && canSend && task?.canStop === true;
   const displayName = agentName(task?.agent ?? agent);
+  const deviceIcon = host.role === 'server' ? 'server' : 'laptop';
   const report = usePhoneReport(
     host,
     active && !!task,
@@ -240,12 +263,21 @@ export function Session({
       title={task?.title ?? title}
       agent={displayName}
       details={details}
+      side={side}
       onBack={onBack}
     />
   );
   const error =
     currentAnswer?.error ?? (!pending ? answers.at(-1)?.error : undefined);
   const displayedAnswer = answers.some(answer => answer.phase !== 'failed');
+  const card = [
+    styles.question,
+    {
+      borderColor: colors.line,
+      borderLeftColor: colors.wait,
+      backgroundColor: colors.surface,
+    },
+  ];
 
   function trackPosition({
     nativeEvent,
@@ -319,215 +351,314 @@ export function Session({
       style={s.fill}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {fixedHeader && header}
-      <View style={s.grow}>
-        <ScrollView
-          ref={scroll}
-          style={s.grow}
-          onScroll={trackPosition}
-          scrollEventThrottle={32}
-          keyboardShouldPersistTaps="handled"
-          nestedScrollEnabled
-          onLayout={() => {
-            if (active && followsLatest.current)
-              scroll.current?.scrollToEnd({ animated: false });
-          }}
-          onContentSizeChange={() => {
-            if (active && followsLatest.current)
-              scroll.current?.scrollToEnd({ animated: false });
-          }}
-        >
-          {!fixedHeader && header}
-          <View
-            style={[styles.inner, styles.thread]}
-            testID="session-conversation"
+      <View
+        style={[
+          styles.screen,
+          { backgroundColor: colors.surface, borderColor: colors.line },
+          width > 800 && styles.column,
+        ]}
+      >
+        {fixedHeader && header}
+        <View style={s.grow}>
+          <ScrollView
+            ref={scroll}
+            style={s.grow}
+            onScroll={trackPosition}
+            scrollEventThrottle={32}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            onLayout={() => {
+              if (active && followsLatest.current)
+                scroll.current?.scrollToEnd({ animated: false });
+            }}
+            onContentSizeChange={() => {
+              if (active && followsLatest.current)
+                scroll.current?.scrollToEnd({ animated: false });
+            }}
           >
-            {!activity.length && !!task?.line && (
-              <Text selectable style={s.text}>
-                {task.line}
-              </Text>
-            )}
-            <ChatThread activity={activity} answers={answers} />
-            {pending ? (
-              <View
-                testID="chat-question"
-                style={[
-                  styles.question,
-                  { borderColor: colors.wait, backgroundColor: colors.amber },
-                ]}
-              >
-                <Text style={[s.label, { color: colors.wait }]}>
-                  {displayName} asks
+            {!fixedHeader && header}
+            <View
+              style={[styles.thread, { paddingHorizontal: side }]}
+              testID="session-conversation"
+            >
+              {!activity.length && !!task?.line && (
+                <Text selectable style={s.message}>
+                  {task.line}
                 </Text>
-                <Text selectable style={s.text}>
-                  {pending.question}
-                </Text>
-                {canReply ? (
-                  <View style={s.actions}>
-                    {pending.choices?.map((choice, index) => (
-                      <Button
-                        key={index}
-                        title={choice}
-                        testID={'answer-choice-' + index}
-                        style={styles.choice}
-                        onPress={() =>
-                          onReply(
-                            index,
-                            lastEntry ? activityKey(lastEntry) : undefined,
-                          )
-                        }
-                      />
-                    ))}
-                  </View>
-                ) : (
-                  <Text style={s.secondary}>Continue on {host.name}.</Text>
-                )}
-                <ErrorMessage message={error ?? ''} />
-              </View>
-            ) : (
-              <>
-                {!host.online && (
-                  <Text style={s.secondary}>{host.name} is offline.</Text>
-                )}
-                {host.online && !task && !displayedAnswer && (
-                  <Text style={s.secondary}>
-                    This session is no longer shared.
+              )}
+              <ChatThread
+                activity={activity}
+                answers={answers}
+                agent={displayName}
+              />
+              {pending ? (
+                <View testID="chat-question" style={card}>
+                  <Text
+                    accessibilityRole="header"
+                    selectable
+                    style={[s.h2, styles.questionTitle]}
+                  >
+                    {pending.question}
                   </Text>
-                )}
-                {host.online && task?.state === 'waiting' && !currentAnswer && (
-                  <Text style={s.secondary}>Continue on {host.name}.</Text>
-                )}
-                {host.online &&
-                  task &&
-                  task.state !== 'waiting' &&
-                  !activity.length &&
-                  !task.line &&
-                  !displayedAnswer && (
+                  {canReply ? (
+                    <View style={styles.choices}>
+                      {pending.choices?.map((choice, index) => (
+                        <Pressable
+                          key={index}
+                          accessibilityRole="button"
+                          testID={'answer-choice-' + index}
+                          onPress={() =>
+                            onReply(
+                              index,
+                              lastEntry ? activityKey(lastEntry) : undefined,
+                            )
+                          }
+                          style={({ pressed }) => [
+                            s.button,
+                            styles.choice,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <Text style={[s.buttonText, styles.choiceText]}>
+                            {choice}
+                          </Text>
+                          <Icon name="right" color={colors.ink} size={19} />
+                        </Pressable>
+                      ))}
+                    </View>
+                  ) : (
                     <Text style={s.secondary}>
-                      No messages shared for this session.
+                      {'Continue on ' + host.name}
                     </Text>
                   )}
-                <ErrorMessage message={error ?? ''} />
-              </>
-            )}
-            {!!queue?.messages.length && (
-              <ChatQueue
-                queue={queue}
-                host={host.name}
-                busy={actionBusy}
-                onSend={
-                  canSend
-                    ? () =>
-                        runChat({
-                          what: 'manage-queue',
-                          revision: queue.revision,
-                          action: 'send',
-                        })
-                    : undefined
-                }
-                onRemove={
-                  canSend
-                    ? index =>
-                        runChat({
-                          what: 'manage-queue',
-                          revision: queue.revision,
-                          action: 'remove',
-                          index,
-                        })
-                    : undefined
-                }
-              />
-            )}
-          </View>
-        </ScrollView>
-        {away && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Go to the latest"
-            onPress={latest}
-            style={[
-              styles.latest,
-              { backgroundColor: colors.surface, borderColor: colors.line },
-            ]}
-          >
-            <Icon name="down" color={colors.accent} size={14} />
-            <Text style={[s.label, { color: colors.accent }]}>Latest</Text>
-          </Pressable>
+                  <ErrorMessage message={error ?? ''} />
+                </View>
+              ) : (
+                <>
+                  {host.online && !task && !displayedAnswer && (
+                    <Text
+                      style={[
+                        s.secondary,
+                        styles.note,
+                        { backgroundColor: colors.raised },
+                      ]}
+                    >
+                      This session is no longer shared.
+                    </Text>
+                  )}
+                  {handBack && (
+                    <View testID="session-hand-back" style={card}>
+                      <Text
+                        accessibilityRole="header"
+                        style={[s.h2, styles.questionTitle]}
+                      >
+                        {'Continue on ' + host.name}
+                      </Text>
+                      <Text style={s.secondary}>
+                        {displayName + ' is waiting for an answer there.'}
+                      </Text>
+                      {stopInCard && (
+                        <Button
+                          title="Stop task"
+                          danger
+                          disabled={actionBusy}
+                          style={styles.stopTask}
+                          onPress={() => runChat({ what: 'stop' })}
+                        />
+                      )}
+                    </View>
+                  )}
+                  {host.online &&
+                    task &&
+                    task.state !== 'waiting' &&
+                    !activity.length &&
+                    !task.line &&
+                    !displayedAnswer && (
+                      <Text
+                        style={[
+                          s.secondary,
+                          styles.note,
+                          { backgroundColor: colors.raised },
+                        ]}
+                      >
+                        This agent hasn’t shared messages from this session.
+                      </Text>
+                    )}
+                  <ErrorMessage message={error ?? ''} />
+                </>
+              )}
+              {!!queue?.messages.length && (
+                <ChatQueue
+                  queue={queue}
+                  host={host.name}
+                  busy={actionBusy}
+                  onSend={
+                    canSend
+                      ? () =>
+                          runChat({
+                            what: 'manage-queue',
+                            revision: queue.revision,
+                            action: 'send',
+                          })
+                      : undefined
+                  }
+                  onRemove={
+                    canSend
+                      ? index =>
+                          runChat({
+                            what: 'manage-queue',
+                            revision: queue.revision,
+                            action: 'remove',
+                            index,
+                          })
+                      : undefined
+                  }
+                />
+              )}
+            </View>
+          </ScrollView>
+          {away && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Go to the latest"
+              onPress={latest}
+              style={[
+                styles.latest,
+                { backgroundColor: colors.surface, borderColor: colors.line },
+              ]}
+            >
+              <Icon name="down" color={colors.accent} size={14} />
+              <Text style={[s.label, { color: colors.accent }]}>Latest</Text>
+            </Pressable>
+          )}
+        </View>
+        {canSend ? (
+          <ChatDock
+            agent={displayName}
+            draft={draft}
+            waiting={task?.state === 'waiting'}
+            busy={actionBusy}
+            status={feedback}
+            error={actionError}
+            side={side}
+            onSend={sendDraft}
+            onChange={reviseDraft}
+            stop={
+              task?.canStop && !stopInCard
+                ? () => runChat({ what: 'stop' })
+                : undefined
+            }
+          />
+        ) : !host.online ? (
+          <ReplyNotice
+            icon={deviceIcon}
+            title="Sending unavailable"
+            detail={`${host.name} is offline.`}
+            side={side}
+          />
+        ) : !task ? null : !canReply ? (
+          <ReplyNotice
+            icon="lock"
+            title="Phone replies are off"
+            detail={`Allow replies for this phone in Togle on ${host.name}.`}
+            side={side}
+          />
+        ) : handBack ? null : (
+          <ReplyNotice
+            icon={deviceIcon}
+            title={`Reply on ${host.name}`}
+            side={side}
+          />
         )}
       </View>
-      {canSend ? (
-        <ChatDock
-          agent={displayName}
-          draft={draft}
-          waiting={task?.state === 'waiting'}
-          busy={actionBusy}
-          status={feedback}
-          error={actionError}
-          onSend={sendDraft}
-          onChange={reviseDraft}
-          stop={task?.canStop ? () => runChat({ what: 'stop' }) : undefined}
-        />
-      ) : host.online &&
-        task &&
-        (task.state !== 'waiting' || (pending && canReply)) ? (
-        <View style={[s.divider, { backgroundColor: colors.surface }]}>
-          <Text style={[s.secondary, styles.inner, styles.replyPlace]}>
-            Reply on {host.name}.
-          </Text>
-        </View>
-      ) : null}
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  inner: {
-    alignSelf: 'center',
-    width: '100%',
-    maxWidth: 704,
-    paddingHorizontal: 16,
-  },
+  screen: { flex: 1, width: '100%', maxWidth: 820, alignSelf: 'center' },
+  column: { borderLeftWidth: 1, borderRightWidth: 1 },
   headerBand: { borderBottomWidth: 1 },
-  header: { paddingTop: 3, paddingBottom: 12, gap: 8 },
-  breadcrumb: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  back: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 7 },
-  title: { fontSize: 24 },
+  header: { paddingBottom: 10 },
+  breadcrumb: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  back: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  title: { fontSize: 23, letterSpacing: -0.8 },
   identity: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    maxWidth: '100%',
+    flexWrap: 'wrap',
+    columnGap: 8,
+    rowGap: 5,
+    marginTop: 7,
   },
-  agentName: { flexShrink: 1 },
-  usage: { gap: 5, marginTop: 2 },
-  usageRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  usageLabel: { width: 130, minHeight: 19 },
+  agent: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  model: { flexShrink: 1 },
+  offline: { marginTop: 6 },
+  usage: { gap: 3, marginTop: 5 },
+  usageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingVertical: 3,
+  },
+  usageLabel: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   wrapping: { flexShrink: 1 },
-  thread: { paddingTop: 13, paddingBottom: 16, gap: 13 },
-  question: { borderWidth: 1, borderRadius: 10, padding: 11, gap: 9 },
-  choice: { flexGrow: 1, minWidth: 72 },
-  replyPlace: { paddingVertical: 10 },
+  thread: { paddingTop: 8, paddingBottom: 12 },
+  question: {
+    marginTop: 14,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderLeftWidth: 3,
+    borderRadius: 8,
+    paddingHorizontal: 17,
+    paddingTop: 17,
+    paddingBottom: 16,
+    gap: 10,
+  },
+  questionTitle: { fontSize: 16, letterSpacing: -0.4 },
+  choices: { gap: 12 },
+  choice: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  choiceText: { flexShrink: 1, textAlign: 'left' },
+  pressed: { opacity: 0.72 },
+  stopTask: { alignSelf: 'flex-start', marginTop: 2 },
+  note: {
+    marginTop: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
   latest: {
     position: 'absolute',
     bottom: 12,
     alignSelf: 'center',
-    minHeight: 40,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     borderWidth: 1,
-    borderRadius: 20,
-    paddingHorizontal: 13,
+    borderRadius: 24,
+    paddingHorizontal: 15,
   },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    borderRadius: 18,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
-  dot: { width: 7, height: 7, borderRadius: 4 },
-  ring: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5 },
-  openRing: { borderRightColor: 'transparent' },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  ring: { borderWidth: 1.5 },
+  openRing: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    borderRightColor: 'transparent',
+  },
+  square: { borderRadius: 1 },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { Session } from '@supabase/supabase-js';
-import { account, readPlan, type Plan } from './src/account';
+import { account, proWaitlist, readPlan, type Plan } from './src/account';
 import { SignIn } from './src/SignIn';
 import {
   Block,
@@ -20,9 +20,10 @@ import {
   ErrorMessage,
   Palette,
   Sheet,
+  useGutter,
   useTheme,
 } from './src/ui';
-import { Workspace } from './src/Workspace';
+import { Workspace, type Waitlist } from './src/Workspace';
 
 const logo = require('./assets/togle.png');
 type PlanStatus =
@@ -41,6 +42,7 @@ export default function App() {
 
 function Togle() {
   const { s, colors, isDark } = useTheme();
+  const gutter = useGutter();
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [authError, setAuthError] = useState('');
   const [retry, setRetry] = useState(0);
@@ -55,6 +57,14 @@ function Togle() {
   }>();
   const current =
     entitlement?.user === userId ? entitlement?.status : undefined;
+  const free = current?.plan === 'free';
+  const [listed, setListed] = useState<{
+    user: string;
+    joined?: boolean;
+    busy: boolean;
+    error: string;
+  }>();
+  const membership = listed?.user === userId ? listed : undefined;
 
   useEffect(() => {
     if (!account) {
@@ -135,6 +145,55 @@ function Togle() {
     };
   }, [userId, retry]);
 
+  // Pro is a waitlist for now: an account on the Free plan can join it here, as in Togle on a computer.
+  const askWaitlist = useCallback(
+    async (
+      user: string,
+      action: 'status' | 'join' | 'leave',
+      before?: boolean,
+    ) => {
+      setListed({ user, joined: before, busy: true, error: '' });
+      let joined = before;
+      let error = '';
+      try {
+        joined = await proWaitlist(action);
+      } catch (failure) {
+        error =
+          failure instanceof Error
+            ? failure.message
+            : 'The Togle Pro waitlist is unavailable. Try again.';
+      }
+      // Another account may have signed in while the service answered.
+      setListed(now =>
+        now?.user === user ? { user, joined, busy: false, error } : now,
+      );
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (userId && free) askWaitlist(userId, 'status');
+  }, [userId, free, askWaitlist]);
+
+  const pro: Waitlist | undefined =
+    userId && free
+      ? {
+          joined: membership?.joined,
+          busy: membership?.busy ?? true,
+          error: membership?.error ?? '',
+          change: () =>
+            askWaitlist(
+              userId,
+              membership?.joined === undefined
+                ? 'status'
+                : membership.joined
+                ? 'leave'
+                : 'join',
+              membership?.joined,
+            ),
+        }
+      : undefined;
+
   async function signOut() {
     if (!account || signingOut) return;
     setSigningOut(true);
@@ -144,6 +203,7 @@ function Togle() {
       if (result.error) throw result.error;
       setShowAccount(false);
       setEntitlement(undefined);
+      setListed(undefined);
     } catch {
       setSignOutError('Could not sign out. Try again.');
     } finally {
@@ -156,11 +216,17 @@ function Togle() {
     setEntitlement(undefined);
     setRetry(value => value + 1);
   };
+  const openAccount = () => {
+    Keyboard.dismiss();
+    setSignOutError('');
+    setShowAccount(true);
+  };
+  const page = [s.page, { paddingHorizontal: gutter }];
 
   return (
     <SafeAreaView style={s.fill}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
-      <View style={s.header}>
+      <View style={[s.header, { paddingHorizontal: gutter }]}>
         <View style={s.topRow}>
           <Image source={logo} style={s.logo} />
           <Text style={s.wordmark}>Togle</Text>
@@ -170,16 +236,14 @@ function Togle() {
             accessibilityRole="button"
             accessibilityLabel="Togle account"
             accessibilityState={{ expanded: showAccount }}
-            onPress={() => {
-              Keyboard.dismiss();
-              setSignOutError('');
-              setShowAccount(true);
-            }}
-            style={[styles.avatar, { backgroundColor: colors.tint }]}
+            onPress={openAccount}
+            style={styles.account}
           >
-            <Text style={[s.label, { color: colors.accent }]}>
-              {email.slice(0, 2).toUpperCase()}
-            </Text>
+            <View style={[styles.avatar, { backgroundColor: colors.tint }]}>
+              <Text style={[s.small, { color: colors.accent }]}>
+                {email.slice(0, 2).toUpperCase()}
+              </Text>
+            </View>
           </Pressable>
         )}
       </View>
@@ -188,7 +252,7 @@ function Togle() {
           <ActivityIndicator color={colors.accent} />
         </View>
       ) : authError ? (
-        <View style={s.page}>
+        <View style={page}>
           <Block>
             <ErrorMessage message={authError} />
             <Button title="Try again" onPress={tryAgain} />
@@ -205,9 +269,11 @@ function Togle() {
                 userId={userId}
                 email={email}
                 plan={current.plan}
+                waitlist={pro}
+                onAccount={openAccount}
               />
             ) : current?.error ? (
-              <View style={s.page}>
+              <View style={page}>
                 <Block>
                   <ErrorMessage message={current.error} />
                   <Button title="Try again" onPress={tryAgain} />
@@ -221,24 +287,51 @@ function Togle() {
           </View>
           {showAccount && (
             <Sheet onClose={() => setShowAccount(false)}>
-              <Text accessibilityRole="header" style={s.h1}>
+              <Text accessibilityRole="header" style={s.h2}>
                 Togle account
               </Text>
-              <Text selectable style={s.text}>
-                {email}
-              </Text>
-              {current?.plan && (
-                <View style={s.topRow}>
-                  <Text style={s.label}>Plan</Text>
-                  <Text style={s.secondary}>
-                    {current.plan === 'free'
-                      ? 'Free'
-                      : current.plan === 'trial'
-                      ? 'Togle Pro trial'
-                      : 'Togle Pro access'}
+              <View>
+                <View style={styles.fact}>
+                  <Text style={s.subtitle}>Email</Text>
+                  <Text selectable style={[s.subtitle, s.strong, styles.value]}>
+                    {email}
                   </Text>
                 </View>
-              )}
+                {current?.plan && (
+                  <View style={[styles.fact, s.divider]}>
+                    <Text style={s.subtitle}>Plan</Text>
+                    <Text style={[s.subtitle, s.strong, styles.value]}>
+                      {current.plan === 'free'
+                        ? 'Free'
+                        : current.plan === 'trial'
+                        ? 'Togle Pro trial'
+                        : 'Togle Pro'}
+                    </Text>
+                  </View>
+                )}
+                {pro && (
+                  <View style={[styles.fact, s.divider]}>
+                    <Text style={[s.subtitle, s.grow]}>
+                      {pro.joined ? 'You’re on the Pro waitlist.' : 'Togle Pro'}
+                    </Text>
+                    {(pro.joined !== undefined || !!pro.error) && (
+                      <Button
+                        title={
+                          pro.joined === undefined
+                            ? 'Try again'
+                            : pro.joined
+                            ? 'Leave waitlist'
+                            : 'Join waitlist'
+                        }
+                        primary={pro.joined === false}
+                        disabled={pro.busy}
+                        onPress={pro.change}
+                      />
+                    )}
+                  </View>
+                )}
+              </View>
+              <ErrorMessage message={pro?.error ?? ''} />
               <ErrorMessage message={signOutError} />
               <Button
                 title={signingOut ? 'Signing out…' : 'Sign out'}
@@ -246,7 +339,7 @@ function Togle() {
                 onPress={signOut}
               />
               <Button
-                title="Close account"
+                title="Close"
                 link
                 onPress={() => setShowAccount(false)}
               />
@@ -259,11 +352,27 @@ function Togle() {
 }
 
 const styles = StyleSheet.create({
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  // A 48 target around the 34 circle of the design.
+  account: {
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fact: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+    paddingVertical: 10,
+  },
+  value: { flexShrink: 1, textAlign: 'right' },
 });

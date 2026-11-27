@@ -11,7 +11,7 @@ import {
 import { deviceStore } from './account';
 import type { Device, Request, Task } from './device-client';
 import { AgentMark, agentName, Icon } from './icons';
-import { Button, ErrorMessage, Sheet, useTheme } from './ui';
+import { Button, ErrorMessage, Sheet, usePageTitle, useTheme } from './ui';
 
 export type WaitingQuestion = { host: Device; task: Task; request: Request };
 type Item = { id: string; title: string; done: boolean };
@@ -27,6 +27,7 @@ export function Todo({
   onOpen(host: Device, task: Task): void;
 }) {
   const { s, colors } = useTheme();
+  const heading = usePageTitle();
   const store = useMemo(() => deviceStore(userId), [userId]);
   const [items, setItems] = useState<Item[]>();
   const [draft, setDraft] = useState('');
@@ -108,10 +109,10 @@ export function Todo({
   return (
     <>
       <View style={styles.heading}>
-        <Text accessibilityRole="header" style={s.h1}>
+        <Text accessibilityRole="header" style={heading}>
           To-do
         </Text>
-        <Text style={s.secondary}>
+        <Text style={s.subtitle}>
           {new Intl.DateTimeFormat(undefined, {
             weekday: 'long',
             month: 'long',
@@ -123,7 +124,7 @@ export function Todo({
         <TextInput
           accessibilityLabel="Add a to-do"
           testID="todo-draft"
-          style={[s.field, s.grow]}
+          style={[s.field, styles.addField, s.grow]}
           placeholder="Add a to-do"
           placeholderTextColor={colors.muted}
           value={draft}
@@ -139,22 +140,29 @@ export function Todo({
           onPress={add}
         />
       </View>
-      <View style={styles.section}>
-        <Text style={s.section}>Waiting for you</Text>
-        <View style={s.panel}>
-          {waiting.length ? (
-            waiting.map(({ host, task, request }, index) => (
+      {!!waiting.length && (
+        <View style={styles.section}>
+          <Text accessibilityRole="header" style={s.section}>
+            Waiting for you
+          </Text>
+          <View style={s.panel}>
+            {waiting.map(({ host, task, request }, index) => (
               <View
                 key={JSON.stringify([host.device, task.key, request.id])}
                 style={[styles.waiting, index > 0 && s.divider]}
               >
-                <AgentMark agent={task.agent} />
-                <View style={[s.grow, styles.question]}>
-                  <Text style={s.h2}>{task.title}</Text>
-                  <Text style={s.secondary}>
+                <View style={styles.mark}>
+                  <AgentMark agent={task.agent} />
+                </View>
+                <View style={s.grow}>
+                  <Text style={s.title}>{task.title}</Text>
+                  <Text style={[s.meta, styles.from]}>
                     {agentName(task.agent)} · {host.name}
                   </Text>
-                  <Text style={s.text} numberOfLines={3}>
+                  <Text
+                    style={[s.secondary, styles.asked, { color: colors.ink }]}
+                    numberOfLines={3}
+                  >
                     {request.question}
                   </Text>
                 </View>
@@ -164,19 +172,17 @@ export function Todo({
                   onPress={() => onOpen(host, task)}
                 />
               </View>
-            ))
-          ) : (
-            <Text style={[s.secondary, styles.empty]}>
-              No questions waiting for an answer.
-            </Text>
-          )}
+            ))}
+          </View>
         </View>
-      </View>
+      )}
       <View style={styles.section}>
         <View style={styles.listHeader}>
           <View>
-            <Text style={s.section}>Personal to-dos</Text>
-            <Text style={s.secondary}>On this phone</Text>
+            <Text accessibilityRole="header" style={s.section}>
+              Personal to-dos
+            </Text>
+            <Text style={s.meta}>On this phone</Text>
           </View>
           {!!items?.length && (
             <Button
@@ -244,11 +250,18 @@ export function Todo({
                       ]}
                     >
                       {item.done && (
-                        <Icon name="check" color={colors.accent} size={16} />
+                        <Icon name="check" color={colors.accent} size={14} />
                       )}
                     </View>
                     <Text
-                      style={[s.text, s.grow, item.done && styles.completed]}
+                      style={[
+                        s.text,
+                        s.grow,
+                        item.done && [
+                          styles.completed,
+                          { color: colors.muted },
+                        ],
+                      ]}
                     >
                       {item.title}
                     </Text>
@@ -263,13 +276,13 @@ export function Todo({
                       setMenu(item);
                     }}
                   >
-                    <Icon name="more" color={colors.ink} />
+                    <Icon name="more" color={colors.ink} size={19} />
                   </Pressable>
                 </View>
               ))
             ) : (
               <Text style={[s.secondary, styles.empty]}>
-                No personal to-dos yet.
+                Nothing on your list. Add what you need to do today.
               </Text>
             )}
           </View>
@@ -325,40 +338,49 @@ export function Todo({
 }
 
 const styles = StyleSheet.create({
-  heading: { gap: 4 },
+  heading: { gap: 7, marginBottom: 4 },
   add: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
-  section: { gap: 10 },
-  waiting: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12 },
-  question: { gap: 3 },
-  empty: { padding: 15 },
+  addField: { borderRadius: 8, paddingHorizontal: 11 },
+  section: { gap: 10, marginTop: 11 },
+  waiting: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mark: { alignSelf: 'flex-start', marginTop: 4 },
+  from: { marginTop: 3 },
+  asked: { marginTop: 5 },
+  empty: { padding: 18 },
   listHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: 12,
   },
-  todoRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9 },
+  todoRow: { flexDirection: 'row', alignItems: 'center', paddingRight: 8 },
   toggle: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    minHeight: 56,
-    paddingHorizontal: 6,
-    paddingVertical: 11,
+    minHeight: 59,
+    paddingHorizontal: 15,
+    paddingVertical: 14,
   },
   checkbox: {
-    width: 21,
-    height: 21,
+    width: 19,
+    height: 19,
     borderRadius: 5,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   more: {
-    minWidth: 44,
-    minHeight: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  completed: { textDecorationLine: 'line-through', opacity: 0.7 },
+  completed: { textDecorationLine: 'line-through' },
 });
