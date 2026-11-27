@@ -1,6 +1,6 @@
 {
   "name": "togle",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "private": true,
   "description": "Manage AI agents on one computer, dictate text, and turn meetings into notes and to-dos.",
   "license": "MIT",
