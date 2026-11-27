@@ -1,5 +1,12 @@
 import React from 'react';
-import { Keyboard, StyleSheet, Text, View } from 'react-native';
+import {
+  Dimensions,
+  Keyboard,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import Renderer from 'react-test-renderer';
 import type { Answer } from '../src/ChatThread';
 import type { Device, Request, Task } from '../src/device-client';
@@ -465,6 +472,13 @@ describe('reading a conversation', () => {
 
   test('"Message sent" goes after a moment, and the box stays above the keyboard', async () => {
     jest.useFakeTimers();
+    // A phone of ordinary size with ordinary type: there the heading has a fixed place.
+    const before = {
+      window: Dimensions.get('window'),
+      screen: Dimensions.get('screen'),
+    };
+    const phone = { width: 400, height: 856, scale: 2.5, fontScale: 1 };
+    Dimensions.set({ window: phone, screen: phone });
     const listeners: Record<string, (event?: unknown) => void> = {};
     const listen = jest
       .spyOn(Keyboard, 'addListener')
@@ -498,6 +512,12 @@ describe('reading a conversation', () => {
       const root = () =>
         StyleSheet.flatten(tree!.root.findAllByType(View)[0].props.style);
       expect(root().paddingBottom).toBe(0);
+      const headingScrolls = () =>
+        tree!.root
+          .findAllByType(ScrollView)[0]
+          .findAll(node => node.props.accessibilityLabel === 'Back to Agents')
+          .length > 0;
+      expect(headingScrolls()).toBe(false);
       const shown =
         listeners.keyboardWillChangeFrame ?? listeners.keyboardDidShow;
       const hidden = listeners.keyboardWillHide ?? listeners.keyboardDidHide;
@@ -506,8 +526,11 @@ describe('reading a conversation', () => {
         shown({ endCoordinates: { screenY: 500 } }),
       );
       expect(root().paddingBottom).toBe(284);
+      // While the keys are up the heading scrolls with the conversation, and it is back in its place after.
+      expect(headingScrolls()).toBe(true);
       await Renderer.act(async () => hidden());
       expect(root().paddingBottom).toBe(0);
+      expect(headingScrolls()).toBe(false);
 
       const send = tree!.root.findAll(
         node =>
@@ -522,6 +545,7 @@ describe('reading a conversation', () => {
     } finally {
       await Renderer.act(() => tree?.unmount());
       listen.mockRestore();
+      Dimensions.set(before);
       jest.useRealTimers();
     }
   });

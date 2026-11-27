@@ -216,7 +216,10 @@ export function Session({
   const { s, colors } = useTheme();
   const keyboard = useKeyboardSpace();
   const { width, height, fontScale } = useWindowDimensions();
-  const fixedHeader = height >= 620 && fontScale <= 1.35;
+  // The heading stays in place on a tall screen. On a short one, with large type, or while the keyboard takes half
+  // the screen, it scrolls away with the conversation, which needs the room more.
+  const fixedHeader =
+    height >= 620 && fontScale <= 1.35 && keyboard.space === 0;
   // The conversation keeps 14 beside it on a phone and up to 26 on a tablet, where it is a column with an edge each side.
   const side = Math.round(Math.min(26, Math.max(14, width * 0.03)));
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
