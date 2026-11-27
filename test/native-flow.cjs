@@ -227,7 +227,8 @@ async function run() {
   await evaluate(row + '.click()')
   await wait(() => evaluate("!!document.querySelector('.call-detail-tabs')"), 'real call details')
   await evaluate("document.querySelector('#meeting-tab-transcript').click()")
-  await wait(() => evaluate("document.querySelector('.call-detail-content').textContent.includes('I will send it by Tuesday.')"), 'the transcript')
+  // The panel that is shown: a page that keeps a panel for every tab has the others in it too, hidden.
+  await wait(() => evaluate("document.querySelector('.call-detail-content:not([hidden])').textContent.includes('I will send it by Tuesday.')"), 'the transcript')
   await invoke('session:clear')
   record = await invoke('calls:merge-speakers', live.id, 'native:4', 'native:1')
   assert.ok(record.transcript.filter(line => line.speaker === 'them').every(line => line.voiceId === 'native:1' && line.voiceName === 'Diana'), 'archived call corrections are saved independently of the current call')

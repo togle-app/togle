@@ -467,12 +467,14 @@ function createDictationSpeech(): DictationSpeech {
 }
 const dictationWindow = new DictationWindow(() => dictation.cancel())
 // Togle Studio, the separate app that cleans the microphone for every call app, when it's on this computer.
-// Test runs look in a folder of their own, never at the real one.
+// Test runs look in a folder of their own, never at the real one: not at its link file, and not at what is installed here
+// either (a test that says "not installed" failed on every computer that has Togle Studio).
+const microphoneTestRun = !app.isPackaged && (process.env.TOGLE_HEADLESS === '1' || !!process.env.TOGLE_MICROPHONE_FOLDER)
 const microphoneLink = new MicrophoneLink({
   folder: !app.isPackaged && process.env.TOGLE_MICROPHONE_FOLDER ? process.env.TOGLE_MICROPHONE_FOLDER : path.join(app.getPath('appData'), MICROPHONE_PRODUCT),
   client: { name: 'togle', version: app.getVersion() },
   // Installed is what the computer has, not what a link file says: its installer's program (a link file outlives the app).
-  installed: () => installedStudio({ platform: process.platform, env: process.env, home: app.getPath('home'), exists: existsSync }),
+  installed: () => (microphoneTestRun ? undefined : installedStudio({ platform: process.platform, env: process.env, home: app.getPath('home'), exists: existsSync })),
   // From source, Togle can start the microphone app's development build too (its link file names Electron and its folder).
   development: !app.isPackaged,
   // Before release Togle Studio was called Togle Microphone: its old link file can still start it, once.
