@@ -11,7 +11,7 @@ import { phoneChoices } from '../reach/share'
 import type { RunnerUsage, UsageWindow } from '@shared/runner-usage'
 import { codexQuestionReplies } from '@shared/codex-questions'
 import { withQuote } from '@shared/quote'
-import { ownGroupOf } from '@shared/task-groups'
+import { ownGroupOf, projectFolderOf } from '@shared/task-groups'
 import { carriedFlags } from './claude-job'
 import { askedLine } from './claude-sessions'
 import { endTree, listProcesses } from './process-tree'
@@ -272,7 +272,7 @@ export class RunnerHub {
         if (view.schedule) continue
         const place = ownGroupOf(view, process.platform)
         const words = asked.get(view.key)
-        sorting.push({ key: view.key, name: view.title, ...(words ? { asked: words } : {}), place, where: placeWords(place, view.folder) })
+        sorting.push({ key: view.key, name: view.title, ...(words ? { asked: words } : {}), place, where: placeWords(place, projectFolderOf(view.folder)) })
         const subject = subjects.of(view.key, place)
         if (subject) view.subject = subject
       }

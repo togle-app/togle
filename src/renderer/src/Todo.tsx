@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { needsYou, taskHandoffProblem, type RunnerStatus, type TaskView, type ViewRequest } from '@shared/runner'
 import { canAllowHere, shownPart } from '@shared/runner-command'
+import { projectFolderOf } from '@shared/task-groups'
 import type { TodoItem, TodoList } from '@shared/todo'
 import type { CallOffer, TodoOffer } from '@shared/call-todo'
 import { meetingTitle } from './MeetingsPage'
@@ -285,7 +286,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
                   <span className="todo-grow">
                     <b>{task.title}</b>
                     <small className="todo-line">
-                      <AgentLead runner={task.runner} name={agentOf(task)} rest={`${baseName(task.folder)} · ${says}`} />
+                      <AgentLead runner={task.runner} name={agentOf(task)} rest={`${baseName(projectFolderOf(task.folder))} · ${says}`} />
                       {/* A command that looks dangerous is marked red, and why is on it. */}
                       {detail && (code ? <> <code className={request?.danger ? 'danger' : undefined} title={request?.danger || undefined}>{detail.split('\n')[0]}</code></> : ` ${detail}`)}
                     </small>

@@ -2,6 +2,7 @@
 // decides what to say and what has been said. The window that shows a notice and the mark on the tray are elsewhere.
 import { isWork, stepsLine, type TaskAttention, type TaskNotice, type ViewRequest } from '@shared/runner'
 import { canAllowHere, shownPart as shown } from '@shared/runner-command'
+import { projectFolderOf } from '@shared/task-groups'
 import { RUNNER_NAMES } from './hub'
 import { actionResult, resultExcerpt } from '../task-notification-text'
 
@@ -9,7 +10,7 @@ const baseName = (folder: string): string => folder.replace(/[\\/]+$/, '').split
 
 function taskIdentity(task: TaskAttention) {
   const agent = task.agent || RUNNER_NAMES[task.runner] || task.runner
-  return { key: task.key, title: task.title, agent, where: [agent, baseName(task.folder)].filter(Boolean).join(' · ') }
+  return { key: task.key, title: task.title, agent, where: [agent, baseName(projectFolderOf(task.folder))].filter(Boolean).join(' · ') }
 }
 
 function waitingNotice(task: TaskAttention, request: ViewRequest, others: number): TaskNotice {

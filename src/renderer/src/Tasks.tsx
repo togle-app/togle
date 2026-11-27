@@ -11,7 +11,7 @@ import { AccountLimits, AgentUsage, AgentUsageList } from './AgentUsage'
 import { DETAIL_MIN, LIST_COLLAPSE_BELOW, LIST_MAX, LIST_MIN, setPanes, usePanes } from './panes'
 import { PointMenu, type Point } from './PointMenu'
 import { ResizeHandle } from './ResizeHandle'
-import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
+import { applyGroupChange, madeKey, NO_GROUPS, ownGroupOf, projectFolderOf, projectKeyOf, subjectFolded, type GroupChange, type TaskGroups } from '@shared/task-groups'
 import { cleanQuote, withQuote, splitQuote } from '@shared/quote'
 import { attachmentCount, splitPictures } from '@shared/pasted-pictures'
 import { knownWith, placeSent, SENT_GIVE_UP_MS, tailDelivery, type SentMessage } from '@shared/sent-messages'
@@ -328,7 +328,7 @@ function groupTasks(list: TaskView[], arrangement: TaskGroups, withMade: boolean
   const projects = [...byGroup.entries()]
     .filter(([key]) => key.startsWith('project:'))
     .map(([key, tasks]) => {
-      const folder = tasks.find((task) => ownGroup(task) === key)?.folder ?? key.slice('project:'.length)
+      const folder = projectFolderOf(tasks.find((task) => ownGroup(task) === key)?.folder ?? key.slice('project:'.length))
       return { key, folder, own: baseName(folder), tasks }
     })
   for (const project of projects) {
@@ -1027,7 +1027,7 @@ function TaskRow({ task, now, old, selected, withFolder, dragging, onSelect, onT
   const job = task.schedule ? [task.state === 'failed' ? 'last run failed' : '', task.schedule, task.state === 'working' ? 'running now' : task.nextRun ? `next ${nextTime(task.nextRun, now)}` : ''].filter(Boolean).join(' · ') : ''
   // Its project is the heading over it, so the line leaves out the folder, unless the person moved it to another group. The agent
   // is its mark (its name is the tooltip), first in the line.
-  const line = job || (elsewhere ? 'terminal' : [withFolder ? baseName(task.folder) : '', detail].filter(Boolean).join(' · '))
+  const line = job || (elsewhere ? 'terminal' : [withFolder ? baseName(projectFolderOf(task.folder)) : '', detail].filter(Boolean).join(' · '))
   const fresh = isFresh(task)
   return (
     <div
@@ -1654,7 +1654,7 @@ function TaskPanel({ detail, onBack, onAnswer, onReply, onSend, onHeld, onInterr
     else if (event.key === 'Enter') { event.preventDefault(); choose(at) }
   }
   // Where it is, as the list has it: its box, and the heading it is under there.
-  const where = place ? place.name : kindOf(task) === 'project' ? baseName(task.folder) : kindOf(task) === 'scheduled' ? 'Scheduled' : 'Everyday'
+  const where = place ? place.name : kindOf(task) === 'project' ? baseName(projectFolderOf(task.folder)) : kindOf(task) === 'scheduled' ? 'Scheduled' : 'Everyday'
   const heading = place?.subjects.find((subject) => subject.tasks.some((one) => one.key === task.key))?.name
   return (
     <div className="task-panel" {...(!sessionShown && !question ? fileDrop(attachFiles) : {})}>

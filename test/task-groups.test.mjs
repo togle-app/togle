@@ -151,3 +151,18 @@ test('the group Togle puts a task in, the same in the window and in main', () =>
   assert.equal(T.ownGroupOf({ folder: 'C:\\work', schedule: 'every day at 8:00' }, 'win32'), 'scheduled')
   assert.equal(T.projectKeyOf('C:\\Work\\', 'win32'), 'c:\\work')
 })
+
+test('a copy of a project that Claude Code makes for a session is in the project it was copied from', () => {
+  const copy = 'C:\\work\\shop\\.claude\\worktrees\\design-cleanup'
+  assert.equal(T.projectFolderOf(copy), 'C:\\work\\shop')
+  assert.equal(T.projectFolderOf(copy + '\\web\\togle.app'), 'C:\\work\\shop', 'a folder inside the copy as well')
+  assert.equal(T.projectFolderOf(copy + '\\'), 'C:\\work\\shop', 'with a slash at the end')
+  assert.equal(T.projectFolderOf('/home/sam/togle/.claude/worktrees/fix-login/src'), '/home/sam/togle', 'with the slashes of another system')
+  assert.equal(T.projectFolderOf('C:\\work\\worktrees\\x'), 'C:\\work\\worktrees\\x', 'a folder that only looks like one is its own project')
+  assert.equal(T.projectFolderOf('C:\\work\\shop\\.claude\\worktrees'), 'C:\\work\\shop\\.claude\\worktrees', 'the folder that holds the copies is no copy')
+  assert.equal(T.projectFolderOf('C:\\work\\shop'), 'C:\\work\\shop')
+  assert.equal(T.projectFolderOf(''), '')
+  // One box in the list, whichever of the two folders the session is in, and however the path is written on Windows.
+  assert.equal(T.ownGroupOf({ folder: copy }, 'win32'), 'project:c:\\work\\shop')
+  assert.equal(T.ownGroupOf({ folder: copy + '\\web' }, 'win32'), T.ownGroupOf({ folder: 'c:\\work\\Shop\\' }, 'win32'))
+})

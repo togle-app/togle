@@ -48,11 +48,21 @@ export const projectKeyOf = (folder: string, platform: string): string => {
   return platform === 'win32' ? clean.toLowerCase() : clean
 }
 
+/**
+ * The folder a project is, from the folder an agent works in. A copy of a project that Claude Code makes for a session
+ * (`<project>/.claude/worktrees/<name>`, or a folder inside it) belongs to the project it was copied from; any other folder is its own.
+ * Only the grouping uses this: a task's own folder stays what it is, because resuming and handing back need the real one.
+ */
+export const projectFolderOf = (folder: string): string => {
+  const copy = /^(.+?)[\\/]\.claude[\\/]worktrees[\\/][^\\/]+(?:[\\/].*)?$/i.exec(folder.replace(/[\\/]+$/, ''))
+  return copy ? copy[1] : folder
+}
+
 /** The group Togle puts a task in by itself: Scheduled for a scheduled job, Everyday for work outside any project, else its project. */
 export function ownGroupOf(task: { schedule?: string; outsideProject?: boolean; folder: string }, platform: string): string {
   if (task.schedule) return 'scheduled'
   if (task.outsideProject || !task.folder) return 'everyday'
-  return `project:${projectKeyOf(task.folder, platform)}`
+  return `project:${projectKeyOf(projectFolderOf(task.folder), platform)}`
 }
 
 const MOST_MADE = 50
