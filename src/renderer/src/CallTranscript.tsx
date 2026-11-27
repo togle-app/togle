@@ -26,15 +26,15 @@ export function callLength(ms: number): string {
  * the name, the time into the call), a marked moment standing out, a voice that goes on without a head of its own. A line of time
  * stands between the turns where each 5 minutes begin.
  */
-export const CallTranscript = memo(function CallTranscript({ record, seconds }: { record: CallSession; seconds?: number }) {
+export const CallTranscript = memo(function CallTranscript({ record, citation }: { record: CallSession; citation?: { seconds: number } }) {
   const turns = useMemo(() => speechTurns(record.transcript), [record.transcript])
   const marked = useMemo(() => markedTurnIds(record), [record])
   const joins = useMemo(() => continuations(turns), [turns])
   // The lines asked for with "Show more" stay shown when the window goes to another place and back to this call.
   const [shown, setShown] = useKeptState(`transcript.shown:${record.id}`, LINES_PER_PAGE)
   const target = useMemo(() => {
-    if (seconds === undefined) return -1
-    const at = record.startedAt + seconds * 1000
+    if (!citation) return -1
+    const at = record.startedAt + citation.seconds * 1000
     let nearest = -1, shortest = Infinity
     for (const [index, turn] of turns.entries()) {
       // Notes use whole seconds. Prefer the turn that starts in the cited second, even if voices overlap.
@@ -43,14 +43,14 @@ export const CallTranscript = memo(function CallTranscript({ record, seconds }: 
       if (distance < shortest) { nearest = index; shortest = distance }
     }
     return nearest
-  }, [record.startedAt, seconds, turns])
+  }, [record.startedAt, citation, turns])
   const visible = Math.max(shown, target + 1)
   const cited = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     if (target < 0 || !cited.current) return
     cited.current.focus({ preventScroll: true })
     cited.current.scrollIntoView({ block: 'center' })
-  }, [target, seconds])
+  }, [target, citation])
   const clock = useMemo(() => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }), [])
   if (!turns.length) return <p className="hint">No transcript was saved for this call.</p>
   const rows: ReactNode[] = []

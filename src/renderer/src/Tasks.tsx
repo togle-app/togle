@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
-import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, needsYou, slashList, type LogEntry, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
+import { AGENT_INSTALLS, changedFiles, KNOWN_AGENTS, isFresh, needsYou, slashList, type LogEntry, type RunnerStatus, type TaskDetail, type TaskOffers, type TaskView, type ViewRequest } from '@shared/runner'
 import type { DeviceTasks, RemoteAct, RemoteTask } from '@shared/reach'
 import { useReach } from './Devices'
 import { openSettings } from './open-settings'
@@ -212,7 +212,6 @@ const waitsOn = (task: TaskView): string => {
 const watching = (task: TaskView): boolean => !needsYou(task) && !task.signedOut && waitsOn(task) !== '' && (task.state === 'idle' || (task.state === 'working' && !!task.turnOver))
 /** What is waited on, one to a line, for the pointer (a monitor's description, a shell's command). */
 const waitsOnLabels = (task: TaskView): string => [...(task.monitors ?? []), ...(task.shells ?? [])].map((one) => one.label).join('\n')
-const isFresh = (task: TaskView): boolean => task.fresh === true && !needsYou(task) && task.state !== 'working' && task.state !== 'waiting'
 /** Where a task stands, in the order a subject lists them: it needs you, it works, it finished and you have not opened it, it is done. */
 const standing = (task: TaskView): number => (needsYou(task) ? 0 : task.state === 'working' ? 1 : isFresh(task) ? 2 : 3)
 /** Inside one standing the order holds still: the working ones by name (they change all the time), the others newest first. */
@@ -1010,7 +1009,7 @@ interface RowProps {
 }
 
 function TaskRow({ task, now, old, selected, withFolder, dragging, onSelect, onTakeOver, onDragStart, onDragEnd, onMenu }: RowProps) {
-  const stoppedHere = needsYou(task) && task.state !== 'waiting'
+  const stoppedHere = task.mine && !task.terminal && (task.state === 'stopped' || task.state === 'failed')
   const elsewhere = !task.mine && !!task.pid
   // One line, as the design has it: the agent, where it works, and how it stands. A task in a terminal says so. Stopped
   // and waiting for a reply, it says why; idle for a long time, it says since when.
@@ -1043,7 +1042,7 @@ function TaskRow({ task, now, old, selected, withFolder, dragging, onSelect, onT
         onMenu(event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : { x: box.left + 24, y: box.bottom - 4 })
       }}
     >
-      <button className={`task-row ${selected ? 'selected' : ''} ${onTakeOver ? 'with-action' : ''}`} data-state={task.state} data-needs={stoppedHere ? 'you' : undefined} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
+      <button className={`task-row ${selected ? 'selected' : ''} ${onTakeOver ? 'with-action' : ''}`} data-state={task.state} data-needs={needsYou(task) ? 'you' : undefined} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
         <StateMark kind={markOf(task)} />
         <span className="task-copy">
           <strong>{task.title}</strong>

@@ -136,7 +136,14 @@ function Room-Id([string]$route, $handle) {
   } finally { $hash.Dispose() }
 }
 function Read-Tabs($window) {
+  $tree=[Windows.Automation.TreeWalker]::ControlViewWalker
   foreach ($tab in $window.FindAll($desc,(Is-Type $ct::TabItem))) {
+    # Read tab identity from the browser chrome.
+    $parent=$tree.GetParent($tab)
+    while ($parent -and $parent.Current.ControlType -ne $ct::Document -and ![Windows.Automation.Automation]::Compare($parent,$window)) {
+      $parent=$tree.GetParent($parent)
+    }
+    if (!$parent -or $parent.Current.ControlType -eq $ct::Document) { continue }
     $sel = $null
     if ($tab.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern,[ref]$sel)) {
       [pscustomobject]@{ key=$tab.GetRuntimeId() -join '.'; selected=$sel.Current.IsSelected; name=$tab.Current.Name; selection=$sel }
@@ -172,7 +179,7 @@ function Controls-Of($document, [bool]$native) {
     if ($button.Cached.ControlType -eq $ct::Pane -and $button.Cached.ClassName -notmatch '^(WindowsForms\d+\.BUTTON\.|Button$)') { continue }
     if (!$button.Cached.IsEnabled) { continue }
     $name=([string]$button.Cached.Name).Trim()
-    if ($name -match '^(?:Leave (?:the |this )?(?:call|meeting|huddle|conference|voice channel|room)|End (?:the |this )?(?:call|meeting)|Hang up|Disconnect from voice|Anruf (?:verlassen|beenden)|Besprechung verlassen|Auflegen|Quitter (?:la |le |l.)?(?:r.union|appel)|Salir de (?:la |la video)?(?:reuni.n|llamada)|Colgar)\b') { $joined=$true; $leaves+=$button; continue }
+    if ($name -match '^(?:(?:Leave|Exit|Disconnect from) (?:the |this )?(?:(?:audio|video|voice) )?(?:call|meeting|huddle|conference|voice channel|room)|End (?:the |this )?(?:(?:audio|video) )?(?:call|meeting)|Hang up|Disconnect from voice|Anruf (?:verlassen|beenden)|Besprechung verlassen|Auflegen|Quitter (?:la |le |l.)?(?:r.union|appel)|Salir de (?:la |la video)?(?:reuni.n|llamada)|Colgar)\b') { $joined=$true; $leaves+=$button; continue }
     if ($name -match '^(?:Leave|Disconnect|Beenden|Verlassen)(?:\s*\([^)]*\))?$') { $leaveOnly=$true; $leaves+=$button; continue }
     if ($name -match '^(?:Rejoin(?: meeting)?|Return to home screen|Join (?:now|meeting|a meeting|huddle|voice channel)|Start (?:a |the )?(?:huddle|voice call|audio call|video call)|Call again|Wieder teilnehmen|Erneut (?:beitreten|teilnehmen)|Zur Startseite|Jetzt teilnehmen)\b') { $ended=$true }
     if ($name -match '^(?:New meeting|Start meeting|Meet now|Neue Besprechung)$') { $startMeeting=$true }
@@ -180,8 +187,8 @@ function Controls-Of($document, [bool]$native) {
     if ($name -match '^(?:Voice call|Audio call)$') { $voiceCall=$true }
     if ($name -eq 'Video call') { $videoCall=$true }
     if ($name -match '^(?:Mic|Microphone|Audio|Mikrofon)$') { $name=([string]$button.Cached.HelpText).Trim() }
-    $state=if ($name -match '^(?:Turn off (?:the |your )?microphone|Turn off (?:your )?mic|Mute (?:your |my )(?:mic|microphone|audio)|Mute (?:myself|yourself)|Mikrofon (?:ausschalten|deaktivieren|stummschalten)|D.sactiver (?:le |votre )?micro|Silenciar (?:mi |el )?micr.fono)\b') { 'open' }
-    elseif ($name -match '^(?:Turn on (?:the |your )?microphone|Turn on (?:your )?mic|Unmute (?:your |my )(?:mic|microphone|audio)|Unmute (?:myself|yourself)|Mikrofon (?:einschalten|aktivieren)|Stummschaltung (?:des Mikrofons )?aufheben|Activer (?:le |votre )?micro|Activar (?:mi |el )?micr.fono)\b') { 'muted' }
+    $state=if ($name -match '^(?:Turn off (?:the |your )?(?:microphone|mic)|Turn (?:the |your )?(?:microphone|mic) off|Mute (?:your |my )(?:mic|microphone|audio)|Mute (?:myself|yourself)|Mikrofon (?:ausschalten|deaktivieren|stummschalten)|D.sactiver (?:le |votre )?micro|Silenciar (?:mi |el )?micr.fono)\b') { 'open' }
+    elseif ($name -match '^(?:Turn on (?:the |your )?(?:microphone|mic)|Turn (?:the |your )?(?:microphone|mic) on|Unmute (?:your |my )(?:mic|microphone|audio)|Unmute (?:myself|yourself)|Mikrofon (?:einschalten|aktivieren)|Stummschaltung (?:des Mikrofons )?aufheben|Activer (?:le |votre )?micro|Activar (?:mi |el )?micr.fono)\b') { 'muted' }
     if ($state) { $own+=@{state=$state; button=$button}; continue }
     if ($name -match '^(Mute|Unmute|Stummschalten)(?: (?:microphone|mic|audio))?(?:\s*[,(:\[].*)?$') {
       $item=@{state=if ($Matches[1] -eq 'Unmute') { 'muted' } else { 'open' }; button=$button}
@@ -276,22 +283,24 @@ do {
           if ($tracked -and $controls.ended) { Report $tracked.id 'left'; $tracked=$null; $reported=$true; break }
         }
         if ($tracked) {
-          # The tab strip survives a tab switch. Losing access to the page or its controls is not evidence of leaving.
+          # Browser tab identity can confirm closure even when the replacement page has no address.
           $gone=$false
-          if ($address -and $room -ne $tracked.id -and $tracked.tab) {
+          if ($browser -and $tracked.tab) {
             $tabs=@(Read-Tabs $window)
             $old=@($tabs | Where-Object key -eq $tracked.tab)
-            $gone=($old -and $old[0].selected) -or (!$old -and @($tabs | Where-Object selected).Count -eq 1 -and !@($tabs | Where-Object name -eq $tracked.title).Count)
+            $navigated=$old -and $old[0].selected -and $address -and $room -ne $tracked.id
+            $closed=!$old -and @($tabs | Where-Object selected).Count -eq 1 -and !@($tabs | Where-Object name -eq $tracked.title).Count
+            $gone=$navigated -or $closed
           }
           if ($gone) { $missing++ } else { $missing=0 }
           if ($missing -ge 2) { Report $tracked.id 'left'; $tracked=$null }
           else { Report $tracked.id 'unknown' }
           $reported=$true; break
         }
-      } catch { if ($tracked) { Report $tracked.id 'unknown'; $reported=$true; break } }
+      } catch { if ($tracked) { $missing=0; Report $tracked.id 'unknown'; $reported=$true; break } }
     }
-    if (!$reported) { if ($tracked) { Report $tracked.id 'unknown' } else { [Console]::WriteLine('.') } }
-  } catch { if ($tracked) { Report $tracked.id 'unknown' } else { [Console]::WriteLine('.') } }
+    if (!$reported) { if ($tracked) { $missing=0; Report $tracked.id 'unknown' } else { [Console]::WriteLine('.') } }
+  } catch { if ($tracked) { $missing=0; Report $tracked.id 'unknown' } else { [Console]::WriteLine('.') } }
   if (!$tracked) { [void][MeetWindows]::Watch($null,'') }
   if (!$Once) { if ($tracked) { [MeetWindows]::Wait(350) } else { Start-Sleep -Milliseconds 1800 } }
 } while (!$Once)

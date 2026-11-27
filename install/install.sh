@@ -51,36 +51,9 @@ need() { command -v "$1" >/dev/null 2>&1 || die "Togle's installer needs $1."; }
 need curl
 need openssl
 
-request() {
-  curl -q -sSL --connect-timeout 15 --speed-limit 1024 --speed-time 45 \
-    -H 'User-Agent: togle-install' "$@"
-}
-
 fetch() {
-  request --retry 3 --retry-all-errors --retry-max-time 60 "$@"
-}
-
-download_build() {
-  build_url=$1
-  build_file=$2
-  for attempt in 1 2 3 4; do
-    set --
-    if [ -s "$build_file" ]; then set -- --continue-at -; fi
-    if request --fail "$@" --output "$build_file" "$build_url"; then
-      return 0
-    else
-      status=$?
-    fi
-    # If the server will not honor a range, start a fresh download on the next attempt.
-    if [ "$#" -gt 0 ]; then
-      case "$status" in 22|33|36) rm -f "$build_file" ;; esac
-    fi
-    if [ "$attempt" -lt 4 ]; then
-      printf 'Retrying the download of %s...\n' "${build_file##*/}"
-      sleep "$attempt"
-    fi
-  done
-  return 1
+  curl -q -sSL --retry 3 --retry-all-errors --retry-max-time 60 --connect-timeout 15 \
+    -H 'User-Agent: togle-install' "$@"
 }
 
 work=$(mktemp -d)
@@ -130,7 +103,7 @@ if [ -z "$url" ]; then die "Togle Free $tag has no build for $platform with a re
 name=${url##*/}
 
 echo "Downloading $name..."
-download_build "$url" "$work/$name" || die "Couldn't download $name. Try again in a moment."
+fetch --fail --output "$work/$name" "$url" || die "Couldn't download $name. Try again in a moment."
 fetch --fail --output "$work/$name.sig" "$url.sig" || die "Couldn't download the release signature. Try again in a moment."
 printf '%s\n' "$PUBLIC_KEY" > "$work/release.pub"
 # RSA-3072, SHA-256, PKCS #1 v1.5: the signature release-key.mjs makes.

@@ -725,7 +725,7 @@ test('a turn that ends with an error stops the task and says why, and signed out
   try {
     const one = await hub.start({ runner: 'claude', folder, prompt: 'Say hi' })
     assert.deepEqual([one.state, one.signedOut, one.fix, one.line], ['failed', true, 'claude auth login', 'Claude Code is signed out.'])
-    assert.equal(T.needsYou(one), true, 'it waits for the person')
+    assert.equal(T.needsYou(one), false, 'sign-in recovery keeps the reported failure state')
     assert.deepEqual((await hub.detail(one.key)).log.map((e) => e.kind), ['you', 'agent', 'note'], 'what the person asked comes first')
     const two = await hub.start({ runner: 'codex', folder, prompt: 'Say hi' })
     assert.deepEqual([two.state, two.fix, two.line], ['failed', 'codex login', 'Codex is signed out.'])
@@ -963,6 +963,36 @@ test('a task is named by the first line of the words it was given, never by an a
     assert.deepEqual(told, ['Fix the flaky login test', 'Write the follow-up email', long.title, 'Dark mode'], 'and goes on the to-do list')
   } finally {
     await hub.dispose()
+  }
+})
+
+test('a stopped or failed task cancels its pending requests and screen prompt; a resumed turn can ask again', async () => {
+  for (const state of ['stopped', 'failed']) {
+    const task = new FakeTask('claude', 'task', 'Review', scratch())
+    const request = { id: 'approval', kind: 'command', command: 'git status', offersAlways: false }
+    task.setBase('working')
+    const approval = task.want(request)
+    const question = task.want({ id: 'question', kind: 'question', questions: [], offersAlways: false })
+    task.waitingFor = 'approval on its screen'
+    task.shells = [{ id: 'background', label: 'build' }]
+    const ended = []
+    task.on(event => {
+      if (event.type !== 'request-ended') return
+      ended.push([event.id, event.outcome, task.pending.length, task.state])
+      task.reply('question', 'late answer')
+    })
+    task.setBase(state)
+    assert.deepEqual(await Promise.all([approval, question]), [{ kind: 'cancelled' }, { kind: 'cancelled' }])
+    assert.deepEqual(ended, [['approval', 'cancelled', 0, state], ['question', 'cancelled', 0, state]])
+    assert.equal(task.waitingFor, undefined)
+    assert.deepEqual(await task.want(request), { kind: 'cancelled' }, 'a late request cannot reopen the dead turn')
+    assert.equal(task.state, state)
+    assert.equal(task.shells[0].id, 'background')
+    await task.send('Continue')
+    const next = task.want(request)
+    assert.equal(task.state, 'waiting')
+    task.answer('approval', 'allow-once')
+    assert.deepEqual(await next, { kind: 'decision', decision: 'allow-once' })
   }
 })
 

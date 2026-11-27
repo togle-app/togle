@@ -40,7 +40,7 @@ export function microphoneNeedsSignIn(status: TogleMicrophoneStatus | undefined)
   return !!status?.running && status.state?.account === 'signed-out'
 }
 
-export const MICROPHONE_SIGN_IN = 'Sign in to Togle Studio to use it.'
+export const MICROPHONE_SIGN_IN = 'Open Togle Studio and sign in with your Togle account.'
 
 /** `unknown`: not enough of the call was measured to say. */
 export type NoiseVerdict = 'quiet' | 'some' | 'noisy' | 'unknown'

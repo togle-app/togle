@@ -257,62 +257,42 @@ test('the shell installer reports an empty stable channel', { skip: !shell }, as
   assert.match(result.out, /No stable release of Togle Free is available yet/)
 })
 
-test('the Linux installer recovers from a partial download and installs the signed Beta alongside Togle', {
+test('the Linux installer retries a partial download and installs Beta alongside Togle', {
   skip: !shell || process.platform !== 'linux'
 }, async t => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'togle-install-'))
+  const script = path.join(folder, 'install.sh')
+  const dataHome = path.join(folder, 'user data')
   const tag = 'v0.2.0-beta.1'
   const filename = 'Togle-0.2.0-beta.1.AppImage'
   const bytes = Buffer.from('#!/bin/sh\nprintf "app started\\n"\n')
-  const cut = 8
-  for (const acceptsRange of [true, false]) {
-    await t.test(acceptsRange ? 'resumes the download' : 'restarts when the server ignores Range', async t => {
-      const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'togle-install-'))
-      const script = path.join(folder, 'install.sh')
-      const dataHome = path.join(folder, 'user data')
-      const stableApp = path.join(dataHome, 'togle', 'Togle.AppImage')
-      const stableShortcut = path.join(dataHome, 'applications', 'togle.desktop')
-      for (const file of [stableApp, stableShortcut]) {
-        fs.mkdirSync(path.dirname(file), { recursive: true })
-        fs.writeFileSync(file, 'existing Togle')
-      }
-      const ranges = []
-      fs.writeFileSync(script, installers(pub, tag).sh)
-      t.after(() => fs.rmSync(folder, { recursive: true, force: true }))
-      const release = await serve(key, { 'Togle-0.2.0-beta.1-arm64.AppImage': bytes, [filename]: bytes }, tag, (name, req, res) => {
-        if (name !== filename) return false
-        const range = req.headers.range
-        ranges.push(range)
-        if (ranges.length === 1) {
-          res.writeHead(200, { 'Content-Length': bytes.length })
-          res.write(bytes.subarray(0, cut), () => setTimeout(() => res.destroy(), 60))
-          return true
-        }
-        if (range && acceptsRange) {
-          res.writeHead(206, {
-            'Content-Range': `bytes ${cut}-${bytes.length - 1}/${bytes.length}`,
-            'Content-Length': bytes.length - cut
-          })
-          res.end(bytes.subarray(cut))
-          return true
-        }
-        return false
-      })
-      t.after(() => release.close())
-      const result = await run(shell, [script], {
-        TOGLE_INSTALL_RELEASES: release.url, TOGLE_INSTALL_PLATFORM: 'linux-x64', XDG_DATA_HOME: dataHome, HOME: folder
-      })
-      assert.equal(result.code, 0, result.out)
-      assert.match(result.out, /Togle Beta is installed/)
-      const expected = [undefined, `bytes=${cut}-`]
-      if (!acceptsRange) expected.push(undefined)
-      assert.deepEqual(ranges, expected)
-      assert.deepEqual(fs.readFileSync(path.join(dataHome, 'togle-beta', 'Togle.AppImage')), bytes)
-      const launch = path.join(dataHome, 'togle-beta', 'togle-beta')
-      assert.ok(fs.readFileSync(path.join(dataHome, 'applications', 'togle-beta.desktop'), 'utf8').includes(`Exec="${launch}"`))
-      for (const file of [stableApp, stableShortcut]) assert.equal(fs.readFileSync(file, 'utf8'), 'existing Togle')
-      assert.deepEqual(await run(launch, [], {}), { code: 0, out: 'app started\n' })
-    })
+  let attempts = 0
+  const stableApp = path.join(dataHome, 'togle', 'Togle.AppImage')
+  const stableShortcut = path.join(dataHome, 'applications', 'togle.desktop')
+  for (const file of [stableApp, stableShortcut]) {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, 'existing Togle')
   }
+  fs.writeFileSync(script, installers(pub, tag).sh)
+  t.after(() => fs.rmSync(folder, { recursive: true, force: true }))
+  const release = await serve(key, { 'Togle-0.2.0-beta.1-arm64.AppImage': bytes, [filename]: bytes }, tag, (name, req, res) => {
+    if (name !== filename || ++attempts !== 1) return false
+    res.writeHead(200, { 'Content-Length': bytes.length })
+    res.write(bytes.subarray(0, 8), () => setTimeout(() => res.destroy(), 60))
+    return true
+  })
+  t.after(() => release.close())
+  const result = await run(shell, [script], {
+    TOGLE_INSTALL_RELEASES: release.url, TOGLE_INSTALL_PLATFORM: 'linux-x64', XDG_DATA_HOME: dataHome, HOME: folder
+  })
+  assert.equal(result.code, 0, result.out)
+  assert.match(result.out, /Togle Beta is installed/)
+  assert.equal(attempts, 2)
+  assert.deepEqual(fs.readFileSync(path.join(dataHome, 'togle-beta', 'Togle.AppImage')), bytes)
+  const launch = path.join(dataHome, 'togle-beta', 'togle-beta')
+  assert.ok(fs.readFileSync(path.join(dataHome, 'applications', 'togle-beta.desktop'), 'utf8').includes(`Exec="${launch}"`))
+  for (const file of [stableApp, stableShortcut]) assert.equal(fs.readFileSync(file, 'utf8'), 'existing Togle')
+  assert.deepEqual(await run(launch, [], {}), { code: 0, out: 'app started\n' })
 })
 
 test('the Mac installer verifies the staged app before replacing the existing installation', {

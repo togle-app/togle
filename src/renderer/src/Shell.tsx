@@ -182,6 +182,7 @@ export function Shell() {
   // A task asked for from elsewhere in the window: the answer to a question put to it on a call.
   useEffect(() => onOpenTaskFrom((key) => openTask(key)), [openTask])
   useEffect(() => api.onHotkey((action) => {
+    if (action === 'speech-settings') openSettings('speech')
     if (action === 'dictation-settings') openSettings('dictation')
     // "Change keys" on the one-time offer when a key was pressed in a code editor.
     if (action === 'keys-settings') openSettings('keys')
@@ -303,7 +304,7 @@ export function Shell() {
             <div className="notice" role="alert"><span>{call.warning}</span><button className="dismiss" aria-label="Dismiss" title="Dismiss" onClick={call.clearWarning}><Icon name="close" size={12} /></button></div>
           )}
           {/* Once, on a Togle that has never run: the first minute, then the to-do list. */}
-          {view === 'todo' && settings && !settings.firstMinute?.done && <FirstMinute settings={settings} stt={stt} onDone={() => void changeSettings({ firstMinute: { done: true } })} />}
+          {view === 'todo' && settings && !settings.firstMinute?.done && <FirstMinute onOpenTask={openTask} onDone={() => void changeSettings({ firstMinute: { done: true } })} />}
           {view === 'todo' && settings?.firstMinute?.done && <Todo onOpenTask={openTask} onOpenCall={openMeeting} />}
           {view === 'agents' && <Tasks focus={taskFocus} resultKeys={resultKeys} closeResults={() => setResultKeys([])} />}
           {view === 'meetings' && settings && (live && call.listening

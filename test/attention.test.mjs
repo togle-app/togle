@@ -27,14 +27,14 @@ test('a command that waits becomes a notice with the command in full and both bu
   assert.deepEqual(look.finished, [])
 })
 
-test('a task that stopped, by the Stop button or by an error, waits for a reply: the tray counts it, and no notice asks', () => {
+test('the tray counts blocked agents, leaving stopped, failed and working agents in their reported states', () => {
   const attention = new T.Attention(clock())
   const look = attention.look([task('codex:a', 'stopped'), task('claude:b', 'failed', [], { line: 'Codex is signed out.' }), task('claude:c', 'idle'), task('claude:d', 'working')])
-  assert.equal(look.waiting, 2, 'the stopped one and the broken one')
+  assert.equal(look.waiting, 0)
   assert.deepEqual(look.notices, [], 'there is nothing to allow or answer in a notice')
   const asked = attention.look([task('codex:a', 'stopped'), task('codex:e', 'waiting', [request('r1', 'command', { command: 'ls', raw: 'ls' })])])
-  assert.equal(asked.waiting, 2)
-  assert.equal(asked.notices[0].others, 1, 'the notice for the one that asks counts the stopped one among the others')
+  assert.equal(asked.waiting, 1)
+  assert.equal(asked.notices[0].others, 0)
 })
 
 test('a task in the background that waits on its own screen counts, with a notice that only opens it, until it no longer waits', () => {
@@ -147,7 +147,7 @@ test('a task that stopped because its agent is signed out says so, with the comm
     ['codex:a', 'failed', 'is signed out', 'codex login', 'command'],
     ['acp-gemini:b', 'failed', 'is signed out', 'Gemini is signed out.', 'words']
   ], 'an added agent has no command Togle knows')
-  assert.equal(look.waiting, 2, 'both wait for a reply')
+  assert.equal(look.waiting, 0, 'the failures notify once and do not increase the waiting count')
   // Signed out, the first turn ends before any look sees it working: it is told all the same, once. Another error is not.
   const quick = attention.look([
     task('claude:c', 'failed', [], { line: 'Claude Code is signed out.', signedOut: true, fix: 'claude auth login' }),

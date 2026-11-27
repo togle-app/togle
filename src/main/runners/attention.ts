@@ -1,6 +1,6 @@
 // Which tasks need the person, as small notices: a command, a change or a question waits, or a turn ended. This only
 // decides what to say and what has been said. The window that shows a notice and the mark on the tray are elsewhere.
-import { isWork, stepsLine, type TaskAttention, type TaskNotice, type ViewRequest } from '@shared/runner'
+import { isWork, needsYou, stepsLine, type TaskAttention, type TaskNotice, type ViewRequest } from '@shared/runner'
 import { canAllowHere, shownPart as shown } from '@shared/runner-command'
 import { projectFolderOf } from '@shared/task-groups'
 import { RUNNER_NAMES } from './hub'
@@ -59,7 +59,8 @@ export class Attention {
     const now = this.clock()
     const live = new Set<string>()
     const requests: { task: TaskAttention; request: ViewRequest; at: number }[] = []
-    for (const task of tasks) {
+    const waitingTasks = tasks.filter(needsYou)
+    for (const task of waitingTasks) {
       for (const request of task.pending) {
         const id = `${task.key}#${request.id}`
         live.add(id)
@@ -68,7 +69,7 @@ export class Attention {
       }
     }
     // A task in the background that waits with no request of Togle's own: it waits on its screen, and counts like any other.
-    const onScreen = tasks.filter((task) => task.state === 'waiting' && !task.pending.length && !!task.waitingFor)
+    const onScreen = waitingTasks.filter((task) => !task.pending.length && !!task.waitingFor)
     for (const task of onScreen) {
       const id = `${task.key}#screen`
       live.add(id)
@@ -81,11 +82,8 @@ export class Attention {
       this.dismissed.delete(id)
     }
     requests.sort((a, b) => a.at - b.at)
-    // A task that stopped (by the person's Stop, or by itself) waits for a reply to go on: it counts too.
-    // Not one in a terminal of Togle's own: it ended with its program, and no reply goes on with it.
-    const waitingTasks = new Set([...requests.map(({ task }) => task.key), ...onScreen.map((task) => task.key), ...tasks.filter((task) => !task.terminal && (task.state === 'stopped' || task.state === 'failed')).map((task) => task.key)])
-    const asked = requests.filter(({ task, request }) => !this.dismissed.has(`${task.key}#${request.id}`)).map(({ task, request, at }) => ({ at, notice: waitingNotice(task, request, waitingTasks.size - 1) }))
-    const onItsScreen = onScreen.filter((task) => !this.dismissed.has(`${task.key}#screen`)).map((task) => ({ at: this.firstSeen.get(`${task.key}#screen`) as number, notice: screenNotice(task, waitingTasks.size - 1) }))
+    const asked = requests.filter(({ task, request }) => !this.dismissed.has(`${task.key}#${request.id}`)).map(({ task, request, at }) => ({ at, notice: waitingNotice(task, request, waitingTasks.length - 1) }))
+    const onItsScreen = onScreen.filter((task) => !this.dismissed.has(`${task.key}#screen`)).map((task) => ({ at: this.firstSeen.get(`${task.key}#screen`) as number, notice: screenNotice(task, waitingTasks.length - 1) }))
     const notices = [...asked, ...onItsScreen].sort((a, b) => a.at - b.at).map(({ notice }) => notice)
 
     const finished: TaskNotice[] = []
@@ -103,7 +101,7 @@ export class Attention {
       else if ((before === 'working' || before === 'waiting' || (before === undefined && task.signedOut)) && task.state === 'failed') finished.push(this.ending(task, 'failed', logAfter))
     }
     for (const key of [...this.last.keys()]) if (!present.has(key)) this.last.delete(key)
-    return { waiting: waitingTasks.size, notices, finished }
+    return { waiting: waitingTasks.length, notices, finished }
   }
 
   /** The person closed a notice: it does not come back. */

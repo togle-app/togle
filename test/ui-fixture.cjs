@@ -311,7 +311,7 @@ module.exports = function install(fixture) {
   const ago = seconds => Date.now() - seconds * 1000
   // (`terminals` is further down: Take over writes into it when it is called, long after both exist.)
   const task = (key, props) => ({ key, runner: key.split(':')[0], id: key.split(':')[1], folder: 'C:\\work\\site', state: 'idle', updatedAt: Date.now(), mine: false, line: '', pending: [], commandsRunning: false, log: [], ...props })
-  const runnerTasks = fixture.scenario !== 'tasks' ? [] : [
+  const runnerTasks = fixture.scenario === 'first-minute-found' ? [task('codex:first', { title: 'Review the pull request' })] : fixture.scenario !== 'tasks' ? [] : [
     task('codex:t1', { title: 'Add the status column', folder: 'C:\\work\\api-server', state: 'waiting', updatedAt: Date.now() - 60000, mine: true, line: 'Wants to run npm run migrate',
       pending: [{ id: 'r1', kind: 'command', command: 'npm run migrate', raw: 'npm run migrate', folder: 'C:\\work\\api-server', offersAlways: true, always: 'Always allow commands that start with npm run' }],
       log: [{ id: 1, at: ago(180), kind: 'you', text: 'Add a status column to the orders table.' }, { id: 2, at: ago(172), kind: 'agent', text: 'I will add the column and a migration.' }, { id: 3, at: ago(160), kind: 'command', text: 'git status', status: 'finished' }, { id: 4, at: ago(140), kind: 'files', text: 'Changed 2 files: src/db/orders.ts, migrations/004.sql', paths: ['src/db/orders.ts', 'migrations/004.sql'] }] }),

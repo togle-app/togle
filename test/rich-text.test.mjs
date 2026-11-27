@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { externalUrl, localFilePath, richDocument, richPreview, richText, userMessageMarkdown } from './.build/togle.mjs'
 
 test('a Codex installer link retains its full local destination including spaces', () => {
-  const path = 'C:/Users/example/togle/dist/Togle Setup 0.1.0.exe'
+  const path = 'C:/Users/Cool/togle-opensource/dist-agent-usage-files-dev/Togle Setup 0.1.0.exe'
   const token = richDocument('[Togle Free Windows installer](</' + path + '>)').blocks[0].tokens[0]
   assert.equal(token.type, 'link')
   assert.equal(localFilePath(token.href, 'win32'), path.replaceAll('/', '\\'))

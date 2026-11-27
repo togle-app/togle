@@ -549,6 +549,26 @@ async function checkMeetingAccountAndRemoval(T, agent) {
   console.log('Notes account recovery with both confirmed speakers and removal from a meeting, the list and search results passed.')
 }
 
+async function checkHandoffBeforeNames(T, agent) {
+  const ui = await open(T, agent, 'confirm-names')
+  await ui.evaluate("window.togleUITest.terminalTask({key:'codex:followup',title:'Prepare the release',state:'idle',screen:true}, '')")
+  await ui.click('.workspace-nav button', 'Meetings')
+  await ui.click('.meeting-row', 'Open call: Sprint review')
+  await ui.click('.meeting-detail button', 'View notes now')
+  await ui.click('.meeting-detail button', 'Give to an agent')
+  await ui.wait("[...document.querySelectorAll('.give-row')].some(row=>row.textContent.includes('Prepare the release'))")
+  await ui.evaluate("[...document.querySelectorAll('.give-row')].find(row=>row.textContent.includes('Prepare the release')).querySelector('input').click()")
+  await ui.fill('.give-words', 'Draft the follow-up')
+  await ui.click('.give-panel .primary', 'Give to 1')
+  await ui.wait("!document.querySelector('.give-panel')")
+  assert.deepEqual((await ui.calls('giveCall')).at(-1)[0].tasks, ['codex:followup'])
+  assert.deepEqual(await ui.calls('confirmAnswer'), [])
+  await ui.click('.meeting-detail button', 'Confirm speaker names')
+  await ui.wait("document.querySelector('.confirm-names')?.textContent.includes('2 of 3 to confirm')")
+  assert.deepEqual(ui.errors, [])
+  ui.window.destroy()
+}
+
 /** After a call: who spoke, and the Meetings screen with search, a call's page and giving it to an agent. */
 async function checkMeetings(T, agent) {
   const ui = await open(T, agent, 'confirm-names')
@@ -582,6 +602,14 @@ async function checkMeetings(T, agent) {
   assert.deepEqual(await ui.evaluate("[...document.querySelectorAll('.confirm-voice')].map(v=>v.classList.contains('guess'))"), [true, false], 'a guess is amber, as everything that waits for you')
   assert.ok((await ui.evaluate(panel)).includes('Dario said “Marta” just before.'))
   assert.ok((await ui.evaluate(panel)).includes('Closes after your last answer. The sound is deleted then, or tomorrow at the latest.'))
+  await ui.click('.meeting-detail button', 'View notes now')
+  await ui.click('.meeting-detail [role=tab]', 'Transcript')
+  await ui.wait("!!document.querySelector('.meeting-detail [role=tabpanel]')")
+  await ui.click('.meeting-detail button', 'Give to an agent')
+  await ui.wait("document.querySelector('.call-record-actions .primary')?.getAttribute('aria-expanded')==='true'")
+  assert.deepEqual(await ui.calls('confirmAnswer'), [])
+  await ui.click('.meeting-detail button', 'Confirm speaker names')
+  await ui.wait("!!document.querySelector('.confirm-names')")
   await ui.capture('confirm-names')
   await ui.click('.confirm-names button', 'Play Marta?')
   await ui.wait("window.togleUITest.calls().some(call=>call.name==='confirmSound'&&call.args[1]==='v0')")
@@ -614,7 +642,22 @@ async function checkMeetings(T, agent) {
   assert.ok(stuck.top === 0 && stuck.left === 0, 'its top part stays at the top of the page, over the page\'s own room: ' + JSON.stringify(stuck))
   assert.ok(stuck.nameTop >= 10 && stuck.tabsBottom <= stuck.topPartBottom && stuck.notesTop < 0, 'the name and the tabs are in view and the notes went up under them: ' + JSON.stringify(stuck))
   await ui.capture('meeting-sticky')
-  await ui.evaluate("document.querySelector('.meeting-detail .call-detail-content').style.minHeight='';document.querySelector('.shell-content').scrollTop=0")
+  const scroll = "document.querySelector('.shell-content').scrollTop"
+  await ui.click('.meeting-detail [role=tab]', 'Transcript')
+  await ui.wait("!document.getElementById('meeting-panel-transcript').hidden")
+  assert.equal(await ui.evaluate(scroll), 0, 'a new transcript starts at the top')
+  await ui.evaluate("document.getElementById('meeting-panel-transcript').style.minHeight='2600px';" + scroll + '=430')
+  await ui.paint()
+  await ui.click('.meeting-detail [role=tab]', 'Notes')
+  await ui.wait("!document.getElementById('meeting-panel-notes').hidden")
+  assert.equal(await ui.evaluate(scroll), 700, 'the original scroll position in Notes returns')
+  await ui.evaluate("document.getElementById('meeting-tab-notes').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))")
+  await ui.wait("!document.getElementById('meeting-panel-transcript').hidden")
+  assert.equal(await ui.evaluate(scroll), 430, 'the transcript keeps its own scroll position')
+  assert.equal(await ui.evaluate("document.activeElement.id"), 'meeting-tab-transcript')
+  await ui.click('.meeting-detail [role=tab]', 'Notes')
+  await ui.wait("!document.getElementById('meeting-panel-notes').hidden")
+  await ui.evaluate("for (const panel of document.querySelectorAll('.meeting-detail .call-detail-content')) panel.style.minHeight='';" + scroll + '=0')
   await ui.paint()
   // Its name is renamed with a click on it; a right click on it renames or deletes it.
   await ui.click('.meeting-detail .call-detail-head h2', 'Sprint review')
@@ -872,12 +915,12 @@ async function checkNoisyCall(T, agent) {
     // One line on the call's page, with one button, as the design has it.
     await ui.wait("!!document.querySelector('.meeting-detail .studio-mention')")
     assert.equal(await ui.evaluate("document.querySelector('.studio-mention > span').textContent"), 'Your microphone picked up room noise for 3 of 10 minutes.')
-    assert.equal(await ui.evaluate("document.querySelector('.studio-mention button').textContent"), 'Clean my microphone')
+    assert.equal(await ui.evaluate("document.querySelector('.studio-mention button').textContent"), 'See Studio')
     assert.equal(await ui.evaluate("document.querySelectorAll('.studio-mention button').length"), 1)
     assert.equal((await ui.calls('noiseMeasured'))[0][0].sample, undefined, 'the audio stays in the window: main gets levels only')
     await ui.fitsWidth()
     await ui.capture('noisy-call-' + width)
-    await ui.click('.studio-mention button', 'Clean my microphone')
+    await ui.click('.studio-mention button', 'See Studio')
     assert.deepEqual(await ui.calls('openMicrophonePage'), [['after-call']], 'not installed: its page, tagged with where it came from')
     // Another call's page does not say it.
     await ui.click('.workspace-nav button', 'Meetings')
@@ -960,67 +1003,23 @@ async function checkShow(T, agent) {
   console.log('Show: a part dragged out and drawn on, saved at the screen\'s own size; a click takes the whole screen; Esc leaves it passed.')
 }
 
-/** The first minute, once: talk, sign in with the plan or skip it, what Togle found; what was skipped goes on To-do. */
 async function checkFirstMinute(T, agent) {
-  // Speech recognition is not on this computer yet: one click gets it, then F9 works.
   const fresh = await open(T, agent, 'first-minute-new', 640)
-  await fresh.wait("!!document.querySelector('.first-minute')")
-  assert.deepEqual(await fresh.evaluate("[...document.querySelectorAll('.first-step')].map(step=>step.getAttribute('aria-label'))"), ['Talk', 'Sign in with your plan', 'Togle finds the rest'])
-  assert.equal(await fresh.evaluate("!!document.querySelector('.todo')"), false, 'the first minute comes before the list')
-  // The three steps: one under another in a narrow window, side by side in a wide one, and between the two the third is as
-  // wide as the first two together. It once stood alone under them, beside a gap.
-  const steps = "(()=>{const list=document.querySelector('.first-steps').getBoundingClientRect();return [...document.querySelectorAll('.first-step')].map(step=>{const r=step.getBoundingClientRect();return [Math.round(r.left-list.left),Math.round(r.top-list.top),Math.round(r.width),Math.round(list.width)]})})()"
-  const firstSize = fresh.window.getContentSize()
-  for (const [width, shape] of [[640, 'one'], [800, 'two'], [1024, 'three']]) {
-    fresh.window.setContentSize(width, firstSize[1])
-    await fresh.wait('innerWidth===' + width)
-    const [first, second, third] = await fresh.evaluate(steps)
-    if (shape === 'one') assert.ok(first[2] === first[3] && second[1] > first[1] && third[1] > second[1], 'one under another at ' + width)
-    if (shape === 'two') assert.ok(second[1] === first[1] && second[0] > first[0] && third[1] > first[1] && third[0] === 0 && third[2] === third[3], 'two side by side, the third as wide as both, at ' + width)
-    if (shape === 'three') assert.ok(second[1] === first[1] && third[1] === first[1] && third[0] > second[0], 'three side by side at ' + width)
-  }
-  fresh.window.setContentSize(firstSize[0], firstSize[1])
-  await fresh.wait('innerWidth===' + firstSize[0])
-  await fresh.wait("[...document.querySelectorAll('.first-step button')].some(b=>b.textContent.startsWith('Get speech recognition'))")
-  assert.equal(await fresh.evaluate('window.togleUITest.calls().filter(call=>call.name===\'installLocalSpeech\').length'), 0, 'nothing is downloaded unasked')
-  await fresh.capture('first-minute-download')
-  await fresh.evaluate("[...document.querySelectorAll('.first-step button')].find(b=>b.textContent.startsWith('Get speech recognition')).click()")
-  await fresh.wait("document.querySelector('.first-step[aria-label=Talk]').textContent.includes('This works offline')")
-  assert.deepEqual(await fresh.calls('installLocalSpeech'), [['parakeet']], 'what English needs on this computer')
-  // Skipped: both steps wait on the list.
-  await fresh.click('.first-step button', 'Skip')
-  await fresh.click('.first-done button', 'Done')
+  await fresh.click('.first-minute button', 'New task')
   await fresh.wait("!!document.querySelector('.todo')")
-  assert.equal(await fresh.evaluate('window.togleUITest.settings().firstMinute.done'), true)
-  assert.deepEqual((await fresh.calls('addTodo')).map(args => args[0]), [
-    'Hold F9 and say something: Togle types it where your cursor is',
-    'Sign in with your AI plan in Settings, so Togle cleans up what you say and writes your meeting notes'
-  ])
-  await fresh.wait("document.querySelectorAll('.todo-item').length===2")
+  assert.deepEqual(await fresh.calls('openTaskBox'), [[{}]])
+  for (const action of ['installLocalSpeech', 'signInAccount', 'addTodo']) assert.deepEqual(await fresh.calls(action), [])
   assert.deepEqual(fresh.errors, [])
   fresh.window.destroy()
 
-  // Done in full: nothing is left for the list.
-  const ui = await open(T, agent, 'first-minute', 1024)
-  await ui.wait("!!document.querySelector('.first-minute')")
-  assert.ok((await ui.evaluate("document.querySelector('.first-step[aria-label=Talk]').textContent")).includes('Hold F9 and say something.'))
-  await ui.emit('onDictation', { phase: 'done', outcome: 'inserted', lastText: 'Hello from the first minute.' })
-  await ui.wait("document.querySelector('.first-step[aria-label=Talk] .first-heard')?.textContent==='Hello from the first minute.'")
-  assert.ok((await ui.evaluate("document.querySelector('.first-step[aria-label=Talk] .first-mini').textContent")).startsWith('Microphone allowedHold F9 and say something.'), 'the design\'s picture: the microphone ticked, the line, the words')
-  assert.ok((await ui.evaluate("document.querySelector('.first-step[aria-label=\"Sign in with your plan\"]').textContent")).includes('Send it to Marta by Friday.'))
-  await ui.click('.first-step button', 'Sign in with ChatGPT')
-  await ui.wait("document.querySelector('.first-step[aria-label=\"Sign in with your plan\"] .first-ok')?.textContent.startsWith('Signed in.')")
-  assert.deepEqual(await ui.calls('signInAccount'), [['chatgpt-default']])
-  assert.ok((await ui.evaluate("document.querySelector('.first-step[aria-label=\"Togle finds the rest\"]').textContent")).includes('No coding agent on this computer yet'))
-  assert.equal(await ui.evaluate("document.querySelectorAll('.first-step.done').length"), 2)
-  await ui.fitsWidth()
-  await ui.capture('first-minute')
-  await ui.click('.first-done button', 'Done')
-  await ui.wait("!!document.querySelector('.todo')")
-  assert.deepEqual(await ui.calls('addTodo'), [], 'nothing left to do from the first minute')
-  assert.deepEqual(ui.errors, [])
-  ui.window.destroy()
-  console.log('First minute: speech recognition on one click, F9 heard, the plan signed in or skipped, what Togle found, and the steps left on To-do passed.')
+  const found = await open(T, agent, 'first-minute-found', 1024)
+  await found.wait("document.querySelector('.first-minute')?.textContent.includes('Review the pull request')")
+  await found.click('.first-minute button', 'Open task')
+  await found.wait("document.querySelector('.task-title h2')?.textContent.includes('Review the pull request')")
+  assert.equal(await found.evaluate('window.togleUITest.settings().firstMinute.done'), true)
+  assert.deepEqual(await found.calls('addTodo'), [])
+  assert.deepEqual(found.errors, [])
+  found.window.destroy()
 }
 
 /** Settings on one screen: Keys, Voice, Meetings, Agents, Accounts, Appearance, Updates; the plan or a key instead; Togle Studio. */
@@ -1389,6 +1388,7 @@ app.whenReady().then(async () => {
     await checkMeetingReview(T, agent)
     await checkCall(T, agent)
     await checkMeetingConsent(T, agent)
+    await checkHandoffBeforeNames(T, agent)
     await checkMeetings(T, agent)
     await checkProblems(T, agent)
     await checkNoisyCall(T, agent)

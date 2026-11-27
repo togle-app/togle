@@ -264,7 +264,6 @@ export class ClaudeJob extends TaskBase implements HookTarget, ScreenSide {
   /** When resting it was last tried, so that one that cannot be put to rest is not tried at every look. */
   restTried = 0
   closed: string | undefined
-  waitingFor: string | undefined
 
   /**
    * `job` is the id Claude Code gives the session; `id` the session it was first known by, which is the task's own id

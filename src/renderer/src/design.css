@@ -1,7 +1,7 @@
 /*
  * Togle's look, as the product design draws it: its colors, its two typefaces, and the few parts every screen is made
  * of (a row, a chip, a dot, a field, a button). Indigo is Togle and "working". Amber is "waiting for you" and is used
- * for nothing else. Green is "done". The window is the design's dark theme. Loaded after styles.css, so where both
+ * for nothing else. Green is "done". Loaded after styles.css, so where both
  * style a part, this wins.
  */
 
@@ -23,8 +23,11 @@
   --danger: #ff7a7a;
   --danger-soft: #3a2026;
   --raised: #1e2330;
-  /* A primary button under the pointer: the text's color, lighter still. */
-  --ink-hover: #ffffff;
+  --primary-bg: var(--ink);
+  --primary-text: var(--bg);
+  --primary-hover: #ffffff;
+  --show-mask: rgba(0, 0, 0, 0.45);
+  --picture-backdrop: rgba(8, 10, 14, 0.86);
   --font-display: 'Bricolage Grotesque Variable', 'Segoe UI', system-ui, sans-serif;
   /* Korean, Japanese and Chinese have their system fonts after the Latin ones, which lack them. */
   --font-body: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Malgun Gothic', 'Yu Gothic UI', 'Microsoft YaHei UI', 'Apple SD Gothic Neo', 'Hiragino Sans', 'PingFang SC', 'Noto Sans CJK KR', 'Noto Sans KR', sans-serif;
@@ -44,13 +47,10 @@
 }
 
 /*
- * The light window: the same parts on a light palette, when the person chose Light in Settings (or System, and the system is light;
- * Togle sets what the page is told, so this media query follows the choice). Every text color keeps 4.5:1 or more on what it sits
- * on, and a symbol 3:1. What floats over other apps (the voice bar, the notices, the call strip: index.html's data-hud) keeps the dark
- * palette. The agents' own screen (Terminal) follows the theme too: TerminalView.tsx colors it, in the same two palettes.
+ * Every desktop window follows the appearance selected in Settings. Electron makes this media query follow that choice.
  */
 @media (prefers-color-scheme: light) {
-  :root:not([data-hud]) {
+  :root {
     --bg: #eef0f5;
     --surface: #ffffff;
     --stage: #dfe3ec;
@@ -67,11 +67,15 @@
     --danger: #b92d2d;
     --danger-soft: #fde0e0;
     --raised: #e8ebf2;
-    --ink-hover: #2e3445;
+    --primary-bg: var(--togle);
+    --primary-text: #ffffff;
+    --primary-hover: #3541b4;
+    --show-mask: rgba(39, 48, 72, 0.24);
+    --picture-backdrop: rgba(223, 227, 236, 0.86);
     color-scheme: light;
   }
   /* The call's avatars: a voice's pastel is for the dark window; on this one its letter is the color taken toward the text. */
-  :root:not([data-hud]) .call-turn::before { color: color-mix(in srgb, var(--avatar) 42%, var(--ink)); }
+  .call-turn::before { color: color-mix(in srgb, var(--avatar) 42%, var(--ink)); }
 }
 
 body {
@@ -98,8 +102,8 @@ button {
 button:hover:not(:disabled) { border-color: var(--muted); }
 button.small { padding: 3px 9px; font-size: 12px; }
 button.icon-only { display: inline-grid; place-items: center; flex: none; width: 28px; min-height: 28px; padding: 0; }
-button.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); font-weight: 600; }
-button.primary:hover:not(:disabled) { background: var(--ink-hover); border-color: var(--ink-hover); }
+button.primary { background: var(--primary-bg); border-color: var(--primary-bg); color: var(--primary-text); font-weight: 600; }
+button.primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
 button.primary:disabled { opacity: 0.45; }
 button.primary.stop { background: var(--danger-soft); border-color: var(--danger-soft); color: var(--danger); }
 button.ghost { background: transparent; }
@@ -633,7 +637,7 @@ button.quote-bar-remove:hover:not(:disabled) { background: none; color: var(--in
 /* What the person said: a card of its own, set apart from what the agent says (its color, a bar at its left, a shadow under it).
    The last one, what the agent works on now, is pinned at the top while its turn is in view. A long one shows its first three
    lines, fading out, and opens to all of it. */
-.you-row { position: relative; z-index: 3; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 7px 12px 9px 12px; border: 1px solid color-mix(in srgb, var(--togle) 24%, var(--line)); border-left: 3px solid var(--togle); border-radius: 10px; background: var(--togle-soft); box-shadow: 0 10px 18px -12px #000; }
+.you-row { position: relative; z-index: 3; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 7px 12px 9px 12px; border: 1px solid color-mix(in srgb, var(--togle) 24%, var(--line)); border-left: 3px solid var(--togle); border-radius: 10px; background: var(--togle-soft); box-shadow: 0 10px 18px -12px var(--shadow); }
 .you-row.pinned { position: sticky; top: 0; container-type: scroll-state; }
 /* While the pinned card is stuck at the top, what scrolls under it fades out just below the card instead of showing cut in half. */
 .you-fade { position: absolute; top: calc(100% + 1px); right: -1px; left: -3px; height: 14px; background: linear-gradient(var(--bg), transparent); opacity: 0; pointer-events: none; }
@@ -837,8 +841,8 @@ button.plan-head:hover:not(:disabled) { border-color: transparent; }
 .task-reply button.reply-interrupt:hover:not(:disabled) { border-color: var(--danger); background: var(--danger-soft); }
 .task-reply button.reply-send { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 50%; }
 /* Stop: the text's color, with the window's color for the square, so that it reads as the opposite of Send's accent. */
-.task-reply button.reply-send.stop { border-color: var(--ink); background: var(--ink); color: var(--bg); }
-.task-reply button.reply-send.stop:hover:not(:disabled) { border-color: var(--ink-hover); background: var(--ink-hover); }
+.task-reply button.reply-send.stop { border-color: var(--primary-bg); background: var(--primary-bg); color: var(--primary-text); }
+.task-reply button.reply-send.stop:hover:not(:disabled) { border-color: var(--primary-hover); background: var(--primary-hover); }
 .task-reply button.reply-send.stop:disabled { opacity: 0.7; }
 .reply-send.stop svg rect { fill: currentColor; }
 .reply-send .row-spin { width: 12px; height: 12px; border-color: color-mix(in srgb, var(--bg) 35%, transparent); border-top-color: var(--bg); }
@@ -874,13 +878,13 @@ q.held-back { quotes: '“' '”'; color: var(--ink); overflow-wrap: anywhere; }
 .you-picture:disabled { cursor: default; }
 .you-picture img { display: block; width: auto; height: auto; max-width: 100%; max-height: 112px; }
 .you-picture.gone { display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; color: var(--muted); font-size: 12px; cursor: default; }
-.picture-backdrop { position: fixed; inset: 36px 0 0; z-index: 90; background: rgba(8, 10, 14, 0.86); backdrop-filter: blur(4px); cursor: zoom-out; }
+.picture-backdrop { position: fixed; inset: 36px 0 0; z-index: 90; background: var(--picture-backdrop); backdrop-filter: blur(4px); cursor: zoom-out; }
 /* The room the picture has: one that is bigger than it scrolls in it. `margin: auto` centers a picture that is smaller than the room, and
    lets a bigger one scroll from its top left. Its size is set by the zoom (Rows.tsx), never by the room. */
 .picture-stage { position: absolute; inset: 0; display: flex; padding: 24px; overflow: auto; }
-.picture-whole { display: block; flex: none; max-width: none; margin: auto; border-radius: 6px; box-shadow: 0 24px 48px -20px #000; cursor: default; }
+.picture-whole { display: block; flex: none; max-width: none; margin: auto; border-radius: 6px; box-shadow: 0 24px 48px -20px var(--shadow); cursor: default; }
 /* Zoom out, how much it is shown at, zoom in: a small pill at the foot, in the middle. */
-.picture-zoom { position: absolute; bottom: 20px; left: 50%; display: flex; align-items: center; gap: 2px; padding: 4px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 999px; background: var(--surface); box-shadow: 0 14px 30px -12px #000; cursor: default; }
+.picture-zoom { position: absolute; bottom: 20px; left: 50%; display: flex; align-items: center; gap: 2px; padding: 4px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 999px; background: var(--surface); box-shadow: 0 14px 30px -12px var(--shadow); cursor: default; }
 .picture-zoom button { display: grid; place-items: center; height: 30px; min-width: 30px; margin: 0; padding: 0 8px; border: 0; border-radius: 999px; background: none; color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
 .picture-zoom button:hover:not(:disabled) { background: var(--raised); }
 .picture-zoom button:disabled { opacity: 0.4; }
@@ -1324,7 +1328,7 @@ body.has-dialog .shell-content { overflow: hidden; }
 .segmented { border-color: var(--line); border-radius: 8px; }
 .segmented button { border: 0; border-radius: 0; font-weight: 600; }
 /* The one picked is light with dark words, as the design draws the switch between a task's two views. */
-.segmented button.on, .segmented button.on:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
+.segmented button.on, .segmented button.on:hover:not(:disabled) { background: var(--primary-bg); color: var(--primary-text); }
 .reach-code-value { font: 600 28px var(--font-mono); letter-spacing: 0.12em; color: var(--ink); }
 .reach-code .control { justify-self: start; }
 .reach-device { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -1348,44 +1352,9 @@ body.has-dialog .shell-content { overflow: hidden; }
 /* ---- The first minute, once ---- */
 
 .first-minute { display: flex; flex-direction: column; gap: 14px; margin-block: 0; padding: 0; }
-.first-minute header { display: flex; flex-direction: column; gap: 4px; }
-.first-minute header h2 { margin: 0; font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; line-height: 1.12; }
-.first-minute header .hint { margin: 0; }
-/* Three steps side by side. A step is never narrower than its widest button ("Get speech recognition (670 MB)"), about
-   15.5rem: where the window has room for two of that (676 to 935px wide), the third is as wide as both, not alone beside a
-   gap; narrower, they are one under another. */
-.first-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
-@media (max-width: 935px) {
-  .first-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .first-step:nth-child(3):last-child { grid-column: 1 / -1; }
-}
-@media (max-width: 675px) {
-  .first-steps { grid-template-columns: minmax(0, 1fr); }
-  .first-step:nth-child(3):last-child { grid-column: auto; }
-}
-.first-step { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); counter-increment: step; }
-.first-step h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--font-display); font-size: 1.02rem; font-weight: 650; }
-.first-step h3::before { content: counter(step); flex: none; display: inline-grid; place-items: center; width: 1.55rem; height: 1.55rem; border-radius: 50%; background: var(--togle-soft); color: var(--togle); font: 600 0.8rem var(--font-body); }
-.first-step.done h3::before { background: var(--ok-soft); color: var(--ok); }
-.first-step > p { margin: 0; font-size: 13px; line-height: 1.45; }
-.first-step .row { display: flex; flex-wrap: wrap; gap: 6px; }
-/* The small picture in each step: what you see when it works. */
-.first-mini { display: flex; flex-direction: column; gap: 6px; margin-top: auto; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 12.5px; line-height: 1.4; }
-.first-mini b { font-weight: 600; }
-.first-mini .dim { color: var(--muted); font-size: 12px; }
-.first-tick { display: flex; align-items: center; gap: 7px; }
-.first-tick .box { flex: none; width: 14px; height: 14px; border: 1.5px solid var(--muted); border-radius: 4px; }
-.first-tick .box.x { border-color: var(--ok); background: var(--ok); }
-.first-heard { color: var(--ink); overflow-wrap: anywhere; }
-.first-download { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 10px; font-size: 12px; }
-.first-download progress { grid-column: 1; width: 100%; accent-color: var(--togle); }
-.first-download button { grid-row: 1 / span 2; grid-column: 2; }
-.first-found-list { display: flex; flex-direction: column; gap: 6px; }
-.first-found { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.first-found li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.first-found li strong { font-weight: 600; }
-.first-found span:not(.av) { color: var(--muted); font-size: 12px; }
-.first-done { display: flex; justify-content: flex-end; }
+.first-minute h2 { margin: 0; font-family: var(--font-display); font-size: 1.05rem; line-height: 1.2; }
+.first-minute p { margin: 0; overflow-wrap: anywhere; }
+.first-minute .row { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* Togle Studio, where the need shows up: one line and one button, never during a call. */
 .studio-mention { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 0 0 12px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); font-size: 12.5px; line-height: 1.4; }
@@ -1459,17 +1428,17 @@ body.taskbox-surface { background: transparent; color: var(--ink); overflow: hid
 
 /* F8 screenshot crop and annotations. */
 
-body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: crosshair; user-select: none; }
+body.show-surface { margin: 0; overflow: hidden; background: var(--stage); cursor: crosshair; user-select: none; }
 .show { position: fixed; inset: 0; touch-action: none; }
 .show-shot { position: absolute; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
-.show-controls { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 12px; width: max-content; max-width: calc(100% - 24px); padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 3px 16px #0005; cursor: default; }
+.show-controls { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 12px; width: max-content; max-width: calc(100% - 24px); padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 3px 16px var(--shadow); cursor: default; }
 .show-tools { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; max-width: 100%; }
 .show-voice-hint { display: inline-flex; align-items: center; gap: 5px; padding: 2px 5px; color: var(--muted); font-size: 12px; }
 .show-tools button { min-height: 30px; }
 .show-tools button[aria-pressed] { border-color: transparent; }
 .show-tools button[aria-pressed=true] { color: var(--ink); border-color: var(--show-ink); background: color-mix(in srgb, var(--show-ink) 14%, var(--surface)); }
 .show-tools kbd { font: inherit; opacity: 0.7; }
-.show-part { position: absolute; border: 1.5px dashed var(--show-ink); border-radius: 10px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45); pointer-events: none; }
+.show-part { position: absolute; border: 1.5px dashed var(--show-ink); border-radius: 10px; box-shadow: 0 0 0 100vmax var(--show-mask); pointer-events: none; }
 .show-ink { position: absolute; inset: 0; width: 100vw; height: 100vh; overflow: visible; pointer-events: none; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7)); }
 .show-ink text { font: 600 15px var(--font-body); }
 /* The words being typed on the picture: where they will be drawn. */
@@ -1478,8 +1447,8 @@ body.show-surface { margin: 0; overflow: hidden; background: #000; cursor: cross
 @keyframes show-caret { 50% { opacity: 0; } }
 
 /* Your voice while you talk, in the first minute: a light pill with dark bars, as the design draws it. */
-.vbar { align-self: flex-start; display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 12px; border-radius: 999px; background: var(--ink); }
-.vbar i { display: block; width: 3px; border-radius: 2px; background: var(--bg); animation: vbar-talk 0.7s ease-in-out infinite alternate; }
+.vbar { align-self: flex-start; display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 12px; border-radius: 999px; background: #e9ecf5; }
+.vbar i { display: block; width: 3px; border-radius: 2px; background: #161a24; animation: vbar-talk 0.7s ease-in-out infinite alternate; }
 @keyframes vbar-talk { from { transform: scaleY(0.4); } to { transform: scaleY(1); } }
 @media (prefers-reduced-motion: reduce) { .vbar i { animation: none; } }
 .first-ok { margin: 0; color: var(--ok); font-size: 12.5px; }

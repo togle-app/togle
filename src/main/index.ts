@@ -39,7 +39,7 @@ import { callAppName, isCallApp, type CallApp } from '@shared/call-apps'
 import { Attention } from './runners/attention'
 import type { RunnerHub } from './runners/hub'
 import type { Backend } from './runners/types'
-import type { GiveCall, GiveResult, StartRequest, TaskBoxOpen, TaskView } from '@shared/runner'
+import { needsYou, type GiveCall, type GiveResult, type StartRequest, type TaskBoxOpen, type TaskView } from '@shared/runner'
 import { CallAgentStore, agentKeysFrom, callKey, callMessage, callWaitingMessage } from './call-agents'
 import type { TodoFile } from './todo'
 import { registerTodo } from './todo-register'
@@ -1010,7 +1010,7 @@ function setupMediaAccess(): void {
 // Global shortcuts steal the keys from every other app, so Togle has only the design's three: Talk, Show and Task. Keys
 // picked in Settings are checked the same way (hotkeyProblem).
 const HOTKEYS: { id: HotkeyId; keys: string; label: string; run: () => void }[] = [
-  { id: 'dictate', keys: 'F9', label: 'Talk', run: () => void dictation.toggle() },
+  { id: 'dictate', keys: 'F9', label: 'Talk', run: toggleDictation },
   // Part of the screen, drawn on while talking: the picture and the words land together.
   { id: 'show', keys: 'F8', label: 'Show', run: () => showShortcut(getSettings().hotkeys.show || 'F8') },
   // The box to start a coding agent's task in, over whatever is on screen.
@@ -1099,8 +1099,22 @@ let tapped: string | undefined
 // Off Windows a key's state may not be readable (a Mac may read every key as up without Input Monitoring): a press that
 // lets go at once leaves dictation on, and the next press stops it.
 const TAP_MS = 300
+function needsSpeechSetup(): boolean {
+  return !dictation.active && localSttStatus().state === 'missing'
+}
+function showSpeechSetup(): void {
+  openWindow()
+  const show = () => send('hotkey', 'speech-settings')
+  if (win?.webContents.isLoadingMainFrame()) win.webContents.once('did-finish-load', show)
+  else show()
+}
+function toggleDictation(): Promise<void> | void {
+  if (needsSpeechSetup()) return showSpeechSetup()
+  return dictation.toggle()
+}
 function dictateShortcut(keys: string): void {
   if (showing) return
+  if (needsSpeechSetup()) { dictationPress.run(keys, showSpeechSetup); return }
   if (voiceSettings().dictation.mode !== 'hold' || !heldKeys) { dictationPress.run(keys, () => void dictation.toggle()); return }
   dictationPress.run(keys, () => {
     if (dictation.active) {
@@ -1244,7 +1258,7 @@ function registerIpc(): void {
   })
   ipcMain.on('dictation:drag', (event, action: string, x: number, y: number) => { if (dictationWindow.owns(event.sender)) dictationWindow.drag(action, x, y) })
   ipcMain.on('dictation:pill', (event, width: number, height: number) => { if (dictationWindow.owns(event.sender) && typeof width === 'number' && typeof height === 'number') dictationWindow.setPill(width, height) })
-  ipcMain.handle('dictation:toggle', () => showing ? finishShow() : dictation.toggle())
+  ipcMain.handle('dictation:toggle', () => showing ? finishShow() : toggleDictation())
   ipcMain.handle('dictation:cancel', (_event, id?: string) => { if (!id || dictation.status().id === id) cancelVoice() })
   ipcMain.on('dictation:audio', (event, id: string, pcm: Float32Array) => { if (dictationWindow.owns(event.sender)) dictation.push(id, pcm) })
   ipcMain.handle('dictation:finish', (event, id: string) => { if (dictationWindow.owns(event.sender)) return dictation.finish(id) })
@@ -2109,7 +2123,7 @@ if (process.argv.includes('--togle-hook')) {
     if (app.isPackaged || process.env.TOGLE_HEADLESS !== '1' || process.env.TOGLE_TEST_TRAY === '1') {
       try {
         tray = new TogleTray(path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'build'), process.platform === 'win32' ? 'icon.ico' : 'icon.png'), {
-          open: openWindow, tasks: () => showTask(runners?.attention().find(task => task.pending.length)?.key ?? ''), settings: openDictationSettings, toggle: () => void dictation.toggle(), cancel: () => dictation.cancel(), copy: () => { void copyLastDictation().catch(() => {}) },
+          open: openWindow, tasks: () => showTask(runners?.attention().find(needsYou)?.key ?? ''), settings: openDictationSettings, toggle: toggleDictation, cancel: () => dictation.cancel(), copy: () => { void copyLastDictation().catch(() => {}) },
           copyText: (text: string) => { if (testClipboard !== undefined) testClipboard = text; else clipboard.writeText(text) },
           indicator: visible => { void setVoiceBar(visible).catch(error => console.warn('[voice bar]', (error as Error).message)) },
           quit: () => void requestQuit()

@@ -16,7 +16,7 @@ const services = [
   ['discord.com', 'discord', 'Discord voice', 'Unmute', 'Disconnect'],
   ['meet.jit.si', 'jitsi', 'Jitsi meeting', 'Unmute microphone', 'Hang up'],
   ['whereby.com', 'whereby', 'Whereby meeting', 'Turn on microphone', 'Leave room'],
-  ['rooms.example.test', 'other', 'Planning', 'Unmute my microphone', 'End call']
+  ['rooms.example.test', 'other', 'Planning', 'Turn your mic on', 'Exit the video call']
 ]
 
 async function until(fn, label, ms = 16000) {
@@ -127,8 +127,15 @@ async function run() {
     at = observations.length
     await send('Target.activateTarget', { targetId: other })
     await seen('unknown', at)
+    const newTabUrl = path.basename(exe) === 'msedge.exe' ? 'edge://newtab/' : 'chrome://newtab/'
+    const newTab = (await send('Target.createTarget', { url: newTabUrl })).targetId
+    await send('Target.activateTarget', { targetId: newTab })
+    at = observations.length
+    await seen('unknown', at)
+    assert.ok(!observations.slice(at).some(event => event.state === 'left'), 'an open meeting survives switching to a new tab')
     await send('Target.closeTarget', { targetId: home })
-    await seen('left', at)
+    assert.equal((await seen('left', at)).id, first.id, 'closing the meeting while the browser is on a new tab ends the meeting')
+    await send('Target.closeTarget', { targetId: newTab })
     const nextSession = (await send('Target.attachToTarget', { targetId: other, flatten: true })).sessionId
     await send('Fetch.enable', {}, nextSession)
     for (const [domain, app] of services) {
@@ -157,7 +164,7 @@ async function run() {
       await send('Runtime.evaluate', { expression: "document.body.innerHTML='<button>" + endAction + "</button>'" }, nextSession)
       assert.equal((await seen('left', at)).app, app)
     }
-    console.log('WINDOWS MEETINGS PASS: Google Meet lobby, quick mute, hidden tab, leave and rejoin, plus join/mute/leave for ' + services.map(row => row[1]).join(', '))
+    console.log('WINDOWS MEETINGS PASS: Google Meet lobby, quick mute, hidden tab, tab closure, leave and rejoin, plus join/mute/leave for ' + services.map(row => row[1]).join(', '))
     helper.kill()
     await nativeWindows(profile, desktopCallApps)
   } finally {

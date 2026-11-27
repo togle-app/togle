@@ -1,8 +1,9 @@
 // Production bar, preload and IPC, with a fake microphone. No user audio or account is accessed.
-const { app, BrowserWindow, ipcMain, nativeImage, screen } = require('electron')
+const { app, BrowserWindow, ipcMain, nativeImage, nativeTheme, screen } = require('electron')
 const assert = require('node:assert/strict')
 const fs = require('node:fs'), path = require('node:path')
-const artifacts = path.join(__dirname, '.work/dictation-ui'); fs.mkdirSync(artifacts, { recursive: true })
+const light = process.argv.includes('--light')
+const artifacts = path.join(__dirname, light ? '.work/dictation-ui-light' : '.work/dictation-ui'); fs.mkdirSync(artifacts, { recursive: true })
 app.setPath('userData', path.join(artifacts, 'profile'))
 fs.rmSync(path.join(artifacts, 'profile/voice-bar.json'), { force: true })
 app.disableHardwareAcceleration()
@@ -41,6 +42,7 @@ ipcMain.handle('dictation:copy', () => {
   copied++; change({ ...state, phase: 'done', outcome: 'copied', message: copiedMessage })
 })
 app.whenReady().then(async () => {
+  nativeTheme.themeSource = light ? 'light' : 'dark'
   const { DictationWindow } = require('../eval/.build/togle.cjs')
   surface = new DictationWindow(() => change({ phase: 'idle' }), path.resolve(__dirname, '../out/main'), () => testCursor)
   surface.setIndicator(true); win = surface.window
@@ -114,6 +116,8 @@ app.whenReady().then(async () => {
   // Native DIP bounds vary with the monitor’s scale. Phase and hover changes must retain this canvas.
   nativeCanvas = win.getSize()
   await wait("!!document.querySelector('.dictation-bar')")
+  assert.equal(await js('getComputedStyle(document.body).colorScheme'), light ? 'light' : 'dark')
+  assert.equal(await js("getComputedStyle(document.querySelector('.dictation-bar')).backgroundColor"), light ? 'rgb(255, 255, 255)' : 'rgb(23, 27, 35)')
   if (reducedMotion) {
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })

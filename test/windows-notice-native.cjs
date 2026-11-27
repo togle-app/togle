@@ -66,10 +66,10 @@ async function run() {
     assert.ok(start)
     const clicked = liveBanner && ps('button') === 'invoked'
     if (!clicked) ps('activate', start)
-    await until(() => readEvent('calls') === 'zoom\n', 'explicit start action')
+    await until(() => readEvent('calls') === 'zoom:false\n', 'explicit start action')
     if (liveBanner) console.log(clicked ? 'Invoked the actual Windows banner button through UI Automation.' : 'The desktop did not expose the test banner; exercised the Windows activation callback.')
     ps('activate', start)
-    assert.equal(readEvent('calls'), 'zoom\n')
+    assert.equal(readEvent('calls'), 'zoom:false\n')
     stop()
     await exited
     fs.unlinkSync(path.join(folder, 'stop'))

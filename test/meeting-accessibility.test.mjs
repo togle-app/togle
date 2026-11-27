@@ -29,7 +29,7 @@ function browser(os) {
     name: ref => nodes.get(ref).name ?? '',
     help: () => '',
     active: () => true,
-    showing: () => true,
+    showing: ref => nodes.get(ref).showing !== false,
     selected: ref => nodes.get(ref).selected ?? false,
     enabled: () => true,
     address: ref => nodes.get(ref).address ?? '',
@@ -88,6 +88,27 @@ for (const platform of ['darwin', 'linux']) {
     read.read()
     assert.deepEqual(events.at(-1), { id, app: 'meet', state: 'left' })
     assert.ok([...refs.values()].every(count => count === 0), 'retained accessibility elements are released')
+  })
+
+  test(`${platform} closes the tracked meeting when the tab disappears on an empty browser page`, () => {
+    const { read, events, nodes, leave, mic, selected, other } = browser(platform)
+    nodes.get(leave).name = 'Exit the video call'
+    nodes.get(mic).name = 'Turn your mic on'
+    read.read()
+    const first = events[0]
+    assert.equal(first.state, 'muted')
+    nodes.get(selected).selected = false
+    nodes.get(selected).showing = false
+    nodes.get(other).selected = true
+    nodes.get(1n).children = [selected, other]
+    read.read()
+    read.read()
+    assert.equal(events.at(-1).state, 'unknown', 'a still-open background tab keeps the meeting active')
+    nodes.get(1n).children = [other]
+    read.read()
+    assert.equal(events.at(-1).state, 'unknown', 'one scan may see a changing tab strip')
+    read.read()
+    assert.deepEqual(events.at(-1), { id: first.id, app: 'meet', state: 'left' })
   })
 }
 

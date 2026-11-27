@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { needsYou, taskHandoffProblem, type RunnerStatus, type TaskView, type ViewRequest } from '@shared/runner'
+import { isFresh, needsYou, taskHandoffProblem, type RunnerStatus, type TaskView, type ViewRequest } from '@shared/runner'
 import { canAllowHere, shownPart } from '@shared/runner-command'
 import { projectFolderOf } from '@shared/task-groups'
 import type { TodoItem, TodoList } from '@shared/todo'
@@ -31,7 +31,7 @@ function chipOf(task: TaskView | undefined): { words: string; tone: 'work' | 'wa
     case 'waiting':
       return { words: 'waiting for you', tone: 'wait' }
     case 'idle':
-      return { words: 'idle', tone: 'done' }
+      return { words: isFresh(task) ? 'idle · new' : 'idle', tone: 'done' }
     case 'failed':
       return { words: task.signedOut ? 'signed out' : 'stopped by an error', tone: 'fail' }
     default:
@@ -44,10 +44,6 @@ const ROW_FITS = 72
 
 /** What a waiting task asks, in a few words for a row: the command (or what signs the agent in) shows as code. */
 function asking(request: ViewRequest | undefined, task: TaskView): { says: string; detail: string; code: boolean } {
-  // Stopped and waiting for a reply to go on: it says why, and signed out, what signs the agent in again.
-  if (!request && task.signedOut) return task.fix ? { says: 'is signed out · sign in with', detail: task.fix, code: true } : { says: 'is signed out.', detail: 'Sign it in, then reply.', code: false }
-  if (!request && task.state === 'failed') return { says: task.line ? 'stopped by an error:' : 'stopped by an error', detail: task.line, code: false }
-  if (!request && task.state === 'stopped') return { says: 'was stopped.', detail: 'Reply to go on.', code: false }
   if (!request) return { says: task.line || 'is waiting', detail: '', code: false }
   if (request.kind === 'question') return { says: 'asks:', detail: shownPart(request.questions?.[0]?.text ?? 'a question'), code: false }
   if (request.kind === 'edit') return { says: 'wants to change', detail: shownPart((request.files ?? []).join('\n') || 'a file'), code: true }
@@ -201,6 +197,8 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
   const canGive = status.some(agent => agent.installed) || tasks.some(task => !taskHandoffProblem(task))
   const waiting = tasks.filter(needsYou)
   const items = list?.items ?? []
+  const linkedTasks = new Set(items.map(item => item.task))
+  const unread = tasks.filter(task => isFresh(task) && !linkedTasks.has(task.key))
   const open = items.filter((item) => !item.done)
   const ticked = items.filter((item) => item.done)
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
@@ -278,7 +276,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
               const { says, detail, code } = asking(request, task)
               // A command or a change is allowed here only when all of it shows on the row and it doesn't look dangerous.
               const fits = !!request && request.kind !== 'question' && canAllowHere(request) && !detail.includes('\n') && detail.length <= ROW_FITS
-              const reply = request?.kind === 'question' || (!request && task.state !== 'waiting')
+              const reply = request?.kind === 'question'
               return (
                 // What can be allowed here shows whole (`allows`): on a narrow window its line breaks, where any other is shortened.
                 <div key={task.key} className={`todo-row need ${fits ? 'allows' : ''}`} role="listitem" data-state="waiting">
@@ -303,7 +301,7 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
                         </button>
                       </>
                     )}
-                    {/* A question, or a task Togle runs that stopped, goes on with a reply; anything else opens in Agents. */}
+                    {/* A blocking question opens its reply box in Agents. */}
                     {!fits && (
                       <button className={`small ${reply ? 'primary' : ''}`} onClick={() => onOpenTask(task.key)}>
                         {reply ? 'Reply' : 'Open'}
@@ -316,6 +314,14 @@ export function Todo({ onOpenTask, onOpenCall }: { onOpenTask: (key: string) => 
           </div>
         </section>
       )}
+      {!!unread.length && <section className="todo-group" aria-label="New results">
+        <h3 className="tasks-label">New results</h3>
+        {unread.map(task => <div key={task.key} className="todo-row">
+          <StateMark kind="done" still />
+          <span className="todo-grow"><b>{task.title}</b><small><AgentLead runner={task.runner} name={agentOf(task)} rest="idle · new" /></small></span>
+          <button className="small" onClick={() => onOpenTask(task.key)}>Open</button>
+        </div>)}
+      </section>}
       <section className="todo-group" aria-label="To do">
         <div className="todo-list-head"><h3 className="tasks-label">To do</h3>
           {!!items.length && !clearing && <button className="quiet-action" onClick={() => setClearing(items)}>Clear list</button>}

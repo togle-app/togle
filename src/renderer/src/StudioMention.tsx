@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { isMicrophoneOn, microphoneNeedsSignIn, type NoiseReport, type TogleMicrophoneStatus } from '@shared/microphone'
+import { isMicrophoneOn, type NoiseReport, type TogleMicrophoneStatus } from '@shared/microphone'
 
 const api = window.togle
 const errorText = (error: unknown): string => (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
@@ -16,12 +16,13 @@ export function NoisyMicrophone({ finding, minutes, microphone }: { finding: Noi
   const noisy = Math.max(1, Math.round(finding.report.noisyMs / 60_000))
   const of = Math.max(noisy, Math.round(minutes), Math.round(finding.report.analyzedMs / 60_000))
   if (isMicrophoneOn(microphone)) return null
-  // The one link does what Togle Studio needs next: get it, sign in to it, or turn it on.
-  const clean = (): Promise<unknown> => !microphone?.installed ? api.openMicrophonePage('after-call') : microphoneNeedsSignIn(microphone) ? api.showMicrophone() : api.turnOnMicrophone()
+  const ready = microphone?.running && microphone.state?.account === 'signed-in' && microphone.state.phase === 'off' && microphone.state.setup === 'ready'
+  const label = !microphone?.installed ? 'See Studio' : ready ? 'Turn on noise cancellation' : 'Open Studio'
+  const clean = (): Promise<unknown> => !microphone?.installed ? api.openMicrophonePage('after-call') : ready ? api.turnOnMicrophone() : api.showMicrophone()
   return (
     <div className="studio-mention" role="status">
       <span>Your microphone picked up room noise for {noisy} of {of} minutes.</span>
-      <button className="small" onClick={() => { setError(''); void clean().catch((failure) => setError(errorText(failure))) }}>Clean my microphone</button>
+      <button className="small" onClick={() => { setError(''); void clean().catch((failure) => setError(errorText(failure))) }}>{label}</button>
       {error && <span className="error">{error}</span>}
     </div>
   )

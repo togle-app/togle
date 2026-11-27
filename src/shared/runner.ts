@@ -342,13 +342,14 @@ export function taskHandoffProblem(task: TaskView): string | undefined {
   return undefined
 }
 
-/**
- * Whether a task needs the person: it asks, or it is one Togle runs that stopped (by their Stop, or by itself) and
- * waits for a reply to go on. A task stopped in its own window is not Togle's to continue, and one in a terminal of
- * Togle's own ended with its program: no reply goes on with it.
- */
-export function needsYou(task: Pick<TaskView, 'state' | 'mine' | 'terminal'>): boolean {
-  return task.state === 'waiting' || (task.mine && !task.terminal && (task.state === 'stopped' || task.state === 'failed'))
+/** A blocked agent reports waiting. Stopped and failed tasks retain their own states. */
+export function needsYou(task: Pick<TaskView, 'state'>): boolean {
+  return task.state === 'waiting'
+}
+
+/** A completed, unread turn stays new until its task is opened. */
+export function isFresh(task: Pick<TaskView, 'state' | 'fresh'>): boolean {
+  return task.state === 'idle' && task.fresh === true
 }
 
 /** How many files a task changed, by what its log says (each file once). A change that failed changed nothing. */

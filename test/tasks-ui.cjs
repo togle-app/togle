@@ -1569,29 +1569,27 @@ async function checkCallStrip(T, agent) {
   ui.window.destroy()
 }
 
-// A task Togle runs that stopped (by an error, or by the Stop button) waits for a reply, and says why; one that runs in
-// its own window is not Togle's to continue.
 async function checkStoppedTasks(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.click('.workspace-nav button', 'Agents')
   await ui.wait("document.querySelectorAll('.task-row').length===5")
-  await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','The plan limit is reached until 14:00.')")
-  await ui.evaluate("window.togleUITest.stopTask('claude:s4','stopped','')")
-  await ui.wait("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page'))?.dataset.needs==='you'")
-  const website = "[...document.querySelectorAll('.task-groups .task-project')].find(p=>p.querySelector('.task-project-name').textContent==='website')"
-  assert.deepEqual((await ui.evaluate('[...' + website + ".querySelectorAll('.task-row strong')].map(e=>e.textContent)")).slice(0, 2).sort(), ['Clean the build folder', 'Rebuild the pricing page'], 'in its project, what waits for you comes first')
-  assert.ok((await ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page')).textContent")).includes('stopped by an error: The plan limit is reached until 14:00.'), 'it says why')
-  assert.equal(await ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page')).dataset.needs"), 'you')
-  assert.equal(await ui.evaluate("[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Write the release notes')).dataset.needs"), undefined, 'a task in its own window that stopped is not Togle\'s to continue')
-  await ui.capture('tasks-stopped')
+  await ui.evaluate("window.togleUITest.stopTask('claude:s2','stopped','')")
+  await ui.wait("[...document.querySelectorAll('.task-row[data-state=stopped]')].some(row => row.textContent.includes('Rebuild the pricing page'))")
   await ui.click('.workspace-nav button', 'To-do')
-  await ui.wait("[...document.querySelectorAll('.todo-row.need b')].some(b=>b.textContent==='Rebuild the pricing page')")
-  const row = "[...document.querySelectorAll('.todo-row.need')].find(r=>r.querySelector('b').textContent==='Rebuild the pricing page')"
-  assert.equal(await ui.evaluate(row + ".querySelector('small').textContent"), 'Claude Code · website · stopped by an error: The plan limit is reached until 14:00.')
-  assert.deepEqual(await ui.evaluate("[..." + row + ".querySelectorAll('button')].map(b=>b.textContent)"), ['Reply'])
-  await ui.evaluate(row + ".querySelector('button').click()")
-  await ui.wait("document.querySelector('.task-title h2')?.firstChild?.textContent==='Rebuild the pricing page'")
-  assert.deepEqual(ui.errors, [], 'no errors in the console')
+  await ui.wait("!!document.querySelector('.todo-row.need')")
+  assert.ok(!(await texts(ui, '.todo-row.need b')).includes('Rebuild the pricing page'))
+  await ui.evaluate("window.togleUITest.setTask('claude:s3', {state:'idle', fresh:true})")
+  await ui.wait("[...document.querySelectorAll('.todo-chip')].some(chip => chip.textContent.includes('idle · new'))")
+  await ui.evaluate("window.togleUITest.setTask('codex:t9', {state:'idle', fresh:true})")
+  await ui.wait("document.querySelector('.todo-group[aria-label^=New]')?.textContent.includes('idle · new')")
+  await ui.click('[aria-label="New results"] button', 'Open')
+  await ui.wait("document.querySelector('.task-title h2')?.textContent.includes('Port the settings screen')")
+  await ui.click('.workspace-nav button', 'To-do')
+  await ui.wait("!!document.querySelector('.todo-row.need') && !document.querySelector('.todo-group[aria-label^=New]')")
+  await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','The plan limit is reached until 14:00.')")
+  await ui.click('.workspace-nav button', 'Agents')
+  await ui.wait("[...document.querySelectorAll('.task-row[data-state=failed]')].some(row => row.textContent.includes('The plan limit is reached until 14:00.'))")
+  assert.deepEqual(ui.errors, [])
   ui.window.destroy()
 }
 
@@ -1882,9 +1880,7 @@ async function checkPlanList(T, agent) {
   ui.window.destroy()
 }
 
-// The theme. Light makes the window and the task box light; what floats over other apps (the notices, the call strip, the keys notice)
-// keeps the dark palette, and so does the agents' own screen. (What Settings sends main turns into what pages are told, which is
-// what nativeTheme.themeSource stands in for here.) The marks of a task stay readable in the light window too.
+// The main window, terminal and floating surfaces all follow the appearance setting through nativeTheme.themeSource.
 async function checkTheme(T, agent) {
   const { nativeTheme } = require('electron')
   const before = nativeTheme.themeSource
@@ -1903,7 +1899,7 @@ async function checkTheme(T, agent) {
     for (const [surface, width] of [['notice', 392], ['callnotice', 372], ['keysnotice', 372], ['callstrip', 380]]) {
       const floating = await open(T, agent, width, surface)
       const seen = await tokens(floating)
-      assert.deepEqual([seen.bg, seen.surface, seen.scheme, seen.hud], ['#0f1115', '#171b23', 'dark', true], surface + ' floats over other apps and stays dark in a light window')
+      assert.deepEqual(seen, { ...LIGHT, hud: true, page: 'rgba(0, 0, 0, 0)' }, surface + ' follows Light and keeps its transparent canvas')
       floating.window.destroy()
     }
     // The agent's own screen is in the window's theme: light in a light window, dark in a dark one, and painted again the moment the theme
@@ -2327,7 +2323,7 @@ async function checkSignedOut(T, agent) {
   const taskRow = "[...document.querySelectorAll('.task-row')].find(r=>r.textContent.includes('Rebuild the pricing page'))"
   await ui.wait(taskRow + "?.textContent.includes('signed out')")
   assert.equal(await ui.evaluate(taskRow + ".querySelector('.task-copy > span').textContent"), 'Claude Code · signed out · sign in with claude auth login')
-  assert.equal(await ui.evaluate(taskRow + ".dataset.needs"), 'you', 'amber: it waits for the person')
+  assert.equal(await ui.evaluate(taskRow + ".dataset.needs"), undefined, 'signed out keeps its reported state')
   await ui.task('Rebuild the pricing page')
   await ui.wait("!!document.querySelector('.task-banner.signed-out')")
   assert.equal(await ui.evaluate("document.querySelector('.task-banner.signed-out span').textContent"), 'Claude Code is signed out. Run claude auth login in a terminal, then reply here to go on.')
@@ -2340,15 +2336,9 @@ async function checkSignedOut(T, agent) {
   assert.equal(await ui.evaluate('window.__copied'), 'claude auth login')
   await ui.capture('tasks-signed-out')
   await ui.click('.workspace-nav button', 'To-do')
-  const row = "[...document.querySelectorAll('.todo-row.need')].find(r=>r.querySelector('b').textContent==='Rebuild the pricing page')"
-  await ui.wait("!!" + row)
-  assert.equal(await ui.evaluate(row + ".querySelector('small').textContent"), 'Claude Code · website · is signed out · sign in with claude auth login')
-  assert.equal(await ui.evaluate(row + ".querySelector('.todo-line code').textContent"), 'claude auth login')
-  assert.deepEqual(await ui.evaluate("[..." + row + ".querySelectorAll('button')].map(b=>b.textContent)"), ['Reply'])
-  assert.ok((await texts(ui, '.todo-chip')).includes('Claude Code · signed out'), 'the item given to it says so too')
-  // An agent Togle does not know the command for: it says how without one.
-  await ui.evaluate("window.togleUITest.stopTask('claude:s2','failed','Gemini is signed out.',{signedOut:true,fix:undefined})")
-  await ui.wait(row + "?.querySelector('small')?.textContent==='Claude Code · website · is signed out. Sign it in, then reply.'")
+  await ui.wait("!!document.querySelector('.todo-chip')")
+  assert.ok(!(await texts(ui, '.todo-row.need b')).includes('Rebuild the pricing page'))
+  assert.ok((await texts(ui, '.todo-chip')).includes('Claude Code · signed out'))
   assert.deepEqual(ui.errors, [], 'no errors in the console')
   ui.window.destroy()
 }
@@ -3876,7 +3866,7 @@ async function checkChatLinksAndAgentUsage(T, agent) {
   const ui = await open(T, agent, 1024)
   await ui.evaluate("localStorage.removeItem('togle.ui.fold:agents.usage')")
   const key = 'codex:installer-link'
-  const folder = process.platform === 'win32' ? '/C:/Users/example/togle/dist' : '/home/user/togle'
+  const folder = process.platform === 'win32' ? '/C:/Users/Cool/togle-opensource/dist-agent-usage-files-dev' : '/home/user/togle'
   const target = folder + '/Togle Setup 0.1.0.exe'
   const shownPath = process.platform === 'win32' ? target.slice(1).replaceAll('/', '\\') : target
   const reply = '[Togle Free Windows installer](<' + target + '>)\n\n[Missing log](<' + folder + '/missing.log>) and [website](https://example.org).'

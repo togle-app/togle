@@ -422,7 +422,7 @@ export interface Settings {
     /** What to do when a call starts in each of those apps: ask (the default), write it down at once, or leave it. */
     apps: Partial<Record<import('./call-apps').CallApp, import('./call-apps').CallAppMode>>
   }
-  /** The first minute (talk, sign in with the plan, what Togle found) was gone through, once. */
+  /** The person has opened or dismissed the first-launch task offer. */
   firstMinute: { done: boolean }
   /** The offer to change Togle's keys, made once: the first time one is pressed while a code editor that uses it is in front. */
   keysOffer: { shown: boolean; key: string; editor: string }
@@ -534,7 +534,7 @@ export interface SttStatus {
 export type AssistKind = 'suggest' | 'ask' | 'summary'
 
 /** 'start-call-unseen': the call shortcut while Togle's window is hidden or minimized (no picker it couldn't show). */
-export type HotkeyAction = 'toggle-listening' | 'start-call-unseen' | 'stop-call' | 'toggle-recording' | 'snapshot' | 'ask' | 'copy' | 'dictation-settings' | 'keys-settings'
+export type HotkeyAction = 'toggle-listening' | 'start-call-unseen' | 'stop-call' | 'toggle-recording' | 'snapshot' | 'ask' | 'copy' | 'dictation-settings' | 'speech-settings' | 'keys-settings'
 
 /** One of Togle's keys was pressed in a code editor that uses it too: the key ("F9") and the editor ("VS Code"). */
 export interface KeysOffer {

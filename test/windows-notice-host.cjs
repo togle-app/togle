@@ -10,7 +10,7 @@ app.setAppUserModelId(id)
 app.setToastActivatorCLSID(clsid)
 app.disableHardwareAcceleration()
 app.whenReady().then(async () => {
-  const notices = new WindowsNotices(dest => fs.writeFileSync(file('destination'), JSON.stringify(dest)), app => fs.appendFileSync(file('calls'), app + '\n'))
+  const notices = new WindowsNotices(dest => fs.writeFileSync(file('destination'), JSON.stringify(dest)), (app, always) => fs.appendFileSync(file('calls'), app + ':' + always + '\n'))
   await notices.start()
   if (process.argv.includes('--post')) {
     const item = (key, kind, title, fields = {}) => ({ id: key + '#42', key, kind, title, agent: 'Codex', detailKind: 'words', detail: '', ...fields })

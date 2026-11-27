@@ -31,11 +31,11 @@ export interface MeetingObservation { id: string; app?: CallApp; state: MeetingM
 type Button = { name: string; help?: string; groups: AccessibleRef[]; ref: AccessibleRef }
 type Controls = { joined: boolean; ended: boolean; mic: MeetingMic; toggle?: AccessibleRef }
 
-const HANG_UP = /^(?:Leave (?:the |this )?(?:call|meeting|huddle|conference|voice channel|room)|End (?:the |this )?(?:call|meeting)|Hang up|Disconnect from voice|Anruf (?:verlassen|beenden)|Besprechung verlassen|Auflegen|Quitter (?:la |le |l.)?(?:r.union|appel)|Salir de (?:la |la video)?(?:reuni.n|llamada)|Colgar)\b/i
+const HANG_UP = /^(?:(?:Leave|Exit|Disconnect from) (?:the |this )?(?:(?:audio|video|voice) )?(?:call|meeting|huddle|conference|voice channel|room)|End (?:the |this )?(?:(?:audio|video) )?(?:call|meeting)|Hang up|Disconnect from voice|Anruf (?:verlassen|beenden)|Besprechung verlassen|Auflegen|Quitter (?:la |le |l.)?(?:r.union|appel)|Salir de (?:la |la video)?(?:reuni.n|llamada)|Colgar)\b/i
 const LEAVE = /^(?:Leave|Disconnect|Beenden|Verlassen)(?:\s*\([^)]*\))?$/i
 const ENDED = /^(?:Rejoin(?: meeting)?|Return to home screen|Join (?:now|meeting|a meeting|huddle|voice channel)|Start (?:a |the )?(?:huddle|voice call|audio call|video call)|Call again|Wieder teilnehmen|Erneut (?:beitreten|teilnehmen)|Zur Startseite|Jetzt teilnehmen)\b/i
-const OWN_OPEN = /^(?:Turn off (?:the |your )?microphone|Turn off (?:your )?mic|Mute (?:(?:your |my )(?:mic|microphone|audio)|myself|yourself)|Mikrofon (?:ausschalten|deaktivieren|stummschalten)|D.sactiver (?:le |votre )?micro|Silenciar (?:mi |el )?micr.fono)\b/i
-const OWN_MUTED = /^(?:Turn on (?:the |your )?microphone|Turn on (?:your )?mic|Unmute (?:(?:your |my )(?:mic|microphone|audio)|myself|yourself)|Mikrofon (?:einschalten|aktivieren)|Stummschaltung (?:des Mikrofons )?aufheben|Activer (?:le |votre )?micro|Activar (?:mi |el )?micr.fono)\b/i
+const OWN_OPEN = /^(?:Turn off (?:the |your )?(?:microphone|mic)|Turn (?:the |your )?(?:microphone|mic) off|Mute (?:(?:your |my )(?:mic|microphone|audio)|myself|yourself)|Mikrofon (?:ausschalten|deaktivieren|stummschalten)|D.sactiver (?:le |votre )?micro|Silenciar (?:mi |el )?micr.fono)\b/i
+const OWN_MUTED = /^(?:Turn on (?:the |your )?(?:microphone|mic)|Turn (?:the |your )?(?:microphone|mic) on|Unmute (?:(?:your |my )(?:mic|microphone|audio)|myself|yourself)|Mikrofon (?:einschalten|aktivieren)|Stummschaltung (?:des Mikrofons )?aufheben|Activer (?:le |votre )?micro|Activar (?:mi |el )?micr.fono)\b/i
 const BARE_MIC = /^(mute|unmute|stummschalten)(?: (?:microphone|mic|audio))?(?:\s*[,(:\[].*)?$/i
 const MIC_SHORTCUT = /(?:(?:ctrl|control|alt|option|cmd|command|shift)\s*\+\s*|[⌥⌘⇧⌃])+[DMA]\b/i
 const CALL_CAPTION = /\b(?:meet(?:ing)?|call|webinar|conference|huddle|besprechung|anruf|videollamada|webex|jitsi|zoom|teams|slack|discord|whereby|ringcentral|whatsapp|signal)\b|[a-z]{3}-[a-z]{4}-[a-z]{3}/i
@@ -159,13 +159,13 @@ export class AccessibleMeetings {
     const page = call.browser ? this.page(window) : undefined
     if (page) {
       const matchingTab = call.tab && page.tabs.find(tab => this.ui.same(tab.ref, call.tab!.ref))
-      const leftTab = call.tab && !matchingTab && !!page.tabs.find(tab => tab.selected) && !page.tabs.some(tab => tab.name === call.tab?.name)
+      const leftTab = call.tab && !matchingTab && page.tabs.filter(tab => tab.selected).length === 1 && !page.tabs.some(tab => tab.name === call.tab?.name)
+      if (leftTab) return this.missing(call, true)
       const sameRoom = page.meeting?.route === call.route
       const sameSite = matchingTab && matchingTab.selected && page.meeting?.origin === call.origin && SAME_TAB_SERVICES.has(call.app)
       if (!page.document || !page.address || matchingTab?.selected === false || !sameRoom && !sameSite) {
-        return this.missing(call, !!page.address && (!!leftTab || !!matchingTab?.selected && !sameRoom && !sameSite))
+        return this.missing(call, !!page.address && !!matchingTab?.selected && !sameRoom && !sameSite)
       }
-      if (leftTab) return this.missing(call, true)
     }
     call.missing = 0
     const controls = this.controls(page?.document ?? window)
@@ -229,7 +229,7 @@ export class AccessibleMeetings {
     let document: AccessibleRef | undefined
     let address = ''
     for (const { ref, role } of this.walk(window, 150, 9, true)) {
-      if (role === 'page tab' && this.ui.showing(ref)) tabs.push({ ref, name: this.ui.name(ref), selected: this.ui.selected(ref) })
+      if (role === 'page tab') tabs.push({ ref, name: this.ui.name(ref), selected: this.ui.selected(ref) })
       if (BROWSER_DOCUMENT.has(role) && this.ui.showing(ref) && !document) {
         document = ref
         const url = this.ui.address(ref)

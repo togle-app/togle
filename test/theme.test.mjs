@@ -39,7 +39,8 @@ test('the window is dark until the person chooses, and a word that is not a them
 const tokensIn = (block) => Object.fromEntries([...block.matchAll(/--([a-z-]+):\s*(#[0-9a-fA-F]{6})\b/g)].map((match) => [match[1], match[2].toLowerCase()]))
 const darkBlock = css.slice(css.indexOf(':root {'), css.indexOf('}', css.indexOf(':root {')))
 const lightStart = css.indexOf('@media (prefers-color-scheme: light)')
-const lightBlock = css.slice(css.indexOf(':root:not([data-hud]) {', lightStart), css.indexOf('}', css.indexOf(':root:not([data-hud]) {', lightStart)))
+const lightRoot = css.indexOf(':root {', lightStart)
+const lightBlock = css.slice(lightRoot, css.indexOf('}', lightRoot))
 const dark = tokensIn(darkBlock)
 const light = { ...dark, ...tokensIn(lightBlock) }
 
@@ -74,5 +75,6 @@ test('each palette keeps its text readable (4.5:1) and its symbols visible (3:1)
     // The colors a line, a ring or a dot is drawn in must show against the panel it is on.
     for (const front of ['muted', 'togle', 'wait', 'ok', 'danger']) assert.ok(ratio(palette[front], palette.surface) >= 3, `${name}: a ${front} symbol on the panel`)
   }
+  for (const fill of ['togle', 'primary-hover']) assert.ok(ratio(light['primary-text'], light[fill]) >= 4.5, 'primary actions are readable in Light mode')
   assert.ok(ratio(light.line, light.surface) >= 1.2 && ratio(dark.line, dark.surface) >= 1.2, 'a line can be seen')
 })

@@ -288,7 +288,6 @@ class HermesTask extends TaskBase implements ScreenSide {
   /** The id Hermes gave the session, once it shows in its list: the task is first known by the name it was started with. */
   real: string | null = null
   closed: string | undefined
-  waitingFor: string | undefined
 
   /** `words`: when it is a new session, the words and name it is started with; a session that exists is opened by `job`. */
   constructor(
