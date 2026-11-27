@@ -10,8 +10,13 @@ import App from '../App';
 jest.mock('../src/account', () => ({ account: undefined }));
 jest.mock('../src/device-client', () => ({ createPhoneClient: jest.fn() }));
 jest.mock('react-native-safe-area-context', () => {
+  const { createContext } = require('react');
   const { View } = require('react-native');
-  return { SafeAreaProvider: View, SafeAreaView: View };
+  return {
+    SafeAreaProvider: View,
+    SafeAreaView: View,
+    SafeAreaInsetsContext: createContext(null),
+  };
 });
 
 test('opens sign-in when the account has not been configured', async () => {

@@ -9,7 +9,15 @@ export type LoadReport = (
   query: PhoneQuery,
 ) => Promise<PhoneReport>;
 
-export function usePhoneReport(
+/** Where the reading of a report stands: the computer shares none, it is on its way, it is here, or it could not be read. */
+export type ReportStatus = 'off' | 'loading' | 'ready' | 'failed';
+
+/**
+ * A computer's report, read again while it is looked at. A computer that stops sharing has its report taken off the
+ * screen at once. One that only goes offline keeps the last report on the screen: nothing newer can be read until it
+ * is back, and what was read is not lost under the reader's eyes.
+ */
+export function usePhoneReportState(
   host: Device,
   active: boolean,
   load: LoadReport,
@@ -17,16 +25,19 @@ export function usePhoneReport(
   revision?: string,
 ) {
   const [report, setReport] = useState<PhoneReport>();
+  const [failed, setFailed] = useState(false);
   const refreshRef = useRef<() => void>(undefined);
   const previous = useRef(revision);
   const share = host.online && host.phoneReports === true;
+  const revoked = host.online && host.phoneReports !== true;
   const device = host.device;
   useEffect(() => {
-    if (!share) {
-      setReport(undefined);
-      return;
-    }
-    if (!active) return;
+    if (!revoked) return;
+    setReport(undefined);
+    setFailed(false);
+  }, [revoked]);
+  useEffect(() => {
+    if (!share || !active) return;
 
     const query: PhoneQuery = session
       ? { kind: 'session', task: session, view: 'chat' }
@@ -49,9 +60,13 @@ export function usePhoneReport(
       reread = false;
       load(device, query)
         .then(value => {
-          if (viewing) setReport(value);
+          if (!viewing) return;
+          setReport(value);
+          setFailed(false);
         })
-        .catch(() => {})
+        .catch(() => {
+          if (viewing) setFailed(true);
+        })
         .finally(() => {
           pending = false;
           if (reread) refresh();
@@ -76,7 +91,25 @@ export function usePhoneReport(
     previous.current = revision;
     refreshRef.current?.();
   }, [revision]);
-  return share ? report : undefined;
+  const shown = revoked ? undefined : report;
+  const status: ReportStatus = shown
+    ? 'ready'
+    : !share
+    ? 'off'
+    : failed
+    ? 'failed'
+    : 'loading';
+  return { report: shown, status, retry: () => refreshRef.current?.() };
+}
+
+export function usePhoneReport(
+  host: Device,
+  active: boolean,
+  load: LoadReport,
+  session?: string,
+  revision?: string,
+) {
+  return usePhoneReportState(host, active, load, session, revision).report;
 }
 
 function resetCountdown(at: number, now = Date.now()): string {

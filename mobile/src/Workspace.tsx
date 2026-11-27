@@ -28,7 +28,14 @@ import { Icon } from './icons';
 import type { LoadReport } from './ReportUsage';
 import { Session } from './Session';
 import { Todo, type WaitingQuestion } from './Todo';
-import { Block, Button, ErrorMessage, useGutter, useTheme } from './ui';
+import {
+  Block,
+  Button,
+  ErrorMessage,
+  useGutter,
+  useInsets,
+  useTheme,
+} from './ui';
 
 type Tab = 'Agents' | 'To-do';
 /** The account's place on the Togle Pro waitlist: unknown until the account service has answered. */
@@ -67,6 +74,7 @@ export function Workspace({
   onAccount?(): void;
 }) {
   const { s, colors } = useTheme();
+  const insets = useInsets();
   const [tab, setTab] = useState<Tab>('Agents');
   const [phone, setPhone] = useState<PhoneState>();
   const [linkError, setLinkError] = useState('');
@@ -496,6 +504,7 @@ export function Workspace({
             <Session
               host={host}
               task={task}
+              sessionKey={selected.task}
               title={selected.title}
               agent={selected.agent}
               request={request}
@@ -515,7 +524,11 @@ export function Workspace({
       <View
         style={[
           styles.tabBar,
-          { backgroundColor: colors.surface, borderColor: colors.line },
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.line,
+            paddingBottom: insets.bottom,
+          },
         ]}
       >
         <View accessibilityRole="tablist" style={styles.tabs}>

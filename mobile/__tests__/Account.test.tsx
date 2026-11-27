@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, TextInput } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import Renderer from 'react-test-renderer';
 import App from '../App';
 import { account, proWaitlist } from '../src/account';
@@ -33,11 +33,18 @@ jest.mock('../src/config.generated', () => ({
 }));
 jest.mock('../src/device-client', () => ({ createPhoneClient: jest.fn() }));
 jest.mock('react-native-safe-area-context', () => {
-  const { View } = require('react-native');
+  const { createContext } = require('react');
+  const Plain = require('react-native').View;
+  // A phone with a status bar of 24 and a gesture bar of 16.
   return {
-    SafeAreaProvider: View,
-    SafeAreaView: View,
-    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+    SafeAreaProvider: Plain,
+    SafeAreaView: Plain,
+    SafeAreaInsetsContext: createContext({
+      top: 24,
+      bottom: 16,
+      left: 0,
+      right: 0,
+    }),
   };
 });
 
@@ -173,5 +180,77 @@ test('the sign-in page tells a failed code in plain words, not as the account se
   expect(send).toHaveBeenCalledTimes(1);
   expect(words()).toContain('Could not send the code. Try again.');
   expect(words()).not.toContain('Database error saving new user');
+  await Renderer.act(() => tree.unmount());
+});
+
+test('asking for the code again says that a new one is on its way', async () => {
+  const send = jest.mocked(account!.auth.signInWithOtp);
+  send.mockReset();
+  send.mockResolvedValue({ error: null } as never);
+  let tree!: Renderer.ReactTestRenderer;
+  await Renderer.act(async () => {
+    tree = Renderer.create(<SignIn />);
+  });
+  const words = () =>
+    tree.root.findAllByType(Text).map(node => node.props.children);
+  const press = (title: string) =>
+    Renderer.act(async () => {
+      const button = tree.root
+        .findAll(node => typeof node.props.onPress === 'function')
+        .find(node =>
+          node
+            .findAllByType(Text)
+            .some(child => child.props.children === title),
+        );
+      expect(button).toBeDefined();
+      await button?.props.onPress();
+    });
+  const email = tree.root
+    .findAllByType(TextInput)
+    .find(node => node.props.testID === 'account-email')!;
+  await Renderer.act(async () => email.props.onChangeText('test@example.test'));
+  await press('Email me a code');
+  expect(words()).toContain('Check your email');
+  expect(words()).not.toContain('A new code is on its way.');
+  // The cursor is in the code's box without another press.
+  const code = tree.root
+    .findAllByType(TextInput)
+    .find(node => node.props.testID === 'account-code')!;
+  expect(code.props.autoFocus).toBe(true);
+  await press('Resend code');
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(words()).toContain('A new code is on its way.');
+  await press('Use another address');
+  expect(words()).not.toContain('A new code is on its way.');
+  await Renderer.act(() => tree.unmount());
+});
+
+test('the top bar runs up under the status bar and the tabs run down under the gesture bar', async () => {
+  jest.mocked(proWaitlist).mockResolvedValue(false);
+  let tree!: Renderer.ReactTestRenderer;
+  await Renderer.act(async () => {
+    tree = Renderer.create(<App />);
+  });
+  const styleOf = (holds: string) => {
+    const view = tree.root
+      .findAllByType(View)
+      .filter(node =>
+        node.findAllByType(Text).some(child => child.props.children === holds),
+      )
+      .at(-1);
+    return StyleSheet.flatten(view?.props.style);
+  };
+  // The innermost views that hold the name and the tabs are rows inside the bars: walk out to the padded ones.
+  const padded = (holds: string, side: 'paddingTop' | 'paddingBottom') =>
+    tree.root
+      .findAllByType(View)
+      .filter(node =>
+        node.findAllByType(Text).some(child => child.props.children === holds),
+      )
+      .map(node => StyleSheet.flatten(node.props.style)?.[side])
+      .filter(value => typeof value === 'number' && value > 0);
+  expect(styleOf('Togle')).toBeDefined();
+  expect(padded('Togle', 'paddingTop')).toContain(24);
+  expect(padded('To-do', 'paddingBottom')).toContain(16);
   await Renderer.act(() => tree.unmount());
 });

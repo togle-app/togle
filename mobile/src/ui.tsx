@@ -1,6 +1,16 @@
-import React, { createContext, useContext, useMemo } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
+  Keyboard,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -10,7 +20,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 
 const font = {
   regular: 'Togle-Text-Regular',
@@ -255,6 +265,60 @@ export function useGutter() {
   return width <= 390 ? 12 : Math.round(Math.min(38, Math.max(16, width / 25)));
 }
 
+const NO_INSETS = { top: 0, bottom: 0, left: 0, right: 0 };
+
+/** The room the status bar and the gesture bar take. The app draws under both and keeps its content out of them. */
+export function useInsets() {
+  return useContext(SafeAreaInsetsContext) ?? NO_INSETS;
+}
+
+/**
+ * The room the keyboard takes at the bottom of a view, measured on the screen. The app draws edge to edge, and there
+ * neither Android nor iOS moves a view out of the keyboard's way: a view that holds a text box gives this much room at
+ * its own bottom (`paddingBottom: space`), so the box stays above the keys. The view takes `ref` and `onLayout`.
+ */
+export function useKeyboardSpace() {
+  const ref = useRef<React.ComponentRef<typeof View>>(null);
+  const top = useRef<number | undefined>(undefined);
+  const [space, setSpace] = useState(0);
+  const fit = useCallback(() => {
+    const view = ref.current;
+    const keyboardTop = top.current;
+    if (keyboardTop === undefined || !view) {
+      setSpace(0);
+      return;
+    }
+    view.measureInWindow((_x, y, _width, height) => {
+      // The keyboard may have gone, or moved, while the view was being measured.
+      if (top.current === keyboardTop)
+        setSpace(Math.max(0, Math.round(y + height - keyboardTop)));
+    });
+  }, []);
+  useEffect(() => {
+    const ios = Platform.OS === 'ios';
+    const shown = Keyboard.addListener(
+      ios ? 'keyboardWillChangeFrame' : 'keyboardDidShow',
+      event => {
+        top.current = event.endCoordinates.screenY;
+        fit();
+      },
+    );
+    const hidden = Keyboard.addListener(
+      ios ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        top.current = undefined;
+        fit();
+      },
+    );
+    return () => {
+      top.current = undefined;
+      shown.remove();
+      hidden.remove();
+    };
+  }, [fit]);
+  return { ref, space, onLayout: fit };
+}
+
 /** A page's heading grows with the window: 32 on a phone, up to 46 on a tablet. */
 export function usePageTitle() {
   const { s } = useTheme();
@@ -343,13 +407,22 @@ export function Sheet({
   children: React.ReactNode;
 }) {
   const { s, colors } = useTheme();
-  const insets = useSafeAreaInsets();
+  const insets = useInsets();
+  const keyboard = useKeyboardSpace();
   const { width } = useWindowDimensions();
-  // From the bottom on a phone, a box in the middle on a tablet.
+  // From the bottom on a phone, a box in the middle on a tablet. Either stays above the keyboard.
   const wide = width > 600;
   return (
     <Modal transparent animationType="fade" onRequestClose={onClose}>
-      <View style={[sheetStyles.scrim, wide && sheetStyles.middle]}>
+      <View
+        ref={keyboard.ref}
+        onLayout={keyboard.onLayout}
+        style={[
+          sheetStyles.scrim,
+          wide && sheetStyles.middle,
+          { paddingBottom: keyboard.space },
+        ]}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Close"
@@ -361,7 +434,7 @@ export function Sheet({
             s.sheet,
             wide
               ? [sheetStyles.box, { borderColor: colors.line }]
-              : { paddingBottom: 18 + insets.bottom },
+              : { paddingBottom: 18 + (keyboard.space ? 0 : insets.bottom) },
           ]}
           accessibilityViewIsModal
         >

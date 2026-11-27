@@ -124,6 +124,7 @@ export function Todo({
         <TextInput
           accessibilityLabel="Add a to-do"
           testID="todo-draft"
+          maxLength={240}
           style={[s.field, styles.addField, s.grow]}
           placeholder="Add a to-do"
           placeholderTextColor={colors.muted}
@@ -314,6 +315,7 @@ export function Todo({
               <TextInput
                 accessibilityLabel="To-do title"
                 testID="todo-edit"
+                maxLength={240}
                 autoFocus
                 style={s.field}
                 editable={!busy}

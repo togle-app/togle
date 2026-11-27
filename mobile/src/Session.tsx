@@ -1,7 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -30,10 +29,10 @@ import type {
 import {
   AccountLimits,
   UsageReadings,
-  usePhoneReport,
+  usePhoneReportState,
   type LoadReport,
 } from './ReportUsage';
-import { Button, ErrorMessage, useTheme } from './ui';
+import { Button, ErrorMessage, useKeyboardSpace, useTheme } from './ui';
 
 const statuses: Record<Task['state'], string> = {
   waiting: 'Waiting',
@@ -183,6 +182,7 @@ function messageId() {
 export function Session({
   host,
   task,
+  sessionKey,
   title,
   agent,
   request,
@@ -198,6 +198,8 @@ export function Session({
 }: {
   host: Device;
   task: Task | undefined;
+  /** The session's key, known also while its computer is offline and lists no session. */
+  sessionKey?: string;
   title: string;
   agent: string;
   request: Request | undefined;
@@ -212,6 +214,7 @@ export function Session({
   onChat?(action: PhoneChatAction): Promise<PhoneDelivery | undefined>;
 }) {
   const { s, colors } = useTheme();
+  const keyboard = useKeyboardSpace();
   const { width, height, fontScale } = useWindowDimensions();
   const fixedHeader = height >= 620 && fontScale <= 1.35;
   // The conversation keeps 14 beside it on a phone and up to 26 on a tablet, where it is a column with an edge each side.
@@ -235,24 +238,25 @@ export function Session({
       : undefined;
   // The agent waits for something this phone was not given: the answer is made on its computer.
   const handBack =
-    host.online &&
-    task?.state === 'waiting' &&
-    !pending &&
-    !currentAnswer;
+    host.online && task?.state === 'waiting' && !pending && !currentAnswer;
   const stopInCard = handBack && canSend && task?.canStop === true;
   const displayName = agentName(task?.agent ?? agent);
   const deviceIcon = host.role === 'server' ? 'server' : 'laptop';
-  const report = usePhoneReport(
+  const key = task?.key ?? sessionKey;
+  const { report, status, retry } = usePhoneReportState(
     host,
     active && !!task,
     loadReport,
-    task?.key,
+    key,
     task && `${task.state}:${task.updatedAt ?? 0}:${activityRevision}`,
   );
+  // What was read stays while the computer is offline. A session an online computer no longer lists is not shown.
   const details =
-    task && report?.kind === 'session' && report.task === task.key
+    (task || !host.online) && report?.kind === 'session' && report.task === key
       ? report
       : undefined;
+  const loading = !!task && status === 'loading';
+  const unread = !!task && status === 'failed';
   const activity = details?.activity ?? EMPTY_ACTIVITY;
   const queue = details?.queue;
   const lastEntry = activity.at(-1);
@@ -289,6 +293,13 @@ export function Session({
     followsLatest.current = following;
     setAway(!following);
   }
+
+  // "Message sent" is a passing word: the message itself is in the conversation, with its ticks.
+  useEffect(() => {
+    if (!feedback || feedback === 'Sending…') return;
+    const timer = setTimeout(() => setFeedback(''), 5000);
+    return () => clearTimeout(timer);
+  }, [feedback]);
 
   function latest() {
     followsLatest.current = true;
@@ -347,9 +358,10 @@ export function Session({
   }
 
   return (
-    <KeyboardAvoidingView
-      style={s.fill}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    <View
+      ref={keyboard.ref}
+      onLayout={keyboard.onLayout}
+      style={[s.fill, { paddingBottom: keyboard.space }]}
     >
       <View
         style={[
@@ -446,6 +458,39 @@ export function Session({
                       This session is no longer shared.
                     </Text>
                   )}
+                  {!host.online && !activity.length && !displayedAnswer && (
+                    <Text
+                      style={[
+                        s.secondary,
+                        styles.note,
+                        { backgroundColor: colors.raised },
+                      ]}
+                    >
+                      No conversation was saved on this phone before the device
+                      went offline.
+                    </Text>
+                  )}
+                  {loading && (
+                    <ActivityIndicator
+                      color={colors.accent}
+                      accessibilityLabel="Loading the conversation"
+                      style={styles.loading}
+                    />
+                  )}
+                  {unread && (
+                    <View
+                      style={[
+                        styles.note,
+                        styles.unread,
+                        { backgroundColor: colors.raised },
+                      ]}
+                    >
+                      <Text style={[s.secondary, s.grow]}>
+                        Could not load the conversation.
+                      </Text>
+                      <Button title="Try again" link onPress={retry} />
+                    </View>
+                  )}
                   {handBack && (
                     <View testID="session-hand-back" style={card}>
                       <Text
@@ -471,6 +516,8 @@ export function Session({
                   {host.online &&
                     task &&
                     task.state !== 'waiting' &&
+                    !loading &&
+                    !unread &&
                     !activity.length &&
                     !task.line &&
                     !displayedAnswer && (
@@ -571,7 +618,7 @@ export function Session({
           />
         )}
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -625,6 +672,8 @@ const styles = StyleSheet.create({
   choiceText: { flexShrink: 1, textAlign: 'left' },
   pressed: { opacity: 0.72 },
   stopTask: { alignSelf: 'flex-start', marginTop: 2 },
+  loading: { marginTop: 18 },
+  unread: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   note: {
     marginTop: 10,
     paddingVertical: 12,

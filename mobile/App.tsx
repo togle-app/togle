@@ -21,11 +21,14 @@ import {
   Palette,
   Sheet,
   useGutter,
+  useInsets,
   useTheme,
 } from './src/ui';
 import { Workspace, type Waitlist } from './src/Workspace';
 
 const logo = require('./assets/togle.png');
+// The top and the bottom of the screen are given room by the bar and by the tabs, in their own colour.
+const SIDES = ['left', 'right'] as const;
 type PlanStatus =
   | { plan: Plan; error?: never }
   | { plan?: never; error: string };
@@ -43,6 +46,7 @@ export default function App() {
 function Togle() {
   const { s, colors, isDark } = useTheme();
   const gutter = useGutter();
+  const insets = useInsets();
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [authError, setAuthError] = useState('');
   const [retry, setRetry] = useState(0);
@@ -224,9 +228,19 @@ function Togle() {
   const page = [s.page, { paddingHorizontal: gutter }];
 
   return (
-    <SafeAreaView style={s.fill}>
+    <SafeAreaView style={s.fill} edges={SIDES}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
-      <View style={[s.header, { paddingHorizontal: gutter }]}>
+      {/* The bar's white runs up under the status bar: the page's grey starts below the bar. */}
+      <View
+        style={[
+          s.header,
+          {
+            paddingHorizontal: gutter,
+            paddingTop: insets.top,
+            minHeight: 60 + insets.top,
+          },
+        ]}
+      >
         <View style={s.topRow}>
           <Image source={logo} style={s.logo} />
           <Text style={s.wordmark}>Togle</Text>
@@ -240,7 +254,10 @@ function Togle() {
             style={styles.account}
           >
             <View style={[styles.avatar, { backgroundColor: colors.tint }]}>
-              <Text style={[s.small, { color: colors.accent }]}>
+              <Text
+                maxFontSizeMultiplier={1.4}
+                style={[s.small, { color: colors.accent }]}
+              >
                 {email.slice(0, 2).toUpperCase()}
               </Text>
             </View>

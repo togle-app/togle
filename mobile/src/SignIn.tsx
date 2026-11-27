@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import {
   Keyboard,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,7 +9,15 @@ import {
   View,
 } from 'react-native';
 import { account } from './account';
-import { Block, Button, ErrorMessage, useGutter, useTheme } from './ui';
+import {
+  Block,
+  Button,
+  ErrorMessage,
+  useGutter,
+  useInsets,
+  useKeyboardSpace,
+  useTheme,
+} from './ui';
 
 /**
  * What to tell a person when sending or checking the code failed. The account service words its errors for developers
@@ -48,12 +54,15 @@ export function signInProblem(failure: unknown, action: 'send' | 'verify') {
 export function SignIn() {
   const { s, colors } = useTheme();
   const gutter = useGutter();
+  const insets = useInsets();
+  const keyboard = useKeyboardSpace();
   const { width, height } = useWindowDimensions();
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
   const address = email.trim();
   const validEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address);
   // The card sits a little down the page and takes more room inside on a tablet.
@@ -72,6 +81,7 @@ export function SignIn() {
       return;
     setBusy(true);
     setError('');
+    setNote('');
     try {
       const result =
         action === 'send'
@@ -84,6 +94,8 @@ export function SignIn() {
       if (result.error) throw result.error;
       Keyboard.dismiss();
       if (action === 'send') {
+        // Asked for again from the code's page: say that it worked, the page stays the same.
+        if (sent) setNote('A new code is on its way.');
         setSent(true);
         setCode('');
       }
@@ -95,15 +107,20 @@ export function SignIn() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={s.fill}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    <View
+      ref={keyboard.ref}
+      onLayout={keyboard.onLayout}
+      style={[s.fill, { paddingBottom: keyboard.space }]}
     >
       <ScrollView
         contentContainerStyle={[
           s.page,
           styles.form,
-          { paddingHorizontal: gutter, maxWidth: 460 + 2 * gutter },
+          {
+            paddingHorizontal: gutter,
+            paddingBottom: 26 + insets.bottom,
+            maxWidth: 460 + 2 * gutter,
+          },
         ]}
         keyboardShouldPersistTaps="handled"
       >
@@ -124,6 +141,7 @@ export function SignIn() {
                   <TextInput
                     accessibilityLabel="Code from the email"
                     testID="account-code"
+                    autoFocus
                     autoComplete="one-time-code"
                     keyboardType="number-pad"
                     maxLength={10}
@@ -155,6 +173,11 @@ export function SignIn() {
                 )}
               </View>
               <ErrorMessage message={error} />
+              {!!note && (
+                <Text accessibilityLiveRegion="polite" style={s.secondary}>
+                  {note}
+                </Text>
+              )}
               <Button
                 title={
                   busy ? 'Please wait…' : sent ? 'Sign in' : 'Email me a code'
@@ -179,6 +202,7 @@ export function SignIn() {
                       setSent(false);
                       setCode('');
                       setError('');
+                      setNote('');
                     }}
                   />
                 </View>
@@ -191,7 +215,7 @@ export function SignIn() {
           )}
         </Block>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
