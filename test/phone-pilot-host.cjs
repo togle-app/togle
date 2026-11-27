@@ -63,7 +63,7 @@ async function until(check, label, ms = 30000) {
 }
 const event = (stage, details = {}) => fs.appendFileSync(path.join(work, 'proof.jsonl'), JSON.stringify({ at: new Date().toISOString(), stage, ...details }) + '\n')
 const digest = value => crypto.createHash('sha256').update(value).digest('hex').slice(0, 16)
-const phoneName = 'Android pilot phone'
+const phoneName = 'Android phone'
 const title = 'VPS phone color check'
 const question = 'Which pilot color should I report?'
 const colors = ['Blue', 'Green']
@@ -152,7 +152,11 @@ async function observe() {
 }
 
 async function main() {
-  await until(() => handlers.has('reach:state') && handlers.has('runners:start'), 'Togle startup')
+  await until(async () => {
+    if (!handlers.has('reach:state') || !handlers.has('runners:start')) return false
+    if (!BrowserWindow.getAllWindows().some(window => window.getTitle() === 'Togle')) return false
+    return (await call('reach:state')).me
+  }, 'Togle startup')
   await call('reach:sign-in', fixture.email, fixture.otp)
   await call('reach:connect')
   const state = await until(async () => {
@@ -168,6 +172,7 @@ async function main() {
       const verb = fs.readFileSync(commandFile, 'utf8').trim()
       fs.unlinkSync(commandFile)
       await command(verb)
+      if (verb === 'quit') return
     }
     await observe()
     await wait(350)
