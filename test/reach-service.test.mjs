@@ -273,12 +273,16 @@ test('phone reports are limited to managed sessions in the opted-in folder', asy
     { id: 2, at, kind: 'command', text: 'private command output' },
     { id: 3, at, kind: 'agent', text: 'Check complete. password=demo-secret-123' },
   ]
+  const hermesPrompt = { id: 1, at, kind: 'you', text: 'Check the Linux build' }
+  const hermesReply = { id: 102, at, kind: 'agent', text: 'The Linux build passed.' }
+  let hermesHistory = [{ ...hermesPrompt, id: 101 }, hermesReply]
   tasks.phone = {
     detail: async key => {
       details.push(key)
+      if (key === hermes.key) return { task: hermes, log: [hermesPrompt] }
       return { task, log }
     },
-    history: async () => null,
+    history: async key => key === hermes.key ? { entries: hermesHistory } : null,
     model: async () => ({ model: 'gpt-6.2-sol', effort: 'high', fast: true }),
     usage: async (runner, id) => {
       meter.push([runner, id])
@@ -348,6 +352,15 @@ test('phone reports are limited to managed sessions in the opted-in folder', asy
   const earlier = await read('older-phone', { kind: 'session', task: task.key })
   assert.equal(earlier.activity.at(-1).text.length, 800)
   assert.equal(earlier.activity.at(-1).id, undefined)
+
+  const hermesChat = await read('hermes-chat', { kind: 'session', task: hermes.key, view: 'chat' })
+  assert.deepEqual(hermesChat.activity, [
+    { ...hermesPrompt, id: 101, delivery: 'delivered' },
+    hermesReply,
+  ])
+  hermesHistory = []
+  const startingHermes = await read('hermes-starting', { kind: 'session', task: hermes.key, view: 'chat' })
+  assert.deepEqual(startingHermes.activity, [{ ...hermesPrompt, delivery: 'delivered' }])
 
   const messageAct = { what: 'send-message', task: task.key, id: 'a'.repeat(24), text: 'Review the checks', quote: 'Check complete.' }
   await assert.rejects(phone.act(hostId, messageAct), /doesn’t take answers/)

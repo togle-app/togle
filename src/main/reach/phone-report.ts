@@ -133,7 +133,9 @@ export async function phoneReport(source: PhoneReportSources, tasks: TaskView[],
   if (!task) return
   const detail = await source.detail(task.key)
   if (!detail.task.mine || detail.task.key !== task.key || path.resolve(detail.task.folder) !== path.resolve(task.folder)) return
-  const log = detail.log.length ? detail.log : (await source.history(task.key).catch(() => null))?.entries ?? []
+  // Hermes keeps its replies in its session history. Togle's live log can contain just the messages it sent.
+  const history = task.runner === 'hermes' || !detail.log.length ? await source.history(task.key).catch(() => null) : null
+  const log = history?.entries.length ? history.entries : detail.log
   const [measured, model] = await Promise.all([
     usage(source, task.runner, accountUsage, detail.task.sessionId ?? detail.task.id),
     source.model(task.key).catch(() => null),
