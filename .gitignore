@@ -18,3 +18,7 @@ test/.work/
 eval/.build/
 eval/results/
 eval/audio/
+
+# What the Supabase CLI keeps for itself when it is run in this folder: which hosted project the folder is linked to
+supabase/.temp/
+supabase/.branches/
